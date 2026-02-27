@@ -4,10 +4,6 @@ import pandas as pd
 from datetime import datetime
 import threading
 import time
-
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-
 from sqlalchemy import create_engine, Column, String, Integer, Float, Boolean, DateTime, desc
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -52,7 +48,6 @@ Base.metadata.create_all(engine)
 # ==========================================
 
 UPDATE_INTERVAL = 60
-TELEGRAM_TOKEN = "8663741789:AAHSEGiO5OFGhzbVA2MzqxPd-npqmIGYX0s"
 
 SYMBOLS = [
     "PETR4.SA","VALE3.SA","ITUB4.SA","BBDC4.SA",
@@ -204,35 +199,6 @@ def auto_update():
         time.sleep(UPDATE_INTERVAL)
 
 threading.Thread(target=auto_update, daemon=True).start()
-
-# ==========================================
-# TELEGRAM
-# ==========================================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🚀 StockNewsBR Online!\nUse /acao PETR4")
-
-async def acao(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) == 0:
-        await update.message.reply_text("Use: /acao PETR4")
-        return
-
-    ticker = context.args[0].upper() + ".SA"
-    data = CACHE.get(ticker)
-
-    if not data:
-        await update.message.reply_text("Ativo não encontrado.")
-        return
-
-    await update.message.reply_text(str(data))
-
-def run_bot():
-    bot = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    bot.add_handler(CommandHandler("start", start))
-    bot.add_handler(CommandHandler("acao", acao))
-    bot.run_polling()
-
-threading.Thread(target=run_bot, daemon=True).start()
 
 # ==========================================
 # ENDPOINTS
