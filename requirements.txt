@@ -2,6 +2,5 @@ fastapi
 uvicorn
 pandas
 numpy
-pandas_ta==0.3.14b0
 yfinance
 requests
