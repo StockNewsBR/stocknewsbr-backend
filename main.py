@@ -1,21 +1,22 @@
 from fastapi import FastAPI, Query
 import yfinance as yf
 import pandas as pd
-from datetime import datetime
+import numpy as np
+from datetime import datetime, timedelta
 import threading
 import time
 from sqlalchemy import create_engine, Column, String, Integer, Float, Boolean, DateTime, desc
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# ==========================================
+# ==================================================
 # FASTAPI
-# ==========================================
+# ==================================================
 
 app = FastAPI(title="StockNewsBR Institutional Engine 🚀")
 
-# ==========================================
+# ==================================================
 # DATABASE
-# ==========================================
+# ==================================================
 
 DATABASE_URL = "sqlite:///stocknewsbr.db"
 
@@ -26,6 +27,10 @@ engine = create_engine(
 
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
+
+# ==================================================
+# MODELS
+# ==================================================
 
 class Signal(Base):
     __tablename__ = "signals"
@@ -41,11 +46,61 @@ class Signal(Base):
     breakout = Column(Boolean)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    telegram_id = Column(String, unique=True, index=True)
+    phone_number = Column(String, unique=True, nullable=True)
+    is_verified = Column(Boolean, default=False)
+    plan = Column(String, default="basic")  # basic | trial | premium
+    trial_expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 Base.metadata.create_all(engine)
 
-# ==========================================
+# ==================================================
+# USER MANAGEMENT
+# ==================================================
+
+def get_or_create_user(telegram_id: str):
+    db = SessionLocal()
+    user = db.query(User).filter_by(telegram_id=telegram_id).first()
+
+    if not user:
+        trial_expiry = datetime.utcnow() + timedelta(days=90)
+
+        user = User(
+            telegram_id=telegram_id,
+            plan="trial",
+            trial_expires_at=trial_expiry,
+            is_verified=False
+        )
+
+        db.add(user)
+        db.commit()
+
+    db.close()
+    return user
+
+
+def check_and_update_plan(user: User):
+    db = SessionLocal()
+
+    if user.plan == "trial" and user.trial_expires_at:
+        if datetime.utcnow() > user.trial_expires_at:
+            user.plan = "basic"
+            db.merge(user)
+            db.commit()
+
+    db.close()
+
+
+# ==================================================
 # CONFIG
-# ==========================================
+# ==================================================
 
 UPDATE_INTERVAL = 60
 
@@ -60,9 +115,9 @@ SYMBOLS = [
 CACHE = {}
 LAST_UPDATE = None
 
-# ==========================================
+# ==================================================
 # SAVE IF CHANGED
-# ==========================================
+# ==================================================
 
 def save_if_changed(result):
     db = SessionLocal()
@@ -74,27 +129,19 @@ def save_if_changed(result):
         .first()
     )
 
-    should_save = False
-
-    if not last:
-        should_save = True
-    else:
-        if (
-            last.score != result["score"] or
-            last.trend != result["trend"] or
-            last.breakout != result["breakout"]
-        ):
-            should_save = True
-
-    if should_save:
+    if not last or (
+        last.score != result["score"] or
+        last.trend != result["trend"] or
+        last.breakout != result["breakout"]
+    ):
         db.add(Signal(**result))
         db.commit()
 
     db.close()
 
-# ==========================================
+# ==================================================
 # ENGINE
-# ==========================================
+# ==================================================
 
 def calculate_score(ticker):
     try:
@@ -106,14 +153,19 @@ def calculate_score(ticker):
             progress=False
         )
 
-        if df is None or df.empty or len(df) < 60:
+        if df is None or df.empty or len(df) < 200:
             return None
 
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
         close = df["Close"]
-        volume = df["Volume"]
+
+        ema21 = close.ewm(span=21, adjust=False).mean()
+        ema50 = close.ewm(span=50, adjust=False).mean()
+        ema200 = close.ewm(span=200, adjust=False).mean()
+
+        structure_ok = ema21.iloc[-1] > ema50.iloc[-1] > ema200.iloc[-1]
 
         delta = close.diff()
         gain = delta.clip(lower=0)
@@ -121,65 +173,42 @@ def calculate_score(ticker):
         avg_gain = gain.rolling(14).mean()
         avg_loss = loss.rolling(14).mean()
         rs = avg_gain / avg_loss
-        rsi_val = float((100 - (100 / (1 + rs))).iloc[-1])
-
-        ema9 = close.ewm(span=9, adjust=False).mean()
-        ema21 = close.ewm(span=21, adjust=False).mean()
-        ema9_val = float(ema9.iloc[-1])
-        ema21_val = float(ema21.iloc[-1])
-
-        ema12 = close.ewm(span=12, adjust=False).mean()
-        ema26 = close.ewm(span=26, adjust=False).mean()
-        macd_val = float((ema12 - ema26).iloc[-1])
-
-        returns = close.pct_change()
-        volatility = returns.rolling(20).std()
-        vol_now = float(volatility.iloc[-1])
-        vol_prev = float(volatility.iloc[-5])
-
-        avg_volume = volume.rolling(20).mean()
-        volume_ratio = float(volume.iloc[-1] / avg_volume.iloc[-1])
+        rsi = (100 - (100 / (1 + rs))).iloc[-1]
 
         highest_20 = close.rolling(20).max().iloc[-2]
-        breakout = bool(close.iloc[-1] > highest_20)
+        breakout = close.iloc[-1] > highest_20
 
         score = 0
-        if 55 < rsi_val < 70: score += 20
-        if macd_val > 0: score += 20
-        if ema9_val > ema21_val: score += 20
-        if vol_now > vol_prev: score += 15
-        if volume_ratio > 1.5: score += 15
-        if breakout: score += 10
+        if structure_ok: score += 40
+        if breakout: score += 30
+        if 55 < rsi < 70: score += 20
 
-        trend = "UPTREND" if ema9_val > ema21_val else "DOWNTREND"
+        trend = "UPTREND" if structure_ok else "DOWNTREND"
 
         result = {
             "symbol": ticker,
-            "score": score,
+            "score": int(score),
             "trend": trend,
-            "rsi": round(rsi_val,2),
-            "macd": round(macd_val,4),
-            "volatility": round(vol_now,4),
-            "volume_spike": round(volume_ratio,2),
-            "breakout": breakout
+            "rsi": round(float(rsi), 2),
+            "macd": 0.0,
+            "volatility": 0.0,
+            "volume_spike": 0.0,
+            "breakout": bool(breakout)
         }
 
         save_if_changed(result)
-
         return result
 
     except Exception as e:
         print("Erro:", e)
         return None
 
-# ==========================================
+# ==================================================
 # UPDATE LOOP
-# ==========================================
+# ==================================================
 
 def update_cache():
     global CACHE, LAST_UPDATE
-
-    print("⚡ Updating engine...")
 
     results = []
 
@@ -193,56 +222,100 @@ def update_cache():
         CACHE = {item["symbol"]: item for item in results}
         LAST_UPDATE = datetime.now().strftime("%H:%M:%S")
 
+
 def auto_update():
     while True:
         update_cache()
         time.sleep(UPDATE_INTERVAL)
 
+
 threading.Thread(target=auto_update, daemon=True).start()
 
-# ==========================================
+# ==================================================
 # ENDPOINTS
-# ==========================================
+# ==================================================
+
+@app.post("/verify")
+def verify_user(telegram_id: str, phone_number: str):
+    db = SessionLocal()
+    user = db.query(User).filter_by(telegram_id=telegram_id).first()
+
+    if not user:
+        db.close()
+        return {"error": "Usuário não encontrado"}
+
+    user.phone_number = phone_number
+    user.is_verified = True
+
+    db.commit()
+    db.close()
+
+    return {"status": "verified"}
+
+
+@app.get("/user/status")
+def user_status(telegram_id: str):
+    db = SessionLocal()
+    user = db.query(User).filter_by(telegram_id=telegram_id).first()
+
+    if not user:
+        db.close()
+        return {"error": "User not found"}
+
+    days_left = None
+
+    if user.trial_expires_at:
+        delta = user.trial_expires_at - datetime.utcnow()
+        days_left = max(delta.days, 0)
+
+    db.close()
+
+    return {
+        "plan": user.plan,
+        "is_verified": user.is_verified,
+        "days_left": days_left
+    }
+
 
 @app.get("/ranking")
-def ranking():
+def ranking(telegram_id: str = Query(...)):
+    user = get_or_create_user(telegram_id)
+    check_and_update_plan(user)
+
+    if not user.is_verified:
+        return {
+            "error": "verification_required",
+            "message": "Envie seu número para ativar o Premium Trial."
+        }
+
+    if user.plan == "basic":
+        return {
+            "error": "premium_required",
+            "message": "🔔 Seu período Premium expirou. Assine o Plano Premium."
+        }
+
     return {"data": list(CACHE.values()), "updated_at": LAST_UPDATE}
 
+
 @app.get("/ranking/top")
-def ranking_top(min_score: int = Query(50)):
+def ranking_top(
+    telegram_id: str = Query(...),
+    min_score: int = Query(50)
+):
+    user = get_or_create_user(telegram_id)
+    check_and_update_plan(user)
+
+    if not user.is_verified:
+        return {
+            "error": "verification_required",
+            "message": "Verificação obrigatória."
+        }
+
+    if user.plan == "basic":
+        return {
+            "error": "premium_required",
+            "message": "Plano Básico não possui acesso ao ranking avançado."
+        }
+
     filtered = [v for v in CACHE.values() if v["score"] >= min_score]
     return {"data": filtered, "updated_at": LAST_UPDATE}
-
-@app.get("/signals/latest")
-def signals_latest(limit: int = 20):
-    db = SessionLocal()
-    results = db.query(Signal).order_by(desc(Signal.created_at)).limit(limit).all()
-    db.close()
-
-    return [
-        {
-            "symbol": r.symbol,
-            "score": r.score,
-            "trend": r.trend,
-            "rsi": r.rsi,
-            "created_at": r.created_at
-        }
-        for r in results
-    ]
-
-@app.get("/signals/history")
-def signal_history(symbol: str):
-    db = SessionLocal()
-    results = db.query(Signal).filter(Signal.symbol == symbol).order_by(desc(Signal.created_at)).limit(100).all()
-    db.close()
-
-    return [
-        {
-            "symbol": r.symbol,
-            "score": r.score,
-            "trend": r.trend,
-            "rsi": r.rsi,
-            "created_at": r.created_at
-        }
-        for r in results
-    ]
