@@ -18,7 +18,7 @@ idna==3.11
 llvmlite==0.44.0
 multitasking==0.0.12
 numba==0.61.2
-numpy==2.4.2
+numpy==1.26.4
 pandas==3.0.1
 peewee==4.0.0
 platformdirs==4.9.2
