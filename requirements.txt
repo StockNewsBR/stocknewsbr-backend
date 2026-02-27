@@ -20,7 +20,7 @@ multitasking==0.0.12
 numba==0.61.2
 numpy==2.4.2
 pandas==3.0.1
-pandas-ta
+pandas_ta
 peewee==4.0.0
 platformdirs==4.9.2
 protobuf==6.33.5
