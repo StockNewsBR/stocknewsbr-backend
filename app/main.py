@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-
 from app.market import router as market_router
 
 app = FastAPI(title="StockNewsBR Institutional Engine 🚀")
