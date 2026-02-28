@@ -5,7 +5,19 @@ import numpy as np
 from datetime import datetime, timedelta
 import threading
 import time
-from sqlalchemy import create_engine, Column, String, Integer, Float, Boolean, DateTime, desc
+import os
+
+from sqlalchemy import (
+    create_engine,
+    Column,
+    String,
+    Integer,
+    Float,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    desc,
+)
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # ==================================================
@@ -18,11 +30,13 @@ app = FastAPI(title="StockNewsBR Institutional Engine 🚀")
 # DATABASE
 # ==================================================
 
-DATABASE_URL = "sqlite:///stocknewsbr.db"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False}
+    pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10
 )
 
 SessionLocal = sessionmaker(bind=engine)
@@ -31,6 +45,19 @@ Base = declarative_base()
 # ==================================================
 # MODELS
 # ==================================================
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    telegram_id = Column(String, unique=True, index=True)
+    phone_number = Column(String, unique=True, nullable=True)
+    is_verified = Column(Boolean, default=False)
+    plan = Column(String, default="basic")  # basic | trial | premium
+    trial_expires_at = Column(DateTime, nullable=True)
+    invited_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 
 class Signal(Base):
     __tablename__ = "signals"
@@ -47,18 +74,30 @@ class Signal(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-class User(Base):
-    __tablename__ = "users"
+class Invite(Base):
+    __tablename__ = "invites"
 
     id = Column(Integer, primary_key=True, index=True)
-    telegram_id = Column(String, unique=True, index=True)
-    phone_number = Column(String, unique=True, nullable=True)
-    is_verified = Column(Boolean, default=False)
-    plan = Column(String, default="basic")  # basic | trial | premium
-    trial_expires_at = Column(DateTime, nullable=True)
+    inviter_id = Column(Integer, ForeignKey("users.id"))
+    code = Column(String, unique=True, index=True)
+    used = Column(Boolean, default=False)
+    used_by = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    plan = Column(String)  # monthly / annual
+    status = Column(String)  # active / canceled / expired
+    started_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime)
+    auto_renew = Column(Boolean, default=True)
+
+
+# Criar tabelas automaticamente
 Base.metadata.create_all(engine)
 
 # ==================================================
@@ -81,6 +120,7 @@ def get_or_create_user(telegram_id: str):
 
         db.add(user)
         db.commit()
+        db.refresh(user)
 
     db.close()
     return user
@@ -96,7 +136,6 @@ def check_and_update_plan(user: User):
             db.commit()
 
     db.close()
-
 
 # ==================================================
 # CONFIG
@@ -140,7 +179,7 @@ def save_if_changed(result):
     db.close()
 
 # ==================================================
-# ENGINE
+# ENGINE CALCULATION
 # ==================================================
 
 def calculate_score(ticker):
@@ -222,12 +261,10 @@ def update_cache():
         CACHE = {item["symbol"]: item for item in results}
         LAST_UPDATE = datetime.now().strftime("%H:%M:%S")
 
-
 def auto_update():
     while True:
         update_cache()
         time.sleep(UPDATE_INTERVAL)
-
 
 threading.Thread(target=auto_update, daemon=True).start()
 
@@ -283,39 +320,9 @@ def ranking(telegram_id: str = Query(...)):
     check_and_update_plan(user)
 
     if not user.is_verified:
-        return {
-            "error": "verification_required",
-            "message": "Envie seu número para ativar o Premium Trial."
-        }
+        return {"error": "verification_required"}
 
     if user.plan == "basic":
-        return {
-            "error": "premium_required",
-            "message": "🔔 Seu período Premium expirou. Assine o Plano Premium."
-        }
+        return {"error": "premium_required"}
 
     return {"data": list(CACHE.values()), "updated_at": LAST_UPDATE}
-
-
-@app.get("/ranking/top")
-def ranking_top(
-    telegram_id: str = Query(...),
-    min_score: int = Query(50)
-):
-    user = get_or_create_user(telegram_id)
-    check_and_update_plan(user)
-
-    if not user.is_verified:
-        return {
-            "error": "verification_required",
-            "message": "Verificação obrigatória."
-        }
-
-    if user.plan == "basic":
-        return {
-            "error": "premium_required",
-            "message": "Plano Básico não possui acesso ao ranking avançado."
-        }
-
-    filtered = [v for v in CACHE.values() if v["score"] >= min_score]
-    return {"data": filtered, "updated_at": LAST_UPDATE}
