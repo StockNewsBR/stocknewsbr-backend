@@ -2,9 +2,12 @@ fastapi==0.133.1
 uvicorn==0.41.0
 SQLAlchemy==2.0.47
 psycopg2-binary==2.9.9
-python-dotenv==1.0.1
 pydantic==2.12.5
+pydantic-core==2.41.5
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-dotenv==1.0.1
 yfinance==1.2.0
 pandas==2.2.2
 numpy==1.26.4
-
+requests==2.32.5
