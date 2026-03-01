@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.market import router as market_router
-from app.auth import router as auth_router
+from app.users import router as auth_router
 
 app = FastAPI(title="StockNewsBR – Inteligência de Mercado com IA")
 
