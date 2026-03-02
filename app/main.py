@@ -1,18 +1,24 @@
 from fastapi import FastAPI, Query
 import pandas as pd
-import pandas_ta as ta
+import numpy as np
 import yfinance as yf
 
 app = FastAPI(title="StockNewsBR API")
 
 # =====================================================
-# LISTA BASE DE AÇÕES (pode expandir depois)
+# LISTA BASE DE AÇÕES
 # =====================================================
 
 TICKERS = [
+    # Ações brasileiras
     "PETR4", "VALE3", "ITUB4", "ABEV3",
     "BBAS3", "BBDC4", "WEGE3", "MGLU3",
-    "SUZB3", "PRIO3"
+    "SUZB3", "PRIO3",
+
+    # BDRs (ações USA via B3)
+    "AAPL34", "AMZO34", "BABA34", "BERK34",
+    "M1TA34", "MELI34", "MSFT34", "NFLX34",
+    "NVDC34", "PFIZ34", "PYPL34", "ROXO34"
 ]
 
 # =====================================================
@@ -23,6 +29,33 @@ def get_data(symbol: str, period="5d", interval="5m"):
     df = yf.download(symbol + ".SA", period=period, interval=interval, progress=False)
     df.dropna(inplace=True)
     return df
+
+# =====================================================
+# INDICADORES MANUAIS
+# =====================================================
+
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.rolling(period).mean()
+    avg_loss = loss.rolling(period).mean()
+
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+
+    return rsi
+
+def calculate_ema(series, period):
+    return series.ewm(span=period, adjust=False).mean()
+
+def calculate_macd(series):
+    ema12 = calculate_ema(series, 12)
+    ema26 = calculate_ema(series, 26)
+    macd = ema12 - ema26
+    signal = calculate_ema(macd, 9)
+    return macd, signal
 
 # =====================================================
 # HOME
@@ -40,23 +73,17 @@ def calculate_score(symbol: str):
     try:
         df = get_data(symbol)
 
-        # RSI
-        df["RSI"] = ta.rsi(df["Close"], length=14)
-        rsi = df["RSI"].iloc[-1]
+        close = df["Close"]
 
-        # MACD
-        macd_df = ta.macd(df["Close"])
-        df = pd.concat([df, macd_df], axis=1)
+        rsi_series = calculate_rsi(close)
+        rsi = rsi_series.iloc[-1]
 
-        macd_col = [c for c in df.columns if "MACD_" in c and "MACDs" not in c][0]
-        signal_col = [c for c in df.columns if "MACDs_" in c][0]
+        macd, macd_signal = calculate_macd(close)
+        macd_value = macd.iloc[-1]
+        macd_signal_value = macd_signal.iloc[-1]
 
-        macd = df[macd_col].iloc[-1]
-        signal = df[signal_col].iloc[-1]
-
-        # Tendência simples (média curta vs longa)
-        ema9 = ta.ema(df["Close"], length=9).iloc[-1]
-        ema21 = ta.ema(df["Close"], length=21).iloc[-1]
+        ema9 = calculate_ema(close, 9).iloc[-1]
+        ema21 = calculate_ema(close, 21).iloc[-1]
 
         score = 0
 
@@ -69,7 +96,7 @@ def calculate_score(symbol: str):
             score -= 10
 
         # MACD
-        if macd > signal:
+        if macd_value > macd_signal_value:
             score += 25
         else:
             score -= 10
