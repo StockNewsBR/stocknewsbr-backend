@@ -67,7 +67,7 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
 from fastapi.security import OAuth2PasswordRequestForm
 
 @router.post("/login", response_model=TokenResponse)
-def login(
+async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
@@ -79,14 +79,12 @@ def login(
     if not verify_password(form_data.password, user.password_hash):
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
-    token = create_access_token({"sub": str(user.id)})
+    access_token = create_access_token({"sub": str(user.id)})
 
-    return {
-        "access_token": token,
-        "token_type": "bearer"
-    }
-
-
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer"
+    )
 
 # ==========================================================
 # PROTECTED ROUTE
