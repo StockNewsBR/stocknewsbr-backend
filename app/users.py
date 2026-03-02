@@ -64,15 +64,19 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
 # LOGIN
 # ==========================================================
 
-@router.post("/login", response_model=TokenResponse)
-def login(user_data: UserLogin, db: Session = Depends(get_db)):
+from fastapi.security import OAuth2PasswordRequestForm
 
-    user = db.query(User).filter(User.email == user_data.email).first()
+@router.post("/login", response_model=TokenResponse)
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.email == form_data.username).first()
 
     if not user:
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
-    if not verify_password(user_data.password, user.password_hash):
+    if not verify_password(form_data.password, user.password_hash):
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
     token = create_access_token({"sub": str(user.id)})
@@ -81,6 +85,7 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
         "access_token": token,
         "token_type": "bearer"
     }
+
 
 # ==========================================================
 # PROTECTED ROUTE
