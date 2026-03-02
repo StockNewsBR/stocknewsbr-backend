@@ -6,7 +6,7 @@ from app.models import Base
 
 app = FastAPI(title="StockNewsBR – Inteligência de Mercado com IA")
 
-# 🔥 cria tabelas automaticamente
+# cria tabelas automaticamente
 Base.metadata.create_all(bind=engine)
 
 app.include_router(market_router)
