@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 
-from app.database import SessionLocal
+from app.dependencies import get_db
 from app.models import User
 from app.schemas import UserRegister, TokenResponse
 from app.security import (
@@ -14,22 +14,8 @@ from app.security import (
     get_current_user,
 )
 
-# ==========================================================
-# ROUTER
-# ==========================================================
-
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-# ==========================================================
-# DATABASE DEPENDENCY
-# ==========================================================
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 # ==========================================================
 # REGISTER
@@ -47,6 +33,7 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
         password_hash=hash_password(user_data.password),
         plan="trial",
         trial_expires_at=datetime.utcnow() + timedelta(days=7),
+        is_active=True
     )
 
     db.add(new_user)
@@ -59,6 +46,7 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
         access_token=access_token,
         token_type="bearer"
     )
+
 
 # ==========================================================
 # LOGIN
@@ -77,12 +65,16 @@ async def login(
     if not verify_password(form_data.password, user.password_hash):
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Usuário inativo")
+
     access_token = create_access_token({"sub": str(user.id)})
 
     return TokenResponse(
         access_token=access_token,
         token_type="bearer"
     )
+
 
 # ==========================================================
 # PROTECTED ROUTE
