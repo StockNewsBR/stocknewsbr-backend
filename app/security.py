@@ -46,7 +46,14 @@ def create_access_token(data: dict):
 # OAUTH2 SCHEME
 # ==========================================================
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+
+from fastapi.security import OAuth2PasswordBearer
+
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/auth/login",
+    scheme_name="JWT"
+)
+
 
 # ==========================================================
 # DATABASE DEPENDENCY
