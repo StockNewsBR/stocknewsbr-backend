@@ -2,10 +2,11 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
+from fastapi.security import OAuth2PasswordRequestForm
 
 from app.database import SessionLocal
 from app.models import User
-from app.schemas import UserRegister, UserLogin, TokenResponse
+from app.schemas import UserRegister, TokenResponse
 from app.security import (
     hash_password,
     verify_password,
@@ -46,25 +47,22 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
         password_hash=hash_password(user_data.password),
         plan="trial",
         trial_expires_at=datetime.utcnow() + timedelta(days=7),
-        is_active=True,
     )
 
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
-    token = create_access_token({"sub": str(new_user.id)})
+    access_token = create_access_token({"sub": str(new_user.id)})
 
-    return {
-        "access_token": token,
-        "token_type": "bearer"
-    }
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer"
+    )
 
 # ==========================================================
 # LOGIN
 # ==========================================================
-
-from fastapi.security import OAuth2PasswordRequestForm
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
@@ -96,6 +94,5 @@ def get_me(current_user: User = Depends(get_current_user)):
         "id": current_user.id,
         "email": current_user.email,
         "plan": current_user.plan,
-        "trial_expires_at": current_user.trial_expires_at,
-        "is_active": current_user.is_active,
+        "trial_expires_at": current_user.trial_expires_at
     }
