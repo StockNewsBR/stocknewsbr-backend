@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends
 import yfinance as yf
+import pandas as pd
+import numpy as np
 
 from app.dependencies import require_active_plan
 from app.config import SYMBOLS
@@ -9,20 +11,22 @@ router = APIRouter(
     tags=["Ranking"]
 )
 
-# ===============================
-# INDICADORES MANUAIS
-# ===============================
+# =====================================================
+# INDICADORES
+# =====================================================
 
 def calculate_rsi(series, period=14):
     delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
+
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
 
     avg_gain = gain.rolling(period).mean()
     avg_loss = loss.rolling(period).mean()
 
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
+
     return rsi
 
 
@@ -38,30 +42,43 @@ def calculate_macd(series):
     return macd, signal
 
 
-# ===============================
+# =====================================================
 # SCORE ENGINE
-# ===============================
+# =====================================================
 
 def calculate_score(symbol: str):
     try:
         df = yf.download(symbol, period="5d", interval="5m", progress=False)
 
-        if df.empty:
+        if df is None or df.empty:
             return None
 
         close = df["Close"]
 
-        rsi = calculate_rsi(close).iloc[-1]
+        rsi_series = calculate_rsi(close)
+        if rsi_series.dropna().empty:
+            return None
+        rsi = float(rsi_series.dropna().iloc[-1])
+
         macd, macd_signal = calculate_macd(close)
+        if macd.dropna().empty:
+            return None
 
-        macd_val = macd.iloc[-1]
-        macd_signal_val = macd_signal.iloc[-1]
+        macd_value = float(macd.dropna().iloc[-1])
+        macd_signal_value = float(macd_signal.dropna().iloc[-1])
 
-        ema9 = calculate_ema(close, 9).iloc[-1]
-        ema21 = calculate_ema(close, 21).iloc[-1]
+        ema9_series = calculate_ema(close, 9)
+        ema21_series = calculate_ema(close, 21)
+
+        if ema9_series.dropna().empty or ema21_series.dropna().empty:
+            return None
+
+        ema9 = float(ema9_series.dropna().iloc[-1])
+        ema21 = float(ema21_series.dropna().iloc[-1])
 
         score = 0
 
+        # RSI
         if rsi < 30:
             score += 25
         elif rsi < 50:
@@ -69,11 +86,13 @@ def calculate_score(symbol: str):
         elif rsi > 70:
             score -= 10
 
-        if macd_val > macd_signal_val:
+        # MACD
+        if macd_value > macd_signal_value:
             score += 25
         else:
             score -= 10
 
+        # Tendência
         if ema9 > ema21:
             score += 25
             trend = "UPTREND"
@@ -81,28 +100,34 @@ def calculate_score(symbol: str):
             score -= 10
             trend = "DOWNTREND"
 
-        volume_mean = df["Volume"].rolling(20).mean().iloc[-1]
-        if df["Volume"].iloc[-1] > volume_mean:
-            score += 25
+        # Volume
+        volume_mean_series = df["Volume"].rolling(20).mean()
+        if not volume_mean_series.dropna().empty:
+            volume_mean = float(volume_mean_series.dropna().iloc[-1])
+            last_volume = float(df["Volume"].iloc[-1])
+            if last_volume > volume_mean:
+                score += 25
 
         return {
             "symbol": symbol,
             "score": max(score, 0),
             "trend": trend,
-            "rsi": round(float(rsi), 2),
+            "rsi": round(rsi, 2),
             "breakout": ema9 > ema21
         }
 
-    except Exception:
+    except Exception as e:
+        print(f"Erro em {symbol}: {e}")
         return None
 
 
-# ===============================
+# =====================================================
 # ENDPOINTS
-# ===============================
+# =====================================================
 
 @router.get("")
 def get_ranking(current_user=Depends(require_active_plan)):
+
     results = []
 
     for symbol in SYMBOLS:
@@ -111,11 +136,13 @@ def get_ranking(current_user=Depends(require_active_plan)):
             results.append(data)
 
     results.sort(key=lambda x: x["score"], reverse=True)
+
     return {"data": results}
 
 
 @router.get("/top")
 def get_top(min_score: int = 50, current_user=Depends(require_active_plan)):
+
     results = []
 
     for symbol in SYMBOLS:
@@ -124,4 +151,5 @@ def get_top(min_score: int = 50, current_user=Depends(require_active_plan)):
             results.append(data)
 
     results.sort(key=lambda x: x["score"], reverse=True)
+
     return {"data": results}
