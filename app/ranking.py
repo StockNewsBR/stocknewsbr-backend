@@ -49,6 +49,7 @@ def calculate_score(symbol: str):
         df = yf.download(symbol, period="5d", interval="5m", progress=False)
 
         if df.empty:
+            print(f"Sem dados para {symbol}")
             return None
 
         close = df["Close"]
@@ -100,9 +101,9 @@ def calculate_score(symbol: str):
             "breakout": ema9 > ema21
         }
 
- except Exception as e:
-    print(f"Erro em {symbol}: {e}")
-    return None
+    except Exception as e:
+        print(f"Erro em {symbol}: {e}")
+        return None
 
 
 # =====================================================
