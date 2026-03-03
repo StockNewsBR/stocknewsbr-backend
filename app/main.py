@@ -5,6 +5,11 @@ import yfinance as yf
 
 app = FastAPI(title="StockNewsBR API")
 
+from app.ranking import router as ranking_router
+app.include_router(ranking_router)
+
+
+
 # =====================================================
 # LISTA BASE DE AÇÕES
 # =====================================================

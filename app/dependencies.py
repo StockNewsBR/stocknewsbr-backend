@@ -1,13 +1,14 @@
-from app.database import SessionLocal
 from datetime import datetime
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
+
+from app.database import SessionLocal
 from app.auth import get_current_user
 
 
-# ==============================
-# DATABASE SESSION
-# ==============================
+# =====================================================
+# DATABASE SESSION (Single Session Per Request)
+# =====================================================
 
 def get_db():
     db = SessionLocal()
@@ -17,9 +18,9 @@ def get_db():
         db.close()
 
 
-# ==============================
-# TRIAL CHECK LOGIC
-# ==============================
+# =====================================================
+# TRIAL EXPIRATION CHECK
+# =====================================================
 
 def check_trial_expiration(user, db: Session):
     if user.plan == "trial" and user.trial_expires_at:
@@ -31,22 +32,24 @@ def check_trial_expiration(user, db: Session):
     return True
 
 
-# ==============================
-# MAIN PLAN VALIDATION
-# ==============================
+# =====================================================
+# REQUIRE ACTIVE PLAN (Enterprise Pattern)
+# =====================================================
 
 def require_active_plan(
-    current_user = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Usuário inativo
+    # 🔹 Pega usuário usando a MESMA sessão
+    current_user = get_current_user(db)
+
+    # 🔹 Usuário inativo
     if not current_user.is_active:
         raise HTTPException(
             status_code=403,
             detail="Usuário inativo"
         )
 
-    # Verifica expiração de trial
+    # 🔹 Verifica expiração automática de trial
     trial_valid = check_trial_expiration(current_user, db)
 
     if not trial_valid:
@@ -55,7 +58,7 @@ def require_active_plan(
             detail="Trial expirado. Faça upgrade para continuar."
         )
 
-    # Bloqueia plano expirado manualmente
+    # 🔹 Bloqueio manual de plano expirado
     if current_user.plan == "expired":
         raise HTTPException(
             status_code=403,
