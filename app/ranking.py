@@ -100,8 +100,9 @@ def calculate_score(symbol: str):
             "breakout": ema9 > ema21
         }
 
-    except Exception:
-        return None
+ except Exception as e:
+    print(f"Erro em {symbol}: {e}")
+    return None
 
 
 # =====================================================
