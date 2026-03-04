@@ -1,4 +1,4 @@
-print("🚀 BUILD VERSION: CLEAN_DEPLOY_V2")
+print("🚀 BUILD VERSION: TESTE_FINAL_RENDER")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
