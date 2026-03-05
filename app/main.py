@@ -1,15 +1,18 @@
-print("🚀 BUILD VERSION: TESTE_FINAL_RENDER")
+print("🚀 BUILD VERSION: ENGINE_V2_RUNNING")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+import threading
 
 from app.database import engine, Base
 from app.ranking import router as ranking_router
 from app.market import router as market_router
 
+from app.engine import auto_update
+
 # =====================================================
-# APP INIT (UMA ÚNICA VEZ)
+# APP INIT
 # =====================================================
 
 app = FastAPI(
@@ -30,7 +33,7 @@ app.add_middleware(
 )
 
 # =====================================================
-# DATABASE AUTO CREATE
+# DATABASE
 # =====================================================
 
 Base.metadata.create_all(bind=engine)
@@ -43,7 +46,7 @@ app.include_router(ranking_router)
 app.include_router(market_router)
 
 # =====================================================
-# DEBUG ENDPOINTS
+# DEBUG
 # =====================================================
 
 @app.get("/ping")
@@ -59,12 +62,17 @@ def debug_tables():
         return {"tables": [row[0] for row in result]}
 
 # =====================================================
-# HEALTH CHECK
+# HEALTH
 # =====================================================
 
 @app.get("/")
 def health_check():
     return {
-        "status": "StockNewsBR backend running 🚀",
-        "debug": "REFERRAL_VERSION_ACTIVE"
+        "status": "StockNewsBR backend running 🚀"
     }
+
+# =====================================================
+# START ENGINE
+# =====================================================
+
+threading.Thread(target=auto_update, daemon=True).start()
