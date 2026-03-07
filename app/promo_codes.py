@@ -1,45 +1,33 @@
+from datetime import datetime
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
-from app.models import PromoCode, User
+from app.models import PromoCode
 
 
-def apply_promo_code(db: Session, user_id: int, code: str):
+def redeem_promo_code(db: Session, user_id: int, code: str):
 
-    user = db.query(User).filter(User.id == user_id).first()
-
-    if user.plan not in ["trial", "free"]:
-        return {"error": "Código só pode ser usado por usuários Free ou Trial"}
-
-    promo = db.query(PromoCode).filter(
-        PromoCode.code == code
-    ).first()
+    promo = db.query(PromoCode).filter(PromoCode.code == code).first()
 
     if not promo:
-        return {"error": "Código inválido"}
+        return {"error": "Invalid promo code"}
 
     now = datetime.utcnow()
 
     if promo.starts_at and promo.starts_at > now:
-        return {"error": "Promoção ainda não começou"}
+        return {"error": "Promotion not started"}
 
     if promo.expires_at and promo.expires_at < now:
-        return {"error": "Código expirado"}
+        return {"error": "Promotion expired"}
 
-    if promo.current_uses >= promo.max_uses:
-        return {"error": "Código já atingiu limite"}
+    if promo.max_uses and promo.current_uses >= promo.max_uses:
+        return {"error": "Promo code fully used"}
 
     promo.current_uses += 1
 
-    if promo.free_year:
-
-        user.plan = "pro"
-        user.plan_expires_at = now + timedelta(days=365)
-
-    elif promo.free_months:
-
-        user.plan = "pro"
-        user.plan_expires_at = now + timedelta(days=30 * promo.free_months)
-
     db.commit()
 
-    return {"success": True}
+    return {
+        "status": "success",
+        "code": promo.code,
+        "free_year": promo.free_year,
+        "free_months": promo.free_months
+    }
