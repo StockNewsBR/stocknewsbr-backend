@@ -15,7 +15,7 @@ from app.liquidity_map import liquidity_zones
 # AI metrics
 from app.ai_confidence import calculate_confidence
 from app.ai_confluence import calculate_confluence
-from app.ai_signal_strength import calculate_signal_strength
+from app.signal_strength import calculate_signal_strength
 from app.ai_market_narrative import generate_market_narrative
 
 
