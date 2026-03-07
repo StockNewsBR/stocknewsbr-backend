@@ -55,8 +55,8 @@ app.include_router(ranking_router)
 app.include_router(market_router)
 app.include_router(stripe_router)
 
-app.include_router(promo_router)
-app.include_router(admin_promo_router)
+app.include_router(promo_router, tags=["Promo"])
+app.include_router(admin_promo_router, tags=["Admin"])
 
 # =====================================================
 # REFERRAL WORKER
