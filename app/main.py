@@ -18,7 +18,6 @@ from app.engine import auto_update
 from app.referrals import validate_referrals
 
 from app.promo_router import router as promo_router
-
 from app.admin_promo import router as admin_promo_router
 
 # =====================================================
@@ -58,6 +57,7 @@ Base.metadata.create_all(bind=engine)
 app.include_router(ranking_router)
 app.include_router(market_router)
 app.include_router(stripe_router)
+
 app.include_router(promo_router)
 app.include_router(admin_promo_router)
 
