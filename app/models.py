@@ -88,3 +88,27 @@ class ReferralStats(Base):
 
     benefit_level = Column(Integer, default=0)
     reward_balance_months = Column(Integer, default=0)
+
+# ==========================================================
+# CLASS PROMOCODE (BASE)
+# ==========================================================
+ 
+class PromoCode(Base):
+    __tablename__ = "promo_codes"
+
+    id = Column(Integer, primary_key=True)
+
+    code = Column(String, unique=True, index=True)
+
+    free_year = Column(Boolean, default=False)
+
+    max_uses = Column(Integer)
+    current_uses = Column(Integer, default=0)
+    
+    starts_at = Column(DateTime)
+    expires_at = Column(DateTime)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+

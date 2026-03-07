@@ -12,10 +12,29 @@ router = APIRouter(
 )
 
 # =====================================================
-# INDICADORES
+# RANK OPPORTUNITIES (AI ENGINE)
+# =====================================================
+
+def rank_opportunities(stocks):
+
+    ranked = sorted(
+        stocks,
+        key=lambda x: (
+            x.get("signal_strength", 0),
+            x.get("score", 0)
+        ),
+        reverse=True
+    )
+
+    return ranked[:10]
+
+
+# =====================================================
+# INDICATORS
 # =====================================================
 
 def calculate_rsi(series, period=14):
+
     delta = series.diff()
 
     gain = delta.where(delta > 0, 0.0)
@@ -31,14 +50,18 @@ def calculate_rsi(series, period=14):
 
 
 def calculate_ema(series, period):
+
     return series.ewm(span=period, adjust=False).mean()
 
 
 def calculate_macd(series):
+
     ema12 = calculate_ema(series, 12)
     ema26 = calculate_ema(series, 26)
+
     macd = ema12 - ema26
     signal = calculate_ema(macd, 9)
+
     return macd, signal
 
 
@@ -47,7 +70,9 @@ def calculate_macd(series):
 # =====================================================
 
 def calculate_score(symbol: str):
+
     try:
+
         df = yf.download(symbol, period="5d", interval="5m", progress=False)
 
         if df is None or df.empty:
@@ -56,11 +81,14 @@ def calculate_score(symbol: str):
         close = df["Close"]
 
         rsi_series = calculate_rsi(close)
+
         if rsi_series.dropna().empty:
             return None
+
         rsi = float(rsi_series.dropna().iloc[-1])
 
         macd, macd_signal = calculate_macd(close)
+
         if macd.dropna().empty:
             return None
 
@@ -92,7 +120,7 @@ def calculate_score(symbol: str):
         else:
             score -= 10
 
-        # Tendência
+        # Trend
         if ema9 > ema21:
             score += 25
             trend = "UPTREND"
@@ -102,9 +130,12 @@ def calculate_score(symbol: str):
 
         # Volume
         volume_mean_series = df["Volume"].rolling(20).mean()
+
         if not volume_mean_series.dropna().empty:
+
             volume_mean = float(volume_mean_series.dropna().iloc[-1])
             last_volume = float(df["Volume"].iloc[-1])
+
             if last_volume > volume_mean:
                 score += 25
 
@@ -117,6 +148,7 @@ def calculate_score(symbol: str):
         }
 
     except Exception as e:
+
         print(f"Erro em {symbol}: {e}")
         return None
 
@@ -131,7 +163,9 @@ def get_ranking(current_user=Depends(require_active_plan)):
     results = []
 
     for symbol in SYMBOLS:
+
         data = calculate_score(symbol)
+
         if data:
             results.append(data)
 
@@ -146,7 +180,9 @@ def get_top(min_score: int = 50, current_user=Depends(require_active_plan)):
     results = []
 
     for symbol in SYMBOLS:
+
         data = calculate_score(symbol)
+
         if data and data["score"] >= min_score:
             results.append(data)
 

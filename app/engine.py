@@ -1,92 +1,42 @@
 import yfinance as yf
 import pandas as pd
+import numpy as np
 from datetime import datetime
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ==========================================
-# CONFIG
-# ==========================================
+from app.config import SYMBOLS, UPDATE_INTERVAL
 
-UPDATE_INTERVAL = 900  # 15 minutos
+# IA modules
+from app.ai_market_radar import build_radar
+from app.liquidity_sweep import build_sweep
+from app.liquidity_map import liquidity_zones
 
-SYMBOLS = [
-
-
-# =========================
-# B3 - AÇÕES
-# =========================
-
-"PETR3.SA","PETR4.SA","VALE3.SA","ITUB4.SA",
-"BBDC3.SA","BBDC4.SA","BBAS3.SA","B3SA3.SA",
-
-"MGLU3.SA","LREN3.SA","PRIO3.SA","CSNA3.SA",
-"GGBR4.SA","USIM5.SA","SUZB3.SA","KLBN11.SA",
-
-"JHSF3.SA","MULT3.SA","CYRE3.SA","EZTC3.SA",
-"CVCB3.SA","AZUL4.SA","GOLL4.SA",
-
-"NTCO3.SA","HAPV3.SA","RDOR3.SA",
-
-"VIVT3.SA","TIMS3.SA",
-
-"EMBR3.SA","WEGE3.SA",
-
-"BRFS3.SA","JBSS3.SA",
-
-"MRVE3.SA",
-
-"CPLE6.SA","CMIG4.SA","ELET3.SA","ELET6.SA",
-"ENBR3.SA","TAEE11.SA","TRPL4.SA",
-
-"YDUQ3.SA",
-
-# =========================
-# BDRs
-# =========================
-
-"AAPL34.SA","MSFT34.SA","AMZO34.SA","GOGL34.SA",
-"FBOK34.SA","TSLA34.SA","BERK34.SA","NFLX34.SA",
-"NVDC34.SA","JPMN34.SA","VISA34.SA",
-
-"MCDC34.SA","DISB34.SA","PYPL34.SA",
-
-"ADID34.SA","NKE34.SA",
-
-"ORCL34.SA","INTC34.SA",
-
-"PFE34.SA","KO34.SA",
-
-# =========================
-# BDRs adicionais
-# =========================
-
-"A1MD34.SA","ADBE34.SA","AIRB34.SA",
-"B1NT34.SA","CMCS34.SA","COC34.SA",
-"COW34.SA","EXXO34.SA","GMCO34.SA",
-"GSGI34.SA","JNJB34.SA","JPMC34.SA",
-"M1RN34.SA","MSCD34.SA","MUTC34.SA",
-"NIKE34.SA","PGCO34.SA","SSFO34.SA",
-"WFCO34.SA"
+# AI metrics
+from app.ai_confidence import calculate_ai_confidence
+from app.ai_confluence import calculate_confluence
+from app.ai_signal_strength import calculate_signal_strength
+from app.ai_market_narrative import generate_market_narrative
 
 
-]
+MAX_WORKERS = 8
+
 
 CACHE = {}
 LAST_UPDATE = None
 
 
-# ==========================================
+# =========================================================
 # INDICATORS
-# ==========================================
+# =========================================================
 
 def calculate_indicators(df):
 
     close = df["Close"]
-    high = df["High"]
-    low = df["Low"]
     volume = df["Volume"]
 
     delta = close.diff()
+
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
 
@@ -96,13 +46,16 @@ def calculate_indicators(df):
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
 
-    ema9 = close.ewm(span=9, adjust=False).mean()
-    ema21 = close.ewm(span=21, adjust=False).mean()
+    ema21 = close.ewm(span=21).mean()
+    ema50 = close.ewm(span=50).mean()
+    ema200 = close.ewm(span=200).mean()
 
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
+    ema12 = close.ewm(span=12).mean()
+    ema26 = close.ewm(span=26).mean()
 
     macd = ema12 - ema26
+
+    roc = close.pct_change(12) * 100
 
     avg_volume = volume.rolling(20).mean()
     volume_ratio = volume / avg_volume
@@ -111,96 +64,159 @@ def calculate_indicators(df):
 
     return {
         "rsi": float(rsi.iloc[-1]),
-        "ema9": float(ema9.iloc[-1]),
         "ema21": float(ema21.iloc[-1]),
+        "ema50": float(ema50.iloc[-1]),
+        "ema200": float(ema200.iloc[-1]),
         "macd": float(macd.iloc[-1]),
+        "roc": float(roc.iloc[-1]),
         "volume_ratio": float(volume_ratio.iloc[-1]),
-        "breakout": bool(breakout),
+        "breakout": bool(breakout)
     }
 
 
-# ==========================================
-# SCORE ENGINE
-# ==========================================
+# =========================================================
+# SCORE
+# =========================================================
 
-def calculate_score(ticker):
+def calculate_score(symbol):
 
     try:
 
         df = yf.download(
-            ticker,
+            symbol,
             period="5d",
             interval="15m",
             auto_adjust=True,
             progress=False
         )
 
-        if df is None or df.empty or len(df) < 50:
+        if df is None or df.empty:
             return None
 
-        indicators = calculate_indicators(df)
+        ind = calculate_indicators(df)
 
         score = 0
 
-        if 55 < indicators["rsi"] < 70:
+        if ind["ema21"] > ind["ema50"] > ind["ema200"]:
             score += 20
 
-        if indicators["macd"] > 0:
+        if 55 < ind["rsi"] < 70:
+            score += 15
+
+        if ind["macd"] > 0:
+            score += 15
+
+        if ind["roc"] > 0:
+            score += 10
+
+        if ind["volume_ratio"] > 1.5:
             score += 20
 
-        if indicators["ema9"] > indicators["ema21"]:
+        if ind["breakout"]:
             score += 20
 
-        if indicators["volume_ratio"] > 1.5:
-            score += 20
+        trend = "UPTREND" if ind["ema21"] > ind["ema50"] else "DOWNTREND"
 
-        if indicators["breakout"]:
-            score += 20
+        # =================================================
+        # AI METRICS
+        # =================================================
 
-        trend = "UPTREND" if indicators["ema9"] > indicators["ema21"] else "DOWNTREND"
+        active_models = 8
+
+        confluence = calculate_confluence(active_models)
+
+        confidence = calculate_ai_confidence(score)
+
+        signal_strength = calculate_signal_strength(score, confluence)
+
+        narrative = generate_market_narrative(symbol, score, confluence)
 
         return {
-            "symbol": ticker,
+            "symbol": symbol,
             "score": score,
             "trend": trend,
-            "rsi": round(indicators["rsi"],2),
-            "macd": round(indicators["macd"],4),
-            "volume_spike": round(indicators["volume_ratio"],2),
-            "breakout": indicators["breakout"]
+            "volume_spike": round(ind["volume_ratio"], 2),
+
+            "ai_confluence": confluence,
+            "ai_confidence": confidence,
+            "signal_strength": signal_strength,
+            "ai_narrative": narrative
         }
 
     except Exception as e:
-        print("Erro:", ticker, e)
+
+        print("Erro:", symbol, e)
         return None
 
 
-# ==========================================
-# ENGINE LOOP
-# ==========================================
+# =========================================================
+# PARALLEL SCANNER
+# =========================================================
+
+def scan_symbol(symbol):
+
+    return calculate_score(symbol)
+
+
+def scan_market_parallel():
+
+    results = []
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+
+        futures = [executor.submit(scan_symbol, symbol) for symbol in SYMBOLS]
+
+        for future in as_completed(futures):
+
+            result = future.result()
+
+            if result:
+                results.append(result)
+
+    return results
+
+
+# =========================================================
+# ENGINE UPDATE
+# =========================================================
 
 def update_cache():
 
     global CACHE, LAST_UPDATE
 
-    results = []
+    print(f"⚡ Engine scanning {len(SYMBOLS)} ativos...")
 
-    for symbol in SYMBOLS:
-
-        result = calculate_score(symbol)
-
-        if result:
-            results.append(result)
+    results = scan_market_parallel()
 
     if results:
 
-        results.sort(key=lambda x: x["score"], reverse=True)
+        results.sort(
+            key=lambda x: (x["score"], x["volume_spike"]),
+            reverse=True
+        )
 
         CACHE = {item["symbol"]: item for item in results}
 
         LAST_UPDATE = datetime.now().strftime("%H:%M:%S")
 
-        print("Engine updated", LAST_UPDATE)
+        print("✅ Ranking updated:", LAST_UPDATE)
 
+    try:
+
+        radar = build_radar()
+        sweep = build_sweep()
+
+        print("Radar signals:", len(radar))
+        print("Liquidity sweeps:", len(sweep))
+
+    except Exception as e:
+
+        print("AI module error:", e)
+
+
+# =========================================================
+# AUTO LOOP
+# =========================================================
 
 def auto_update():
 
@@ -209,3 +225,26 @@ def auto_update():
         update_cache()
 
         time.sleep(UPDATE_INTERVAL)
+
+
+# =========================================================
+# PUBLIC API
+# =========================================================
+
+def scan_market():
+
+    return list(CACHE.values())
+
+
+def collect_market_signals():
+
+    signals = []
+
+    for item in CACHE.values():
+
+        if item.get("trend") == "UPTREND":
+            signals.append("bullish")
+        else:
+            signals.append("bearish")
+
+    return signals
