@@ -13,7 +13,7 @@ from app.liquidity_sweep import build_sweep
 from app.liquidity_map import liquidity_zones
 
 # AI metrics
-from app.ai_confidence import calculate_ai_confidence
+from app.ai_confidence import calculate_confidence
 from app.ai_confluence import calculate_confluence
 from app.ai_signal_strength import calculate_signal_strength
 from app.ai_market_narrative import generate_market_narrative
@@ -124,9 +124,8 @@ def calculate_score(symbol):
         active_models = 8
 
         confluence = calculate_confluence(active_models)
-
-        confidence = calculate_ai_confidence(score)
-
+        confidence = calculate_confidence(score)
+       
         signal_strength = calculate_signal_strength(score, confluence)
 
         narrative = generate_market_narrative(symbol, score, confluence)
