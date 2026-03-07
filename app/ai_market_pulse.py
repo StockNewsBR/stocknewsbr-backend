@@ -1,22 +1,35 @@
-def calculate_market_pulse(signals):
+# =========================================================
+# AI MARKET PULSE
+# Calculates overall market sentiment
+# =========================================================
 
-    bullish = 0
-    bearish = 0
+def market_pulse(signals):
 
-    for s in signals:
+    if not signals:
+        return {"sentiment": "neutral"}
 
-        if s["score"] >= 70:
-            bullish += 1
-
-        if s["score"] <= 40:
-            bearish += 1
+    bullish = signals.count("bullish")
+    bearish = signals.count("bearish")
 
     total = len(signals)
 
-    if total == 0:
-        return {"bullish":0,"bearish":0}
+    bull_ratio = bullish / total
+    bear_ratio = bearish / total
+
+    if bull_ratio > 0.65:
+        sentiment = "strong bullish"
+    elif bull_ratio > 0.55:
+        sentiment = "bullish"
+    elif bear_ratio > 0.65:
+        sentiment = "strong bearish"
+    elif bear_ratio > 0.55:
+        sentiment = "bearish"
+    else:
+        sentiment = "neutral"
 
     return {
-        "bullish": round((bullish/total)*100,1),
-        "bearish": round((bearish/total)*100,1)
+        "sentiment": sentiment,
+        "bullish_signals": bullish,
+        "bearish_signals": bearish,
+        "total_signals": total
     }
