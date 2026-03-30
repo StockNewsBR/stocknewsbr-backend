@@ -1,90 +1,61 @@
-from datetime import datetime, timedelta
+# =====================================================
+# STOCKNEWSBR USER SERVICES
+# =====================================================
 
-from fastapi import APIRouter, HTTPException, Depends
+import secrets
+
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from fastapi.security import OAuth2PasswordRequestForm
 
-from app.dependencies import get_db
 from app.models import User
-from app.schemas import UserRegister, TokenResponse
-from app.security import (
-    hash_password,
-    verify_password,
-    create_access_token,
-    get_current_user,
+from app.security import hash_password
+from app.services.access_service import (
+    accept_legal_documents,
+    ensure_referral_code,
+    grant_trial_access,
+    link_telegram_account,
+    refresh_user_access,
 )
 
-router = APIRouter(prefix="/auth", tags=["Auth"])
 
+def get_or_create_user(db: Session, telegram_id: str, telegram_username: str | None = None):
+    user = db.query(User).filter(User.telegram_id == telegram_id).first()
 
-# ==========================================================
-# REGISTER
-# ==========================================================
+    if user:
+        refresh_user_access(user)
+        return user
 
-@router.post("/register", response_model=TokenResponse)
-def register(user_data: UserRegister, db: Session = Depends(get_db)):
+    pseudo_email = f"telegram_{telegram_id}@stocknewsbr.local"
 
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-
-    new_user = User(
-        email=user_data.email,
-        password_hash=hash_password(user_data.password),
-        plan="trial",
-        trial_expires_at=datetime.utcnow() + timedelta(days=7),
-        is_active=True
+    user = User(
+        email=pseudo_email,
+        password_hash=hash_password(secrets.token_hex(24)),
+        display_name=telegram_username or f"telegram_{telegram_id}",
+        is_active=True,
+        is_verified=True,
+        referral_code=secrets.token_hex(4).upper(),
     )
 
-    db.add(new_user)
+    grant_trial_access(user)
+    accept_legal_documents(user, True, True, True)
+
+    db.add(user)
+    db.flush()
+    ensure_referral_code(db, user)
+    link_telegram_account(db, user, telegram_id, telegram_username)
     db.commit()
-    db.refresh(new_user)
+    db.refresh(user)
 
-    access_token = create_access_token({"sub": str(new_user.id)})
-
-    return TokenResponse(
-        access_token=access_token,
-        token_type="bearer"
-    )
+    return user
 
 
-# ==========================================================
-# LOGIN
-# ==========================================================
-
-@router.post("/login", response_model=TokenResponse)
-async def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db)
-):
-    user = db.query(User).filter(User.email == form_data.username).first()
-
-    if not user:
-        raise HTTPException(status_code=400, detail="Invalid credentials")
-
-    if not verify_password(form_data.password, user.password_hash):
-        raise HTTPException(status_code=400, detail="Invalid credentials")
-
-    if not user.is_active:
-        raise HTTPException(status_code=403, detail="Usuário inativo")
-
-    access_token = create_access_token({"sub": str(user.id)})
-
-    return TokenResponse(
-        access_token=access_token,
-        token_type="bearer"
-    )
+def require_verified(user: User):
+    if not user.is_verified:
+        raise HTTPException(status_code=403, detail="verification_required")
 
 
-# ==========================================================
-# PROTECTED ROUTE
-# ==========================================================
+def require_premium(user: User):
+    refresh_user_access(user)
 
-@router.get("/me")
-def get_me(current_user: User = Depends(get_current_user)):
-    return {
-        "id": current_user.id,
-        "email": current_user.email,
-        "plan": current_user.plan,
-        "trial_expires_at": current_user.trial_expires_at
-    }
+    if user.plan not in ["trial", "premium", "enterprise"]:
+        raise HTTPException(status_code=403, detail="premium_required")

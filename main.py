@@ -1,124 +1,312 @@
-print("🚀 BUILD VERSION: STOCKNEWSBR_PRODUCTION")
+# =====================================================
+# STOCKNEWSBR BACKEND API (V36 HARDENED)
+# =====================================================
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+import importlib
+import logging
+import os
 import threading
 import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+from uuid import uuid4
 
-from app.database import engine, Base, SessionLocal
+from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
-# ROUTERS
-from app.ranking import router as ranking_router
-from app.market import router as market_router
-from app.stripe_webhook import router as stripe_router
-from app.promo_router import router as promo_router
-from app.admin_promo import router as admin_promo_router
+from app.ai.ai_market_pulse import market_pulse
+from app.cache.snapshot_cache import get_snapshot, get_snapshot_info, get_snapshot_signals
+from app.database import Base, SessionLocal, engine
+from app.database_schema import ensure_runtime_schema
+from app.dependencies import require_internal_token
+from app.services.media_service import ensure_media_root
+from app.services.referrals import validate_referrals
+from app.system.system_metrics import increment_http_errors, increment_http_requests
 
-# ENGINE
-from app import engine as ai_engine
-from app import ranking
-from app.ai_market_pulse import market_pulse
-from app.engine import auto_update
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
 
-# REFERRALS
-from app.referrals import validate_referrals
+logger = logging.getLogger("stocknewsbr.main")
+
+ROUTER_SPECS = [
+    ("app.auth", "router"),
+    ("app.api.routes_opportunity", "router"),
+    ("app.api.routes_system", "router"),
+    ("app.api.routes_snapshot", "router"),
+    ("app.api.routes_signals", "router"),
+    ("app.api.routes_public_meta", "router"),
+    ("app.api.routes_internal", "router"),
+    ("app.api.api_market_routes", "router"),
+    ("app.api.market_routes", "router"),
+    ("app.api.routes_heatmap", "router"),
+    ("app.api.routes_narrative", "router"),
+    ("app.api.routes_radar", "router"),
+    ("app.api.routes_market_bar", "router"),
+    ("app.api.routes_activity", "router"),
+    ("app.api.routes_feed", "router"),
+    ("app.api.routes_likes", "router"),
+    ("app.api.routes_moderation", "router"),
+    ("app.api.routes_moderation_admin", "router"),
+    ("app.api.routes_media", "router"),
+    ("app.api.routes_push", "router"),
+    ("app.api.routes_poll", "router"),
+    ("app.api.routes_sentiment", "router"),
+    ("app.api.routes_social", "router"),
+    ("app.api.routes_chat", "router"),
+    ("app.api.routes_app_workspace", "router"),
+    ("app.api.stripe_webhook", "router"),
+    ("app.api.routes_ticker", "router"),
+    ("app.services.ranking", "router"),
+    ("app.system.stream_router", "router"),
+    ("app.web.routes_chart", "router"),
+    ("app.web.routes_dashboard", "router"),
+    ("app.web.routes_market_pulse", "router"),
+    ("app.web.routes_opportunities", "router"),
+    ("app.web.routes_radar", "router"),
+    ("app.web.routes_search", "router"),
+    ("app.web.routes_terminal", "router"),
+    ("app.web.routes_top_movers", "router"),
+    ("app.web.routes_watchlist", "router"),
+    ("app.web.routes_workspace", "router"),
+    ("app.web.routes_site", "router"),
+]
+
+BACKGROUND_THREADS = {}
+THREAD_LOCK = threading.RLock()
+STOP_EVENT = threading.Event()
+WORKERS_STARTED = False
+WORKERS_LOCK = threading.Lock()
 
 
-# =====================================================
-# FASTAPI APP
-# =====================================================
+def _env_flag(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+
+    if raw_value is None:
+        return default
+
+    return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _cors_origins():
+    raw_value = os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "https://www.stocknewsbr.com,https://stocknewsbr.com,http://localhost:3000,http://127.0.0.1:3000",
+    )
+    origins = [item.strip() for item in raw_value.split(",") if item.strip()]
+    return origins or ["*"]
+
+
+def _create_tables_if_needed():
+    environment = os.getenv("ENV", "development").lower()
+
+    try:
+        import app.models  # noqa: F401
+
+        if environment != "production" or engine.url.drivername.startswith("sqlite"):
+            Base.metadata.create_all(bind=engine)
+
+        ensure_runtime_schema(engine)
+    except Exception:
+        logger.exception("Database bootstrap failed")
+        raise
+
+
+def _safe_import_router(module_path: str, attribute: str):
+    try:
+        module = importlib.import_module(module_path)
+        return getattr(module, attribute)
+    except Exception as exc:
+        logger.warning("Skipping router %s: %s", module_path, exc)
+        return None
+
+
+def _include_routers(app: FastAPI):
+    included = 0
+
+    for module_path, attribute in ROUTER_SPECS:
+        router = _safe_import_router(module_path, attribute)
+
+        if router is None:
+            continue
+
+        app.include_router(router)
+        included += 1
+
+    logger.info("Router bootstrap completed | included=%s", included)
+
+
+def _start_thread(name: str, target, *args):
+    with THREAD_LOCK:
+        current = BACKGROUND_THREADS.get(name)
+
+        if current and current.is_alive():
+            return False
+
+        thread = threading.Thread(
+            target=target,
+            args=args,
+            name=name,
+            daemon=True,
+        )
+        thread.start()
+        BACKGROUND_THREADS[name] = thread
+        return True
+
+
+def referral_worker(stop_event: threading.Event):
+    while not stop_event.is_set():
+        db = None
+
+        try:
+            db = SessionLocal()
+            validate_referrals(db)
+        except Exception:
+            logger.exception("Referral worker error")
+        finally:
+            if db is not None:
+                db.close()
+
+        stop_event.wait(3600)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    del app
+
+    global WORKERS_STARTED
+
+    STOP_EVENT.clear()
+    _create_tables_if_needed()
+
+    with WORKERS_LOCK:
+        if not WORKERS_STARTED:
+            if _env_flag("START_ENGINE_WORKER", True):
+                from worker import start_worker
+
+                started = _start_thread("stocknewsbr-engine-worker", start_worker, STOP_EVENT)
+                logger.info("Engine worker thread started=%s", started)
+
+            if _env_flag("START_REFERRAL_WORKER", True):
+                started = _start_thread("stocknewsbr-referral-worker", referral_worker, STOP_EVENT)
+                logger.info("Referral worker thread started=%s", started)
+
+            if _env_flag("START_SNAPSHOT_WORKER", False):
+                from app.system.snapshot_worker import start_snapshot_worker
+
+                start_snapshot_worker()
+                logger.info("Snapshot worker bootstrap requested")
+
+            if _env_flag("START_AI_WORKER", True):
+                from app.system.ai_worker import start_ai_worker
+
+                started = _start_thread("stocknewsbr-ai-worker", start_ai_worker)
+                logger.info("AI worker thread started=%s", started)
+
+            WORKERS_STARTED = True
+
+    try:
+        yield
+    finally:
+        STOP_EVENT.set()
+
+        with WORKERS_LOCK:
+            WORKERS_STARTED = False
+
 
 app = FastAPI(
     title="StockNewsBR API",
-    version="1.0.0"
+    version="3.3",
+    lifespan=lifespan,
 )
-
-# =====================================================
-# CORS
-# =====================================================
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins(),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# =====================================================
-# DATABASE
-# =====================================================
-
-Base.metadata.create_all(bind=engine)
-
-# =====================================================
-# ROUTERS
-# =====================================================
-
-app.include_router(ranking_router)
-app.include_router(market_router)
-app.include_router(stripe_router)
-
-# PROMO SYSTEM
-app.include_router(promo_router)
-app.include_router(admin_promo_router)
-
-# =====================================================
-# REFERRAL WORKER
-# =====================================================
-
-def referral_worker():
-
-    while True:
-
-        db = SessionLocal()
-
-        validate_referrals(db)
-
-        time.sleep(3600)
+app.add_middleware(GZipMiddleware, minimum_size=512)
+app.mount(
+    "/media",
+    StaticFiles(directory=str(ensure_media_root())),
+    name="media",
+)
 
 
-threading.Thread(target=referral_worker, daemon=True).start()
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start = time.perf_counter()
+    request_id = uuid4().hex
+    increment_http_requests()
 
-# =====================================================
-# API ENDPOINTS
-# =====================================================
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception("Unhandled request error on %s", request.url.path)
+        increment_http_errors()
+        duration_ms = (time.perf_counter() - start) * 1000
+        response = JSONResponse(
+            status_code=500,
+            content={
+                "detail": "internal_server_error",
+                "request_id": request_id,
+            },
+        )
+        response.headers["X-Process-Time-Ms"] = f"{duration_ms:.2f}"
+        response.headers["X-Request-Id"] = request_id
+        return response
+
+    duration_ms = (time.perf_counter() - start) * 1000
+    response.headers["X-Process-Time-Ms"] = f"{duration_ms:.2f}"
+    response.headers["X-Request-Id"] = request_id
+
+    if response.status_code >= 500:
+        increment_http_errors()
+
+    return response
+
+
+_include_routers(app)
+
 
 @app.get("/opportunities")
 def get_opportunities():
+    preview_rows = []
 
-    data = ai_engine.scan_market()
+    for signal in get_snapshot_signals(limit=5):
+        preview_rows.append(
+            {
+                "ticker": signal.get("ticker") or signal.get("symbol"),
+                "score": signal.get("score"),
+                "signal": signal.get("signal"),
+                "price": signal.get("price"),
+            }
+        )
 
-    ranked = ranking.rank_opportunities(data)
-
-    return ranked
+    return {
+        "preview": True,
+        "count": len(preview_rows),
+        "signals": preview_rows,
+    }
 
 
 @app.get("/market-pulse")
 def get_market_pulse():
-
-    signals = ai_engine.collect_market_signals()
-
-    return market_pulse(signals)
+    return market_pulse(get_snapshot_signals())
 
 
 @app.get("/spotlight")
-def opportunity_spotlight():
+def spotlight():
+    signals = get_snapshot_signals(limit=1)
+    return signals[0] if signals else {}
 
-    data = ai_engine.scan_market()
-
-    ranked = ranking.rank_opportunities(data)
-
-    if ranked:
-        return ranked[0]
-
-    return {}
-
-
-# =====================================================
-# DEBUG
-# =====================================================
 
 @app.get("/ping")
 def ping():
@@ -126,30 +314,33 @@ def ping():
 
 
 @app.get("/debug/tables")
-def debug_tables():
+def debug_tables(_internal=Depends(require_internal_token)):
+    del _internal
 
-    with engine.connect() as conn:
+    query = (
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        if engine.url.drivername.startswith("sqlite")
+        else "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
+    )
 
-        result = conn.execute(text(
-            "SELECT tablename FROM pg_tables WHERE schemaname = 'public';"
-        ))
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text(query))
+            return {"tables": [row[0] for row in result]}
+    except Exception as exc:
+        return {"error": str(exc)}
 
-        return {"tables": [row[0] for row in result]}
-
-
-# =====================================================
-# HEALTH CHECK
-# =====================================================
 
 @app.get("/")
-def health_check():
+def health():
+    snapshot = get_snapshot()
+    snapshot_info = get_snapshot_info()
 
     return {
-        "status": "StockNewsBR backend running 🚀"
+        "status": "running",
+        "service": "StockNewsBR backend",
+        "version": "3.3",
+        "engine": "V36",
+        "signals": snapshot_info.get("signals", 0),
+        "snapshot_updated_at": snapshot.get("updated_at"),
     }
-
-# =====================================================
-# START ENGINE
-# =====================================================
-
-threading.Thread(target=auto_update, daemon=True).start()

@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: stocknewsbr-api
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /ping
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: START_ENGINE_WORKER
+        value: "false"
+      - key: START_REFERRAL_WORKER
+        value: "false"
+      - key: START_SNAPSHOT_WORKER
+        value: "false"
+      - key: START_AI_WORKER
+        value: "true"
+
+  - type: worker
+    name: stocknewsbr-engine-worker
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python worker.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: SCAN_INTERVAL
+        value: "20"
+
+  - type: worker
+    name: stocknewsbr-telegram-bot
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app/telegram/bot.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9

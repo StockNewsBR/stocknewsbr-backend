@@ -1,19 +1,43 @@
+# =====================================================
+# STOCKNEWSBR CONFIG
+# =====================================================
+
 import os
+import logging
+
+logger = logging.getLogger("stocknewsbr.config")
 
 # =====================================================
 # DATABASE
 # =====================================================
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "sqlite:///./stocknews.db"
+)
 
 # =====================================================
-# ENGINE CONFIG
+# ENGINE
 # =====================================================
 
-UPDATE_INTERVAL = 60  # segundos
+UPDATE_INTERVAL = int(
+    os.getenv("UPDATE_INTERVAL", 60)
+)
 
 # =====================================================
-# AÇÕES BRASIL
+# SIGNAL CONFIG
+# =====================================================
+
+MIN_SCORE_ALERT = int(
+    os.getenv("MIN_SCORE_ALERT", 80)
+)
+
+TOP_RANKING_LIMIT = int(
+    os.getenv("TOP_RANKING_LIMIT", 10)
+)
+
+# =====================================================
+# STOCK UNIVERSE
 # =====================================================
 
 BR_SYMBOLS = [
@@ -21,39 +45,25 @@ BR_SYMBOLS = [
 "BBDC3.SA","BBDC4.SA","BBAS3.SA","B3SA3.SA",
 "MGLU3.SA","LREN3.SA","PRIO3.SA","CSNA3.SA",
 "GGBR4.SA","USIM5.SA","SUZB3.SA","KLBN11.SA",
-"JHSF3.SA","MULT3.SA","CYRE3.SA","EZTC3.SA",
-"CVCB3.SA","AZUL4.SA","GOLL4.SA",
-"NTCO3.SA","HAPV3.SA","RDOR3.SA",
-"VIVT3.SA","TIMS3.SA",
-"EMBR3.SA","WEGE3.SA",
-"BRFS3.SA","JBSS3.SA",
-"MRVE3.SA",
-"CPLE6.SA","CMIG4.SA","ELET3.SA","ELET6.SA",
-"ENBR3.SA","TAEE11.SA","TRPL4.SA",
-"YDUQ3.SA"
+"WEGE3.SA","EMBR3.SA"
 ]
 
-# =====================================================
-# BDRs
-# =====================================================
-
 BDR_SYMBOLS = [
-"AAPL34.SA","MSFT34.SA","AMZO34.SA","GOGL34.SA",
-"FBOK34.SA","TSLA34.SA","NFLX34.SA","NVDC34.SA",
-"JPMN34.SA","VISA34.SA","PYPL34.SA",
-"MCDC34.SA","DISB34.SA","NKE34.SA","KO34.SA",
-"ORCL34.SA","INTC34.SA","ADBE34.SA",
-"PFE34.SA",
-"BERK34.SA","ADID34.SA",
-"A1MD34.SA","AIRB34.SA","B1NT34.SA",
-"CMCS34.SA","COW34.SA","EXXO34.SA",
-"GMCO34.SA","GSGI34.SA","JNJB34.SA",
-"JPMC34.SA","M1RN34.SA","MSCD34.SA",
-"MUTC34.SA","PGCO34.SA","SSFO34.SA",
-"WFCO34.SA"
+"AAPL34.SA","MSFT34.SA","AMZO34.SA","TSLA34.SA",
+"NFLX34.SA","NVDC34.SA","PYPL34.SA"
+]
+
+CRYPTO_SYMBOLS = [
+
+"BTCUSDT",
+"ETHUSDT",
+"SOLUSDT",
+"BNBUSDT"
+
 ]
 
 SYMBOLS = BR_SYMBOLS + BDR_SYMBOLS
 
-TOP_RANKING_LIMIT = 10
-MIN_SCORE_ALERT = 80
+TOTAL_SYMBOLS = len(SYMBOLS)
+
+logger.info(f"Loaded {TOTAL_SYMBOLS} symbols")

@@ -1,0 +1,20 @@
+[
+  {
+    "slug": "heat-map",
+    "title": "IA Heat Map",
+    "subtitle": "Entenda onde esta a forca do mercado em segundos.",
+    "status": "planned"
+  },
+  {
+    "slug": "radar",
+    "title": "IA Radar",
+    "subtitle": "Scanner de aceleracao e oportunidade em tempo real.",
+    "status": "planned"
+  },
+  {
+    "slug": "grafico",
+    "title": "IA Grafico",
+    "subtitle": "Overlays de compra, venda e contexto operacional.",
+    "status": "planned"
+  }
+]
