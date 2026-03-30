@@ -1,0 +1,275 @@
+export type WorkspaceTab = {
+  id: string;
+  title: string;
+  icon?: string;
+  route?: string;
+  popout_route?: string;
+  detachable?: boolean;
+  monitor_ready?: boolean;
+};
+
+export type RankingRow = {
+  symbol: string;
+  score: number;
+  trend?: string | null;
+  rsi?: number | string | null;
+  breakout?: boolean;
+  price?: number | null;
+};
+
+export type SignalRow = {
+  ticker?: string;
+  symbol?: string;
+  score?: number;
+  trend?: string | null;
+  breakout?: boolean;
+  price?: number | null;
+};
+
+export type HelpGuide = {
+  slug: string;
+  title: string;
+  tagline?: string;
+  description?: string;
+  how_to_use?: string[];
+  demo_video_url?: string | null;
+  video_status?: string | null;
+  mp4_url?: string | null;
+};
+
+export type WorkspaceLayout = {
+  tabs: string[];
+  pinned_ticker: string;
+  opened_popouts: string[];
+  updated_at?: number;
+};
+
+export type FeedComment = {
+  id: number;
+  user: string;
+  user_id?: number;
+  user_email?: string | null;
+  user_avatar_url?: string | null;
+  text: string;
+  image_url?: string | null;
+  timestamp?: number;
+};
+
+export type FeedPost = {
+  id: number;
+  user: string;
+  user_id: number;
+  user_email?: string | null;
+  user_avatar_url?: string | null;
+  text: string;
+  ticker?: string | null;
+  sentiment?: string | null;
+  image_url?: string | null;
+  timestamp?: number;
+  likes?: number;
+  liked_by_me?: boolean;
+  comments?: FeedComment[];
+};
+
+export type ChatMessage = {
+  id: string;
+  symbol: string;
+  user_id: number;
+  user_name: string;
+  text: string;
+  image_url?: string | null;
+  created_at: number;
+};
+
+export type WorkspaceData = {
+  brand: string;
+  workspace_mode: string;
+  tabs: WorkspaceTab[];
+  top_signals: SignalRow[];
+  ranking: RankingRow[];
+  featured_posts: FeedPost[];
+  ticker_room_preview: {
+    symbol: string;
+    messages: ChatMessage[];
+  };
+  help_center: {
+    guides: HelpGuide[];
+    video_status?: {
+      available_videos?: number;
+      planned_videos?: number;
+      mp4_recordings_ready?: boolean;
+      next_step?: string;
+    };
+  };
+  media: {
+    provider: string;
+    cdn_ready: boolean;
+    next_step?: string;
+  };
+  push: {
+    android_ready: boolean;
+    apple_ready: boolean;
+    next_step?: string;
+    registered_tokens?: number;
+  };
+  pricing: {
+    trial_days: number;
+    premium_monthly?: { price_brl: number };
+    premium_annual?: { price_brl: number };
+  };
+  launch_roadmap: {
+    current?: string;
+    next?: string;
+    domain?: string;
+  };
+  ai_modules: string[];
+  social_features: Record<string, boolean>;
+  layout: WorkspaceLayout;
+  status: {
+    engine_cycles?: number;
+    signals_generated?: number;
+    assets_scanned?: number;
+    cache_age?: number | null;
+    snapshot_signals?: number;
+    http_requests?: number;
+    ws_connections?: number;
+    chat_messages?: number;
+  };
+  chart_capabilities: Record<string, boolean>;
+};
+
+export type ChartBar = {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+  ema9?: number;
+  ema21?: number;
+};
+
+export type ChartMarker = {
+  type?: string;
+  side?: "buy" | "sell" | "neutral";
+  price?: number;
+  time?: string;
+};
+
+export type ChartZone = {
+  label: string;
+  price: number;
+};
+
+export type ChartPayload = {
+  ticker: string;
+  interval: string;
+  ohlc: ChartBar[];
+  series: ChartBar[];
+  markers: ChartMarker[];
+  zones: ChartZone[];
+  summary: {
+    ticker?: string;
+    latest_close?: number;
+    trend_bias?: string;
+  };
+};
+
+export type FeedPayload = {
+  symbol: string;
+  count: number;
+  posts: FeedPost[];
+};
+
+export type PollOption = {
+  key: string;
+  label: string;
+  votes: number;
+  pct?: number;
+};
+
+export type PollPayload = {
+  symbol: string;
+  question?: string;
+  options?: PollOption[];
+  total_votes?: number;
+  status?: string;
+};
+
+export type ChatHistoryPayload = {
+  symbol: string;
+  items: ChatMessage[];
+};
+
+export type UserAccess = {
+  id: number;
+  email: string;
+  display_name?: string | null;
+  phone?: string | null;
+  avatar_url?: string | null;
+  plan: string;
+  plan_status: string;
+  telegram_linked?: boolean;
+  telegram_username?: string | null;
+  session_policy?: string | null;
+  otp_required_on_login?: boolean;
+  access: {
+    app: boolean;
+    web: boolean;
+    telegram: boolean;
+  };
+  trial_expires_at?: string | null;
+  plan_expires_at?: string | null;
+};
+
+export type AuthFlowResponse = {
+  access_token?: string | null;
+  token_type?: string;
+  otp_required?: boolean;
+  login_token?: string | null;
+  otp_expires_at?: string | null;
+  debug_otp_code?: string | null;
+  session_policy?: string | null;
+  channel?: string | null;
+  detail?: string | null;
+};
+
+export type TelegramLinkSessionResponse = {
+  link_code: string;
+  deep_link?: string | null;
+  bot_username?: string | null;
+  expires_at: string;
+  status?: string;
+};
+
+export type QuotePayload = {
+  symbol: string;
+  price?: number;
+  change?: number;
+  change_pct?: number;
+  volume?: number;
+  high?: number;
+  low?: number;
+};
+
+export type UploadResponse = {
+  url: string;
+  relative_url?: string;
+  filename: string;
+};
+
+export type PublicBootstrap = {
+  brand: string;
+  ai_modules: string[];
+  social_features: Record<string, boolean>;
+  pricing: {
+    trial_days: number;
+    premium_monthly?: { price_brl: number };
+    premium_annual?: { price_brl: number };
+  };
+  launch_roadmap: {
+    current?: string;
+    next?: string;
+    domain?: string;
+  };
+};
