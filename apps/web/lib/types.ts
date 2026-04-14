@@ -26,6 +26,44 @@ export type SignalRow = {
   price?: number | null;
 };
 
+export type AiToolMetrics = Record<string, string | number | boolean | null>;
+
+export type AiToolRow = {
+  ticker: string;
+  name: string;
+  tool: string;
+  score: number;
+  signal: string;
+  state: string;
+  confidence: number;
+  price?: number | null;
+  change_pct?: number | null;
+  volume?: number | null;
+  rel_volume?: number | null;
+  vwap?: number | null;
+  rsi?: number | null;
+  adx?: number | null;
+  atr_pct?: number | null;
+  metrics?: AiToolMetrics;
+  ai_comment?: string;
+  trigger?: string;
+  invalidation?: string;
+  updated_at?: string;
+};
+
+export type WorkspaceAiTools = {
+  heat_map: AiToolRow[];
+  breakout_probability: AiToolRow[];
+  institutional_flow: AiToolRow[];
+  smart_money: AiToolRow[];
+  accumulation: AiToolRow[];
+  volatility_squeeze: AiToolRow[];
+  liquidity_sweep: AiToolRow[];
+  liquidity_map: AiToolRow[];
+  market_regime: AiToolRow[];
+  master_score: AiToolRow[];
+};
+
 export type HelpGuide = {
   slug: string;
   title: string;
@@ -41,6 +79,10 @@ export type WorkspaceLayout = {
   tabs: string[];
   pinned_ticker: string;
   opened_popouts: string[];
+  chart_settings?: {
+    show_markers?: boolean;
+    show_zones?: boolean;
+  };
   updated_at?: number;
 };
 
@@ -87,6 +129,7 @@ export type WorkspaceData = {
   tabs: WorkspaceTab[];
   top_signals: SignalRow[];
   ranking: RankingRow[];
+  ai_tools: WorkspaceAiTools;
   featured_posts: FeedPost[];
   ticker_room_preview: {
     symbol: string;

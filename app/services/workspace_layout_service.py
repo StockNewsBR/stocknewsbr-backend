@@ -15,6 +15,10 @@ def _default_layout():
         "tabs": [tab["id"] for tab in get_layout()["tabs"]],
         "pinned_ticker": "PETR4",
         "opened_popouts": [],
+        "chart_settings": {
+            "show_markers": True,
+            "show_zones": True,
+        },
         "updated_at": int(time.time()),
     }
 
@@ -46,6 +50,13 @@ def get_user_workspace_layout(user_id: int):
     layout.setdefault("tabs", _default_layout()["tabs"])
     layout.setdefault("pinned_ticker", "PETR4")
     layout.setdefault("opened_popouts", [])
+    chart_settings = layout.get("chart_settings")
+    if not isinstance(chart_settings, dict):
+        chart_settings = {}
+    layout["chart_settings"] = {
+        "show_markers": bool(chart_settings.get("show_markers", True)),
+        "show_zones": bool(chart_settings.get("show_zones", True)),
+    }
     layout.setdefault("updated_at", int(time.time()))
     return layout
 
@@ -80,6 +91,13 @@ def save_user_workspace_layout(user_id: int, layout: dict):
             for tab in opened_popouts
             if str(tab) in valid_tabs
         ]
+
+    chart_settings = payload.get("chart_settings")
+    if isinstance(chart_settings, dict):
+        safe_layout["chart_settings"] = {
+            "show_markers": bool(chart_settings.get("show_markers", True)),
+            "show_zones": bool(chart_settings.get("show_zones", True)),
+        }
 
     safe_layout["updated_at"] = int(time.time())
 

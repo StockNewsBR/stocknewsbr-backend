@@ -5,12 +5,15 @@
 import logging
 from datetime import datetime, timezone
 
+from app.ai.feature_hub import build_ai_tool_payload
 from app.cache.signal_cache import get_all_signals
 from app.cache.snapshot_cache import update_snapshot
 from app.engine.engine_orchestrator import run_engine
 from app.services.signal_history import store_signals
 
 logger = logging.getLogger("stocknewsbr.snapshot_engine")
+AI_INPUT_LIMIT = 80
+AI_OUTPUT_LIMIT = 20
 
 
 def _safe_score(row):
@@ -41,10 +44,22 @@ def build_snapshot_payload(signals):
 
     bullish = len([row for row in normalized if row["score"] >= 70])
     bearish = len([row for row in normalized if row["score"] <= 30])
+    ai_input_rows = normalized[:AI_INPUT_LIMIT]
+
+    try:
+        ai_tools = build_ai_tool_payload(
+            top_signals=ai_input_rows,
+            ranking=ai_input_rows,
+            limit=AI_OUTPUT_LIMIT,
+        )
+    except Exception:
+        logger.exception("Snapshot AI payload build failed")
+        ai_tools = {}
 
     return {
         "signals": normalized[:200],
         "leaders": normalized[:20],
+        "ai_tools": ai_tools,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "stats": {
             "total_signals": len(normalized),

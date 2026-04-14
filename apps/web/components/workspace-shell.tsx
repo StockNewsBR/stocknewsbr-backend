@@ -36,6 +36,7 @@ import {
   votePoll,
 } from "@/lib/api";
 import type {
+  AiToolRow,
   AuthFlowResponse,
   ChatHistoryPayload,
   FeedPayload,
@@ -55,6 +56,11 @@ type Props = {
   focusedTab?: string;
 };
 
+type ChartSettings = {
+  show_markers: boolean;
+  show_zones: boolean;
+};
+
 type WatchlistItem = {
   symbol: string;
   label: string;
@@ -70,6 +76,19 @@ type ToolCopyItem = {
   description: string;
   explanation: string;
 };
+
+const AI_TOOL_TAB_MAP = {
+  "heat-map": "heat_map",
+  "breakout-probability": "breakout_probability",
+  "volatility-squeeze": "volatility_squeeze",
+  "institutional-flow": "institutional_flow",
+  "smart-money": "smart_money",
+  accumulation: "accumulation",
+  "liquidity-sweep": "liquidity_sweep",
+  "liquidity-map": "liquidity_map",
+  "market-regime": "market_regime",
+  "master-score": "master_score",
+} as const;
 
 const TAB_META: Record<string, { label: string; short: string }> = {
   grafico: { label: "📈 IA Grafico", short: "Grafico" },
@@ -159,6 +178,10 @@ const FALLBACK_TABS: WorkspaceTab[] = [
 ];
 
 const CATEGORY_ORDER = ["B3", "BDR", "Crypto", "USA"] as const;
+const DEFAULT_CHART_SETTINGS: ChartSettings = {
+  show_markers: true,
+  show_zones: true,
+};
 const B3_SYMBOL_PATTERN = /^[A-Z]{4}(?:3|4|5|6|11)$/;
 const BDR_SYMBOL_PATTERN = /^[A-Z]{4,5}34$/;
 const USA_SYMBOL_PATTERN = /^[A-Z]{1,5}$/;
@@ -753,6 +776,30 @@ function movementArrow(kind: string) {
   return "•";
 }
 
+function humanizeMachineLabel(value?: string | null) {
+  return String(value || "monitoring")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function aiSignalTone(signal?: string | null) {
+  if (signal === "BUY") return "bullish";
+  if (signal === "SELL") return "bearish";
+  return "neutral";
+}
+
+function formatAiUpdatedAt(value?: string | null) {
+  if (!value) return "agora";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "agora";
+
+  return parsed.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function getTabMeta(tab: WorkspaceTab) {
   return TAB_META[tab.id] || { label: tab.title, short: tab.title };
 }
@@ -948,8 +995,8 @@ export function WorkspaceShell({ focusedTab }: Props) {
   const [activeWatchSymbols, setActiveWatchSymbols] = useState<string[]>(() => PRELOADED_UNIVERSE.map((item) => item.symbol));
   const [tickerTapePaused, setTickerTapePaused] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
-  const [showMarkers, setShowMarkers] = useState(true);
-  const [showZones, setShowZones] = useState(true);
+  const [showMarkers, setShowMarkers] = useState(DEFAULT_CHART_SETTINGS.show_markers);
+  const [showZones, setShowZones] = useState(DEFAULT_CHART_SETTINGS.show_zones);
   const [mobileWatchlistOpen, setMobileWatchlistOpen] = useState(false);
   const [mobileInsightsOpen, setMobileInsightsOpen] = useState(false);
 
@@ -987,6 +1034,12 @@ export function WorkspaceShell({ focusedTab }: Props) {
   useEffect(() => {
     getBootstrap().then(setBootstrap).catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    const chartSettings = workspace?.layout?.chart_settings;
+    setShowMarkers(chartSettings?.show_markers ?? DEFAULT_CHART_SETTINGS.show_markers);
+    setShowZones(chartSettings?.show_zones ?? DEFAULT_CHART_SETTINGS.show_zones);
+  }, [workspace?.layout?.chart_settings?.show_markers, workspace?.layout?.chart_settings?.show_zones]);
 
   useEffect(() => {
     if (!token || !watchlistQuery.trim()) {
@@ -1256,14 +1309,24 @@ export function WorkspaceShell({ focusedTab }: Props) {
     }
   }
 
-  async function persistLayout(nextTabs: WorkspaceTab[], popouts?: string[], pinnedTicker?: string) {
+  async function persistLayout(
+    nextTabs: WorkspaceTab[],
+    popouts?: string[],
+    pinnedTicker?: string,
+    chartSettings?: Partial<ChartSettings>,
+  ) {
     if (!token) return;
 
     try {
+      const nextChartSettings = {
+        show_markers: chartSettings?.show_markers ?? workspace?.layout?.chart_settings?.show_markers ?? showMarkers,
+        show_zones: chartSettings?.show_zones ?? workspace?.layout?.chart_settings?.show_zones ?? showZones,
+      };
       const nextLayout = await saveWorkspaceLayout(token, {
         tabs: nextTabs.map((tab) => tab.id),
         pinned_ticker: pinnedTicker ?? selectedTicker,
         opened_popouts: popouts ?? workspace?.layout?.opened_popouts ?? [],
+        chart_settings: nextChartSettings,
       });
 
       startTransition(() => {
@@ -1293,6 +1356,16 @@ export function WorkspaceShell({ focusedTab }: Props) {
       left: direction === "left" ? -280 : 280,
       behavior: "smooth",
     });
+  }
+
+  function updateChartSetting(key: keyof ChartSettings, value: boolean) {
+    if (key === "show_markers") {
+      setShowMarkers(value);
+    }
+    if (key === "show_zones") {
+      setShowZones(value);
+    }
+    void persistLayout(tabs, undefined, undefined, { [key]: value });
   }
 
   function selectTicker(nextTicker: string) {
@@ -1591,6 +1664,8 @@ export function WorkspaceShell({ focusedTab }: Props) {
   const currentRanking = rankingRows.find((item) => item.symbol === selectedTicker);
   const currentWatchItem = watchUniverse.find((item) => item.symbol === selectedTicker);
   const symbolLabel = currentWatchItem?.label || symbolName(selectedTicker);
+  const currentAiKey = AI_TOOL_TAB_MAP[currentTab as keyof typeof AI_TOOL_TAB_MAP];
+  const currentAiRows: AiToolRow[] = (currentAiKey ? workspace?.ai_tools?.[currentAiKey] : undefined) || [];
   const newsRows = (radarRows.length ? radarRows : rankingRows).slice(0, 6).map((row, index) => {
     const symbol = String((row as any).symbol || (row as any).ticker || selectedTicker);
     const score = (row as any).score != null ? Number((row as any).score).toFixed(1) : "n/a";
@@ -2118,6 +2193,117 @@ export function WorkspaceShell({ focusedTab }: Props) {
   function renderToolTab(title: string, description: string) {
     const copy = TOOL_COPY[currentTab] || { title, description, explanation: "" };
 
+    if (currentAiKey) {
+      return (
+        <section className="snbr-tool-shell">
+          <div className="snbr-tool-head">
+            <div>
+              <h3>{copy.title}</h3>
+              <p>{copy.description}</p>
+              {copy.explanation ? <p>{copy.explanation}</p> : null}
+            </div>
+            <button className="snbr-button secondary" onClick={() => openPopout(currentTab)} type="button">
+              Liberar Tela
+            </button>
+          </div>
+
+          {currentAiRows.length ? (
+            <div className="snbr-tool-stack">
+              {currentAiRows.map((item, index) => {
+                const watchItem = watchUniverse.find((candidate) => candidate.symbol === item.ticker);
+                const tone = aiSignalTone(item.signal);
+
+                return (
+                  <div key={`${currentTab}-${item.ticker}-${index}`} className="snbr-tool-row">
+                    <section className="snbr-plain-panel">
+                      <div className="snbr-section-head compact">
+                        <div>
+                          <h3>Painel do ativo</h3>
+                          <p>Leitura dedicada da IA com score, estado e critérios de execução.</p>
+                        </div>
+                        <span className="snbr-chip">{item.signal} • {formatAiUpdatedAt(item.updated_at)}</span>
+                      </div>
+                      <button className="snbr-asset-box snbr-asset-box-large" onClick={() => selectTicker(item.ticker)} type="button">
+                        <div className="snbr-asset-box-head">
+                          <strong>{item.ticker}</strong>
+                          <span className={cx("snbr-side-badge", scoreClass(item.score))}>
+                            {item.score.toFixed(1)}
+                          </span>
+                        </div>
+                        <span>{item.name || symbolName(item.ticker)}</span>
+                        <div className="snbr-asset-box-stats">
+                          <div>
+                            <small>Preco</small>
+                            <strong>{formatPrice(item.price)}</strong>
+                          </div>
+                          <div>
+                            <small>Variacao</small>
+                            <strong>{item.change_pct != null ? formatSignedPercent(item.change_pct) : (watchItem?.changePct != null ? formatSignedPercent(watchItem.changePct) : "n/a")}</strong>
+                          </div>
+                          <div>
+                            <small>Volume</small>
+                            <strong>{item.volume != null ? formatCompact(item.volume) : "n/a"}</strong>
+                          </div>
+                          <div>
+                            <small>RVOL</small>
+                            <strong>{item.rel_volume != null ? item.rel_volume.toFixed(2) : "n/a"}</strong>
+                          </div>
+                          <div>
+                            <small>Confianca</small>
+                            <strong>{item.confidence}%</strong>
+                          </div>
+                          <div>
+                            <small>Estado</small>
+                            <strong>{humanizeMachineLabel(item.state)}</strong>
+                          </div>
+                        </div>
+                      </button>
+                    </section>
+
+                    <section className="snbr-plain-panel">
+                      <div className="snbr-section-head compact">
+                        <div>
+                          <h3>Leituras da IA</h3>
+                          <p>Resumo operacional, trigger, invalidação e contexto do snapshot atual.</p>
+                        </div>
+                      </div>
+                      <div className="snbr-tool-reading-grid">
+                        <div className="snbr-tool-reading-card">
+                          <span>Leitura principal</span>
+                          <strong>{humanizeMachineLabel(item.state)}</strong>
+                          <p>{item.ai_comment || "Sem leitura adicional para este ativo."}</p>
+                        </div>
+                        <div className="snbr-tool-reading-card">
+                          <span>Trigger</span>
+                          <strong>{item.trigger || "Aguardar confirmação estrutural."}</strong>
+                        </div>
+                        <div className="snbr-tool-reading-card">
+                          <span>Invalidacao</span>
+                          <strong>{item.invalidation || "Sem invalidação definida."}</strong>
+                        </div>
+                        <div className="snbr-tool-reading-card">
+                          <span>Contexto</span>
+                          <strong className={cx("snbr-tone-tag", tone)}>
+                            {tone === "bullish" ? "🐂 Compra" : tone === "bearish" ? "🐻 Venda" : "Monitorando"}
+                          </strong>
+                          <p>RSI {item.rsi != null ? item.rsi.toFixed(1) : "n/a"} • ADX {item.adx != null ? item.adx.toFixed(1) : "n/a"} • ATR {item.atr_pct != null ? item.atr_pct.toFixed(1) : "n/a"}%</p>
+                        </div>
+                      </div>
+                    </section>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="snbr-empty-thread">
+              <strong>Sem leituras específicas no snapshot atual.</strong>
+              <p>O backend desta IA já está ligado, mas nenhum ativo entrou no recorte atual do worker.</p>
+            </div>
+          )}
+        </section>
+      );
+    }
+
     return (
       <section className="snbr-tool-shell">
         <div className="snbr-tool-head">
@@ -2232,11 +2418,19 @@ export function WorkspaceShell({ focusedTab }: Props) {
             </div>
             <div className="snbr-chart-actions">
               <label className="snbr-toggle">
-                <input checked={showMarkers} onChange={() => setShowMarkers((value) => !value)} type="checkbox" />
+                <input
+                  checked={showMarkers}
+                  onChange={(event) => updateChartSetting("show_markers", event.target.checked)}
+                  type="checkbox"
+                />
                 <span>Compra/Venda Ferramenta</span>
               </label>
               <label className="snbr-toggle">
-                <input checked={showZones} onChange={() => setShowZones((value) => !value)} type="checkbox" />
+                <input
+                  checked={showZones}
+                  onChange={(event) => updateChartSetting("show_zones", event.target.checked)}
+                  type="checkbox"
+                />
                 <span>Zonas de Liquidez</span>
               </label>
               <button className="snbr-button secondary" onClick={() => openPopout("grafico")} type="button">
@@ -2245,7 +2439,7 @@ export function WorkspaceShell({ focusedTab }: Props) {
             </div>
           </div>
 
-          <TickerChart chart={chart} showMarkers={showMarkers} />
+          <TickerChart chart={chart} showMarkers={showMarkers} showZones={showZones} />
 
           <div className="snbr-timeframes">
             {TIMEFRAME_OPTIONS.map((timeframe, index) => (

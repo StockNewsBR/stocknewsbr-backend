@@ -5,13 +5,19 @@ import type { ChartPayload } from "@/lib/types";
 type Props = {
   chart: ChartPayload | null;
   showMarkers?: boolean;
+  showZones?: boolean;
 };
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-export function TickerChart({ chart, showMarkers = true }: Props) {
+function normalizeNumber(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function TickerChart({ chart, showMarkers = true, showZones = true }: Props) {
   const series = chart?.series || [];
 
   if (!series.length) {
@@ -50,6 +56,39 @@ export function TickerChart({ chart, showMarkers = true }: Props) {
   const closePath = buildPath(closes);
   const ema9Path = buildPath(ema9);
   const ema21Path = buildPath(ema21);
+  const timeToIndex = new Map(series.map((item, index) => [String(item.time || ""), index]));
+
+  const markerAnchors = showMarkers
+    ? (chart?.markers || []).map((marker, markerIndex) => {
+        const normalizedTime = String(marker.time || "");
+        let index = timeToIndex.get(normalizedTime);
+
+        if (index == null) {
+          index = Math.max(series.length - 1 - markerIndex, 0);
+        }
+
+        const anchorValue = normalizeNumber(marker.price) ?? closes[index] ?? closes[closes.length - 1] ?? 0;
+        const x = toX(index);
+        const y = toY(anchorValue);
+        const side = marker.side === "buy" || marker.side === "sell" ? marker.side : "neutral";
+        const direction = side === "buy" ? -1 : side === "sell" ? 1 : -1;
+        const stemEndY = clamp(y + direction * 20, padding + 8, height - padding - 8);
+        const label = side === "buy" ? "BUY" : side === "sell" ? "SELL" : String(marker.type || "EVENT");
+        const fill = side === "buy" ? "#1fd38a" : side === "sell" ? "#ff6b6b" : "#f4b942";
+        const stroke = side === "buy" ? "#0b6a45" : side === "sell" ? "#8f2838" : "#8a651d";
+
+        return {
+          key: `${normalizedTime || "marker"}-${markerIndex}`,
+          x,
+          y,
+          stemEndY,
+          label,
+          fill,
+          stroke,
+          side,
+        };
+      })
+    : [];
 
   return (
     <div className="snbr-chart-shell">
@@ -66,6 +105,35 @@ export function TickerChart({ chart, showMarkers = true }: Props) {
           return <line key={step} x1={padding} x2={width - padding} y1={y} y2={y} stroke="rgba(255,255,255,0.06)" />;
         })}
 
+        {showZones
+          ? (chart?.zones || []).map((zone, index) => {
+              const zonePrice = normalizeNumber(zone.price);
+              if (zonePrice == null) return null;
+              const y = toY(zonePrice);
+              return (
+                <g key={`${zone.label}-${zone.price}-${index}`}>
+                  <line
+                    x1={padding}
+                    x2={width - padding}
+                    y1={y}
+                    y2={y}
+                    stroke="rgba(105,214,255,0.35)"
+                    strokeDasharray="6 6"
+                  />
+                  <text
+                    x={width - padding - 8}
+                    y={Math.max(y - 6, padding + 12)}
+                    textAnchor="end"
+                    fill="#9fd8ff"
+                    fontSize="11"
+                  >
+                    {String(zone.label).toUpperCase()}
+                  </text>
+                </g>
+              );
+            })
+          : null}
+
         <path
           d={`${closePath} L ${toX(series.length - 1)} ${height - padding} L ${toX(0)} ${height - padding} Z`}
           fill="url(#priceFill)"
@@ -74,13 +142,49 @@ export function TickerChart({ chart, showMarkers = true }: Props) {
         <path d={ema9Path} stroke="#1fd38a" strokeWidth="2" fill="none" strokeLinecap="round" />
         <path d={ema21Path} stroke="#69d6ff" strokeWidth="2" fill="none" strokeLinecap="round" />
 
-        {showMarkers ? (chart?.markers || []).map((marker, index) => {
-          const x = width - 30 - index * 22;
-          const y = marker.side === "buy" ? 28 : marker.side === "sell" ? 54 : 80;
-          const color = marker.side === "buy" ? "#1fd38a" : marker.side === "sell" ? "#ff6b6b" : "#f4b942";
-
-          return <circle key={`${marker.time || "m"}-${index}`} cx={x} cy={y} r="5" fill={color} />;
-        }) : null}
+        {markerAnchors.map((marker) => (
+          <g key={marker.key}>
+            <line
+              x1={marker.x}
+              x2={marker.x}
+              y1={marker.y}
+              y2={marker.stemEndY}
+              stroke={marker.fill}
+              strokeWidth="2"
+            />
+            <circle cx={marker.x} cy={marker.y} r="5" fill={marker.fill} stroke={marker.stroke} strokeWidth="2" />
+            <path
+              d={
+                marker.side === "sell"
+                  ? `M ${marker.x - 5} ${marker.stemEndY - 4} L ${marker.x + 5} ${marker.stemEndY - 4} L ${marker.x} ${marker.stemEndY + 4} Z`
+                  : `M ${marker.x - 5} ${marker.stemEndY + 4} L ${marker.x + 5} ${marker.stemEndY + 4} L ${marker.x} ${marker.stemEndY - 4} Z`
+              }
+              fill={marker.fill}
+              stroke={marker.stroke}
+              strokeWidth="1"
+            />
+            <rect
+              x={clamp(marker.x - 19, padding, width - padding - 38)}
+              y={marker.side === "sell" ? marker.stemEndY + 8 : marker.stemEndY - 28}
+              rx="10"
+              ry="10"
+              width="38"
+              height="18"
+              fill={marker.fill}
+              opacity="0.95"
+            />
+            <text
+              x={marker.x}
+              y={marker.side === "sell" ? marker.stemEndY + 20 : marker.stemEndY - 16}
+              textAnchor="middle"
+              fill="#08131b"
+              fontSize="10"
+              fontWeight="700"
+            >
+              {marker.label}
+            </text>
+          </g>
+        ))}
       </svg>
 
       <div className="snbr-chart-meta">

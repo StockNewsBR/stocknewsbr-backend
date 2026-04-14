@@ -557,6 +557,18 @@ function renderFeatureList(title, items) {{
   `;
 }}
 
+function renderAiToolList(title, items, fallbackTagline) {{
+  const safeItems = Array.isArray(items) ? items : [];
+  const rows = safeItems.length
+    ? safeItems.map(item => ({{
+        title: `${{item.ticker || "ATIVO"}} • ${{item.signal || "NEUTRAL"}} • ${{Number(item.score || 0).toFixed(1)}}`,
+        tagline: item.ai_comment || item.trigger || fallbackTagline || "Leitura operacional da IA.",
+      }}))
+    : [{{ title, tagline: fallbackTagline || "Sem leituras especificas no snapshot atual." }}];
+
+  return renderFeatureList(title, rows);
+}}
+
 function renderHelp() {{
   const guides = WORKSPACE?.help_center?.guides || [];
   const videoStatus = WORKSPACE?.help_center?.video_status || {{}};
@@ -824,17 +836,17 @@ function renderWorkspace() {{
 
   const panels = {{
     "home": renderHome(),
-    "heatmap": renderFeatureList("IA Heat Map", (WORKSPACE?.ai_modules || []).filter(item => String(item).includes("Heat")).map(item => ({{title:item, tagline:"Mapa de calor institucional por ativo e setor."}}))),
+    "heatmap": renderAiToolList("IA Heat Map", WORKSPACE?.ai_tools?.heat_map || [], "Mapa de calor institucional por ativo e setor."),
     "radar": renderHome(),
-    "breakout-probability": renderFeatureList("IA Breakout Probability", [{{title:"Probabilidade de breakout", tagline:"Scanner para rompimentos com contexto de fluxo e score."}}]),
-    "volatility-squeeze": renderFeatureList("IA Volatility Squeeze", [{{title:"Volatility Squeeze", tagline:"Busca compressoes antes de expansao direcional."}}]),
-    "institutional-flow": renderFeatureList("IA Institutional Flow", [{{title:"Institutional Flow", tagline:"Leitura de pressao institucional, smart money e acumulacao."}}]),
-    "smart-money": renderFeatureList("IA Smart Money", [{{title:"Smart Money", tagline:"Rastreamento de volume anormal e presenca de player forte."}}]),
-    "accumulation": renderFeatureList("IA Accumulation", [{{title:"Accumulation", tagline:"Base para identificar absorcao e construcao de posicao."}}]),
-    "liquidity-sweep": renderFeatureList("IA Liquidity Sweep", [{{title:"Liquidity Sweep", tagline:"Mapeia varredura de liquidez e possiveis traps."}}]),
-    "liquidity-map": renderFeatureList("IA Liquidity Map", [{{title:"Liquidity Map", tagline:"Zonas de liquidez para decisao de trade e gerenciamento."}}]),
-    "market-regime": renderFeatureList("IA Market Regime", [{{title:"Market Regime", tagline:"Define se o mercado esta em momentum, rotacao ou defesa."}}]),
-    "master-score": renderFeatureList("IA Master Score", [{{title:"Master Score", tagline:"Ranking consolidado do ecossistema institucional da plataforma."}}]),
+    "breakout-probability": renderAiToolList("IA Breakout Probability", WORKSPACE?.ai_tools?.breakout_probability || [], "Scanner para rompimentos com contexto de fluxo e score."),
+    "volatility-squeeze": renderAiToolList("IA Volatility Squeeze", WORKSPACE?.ai_tools?.volatility_squeeze || [], "Busca compressoes antes de expansao direcional."),
+    "institutional-flow": renderAiToolList("IA Institutional Flow", WORKSPACE?.ai_tools?.institutional_flow || [], "Leitura de pressao institucional, smart money e acumulacao."),
+    "smart-money": renderAiToolList("IA Smart Money", WORKSPACE?.ai_tools?.smart_money || [], "Rastreamento de volume anormal e presenca de player forte."),
+    "accumulation": renderAiToolList("IA Accumulation", WORKSPACE?.ai_tools?.accumulation || [], "Base para identificar absorcao e construcao de posicao."),
+    "liquidity-sweep": renderAiToolList("IA Liquidity Sweep", WORKSPACE?.ai_tools?.liquidity_sweep || [], "Mapeia varredura de liquidez e possiveis traps."),
+    "liquidity-map": renderAiToolList("IA Liquidity Map", WORKSPACE?.ai_tools?.liquidity_map || [], "Zonas de liquidez para decisao de trade e gerenciamento."),
+    "market-regime": renderAiToolList("IA Market Regime", WORKSPACE?.ai_tools?.market_regime || [], "Define se o mercado esta em momentum, rotacao ou defesa."),
+    "master-score": renderAiToolList("IA Master Score", WORKSPACE?.ai_tools?.master_score || [], "Ranking consolidado do ecossistema institucional da plataforma."),
     "grafico": renderChartPanel(),
     "ticker-rooms": renderTickerRoom(),
     "education": renderHelp(),
