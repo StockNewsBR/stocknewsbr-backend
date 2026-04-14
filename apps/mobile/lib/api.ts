@@ -52,7 +52,7 @@ export async function getWorkspace(token: string) {
 }
 
 export async function getChart(token: string, ticker: string) {
-  const response = await fetch(`${API_BASE}/web/chart/${encodeURIComponent(ticker)}?interval=1D`, {
+  const response = await fetch(`${API_BASE}/chart/${encodeURIComponent(ticker)}?interval=1D`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   return parseJson(response);

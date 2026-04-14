@@ -71,22 +71,27 @@ def _attach_events(ranked, events):
 
     events_by_ticker = {}
 
+    def normalize_ticker(value):
+        ticker = str(value or "").upper().strip()
+
+        if ticker.endswith(".SA"):
+            ticker = ticker[:-3]
+
+        if ticker.endswith("-USD"):
+            ticker = ticker[:-4] + "USD"
+
+        return ticker
+
     for event in events:
         if not isinstance(event, dict):
             continue
 
-        ticker = event.get("ticker")
+        ticker = normalize_ticker(event.get("ticker") or event.get("symbol"))
 
         if not ticker:
             continue
 
-        events_by_ticker.setdefault(ticker, []).append(
-            {
-                "type": "price_event",
-                "price": event.get("price"),
-                "change": event.get("change"),
-            }
-        )
+        events_by_ticker.setdefault(ticker, []).append(dict(event))
 
     annotated = []
 
@@ -97,13 +102,14 @@ def _attach_events(ranked, events):
         item = dict(row)
         ticker = item.get("ticker") or item.get("symbol")
         row_events = list(item.get("events", []))
+        normalized_ticker = normalize_ticker(ticker)
 
         if ticker:
             item["ticker"] = ticker
             item["symbol"] = ticker
 
-        if ticker in events_by_ticker:
-            row_events.extend(events_by_ticker[ticker])
+        if normalized_ticker in events_by_ticker:
+            row_events.extend(events_by_ticker[normalized_ticker])
 
         if row_events:
             item["events"] = row_events
@@ -123,7 +129,6 @@ def run_engine():
             record_cycle(time.time() - start, 0)
             return []
 
-        events = _safe_run(detect_price_events, pool) or []
         ranked = []
 
         if ENGINE_MODE in ("AUTO", "V36"):
@@ -136,6 +141,7 @@ def run_engine():
             record_cycle(time.time() - start, 0)
             return []
 
+        events = _safe_run(detect_price_events, pool, ranked) or []
         ranked = _attach_events(ranked, events)
         _safe_run(update_signals, ranked)
 

@@ -9,6 +9,10 @@ from app.dependencies import require_channel_access
 from app.market.market_data_loader import get_chart_data
 from app.cache.signal_cache import signal_cache
 from app.services.chart_overlay_service import build_chart_overlays
+from app.engine.trend_breakout_signal_engine import (
+    build_trend_breakout_payload,
+    resolve_chart_timeframe,
+)
 
 router = APIRouter(
     prefix="/web",
@@ -17,6 +21,10 @@ router = APIRouter(
 )
 
 logger = logging.getLogger("stocknewsbr.web.chart")
+
+
+def _normalize_chart_ticker(value: str) -> str:
+    return str(value or "").upper().strip().replace(".SA", "").replace("-USD", "USD")
 
 
 # =====================================================
@@ -44,16 +52,19 @@ def get_chart(ticker: str, interval: str = "1D"):
         try:
 
             all_signals = signal_cache.get_all()
+            requested = _normalize_chart_ticker(ticker)
 
             for s in all_signals:
+                source_ticker = _normalize_chart_ticker(s.get("ticker") or s.get("symbol"))
 
-                if (s.get("ticker") or s.get("symbol")) == ticker:
+                if source_ticker == requested:
 
                     signals.append({
 
                         "score": s.get("score"),
                         "trend": s.get("trend"),
                         "breakout": s.get("breakout"),
+                        "signal": s.get("signal"),
 
                         "events": s.get("events", [])
 
@@ -62,6 +73,14 @@ def get_chart(ticker: str, interval: str = "1D"):
         except Exception:
             pass
 
+        chart_signal = build_trend_breakout_payload(
+            ticker,
+            ohlc,
+            timeframe=resolve_chart_timeframe(interval),
+        )
+
+        if chart_signal:
+            signals.append(chart_signal)
 
         overlays = build_chart_overlays(ticker, ohlc, signals)
 
@@ -72,6 +91,8 @@ def get_chart(ticker: str, interval: str = "1D"):
 
             "ohlc": ohlc,
             "signals": signals,
+            "chart_signal": chart_signal,
+            "alerts": chart_signal.get("events", []) if chart_signal else [],
             "series": overlays["series"],
             "markers": overlays["markers"],
             "zones": overlays["zones"],

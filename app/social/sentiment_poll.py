@@ -1,16 +1,4 @@
-# =====================================================
-# SENTIMENT POLL ENGINE (SAFE)
-# =====================================================
-
-from collections import defaultdict
-
-polls = defaultdict(lambda: {
-    "extreme_bear": 0,
-    "bearish": 0,
-    "neutral": 0,
-    "bullish": 0,
-    "extreme_bull": 0
-})
+from app.social.store import mutate_social_state, read_social_state
 
 SENTIMENT_WEIGHTS = {
     "extreme_bear": -2,
@@ -32,15 +20,48 @@ def vote(ticker: str, sentiment: str):
     if sentiment not in SENTIMENT_WEIGHTS:
         return None
 
-    polls[ticker][sentiment] += 1
+    def _vote(state):
+        polls = dict(state.get("sentiment_polls", {}))
+        poll = dict(
+            polls.get(
+                ticker,
+                {
+                    "extreme_bear": 0,
+                    "bearish": 0,
+                    "neutral": 0,
+                    "bullish": 0,
+                    "extreme_bull": 0,
+                },
+            )
+        )
+        poll[sentiment] = int(poll.get(sentiment, 0)) + 1
+        polls[ticker] = poll
+        state["sentiment_polls"] = polls
+        return poll
 
+    mutate_social_state(_vote)
     return get_sentiment(ticker)
 
 
 def get_sentiment(ticker: str):
     ticker = ticker.upper()
 
-    data = polls[ticker]
+    def _read(state):
+        polls = dict(state.get("sentiment_polls", {}))
+        return dict(
+            polls.get(
+                ticker,
+                {
+                    "extreme_bear": 0,
+                    "bearish": 0,
+                    "neutral": 0,
+                    "bullish": 0,
+                    "extreme_bull": 0,
+                },
+            )
+        )
+
+    data = read_social_state(_read)
 
     total = sum(data.values())
 

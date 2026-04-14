@@ -1,51 +1,40 @@
 from app.engine.signal_engine import generate_signals
 
+
 def chart_signals(symbol):
-
     signals = generate_signals(symbol)
-
     chart_events = []
 
     for s in signals:
+        event_type = str(s.get("type", "")).upper()
+        shape = "circle"
+        color = "gray"
 
-        if s["type"] == "BUY":
+        if event_type == "BUY":
+            shape = "circle"
+            color = "green"
+        elif event_type == "SELL":
+            shape = "circle"
+            color = "red"
+        elif event_type == "SHORT":
+            shape = "square"
+            color = "orange"
+        elif event_type == "COVER":
+            shape = "diamond"
+            color = "blue"
+        else:
+            continue
 
-            chart_events.append({
-                "type": "buy",
-                "shape": "circle",
-                "color": "green",
-                "price": s["price"],
-                "time": s["time"]
-            })
-
-        elif s["type"] == "SELL":
-
-            chart_events.append({
-                "type": "sell",
-                "shape": "circle",
-                "color": "red",
-                "price": s["price"],
-                "time": s["time"]
-            })
-
-        elif s["type"] == "SHORT":
-
-            chart_events.append({
-                "type": "short",
-                "shape": "square",
-                "color": "orange",
-                "price": s["price"],
-                "time": s["time"]
-            })
-
-        elif s["type"] == "COVER":
-
-            chart_events.append({
-                "type": "cover",
-                "shape": "square",
-                "color": "blue",
-                "price": s["price"],
-                "time": s["time"]
-            })
+        chart_events.append(
+            {
+                "type": event_type.lower(),
+                "shape": shape,
+                "color": color,
+                "price": s.get("price"),
+                "time": s.get("time"),
+                "score": s.get("score"),
+                "reason": s.get("reason"),
+            }
+        )
 
     return chart_events

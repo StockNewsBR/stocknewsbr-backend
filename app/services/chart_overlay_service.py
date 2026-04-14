@@ -28,6 +28,9 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list):
 
     series = []
     markers = []
+    bullish_markers = 0
+    bearish_markers = 0
+    latest_signal = "NEUTRAL"
 
     for index, row in enumerate(ohlc):
         series.append(
@@ -41,6 +44,9 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list):
         )
 
     for signal in signals or []:
+        if signal.get("signal"):
+            latest_signal = str(signal.get("signal") or latest_signal).upper()
+
         for event in signal.get("events", []):
             event_type = str(event.get("type", "")).upper()
 
@@ -48,20 +54,42 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list):
                 continue
 
             side = "neutral"
+            shape = "circle"
+            color = "gray"
 
             if event_type in {"BUY", "COVER"}:
                 side = "buy"
+                bullish_markers += 1
             elif event_type in {"SELL", "SHORT"}:
                 side = "sell"
+                bearish_markers += 1
+
+            if event_type == "BUY":
+                shape = "circle"
+                color = "green"
+            elif event_type == "SELL":
+                shape = "circle"
+                color = "red"
+            elif event_type == "SHORT":
+                shape = "square"
+                color = "orange"
+            elif event_type == "COVER":
+                shape = "diamond"
+                color = "blue"
 
             markers.append(
                 {
                     "ticker": ticker,
                     "type": event_type,
                     "side": side,
+                    "shape": shape,
+                    "color": color,
+                    "label": event_type.title(),
                     "time": event.get("time"),
                     "price": event.get("price"),
                     "change": event.get("change"),
+                    "score": event.get("score"),
+                    "reason": event.get("reason"),
                 }
             )
 
@@ -78,9 +106,12 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list):
         "latest_close": close_prices[-1] if close_prices else None,
         "trend_bias": (
             "alta"
-            if ema9 and ema21 and ema9[-1] >= ema21[-1]
+            if ema9 and ema21 and ema50 and ema9[-1] >= ema21[-1] >= ema50[-1]
             else "baixa"
         ),
+        "latest_signal": latest_signal,
+        "bullish_markers": bullish_markers,
+        "bearish_markers": bearish_markers,
         "markers": len(markers),
     }
 

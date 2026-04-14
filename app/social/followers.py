@@ -1,8 +1,4 @@
-# =====================================================
-# FOLLOWERS ENGINE
-# =====================================================
-
-followers = {}
+from app.social.store import mutate_social_state, read_social_state
 
 
 def follow(user, target):
@@ -10,12 +6,19 @@ def follow(user, target):
     if not user or not target:
         return {"status": "invalid"}
 
-    followers.setdefault(target, set())
-    followers[target].add(user)
+    key = str(target)
 
-    return {"status": "following"}
+    def _follow(state):
+        followers = dict(state.get("followers", {}))
+        current = set(followers.get(key, set()))
+        current.add(user)
+        followers[key] = current
+        state["followers"] = followers
+        return {"status": "following"}
+
+    return mutate_social_state(_follow)
 
 
 def get_followers(user):
-
-    return list(followers.get(user, []))
+    key = str(user)
+    return read_social_state(lambda state: list(set(dict(state.get("followers", {})).get(key, set()))))
