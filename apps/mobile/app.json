@@ -4,13 +4,25 @@
     "slug": "stocknewsbr-mobile",
     "scheme": "stocknewsbr",
     "version": "0.1.0",
+    "description": "StockNewsBR mobile app for market intelligence, ticker panels, social context and premium access.",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "android": {
-      "package": "com.stocknewsbr.mobile"
+      "package": "com.stocknewsbr.mobile",
+      "versionCode": 1,
+      "permissions": []
     },
     "ios": {
       "bundleIdentifier": "com.stocknewsbr.mobile"
+    },
+    "extra": {
+      "primaryLaunchSurface": "google_play",
+      "billingProducts": {
+        "brMonthly": "premium_br_monthly",
+        "brAnnual": "premium_br_annual",
+        "usaMonthly": "premium_usa_monthly",
+        "usaAnnual": "premium_usa_annual"
+      }
     },
     "plugins": [
       "expo-router",

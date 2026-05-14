@@ -52,6 +52,11 @@ Atualizado em: 2026-05-14
 - Assinatura USA mostra aviso de conta internacional com Premium a `$49/month` ou `$500 upfront` para cartao internacional fora do Brasil.
 - Etapa 8 - SaaS / Acesso / Stripe / Referral fechada em 100%: trial novo com 30 dias ate a janela de lancamento e 14 dias depois, downgrade automatico para Basico ao vencer, precos BR/USA separados, janela de refund de 7 dias, webhook Stripe sandbox validado, acesso web/app/telegram atualizado por pagamento/cancelamento e referral validado apenas no 8o dia apos pagamento.
 - Referral agora exige indicado pagante ativo, nao conta antes da janela de refund, credita 1 mes a cada 3 indicacoes validas, nao gera cash/money back, aplica `Badge Vip` em 10 indicacoes, `Leaderboard VIP` em 100+ e expoe ranking mascarado na aba `Indicacoes`/`Referrals`.
+- Etapa 9 - Mobile e Publicacao fechada em 100% no escopo de codigo/app: Expo Mobile agora tem login/OTP, painel mobile por ticker, grafico com ranges `1D`, `1W`, `1M`, `3M`, `1Y`, candles, zonas, marcadores, news, feed, poll, perfil/plano e acesso Telegram.
+- Tela mobile de ativo abre `/ticker/[symbol]`, carrega snapshot, chart por range, news, feed e poll; quando faltam candles com preco real, mostra estado explicito em vez de fingir grafico.
+- Plano mobile usa `/billing/pricing` para BR e USA, mostra trial atual de 30/14 dias, Premium BR `R$49/R$500`, Premium USA `$49/$500` e janela de refund/cancelamento de 7 dias.
+- Publicacao Android preparada com `app.json` (`com.stocknewsbr.mobile`, `versionCode=1`, produtos BR/USA) e `eas.json` com profile `production` gerando Android App Bundle para Google Play.
+- Smoke mobile agora valida app/ticker, chart, plano, EAS/Google Play, config Expo e emulador Android quando `REQUIRE_MOBILE_DEVICE=1`.
 
 ## Validado
 
@@ -111,6 +116,10 @@ Atualizado em: 2026-05-14
 - `npm run build` em `apps/web`: build/typecheck OK apos adicionar a aba `Indicacoes`/`Referrals`.
 - Smoke API isolado em `127.0.0.1:8001`: `/billing/pricing?market=USA` retornou `currency=USD`, `$49/$500`, `trial_days=30`, `refund_window_days=7`; `/billing/referrals/leaderboard?limit=10` retornou lista estruturada e `valid_after_days=8`.
 - Browser real em `http://127.0.0.1:3001/panel/F`: aba `Indicacoes` abriu em PT-BR, seletor USA trocou a aba para `Referrals` e a copy da etapa para ingles; screenshots em `runtime/stage8-referrals.png` e `runtime/stage8-referrals-en.png`.
+- `npm run typecheck` em `apps/mobile`: TypeScript OK.
+- Emulador Android `Medium_Phone_API_36.1` iniciado e bootado (`emulator-5554`, `sys.boot_completed=1`).
+- `$env:REQUIRE_MOBILE_DEVICE='1'; npm run smoke:mobile` em `apps/mobile`: OK; validou arquivos de rotas mobile, painel do ticker, ranges, grafico com candles, contrato de trigger/invalidacao/risco, pricing BR/USA, config Expo, EAS App Bundle e emulador visivel/bootado.
+- `npm run export:android` em `apps/mobile`: Android bundle exportado em `dist/android` sem crash e sem aviso deprecated do `expo-router/babel` apos ajuste do Babel.
 
 ## Smoke Atual
 
@@ -131,9 +140,10 @@ Atualizado em: 2026-05-14
 
 - Etapa 0 - Trava de controle: revisada em 2026-05-14; `PROJECT_STATUS.md` foi lido antes de continuar.
 - Estado atual conhecido: Etapa 1 fechada em 100%; Etapa 2 fechada em 100%; Etapa 3 fechada em 100%; Etapa 4 fechada em 100%; Etapa 5 fechada em 100%; Etapa 6 fechada em 100%; Etapa 7 fechada em 100%; Etapa 8 fechada em 100%.
-- Arquivos alterados nesta etapa: `app/services/access_service.py`, `app/services/legal_service.py`, `app/services/referrals.py`, `app/api/stripe_webhook.py`, `app/auth.py`, `apps/web/components/workspace-shell.tsx`, `tests/test_access_service.py`, `tests/test_referral_service.py`, `tests/test_stripe_webhook.py` e `PROJECT_STATUS.md`.
-- Testes/smokes registrados: `venv\Scripts\python.exe -m unittest tests.test_access_service tests.test_referral_service tests.test_stripe_webhook`; `venv\Scripts\python.exe -m compileall app\services\access_service.py app\services\referrals.py app\services\legal_service.py app\api\stripe_webhook.py app\auth.py`; `npm run build` em `apps/web`; smoke API em `127.0.0.1:8001`; browser real em `127.0.0.1:3001/panel/F` com screenshots PT/USA da aba de referrals.
-- Proxima etapa clara: iniciar apenas a proxima etapa formal que o usuario indicar, mantendo a regra de nao abrir nova etapa antes da anterior ficar fechada.
+- Estado atual conhecido: Etapa 1 fechada em 100%; Etapa 2 fechada em 100%; Etapa 3 fechada em 100%; Etapa 4 fechada em 100%; Etapa 5 fechada em 100%; Etapa 6 fechada em 100%; Etapa 7 fechada em 100%; Etapa 8 fechada em 100%; Etapa 9 fechada em 100%.
+- Arquivos alterados nesta etapa: `apps/mobile/README.md`, `apps/mobile/app.json`, `apps/mobile/babel.config.js`, `apps/mobile/package.json`, `apps/mobile/app/_layout.tsx`, `apps/mobile/app/index.tsx`, `apps/mobile/app/(tabs)/*`, `apps/mobile/app/ticker/[symbol].tsx`, `apps/mobile/components/*`, `apps/mobile/lib/api.ts`, `apps/mobile/lib/format.ts`, `apps/mobile/lib/session.tsx`, `apps/mobile/eas.json`, `apps/mobile/scripts/smoke-mobile.mjs` e `PROJECT_STATUS.md`.
+- Testes/smokes registrados: `npm run typecheck` em `apps/mobile`; `$env:REQUIRE_MOBILE_DEVICE='1'; npm run smoke:mobile`; `npm run export:android`.
+- Proxima etapa clara: checklist final de lancamento amplo so deve mexer em credenciais reais, Price IDs/assinaturas da Play Console e submissao EAS quando a conta Google Play estiver disponivel.
 - Stage/commit: fechado nesta rodada somente com os arquivos listados nesta etapa, sem incluir alteracoes antigas de outras etapas.
 
 ## Riscos Restantes
@@ -157,6 +167,8 @@ Atualizado em: 2026-05-14
 - Etapa 7: `pytest` nao esta instalado no `venv`/Python global desta sessao; os testes Python focados foram executados via `unittest` e o smoke Playwright cobriu o contrato anti-clone/coerencia visual.
 - Etapa 8: Stripe foi validado em sandbox/webhook local; antes de producao ainda e necessario conferir os Price IDs reais no painel Stripe e garantir que metadata `user_id`/`product_id` esteja vindo do checkout real.
 - Etapa 8: referral depende de evento pago em `subscription_audit_logs`; eventos externos sem usuario resolvido ficam `unresolved` e nao validam indicacao, como esperado para evitar fraude basica.
+- Etapa 9: envio real para Google Play ainda depende de credenciais/conta Play Console, `eas login`, service account e cadastro dos produtos `premium_br_monthly`, `premium_br_annual`, `premium_usa_monthly` e `premium_usa_annual`; o codigo esta preparado, mas a submissao real nao deve ser simulada.
+- Etapa 9: `npm run export:android` valida o bundle JS/asset Android; o AAB final de loja deve ser gerado por `npx eas build --platform android --profile production` no ambiente autenticado da Play/EAS.
 
 ## Proximo TODO
 
@@ -168,6 +180,7 @@ Atualizado em: 2026-05-14
 - Etapa 6 esta 100% concluida: news por ticker, poll semanal contextual, earnings poll com evidencia, discussao destacada por relevancia e estados vazios explicitos.
 - Etapa 7 esta 100% concluida: smoke Playwright multi-ticker/dark-light/troca de ticker/IA tabs/anti-clone, USA/BR, PETR4/USA sem textos PT, screenshot de UI, smoke de falha de provider de news e stage/commit da etapa atual registrados.
 - Etapa 8 esta 100% concluida: trial 30/14, pricing BR/USA, refund 7 dias, downgrade para Basico, Stripe sandbox, acesso web/app/telegram, referral antifraude, recompensa a cada 3, badges e ranking `Indicacoes`/`Referrals` validados.
+- Etapa 9 esta 100% concluida no codigo/app: app mobile abre ativo por rota de ticker, grafico e utilizavel com ranges/candles/zonas/marcadores, login/plano refletem BR/USA, smoke com emulador passou e Google Play esta preparado por EAS/App Bundle.
 - Reexecutar smoke completo apos qualquer mudanca em provider/cache/chart/news, worker ou nas abas IA.
 - Se for criar commit, usar o MinGit por caminho absoluto enquanto o Codex nao recarregar PATH.
 - Separar refatoracoes institucionais maiores em commits pequenos por area: data/api, ai, web, tests.

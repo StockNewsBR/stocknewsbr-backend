@@ -1,15 +1,18 @@
 import { Stack } from "expo-router";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { StatusBar } from "react-native";
+import { SessionProvider } from "@/lib/session";
+import { theme } from "@/components/ui";
 
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
+    <SessionProvider>
+      <StatusBar barStyle="light-content" backgroundColor={theme.colors.background} />
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: "#061018" }
+          contentStyle: { backgroundColor: theme.colors.background },
         }}
       />
-    </SafeAreaProvider>
+    </SessionProvider>
   );
 }
