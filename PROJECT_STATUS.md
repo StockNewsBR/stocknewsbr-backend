@@ -50,6 +50,8 @@ Atualizado em: 2026-05-14
 - Lista B3 agora inclui contratos futuros rolantes `WIN` e `WDO` por letra do mes/ano; lista USA inclui CME, NQ, MNQ/MNO, ES/MES e MYM.
 - Top tab `IA Grafico` virou `IA Grafico/ Rede Social` em PT-BR e `AI Chart / Social` em USA; seletor BR/USA com bandeiras fica no topo e alterna interface, ajuda, chats/social, poll e copy de assinatura.
 - Assinatura USA mostra aviso de conta internacional com Premium a `$49/month` ou `$500 upfront` para cartao internacional fora do Brasil.
+- Etapa 8 - SaaS / Acesso / Stripe / Referral fechada em 100%: trial novo com 30 dias ate a janela de lancamento e 14 dias depois, downgrade automatico para Basico ao vencer, precos BR/USA separados, janela de refund de 7 dias, webhook Stripe sandbox validado, acesso web/app/telegram atualizado por pagamento/cancelamento e referral validado apenas no 8o dia apos pagamento.
+- Referral agora exige indicado pagante ativo, nao conta antes da janela de refund, credita 1 mes a cada 3 indicacoes validas, nao gera cash/money back, aplica `Badge Vip` em 10 indicacoes, `Leaderboard VIP` em 100+ e expoe ranking mascarado na aba `Indicacoes`/`Referrals`.
 
 ## Validado
 
@@ -104,6 +106,11 @@ Atualizado em: 2026-05-14
 - `venv\Scripts\python.exe scripts\smoke_news_provider_failure.py`: OK com `status=provider_error` explicito para `PETR4`.
 - `venv\Scripts\python.exe -m unittest tests.test_public_news_service tests.test_news_service`: 13 testes OK.
 - `git diff --check -- PROJECT_STATUS.md apps/web/app/globals.css apps/web/components/workspace-shell.tsx apps/web/components/workspace-rails.tsx apps/web/components/workspace-sections.tsx apps/web/components/ticker-chart.tsx apps/web/package.json apps/web/scripts/smoke-etapa7.mjs scripts/smoke_news_provider_failure.py`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
+- `venv\Scripts\python.exe -m unittest tests.test_access_service tests.test_referral_service tests.test_stripe_webhook`: 10 testes OK cobrindo trial 30/14, pricing BR/USA, downgrade/acesso, anti-fraude de referral no 8o dia, recompensa a cada 3 indicacoes, badges e webhook Stripe sandbox.
+- `venv\Scripts\python.exe -m compileall app\services\access_service.py app\services\referrals.py app\services\legal_service.py app\api\stripe_webhook.py app\auth.py`: sintaxe OK.
+- `npm run build` em `apps/web`: build/typecheck OK apos adicionar a aba `Indicacoes`/`Referrals`.
+- Smoke API isolado em `127.0.0.1:8001`: `/billing/pricing?market=USA` retornou `currency=USD`, `$49/$500`, `trial_days=30`, `refund_window_days=7`; `/billing/referrals/leaderboard?limit=10` retornou lista estruturada e `valid_after_days=8`.
+- Browser real em `http://127.0.0.1:3001/panel/F`: aba `Indicacoes` abriu em PT-BR, seletor USA trocou a aba para `Referrals` e a copy da etapa para ingles; screenshots em `runtime/stage8-referrals.png` e `runtime/stage8-referrals-en.png`.
 
 ## Smoke Atual
 
@@ -123,9 +130,9 @@ Atualizado em: 2026-05-14
 ## Controle da Etapa Atual
 
 - Etapa 0 - Trava de controle: revisada em 2026-05-14; `PROJECT_STATUS.md` foi lido antes de continuar.
-- Estado atual conhecido: Etapa 1 fechada em 100%; Etapa 2 fechada em 100%; Etapa 3 fechada em 100%; Etapa 4 fechada em 100%; Etapa 5 fechada em 100%; Etapa 6 fechada em 100%; Etapa 7 reaberta pela regressao USA/stage e fechada novamente em 100%.
-- Arquivos alterados nesta etapa: `apps/web/components/workspace-shell.tsx`, `apps/web/components/workspace-rails.tsx`, `apps/web/components/workspace-sections.tsx`, `apps/web/components/ticker-chart.tsx`, `apps/web/app/globals.css`, `apps/web/package.json`, `apps/web/scripts/smoke-etapa7.mjs`, `scripts/smoke_news_provider_failure.py` e `PROJECT_STATUS.md`.
-- Testes/smokes registrados: `npm run build` em `apps/web`; `scripts\start_all_local.ps1`; `npm run smoke:etapa7` com `F`, `PETR4`, `BTCUSD`, `META34`, dark/light, troca de ticker, modo USA/BR, PETR4/USA sem termos PT, abas IA com horario/Score/Trigger/Invalidacao e anti-clone; screenshots em `runtime\etapa7\panel-F-light.png`, `runtime\etapa7\panel-F-dark.png`, `runtime\etapa7\panel-F-usa.png`; varredura extra DOM USA sem termos PT; `venv\Scripts\python.exe scripts\smoke_news_provider_failure.py`; `venv\Scripts\python.exe -m unittest tests.test_public_news_service tests.test_news_service` com 13 testes OK.
+- Estado atual conhecido: Etapa 1 fechada em 100%; Etapa 2 fechada em 100%; Etapa 3 fechada em 100%; Etapa 4 fechada em 100%; Etapa 5 fechada em 100%; Etapa 6 fechada em 100%; Etapa 7 fechada em 100%; Etapa 8 fechada em 100%.
+- Arquivos alterados nesta etapa: `app/services/access_service.py`, `app/services/legal_service.py`, `app/services/referrals.py`, `app/api/stripe_webhook.py`, `app/auth.py`, `apps/web/components/workspace-shell.tsx`, `tests/test_access_service.py`, `tests/test_referral_service.py`, `tests/test_stripe_webhook.py` e `PROJECT_STATUS.md`.
+- Testes/smokes registrados: `venv\Scripts\python.exe -m unittest tests.test_access_service tests.test_referral_service tests.test_stripe_webhook`; `venv\Scripts\python.exe -m compileall app\services\access_service.py app\services\referrals.py app\services\legal_service.py app\api\stripe_webhook.py app\auth.py`; `npm run build` em `apps/web`; smoke API em `127.0.0.1:8001`; browser real em `127.0.0.1:3001/panel/F` com screenshots PT/USA da aba de referrals.
 - Proxima etapa clara: iniciar apenas a proxima etapa formal que o usuario indicar, mantendo a regra de nao abrir nova etapa antes da anterior ficar fechada.
 - Stage/commit: fechado nesta rodada somente com os arquivos listados nesta etapa, sem incluir alteracoes antigas de outras etapas.
 
@@ -148,6 +155,8 @@ Atualizado em: 2026-05-14
 - Discussao em destaque depende de posts reais do ticker. Quando nao houver post util, a API retorna `discussion_state=empty` ou `no_relevant_discussion` para a UI nao fingir contexto social.
 - Etapa 7: modo USA tem trava Playwright contra regressao de PT em interface, ajuda, rails, lista ativa, social, chart, poll, news e PETR4; conteudo bruto externo de provider ainda deve ser monitorado se vier em idioma original da fonte.
 - Etapa 7: `pytest` nao esta instalado no `venv`/Python global desta sessao; os testes Python focados foram executados via `unittest` e o smoke Playwright cobriu o contrato anti-clone/coerencia visual.
+- Etapa 8: Stripe foi validado em sandbox/webhook local; antes de producao ainda e necessario conferir os Price IDs reais no painel Stripe e garantir que metadata `user_id`/`product_id` esteja vindo do checkout real.
+- Etapa 8: referral depende de evento pago em `subscription_audit_logs`; eventos externos sem usuario resolvido ficam `unresolved` e nao validam indicacao, como esperado para evitar fraude basica.
 
 ## Proximo TODO
 
@@ -158,6 +167,7 @@ Atualizado em: 2026-05-14
 - Etapa 5 esta 100% concluida: grafico usa labels operacionais, tooltips completos, modos Guiado/Trader/Pro com decisao clara, dark mode, zoom/pan e ranges validados.
 - Etapa 6 esta 100% concluida: news por ticker, poll semanal contextual, earnings poll com evidencia, discussao destacada por relevancia e estados vazios explicitos.
 - Etapa 7 esta 100% concluida: smoke Playwright multi-ticker/dark-light/troca de ticker/IA tabs/anti-clone, USA/BR, PETR4/USA sem textos PT, screenshot de UI, smoke de falha de provider de news e stage/commit da etapa atual registrados.
+- Etapa 8 esta 100% concluida: trial 30/14, pricing BR/USA, refund 7 dias, downgrade para Basico, Stripe sandbox, acesso web/app/telegram, referral antifraude, recompensa a cada 3, badges e ranking `Indicacoes`/`Referrals` validados.
 - Reexecutar smoke completo apos qualquer mudanca em provider/cache/chart/news, worker ou nas abas IA.
 - Se for criar commit, usar o MinGit por caminho absoluto enquanto o Codex nao recarregar PATH.
 - Separar refatoracoes institucionais maiores em commits pequenos por area: data/api, ai, web, tests.

@@ -45,6 +45,7 @@ import {
   repostPost,
   reportPost,
   requestTelegramLink,
+  resolveApiBase,
   saveWorkspaceLayout,
   unrepostPost,
   unfollowUser,
@@ -118,6 +119,25 @@ type UserListEntry = {
   avatarUrl?: string | null;
 };
 
+type ReferralLeaderboardItem = {
+  position: number;
+  name: string;
+  badge?: string | null;
+  total_validated: number;
+  total_active: number;
+  paid_referrals: string[];
+};
+
+type ReferralLeaderboardPayload = {
+  items: ReferralLeaderboardItem[];
+  rules: {
+    valid_after_days: number;
+    reward: string;
+    vip_badge_at: number;
+    leaderboard_badge_at: number;
+  };
+};
+
 const AI_TOOL_TAB_MAP = {
   "heat-map": "heat_map",
   radar: "radar",
@@ -147,6 +167,7 @@ const TAB_META: Record<string, { label: string; short: string }> = {
   "liquidity-map": { label: "🧭 IA Liquidity Map", short: "IA Liquidity Map" },
   "market-regime": { label: "📊 IA Regime de Mercado", short: "Regime" },
   "master-score": { label: "⭐ IA Score Mestre", short: "Score" },
+  referrals: { label: "🤝 Indicações", short: "Indicações" },
   education: { label: "🎓 Ajuda Educacional para o Trader", short: "Ajuda" },
 };
 
@@ -165,6 +186,7 @@ const TAB_META_EN: Record<string, { label: string; short: string }> = {
   "liquidity-map": { label: "🧭 AI Liquidity Map", short: "Liquidity Map" },
   "market-regime": { label: "📊 AI Market Regime", short: "Regime" },
   "master-score": { label: "⭐ AI Master Score", short: "Master Score" },
+  referrals: { label: "🤝 Referrals", short: "Referrals" },
   education: { label: "🎓 Trader Help", short: "Help" },
 };
 
@@ -232,6 +254,7 @@ const TOP_TAB_TEXT: Record<string, string> = {
   "liquidity-map": "IA Liquidity Map",
   "market-regime": "IA Regime",
   "master-score": "Score Mestre",
+  referrals: "Indicações",
   education: "Ajuda",
 };
 
@@ -249,6 +272,7 @@ const TOP_TAB_TEXT_EN: Record<string, string> = {
   "liquidity-map": "AI Liquidity Map",
   "market-regime": "AI Regime",
   "master-score": "Master Score",
+  referrals: "Referrals",
   education: "Help",
 };
 
@@ -266,6 +290,7 @@ const TAB_ORDER = [
   "liquidity-map",
   "market-regime",
   "master-score",
+  "referrals",
   "education",
 ];
 
@@ -300,6 +325,7 @@ const FALLBACK_TABS: WorkspaceTab[] = [
   { id: "liquidity-map", title: "IA Liquidity Map" },
   { id: "market-regime", title: "IA Regime de Mercado" },
   { id: "master-score", title: "IA Score Mestre" },
+  { id: "referrals", title: "Indicações" },
   { id: "education", title: "Ajuda Educacional para o Trader" },
 ];
 
@@ -2890,6 +2916,18 @@ function buildTabs(source?: WorkspaceTab[]) {
   return TAB_ORDER.filter((id) => byId.has(id)).map((id) => byId.get(id)!);
 }
 
+async function fetchReferralLeaderboard(limit = 50): Promise<ReferralLeaderboardPayload> {
+  const response = await fetch(`${resolveApiBase()}/billing/referrals/leaderboard?limit=${limit}`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(response.statusText || "referral_leaderboard_failed");
+  }
+
+  return response.json() as Promise<ReferralLeaderboardPayload>;
+}
+
 function readInitialLocale(): AppLocale {
   if (typeof window === "undefined") return "pt-BR";
   const saved = window.localStorage.getItem(APP_LOCALE_STORAGE_KEY);
@@ -3181,6 +3219,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [feed, setFeed] = useState<FeedPayload | null>(null);
   const [news, setNews] = useState<NewsPayload | null>(null);
   const [poll, setPoll] = useState<PollPayload | null>(null);
+  const [referralLeaderboard, setReferralLeaderboard] = useState<ReferralLeaderboardPayload | null>(null);
+  const [referralLeaderboardLoading, setReferralLeaderboardLoading] = useState(false);
+  const [referralLeaderboardError, setReferralLeaderboardError] = useState("");
   const [room, setRoom] = useState<ChatHistoryPayload | null>(null);
   const [quote, setQuote] = useState<QuotePayload | null>(null);
   const [publicQuotes, setPublicQuotes] = useState<Record<string, QuotePayload>>({});
@@ -3219,6 +3260,33 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     document.documentElement.lang = appLocale === "en-US" ? "en-US" : "pt-BR";
     document.documentElement.dataset.locale = appLocale;
   }, [appLocale]);
+
+  useEffect(() => {
+    if ((focusedTab || activeTab) !== "referrals") return;
+
+    let cancelled = false;
+    setReferralLeaderboardLoading(true);
+    setReferralLeaderboardError("");
+
+    fetchReferralLeaderboard()
+      .then((payload) => {
+        if (cancelled) return;
+        setReferralLeaderboard(payload);
+      })
+      .catch((err: Error) => {
+        if (cancelled) return;
+        setReferralLeaderboard(null);
+        setReferralLeaderboardError(err.message || "referral_leaderboard_failed");
+      })
+      .finally(() => {
+        if (!cancelled) setReferralLeaderboardLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, focusedTab]);
+
   const publicWatchSymbols = useMemo(
     () => Array.from(new Set([...PRELOADED_UNIVERSE.map((item) => item.symbol), ...customWatchItems.map((item) => item.symbol), selectedTicker])),
     [customWatchItems, selectedTicker],
@@ -6806,6 +6874,75 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     );
   }
 
+  function renderReferrals() {
+    const rows = referralLeaderboard?.items || [];
+    const ruleText = isUsLocale
+      ? "A referral becomes valid only on the 8th day after the referred user pays. Every 3 valid paid referrals gives 1 free month, with no cash refund."
+      : "A indicação só valida no 8º dia após o indicado pagar. A cada 3 indicações pagas e válidas, o assinante ganha 1 mês grátis, sem cashback.";
+    const emptyText = isUsLocale
+      ? "No paid validated referrals yet. The leaderboard only shows referrals that already paid and passed the refund window."
+      : "Ainda não há indicações pagas validadas. O ranking só mostra indicados que já pagaram e passaram da janela de reembolso.";
+
+    return (
+      <section className="snbr-tool-shell">
+        <div className="snbr-tool-head">
+          <div>
+            <h2>{isUsLocale ? "Referrals" : "Indicações"}</h2>
+            <p>{ruleText}</p>
+          </div>
+          <span className="snbr-chip">{isUsLocale ? "7-day refund window" : "Janela de 7 dias"}</span>
+        </div>
+
+        <div className="snbr-tool-reading-grid">
+          <div className="snbr-tool-reading-card">
+            <span>{isUsLocale ? "Pricing rule" : "Regra comercial"}</span>
+            <strong>
+              {isUsLocale
+                ? "USA/international: $49/month or $500 upfront for 12 months."
+                : "Brasil: R$49/mês ou R$500 à vista por 12 meses."}
+            </strong>
+          </div>
+          <div className="snbr-tool-reading-card">
+            <span>{isUsLocale ? "Reward rule" : "Regra de prêmio"}</span>
+            <strong>
+              {isUsLocale
+                ? "3 paid referrals = 1 free month. 10 = Badge Vip. 100+ = Leaderboard VIP."
+                : "3 indicações pagas = 1 mês grátis. 10 = Badge Vip. 100+ = Leaderboard VIP."}
+            </strong>
+          </div>
+        </div>
+
+        {referralLeaderboardLoading ? (
+          <div className="snbr-empty">{isUsLocale ? "Loading referral leaderboard..." : "Carregando ranking de indicações..."}</div>
+        ) : referralLeaderboardError ? (
+          <div className="snbr-empty">
+            {isUsLocale ? "Referral leaderboard unavailable." : "Ranking de indicações indisponível."}
+          </div>
+        ) : rows.length ? (
+          <ol className="snbr-tool-stack">
+            {rows.map((row) => (
+              <li key={`${row.position}-${row.name}`} className="snbr-tool-reading-card">
+                <span>
+                  #{row.position} · {row.total_validated} {isUsLocale ? "valid referrals" : "indicações válidas"}
+                </span>
+                <strong>
+                  {row.name}
+                  {row.badge ? ` · ${row.badge}` : ""}
+                </strong>
+                <p>
+                  {isUsLocale ? "Paid referred users: " : "Indicados pagos: "}
+                  {row.paid_referrals.length ? row.paid_referrals.join(", ") : (isUsLocale ? "none yet" : "nenhum ainda")}
+                </p>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className="snbr-empty">{emptyText}</div>
+        )}
+      </section>
+    );
+  }
+
   function renderCenterPanel() {
     if (currentTab === "grafico") return renderGrafico();
     if (currentTab === "news") return renderNews();
@@ -6821,6 +6958,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     if (currentTab === "liquidity-map") return renderToolTab(TOOL_COPY["liquidity-map"].title, TOOL_COPY["liquidity-map"].description);
     if (currentTab === "market-regime") return renderToolTab(TOOL_COPY["market-regime"].title, TOOL_COPY["market-regime"].description);
     if (currentTab === "master-score") return renderToolTab(TOOL_COPY["master-score"].title, TOOL_COPY["master-score"].description);
+    if (currentTab === "referrals") return renderReferrals();
     if (currentTab === "education") return renderEducation();
     return renderGrafico();
   }

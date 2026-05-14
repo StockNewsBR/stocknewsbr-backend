@@ -1,7 +1,7 @@
 import hashlib
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -9,24 +9,96 @@ from app.models import SubscriptionAuditLog, User
 
 logger = logging.getLogger("stocknewsbr.access")
 
-DEFAULT_TRIAL_DAYS = max(1, int(os.getenv("TRIAL_DAYS", "90")))
+SAAS_LAUNCH_DATE = date.fromisoformat(os.getenv("SAAS_LAUNCH_DATE", "2026-05-14"))
+TRIAL_SHORTEN_AFTER_DAYS = max(1, int(os.getenv("TRIAL_SHORTEN_AFTER_DAYS", "30")))
+INITIAL_TRIAL_DAYS = max(1, int(os.getenv("INITIAL_TRIAL_DAYS", "30")))
+POST_LAUNCH_TRIAL_DAYS = max(1, int(os.getenv("POST_LAUNCH_TRIAL_DAYS", "14")))
+DEFAULT_TRIAL_DAYS = INITIAL_TRIAL_DAYS
+REFUND_WINDOW_DAYS = max(1, int(os.getenv("REFUND_WINDOW_DAYS", "7")))
+MONTHLY_PLAN_DAYS = 31
+ANNUAL_PLAN_DAYS = 365
 LEGAL_NOTICE_VERSION = os.getenv("LEGAL_NOTICE_VERSION", "2026-03")
 PAID_PLANS = {"premium", "enterprise"}
 FREE_PLAN = "free"
 TRIAL_PLAN = "trial"
+
+PRICING_CATALOG = {
+    "BR": {
+        "currency": "BRL",
+        "monthly_amount": 49,
+        "annual_amount": 500,
+        "monthly_product_id": "premium_br_monthly",
+        "annual_product_id": "premium_br_annual",
+        "payment_note": "Assinatura Brasil: R$49/mes ou R$500 a vista por 12 meses.",
+    },
+    "USA": {
+        "currency": "USD",
+        "monthly_amount": 49,
+        "annual_amount": 500,
+        "monthly_product_id": "premium_usa_monthly",
+        "annual_product_id": "premium_usa_annual",
+        "payment_note": "International account: USA subscription. Premium is $49/month or $500 upfront for 12 months.",
+    },
+}
 
 
 def utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _as_naive_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def trial_days_for_market(market: str | None = None, now: datetime | None = None) -> int:
+    reference = (_as_naive_utc(now) or utcnow()).date()
+    shorten_date = SAAS_LAUNCH_DATE + timedelta(days=TRIAL_SHORTEN_AFTER_DAYS)
+    return POST_LAUNCH_TRIAL_DAYS if reference >= shorten_date else INITIAL_TRIAL_DAYS
+
+
+def normalize_billing_market(value: str | None = None) -> str:
+    normalized = str(value or "").strip().upper()
+    if normalized in {"BR", "BRA", "BRAZIL", "BRASIL", "PT-BR", "B3"}:
+        return "BR"
+    return "USA"
+
+
+def pricing_catalog(market: str | None = None, now: datetime | None = None):
+    requested_market = normalize_billing_market(market)
+    catalog = {
+        key: {
+            **value,
+            "trial_days": trial_days_for_market(key, now),
+            "refund_window_days": REFUND_WINDOW_DAYS,
+            "refund_policy": (
+                "Cancelamento permitido em ate 7 dias. Depois disso nao ha reembolso."
+                if key == "BR"
+                else "Cancellation/refund window is 7 days. After that there is no refund."
+            ),
+        }
+        for key, value in PRICING_CATALOG.items()
+    }
+    return {
+        "market": requested_market,
+        "trial_shortens_after_days": TRIAL_SHORTEN_AFTER_DAYS,
+        "post_launch_trial_days": POST_LAUNCH_TRIAL_DAYS,
+        "refund_window_days": REFUND_WINDOW_DAYS,
+        "plans": catalog,
+        "selected": catalog[requested_market],
+    }
+
+
 def _default_plan_days(product_id: str | None) -> int:
     product_id = str(product_id or "").lower()
 
     if any(token in product_id for token in {"annual", "anual", "year", "12m", "12_meses"}):
-        return 366
+        return ANNUAL_PLAN_DAYS
 
-    return 31
+    return MONTHLY_PLAN_DAYS
 
 
 def generate_referral_code(seed: str) -> str:
@@ -78,11 +150,12 @@ def accept_legal_documents(
     return user
 
 
-def grant_trial_access(user: User, days: int = DEFAULT_TRIAL_DAYS):
-    now = utcnow()
+def grant_trial_access(user: User, days: int | None = None, market: str | None = None, now: datetime | None = None):
+    now = _as_naive_utc(now) or utcnow()
+    trial_days = days if days is not None else trial_days_for_market(market, now)
     user.plan = TRIAL_PLAN
     user.plan_status = "trialing"
-    user.trial_expires_at = user.trial_expires_at or (now + timedelta(days=days))
+    user.trial_expires_at = user.trial_expires_at or (now + timedelta(days=trial_days))
     user.access_app = True
     user.access_web = True
     user.access_telegram = True
@@ -127,13 +200,14 @@ def activate_subscription(
     user.access_telegram = True
 
     if started_at:
-        user.created_at = user.created_at or started_at
+        user.created_at = user.created_at or _as_naive_utc(started_at)
 
     if renewal_at:
-        user.plan_expires_at = renewal_at
+        user.plan_expires_at = _as_naive_utc(renewal_at)
     elif user.plan_expires_at is None or user.plan_expires_at < now:
         user.plan_expires_at = now + timedelta(days=_default_plan_days(product_id))
 
+    user.trial_expires_at = None
     user.updated_at = now
     return user
 

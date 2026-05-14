@@ -5,7 +5,10 @@ try:
     from app.services.access_service import (
         _default_plan_days,
         activate_subscription,
+        grant_trial_access,
+        pricing_catalog,
         refresh_user_access,
+        trial_days_for_market,
     )
     IMPORT_ERROR = None
 except ModuleNotFoundError as exc:
@@ -75,9 +78,40 @@ class AccessServiceTests(unittest.TestCase):
         self.assertGreaterEqual((user.plan_expires_at - now).days, 360)
 
     def test_default_plan_days_detects_annual_keywords(self):
-        self.assertEqual(_default_plan_days("premium_annual"), 366)
-        self.assertEqual(_default_plan_days("premium_anual"), 366)
+        self.assertEqual(_default_plan_days("premium_annual"), 365)
+        self.assertEqual(_default_plan_days("premium_anual"), 365)
         self.assertEqual(_default_plan_days("premium_mensal"), 31)
+
+    def test_trial_policy_starts_with_30_days_and_shortens_after_launch_window(self):
+        launch_day = datetime(2026, 5, 14)
+        after_launch_window = datetime(2026, 6, 14)
+
+        self.assertEqual(trial_days_for_market("BR", launch_day), 30)
+        self.assertEqual(trial_days_for_market("USA", launch_day), 30)
+        self.assertEqual(trial_days_for_market("BR", after_launch_window), 14)
+        self.assertEqual(trial_days_for_market("USA", after_launch_window), 14)
+
+    def test_grant_trial_access_uses_current_trial_policy(self):
+        user = DummyUser()
+        user.trial_expires_at = None
+
+        grant_trial_access(user, now=datetime(2026, 5, 14))
+
+        self.assertEqual(user.plan, "trial")
+        self.assertEqual((user.trial_expires_at - datetime(2026, 5, 14)).days, 30)
+        self.assertTrue(user.access_app)
+        self.assertTrue(user.access_web)
+        self.assertTrue(user.access_telegram)
+
+    def test_pricing_catalog_separates_br_and_usa_and_refund_window(self):
+        catalog = pricing_catalog("USA", datetime(2026, 5, 14))
+
+        self.assertEqual(catalog["selected"]["currency"], "USD")
+        self.assertEqual(catalog["plans"]["BR"]["monthly_amount"], 49)
+        self.assertEqual(catalog["plans"]["BR"]["annual_amount"], 500)
+        self.assertEqual(catalog["plans"]["USA"]["monthly_amount"], 49)
+        self.assertEqual(catalog["plans"]["USA"]["annual_amount"], 500)
+        self.assertEqual(catalog["refund_window_days"], 7)
 
 
 if __name__ == "__main__":

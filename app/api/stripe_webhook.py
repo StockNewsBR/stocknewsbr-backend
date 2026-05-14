@@ -2,21 +2,49 @@ import json
 import os
 
 import stripe
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal
+from app.database import SessionLocal, get_db
 from app.models import User
+from app.security import get_current_user
 from app.services.access_service import (
     activate_subscription,
     downgrade_to_free,
     log_subscription_event,
+    pricing_catalog,
 )
+from app.services.referrals import referral_leaderboard, referral_summary, validate_referrals
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
+
+@router.get("/pricing")
+def billing_pricing(market: str = Query(default="BR", max_length=16)):
+    return pricing_catalog(market)
+
+
+@router.get("/referrals/leaderboard")
+def billing_referral_leaderboard(
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    result = referral_leaderboard(db, limit=limit)
+    db.commit()
+    return result
+
+
+@router.get("/referrals/me")
+def billing_referral_summary(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    result = referral_summary(db, current_user.id)
+    db.commit()
+    return result
 
 
 def _resolve_user(db: Session, data: dict):
@@ -92,6 +120,8 @@ async def stripe_webhook(request: Request):
 
         if user:
             db.add(user)
+            if event_type in {"invoice.payment_succeeded", "checkout.session.completed"}:
+                validate_referrals(db)
 
         db.commit()
         return {"status": "ok"}
