@@ -57,6 +57,8 @@ Atualizado em: 2026-05-14
 - Plano mobile usa `/billing/pricing` para BR e USA, mostra trial atual de 30/14 dias, Premium BR `R$49/R$500`, Premium USA `$49/$500` e janela de refund/cancelamento de 7 dias.
 - Publicacao Android preparada com `app.json` (`com.stocknewsbr.mobile`, `versionCode=1`, produtos BR/USA) e `eas.json` com profile `production` gerando Android App Bundle para Google Play.
 - Smoke mobile agora valida app/ticker, chart, plano, EAS/Google Play, config Expo e emulador Android quando `REQUIRE_MOBILE_DEVICE=1`.
+- Retomada 2026-05-14 do TODO pendente: `signal_cache` agora recebe preco/volume reais do `warm_market_pool` no fim do ciclo do engine, antes de alimentar snapshot, worker e abas IA.
+- Sinais sem frame, preco ou volume valido permanecem `data_quality=score_only`; o engine nao preenche preco/volume artificial quando o provider nao entregou dado real.
 
 ## Validado
 
@@ -120,6 +122,11 @@ Atualizado em: 2026-05-14
 - Emulador Android `Medium_Phone_API_36.1` iniciado e bootado (`emulator-5554`, `sys.boot_completed=1`).
 - `$env:REQUIRE_MOBILE_DEVICE='1'; npm run smoke:mobile` em `apps/mobile`: OK; validou arquivos de rotas mobile, painel do ticker, ranges, grafico com candles, contrato de trigger/invalidacao/risco, pricing BR/USA, config Expo, EAS App Bundle e emulador visivel/bootado.
 - `npm run export:android` em `apps/mobile`: Android bundle exportado em `dist/android` sem crash e sem aviso deprecated do `expo-router/babel` apos ajuste do Babel.
+- `python -m py_compile app\engine\engine_orchestrator.py tests\test_engine_orchestrator_signal_enrichment.py`: OK.
+- `git diff --check -- app/engine/engine_orchestrator.py tests/test_engine_orchestrator_signal_enrichment.py`: sem erro; apenas aviso esperado de LF para CRLF no Windows.
+- `venv\Scripts\python.exe -c "import sys, numpy, pandas, dotenv, fastapi, sqlalchemy; ..."`: Python 3.11.9 restaurado no `venv`, `sys.executable=C:\Users\dcima\stocknewsbr-backend\venv\Scripts\python.exe` e dependencias criticas OK.
+- `venv\Scripts\python.exe -m unittest tests.test_engine_orchestrator_signal_enrichment tests.test_runtime_shared_cache tests.test_market_snapshot_ai_tools tests.test_ai_worker_health`: 16 testes OK.
+- `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 133 testes OK.
 
 ## Smoke Atual
 
@@ -142,7 +149,9 @@ Atualizado em: 2026-05-14
 - Estado atual conhecido: Etapa 1 fechada em 100%; Etapa 2 fechada em 100%; Etapa 3 fechada em 100%; Etapa 4 fechada em 100%; Etapa 5 fechada em 100%; Etapa 6 fechada em 100%; Etapa 7 fechada em 100%; Etapa 8 fechada em 100%.
 - Estado atual conhecido: Etapa 1 fechada em 100%; Etapa 2 fechada em 100%; Etapa 3 fechada em 100%; Etapa 4 fechada em 100%; Etapa 5 fechada em 100%; Etapa 6 fechada em 100%; Etapa 7 fechada em 100%; Etapa 8 fechada em 100%; Etapa 9 fechada em 100%.
 - Arquivos alterados nesta etapa: `apps/mobile/README.md`, `apps/mobile/app.json`, `apps/mobile/babel.config.js`, `apps/mobile/package.json`, `apps/mobile/app/_layout.tsx`, `apps/mobile/app/index.tsx`, `apps/mobile/app/(tabs)/*`, `apps/mobile/app/ticker/[symbol].tsx`, `apps/mobile/components/*`, `apps/mobile/lib/api.ts`, `apps/mobile/lib/format.ts`, `apps/mobile/lib/session.tsx`, `apps/mobile/eas.json`, `apps/mobile/scripts/smoke-mobile.mjs` e `PROJECT_STATUS.md`.
+- Arquivos alterados nesta retomada do TODO de dados reais no `signal_cache`: `app/engine/engine_orchestrator.py`, `tests/test_engine_orchestrator_signal_enrichment.py` e `PROJECT_STATUS.md`.
 - Testes/smokes registrados: `npm run typecheck` em `apps/mobile`; `$env:REQUIRE_MOBILE_DEVICE='1'; npm run smoke:mobile`; `npm run export:android`.
+- Testes/smokes registrados nesta retomada: validacao do `venv` Python 3.11.9 e dependencias; unittest focado de `signal_cache`/snapshot/worker; unittest discover completo com 133 testes OK.
 - Proxima etapa clara: checklist final de lancamento amplo so deve mexer em credenciais reais, Price IDs/assinaturas da Play Console e submissao EAS quando a conta Google Play estiver disponivel.
 - Stage/commit: fechado nesta rodada somente com os arquivos listados nesta etapa, sem incluir alteracoes antigas de outras etapas.
 
@@ -184,5 +193,5 @@ Atualizado em: 2026-05-14
 - Reexecutar smoke completo apos qualquer mudanca em provider/cache/chart/news, worker ou nas abas IA.
 - Se for criar commit, usar o MinGit por caminho absoluto enquanto o Codex nao recarregar PATH.
 - Separar refatoracoes institucionais maiores em commits pequenos por area: data/api, ai, web, tests.
-- Proxima melhoria de produto: ligar preco/volume real ao `signal_cache` que alimenta o worker para elevar a auditoria IA de `watch` para `approved`, sem inventar dado de mercado.
+- Proxima melhoria de produto: codigo ja liga preco/volume real ao `signal_cache` via `warm_market_pool` e passou nos testes com o `venv` Python 3.11.9; acompanhar proximo ciclo real do worker com dados de mercado para confirmar auditoria IA `approved` em producao.
 - Proxima melhoria de dados B3: se o produto exigir leilao/pre-abertura antes de 10:00, integrar provider que entregue esse feed; o chart atual nao inventa barras antes da primeira barra recebida.
