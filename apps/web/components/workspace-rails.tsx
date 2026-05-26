@@ -185,6 +185,28 @@ export function WorkspaceLeftRail({
               {section.label || section.title}
             </button>
           ))}
+          <div className="snbr-rail-disclosure">
+            <div className="snbr-store-badges" aria-label={isEnglish ? "App stores" : "Lojas do app"}>
+              <span>App Store</span>
+              <span>Google Play</span>
+            </div>
+            <p>{isEnglish ? "©2026 StockNewsBR. All rights reserved." : "©2026 StockNewsBR. Todos os direitos reservados."}</p>
+            <p>
+              {isEnglish
+                ? "Market data comes from public/connected providers and internal caches identified by each payload. Futures may show explicit reference pricing when an exact public contract is unavailable; crypto data uses public crypto providers when available."
+                : "Dados de mercado vêm de provedores públicos/conectados e caches internos identificados em cada payload. Futuros podem mostrar preço de referência explícito quando o contrato público exato não estiver disponível; cripto usa provedores públicos quando houver dado."}
+            </p>
+            <p>
+              {isEnglish
+                ? "StockNewsBR is not a securities broker-dealer, investment adviser or financial professional. Nothing on the platform is an offer, solicitation, research report or individualized advice to buy, sell, short or hold any asset."
+                : "StockNewsBR não é corretora, consultor de investimentos ou profissional financeiro. Nada na plataforma é oferta, solicitação, relatório de análise ou recomendação individual para comprar, vender, operar vendido ou manter qualquer ativo."}
+            </p>
+            <p>
+              {isEnglish
+                ? "By using the platform, you understand that every trade decision is yours and must be confirmed with price, volume, liquidity, risk and your own suitability."
+                : "Ao usar a plataforma, você entende que toda decisão de trade é sua e deve ser confirmada com preço, volume, liquidez, risco e adequação ao seu perfil."}
+            </p>
+          </div>
         </div>
       </div>
     </aside>
@@ -195,7 +217,7 @@ type RightRailProps = {
   locale: AppLocale;
   mobileInsightsOpen: boolean;
   onToggleMobileInsights: () => void;
-  stats: Array<{ label: string; value: string }>;
+  stats: Array<{ label: string; value: string; hint?: string }>;
   newsRows: WorkspaceNewsRow[];
   discussionPosts: FeedPost[];
   activePoll: PollPayload;
@@ -252,6 +274,7 @@ export function WorkspaceRightRail({
               <div key={item.label} className="snbr-mini-stat">
                 <span>{item.label}</span>
                 <strong>{item.value}</strong>
+                {item.hint ? <small>{item.hint}</small> : null}
               </div>
             ))}
           </div>

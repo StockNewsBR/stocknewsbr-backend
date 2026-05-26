@@ -1,6 +1,6 @@
 # StockNewsBR Project Status
 
-Atualizado em: 2026-05-14
+Atualizado em: 2026-05-18
 
 ## Estado Atual
 
@@ -51,7 +51,7 @@ Atualizado em: 2026-05-14
 - Top tab `IA Grafico` virou `IA Grafico/ Rede Social` em PT-BR e `AI Chart / Social` em USA; seletor BR/USA com bandeiras fica no topo e alterna interface, ajuda, chats/social, poll e copy de assinatura.
 - Assinatura USA mostra aviso de conta internacional com Premium a `$49/month` ou `$500 upfront` para cartao internacional fora do Brasil.
 - Etapa 8 - SaaS / Acesso / Stripe / Referral fechada em 100%: trial novo com 30 dias ate a janela de lancamento e 14 dias depois, downgrade automatico para Basico ao vencer, precos BR/USA separados, janela de refund de 7 dias, webhook Stripe sandbox validado, acesso web/app/telegram atualizado por pagamento/cancelamento e referral validado apenas no 8o dia apos pagamento.
-- Referral agora exige indicado pagante ativo, nao conta antes da janela de refund, credita 1 mes a cada 3 indicacoes validas, nao gera cash/money back, aplica `Badge Vip` em 10 indicacoes, `Leaderboard VIP` em 100+ e expoe ranking mascarado na aba `Indicacoes`/`Referrals`.
+- Referral agora exige indicado pagante ativo, nao conta antes da janela de refund, credita 1 mes a cada 3 indicacoes validas, nao gera cash/money back, aplica `Badge Vip` em 10 indicacoes, `Leaderboard King` em 100+ e expoe ranking mascarado na aba `Indicacoes`/`Referrals`.
 - Etapa 9 - Mobile e Publicacao fechada em 100% no escopo de codigo/app: Expo Mobile agora tem login/OTP, painel mobile por ticker, grafico com ranges `1D`, `1W`, `1M`, `3M`, `1Y`, candles, zonas, marcadores, news, feed, poll, perfil/plano e acesso Telegram.
 - Tela mobile de ativo abre `/ticker/[symbol]`, carrega snapshot, chart por range, news, feed e poll; quando faltam candles com preco real, mostra estado explicito em vez de fingir grafico.
 - Plano mobile usa `/billing/pricing` para BR e USA, mostra trial atual de 30/14 dias, Premium BR `R$49/R$500`, Premium USA `$49/$500` e janela de refund/cancelamento de 7 dias.
@@ -59,6 +59,19 @@ Atualizado em: 2026-05-14
 - Smoke mobile agora valida app/ticker, chart, plano, EAS/Google Play, config Expo e emulador Android quando `REQUIRE_MOBILE_DEVICE=1`.
 - Retomada 2026-05-14 do TODO pendente: `signal_cache` agora recebe preco/volume reais do `warm_market_pool` no fim do ciclo do engine, antes de alimentar snapshot, worker e abas IA.
 - Sinais sem frame, preco ou volume valido permanecem `data_quality=score_only`; o engine nao preenche preco/volume artificial quando o provider nao entregou dado real.
+- Retomada 2026-05-14 da engine de trade: grafico agora calcula regime (`trend`, `chop`, `squeeze`, `breakout`), evento de liquidez, confianca long/short e entradas de continuacao; saidas nao fecham cedo quando a continuacao institucional segue valida.
+- Futuros CME `NQ`, `MNQ/MNO`, `ES/MES` e `MYM` agora usam simbolos de provider `=F` e rejeitam cache contaminado de acoes homonimas, como `ES` equity.
+- Futuros B3 `WIN`/`WDO` por contrato mensal exibem preco de referencia marcado quando o provider publico nao entrega contrato exato; payload sai como `quote_status=reference`, `source=reference_proxy` e `exact_contract=false`, sem fingir dado executavel.
+- Raiz web `http://127.0.0.1:3000/` agora redireciona para `/panel/F`; `scripts/start_all_local.ps1` limpa `.next` ao subir em modo dev para evitar manifesto Next/webpack stale e tela `Runtime Error`.
+- Retomada 2026-05-18 da engine 1D: o motor deixou de exigir 60 barras fixas, usa warmup dinamico por range/perfil, VWAP no contexto, `trend_acceptance`, `liquidity_reversal` e saidas mais pacientes para nao perder oportunidades em `1D` curto de B3/USA.
+- Overlay do grafico nao preenche mais o painel com `Watch` derivado quando ja existem sinais operacionais; no `1D`, Watch derivado fica limitado e so aparece quando nao ha trade real.
+- Quando volume real nao vem do provider publico, trigger/risco deixam claro que a execucao precisa confirmar volume no tape/terminal; o sistema nao escreve mais "volume confirmado" nesse caso.
+- Retomada 2026-05-18 UX/produto: grafico intraday fecha posicao aberta no fim do dia, modo unico `Pro` substitui Guiado/Trader/Pro, metricas de topo explicam variacao/volume/Score IA/RSI/Bias, IA Mapa de Calor mostra bolinha verde/vermelha no Score, historico das IAs limita 20 ativos visiveis com achado novo primeiro, Minha Lista ganhou mais altura e o rodape institucional/legal entrou no rail esquerdo.
+- Horario das IAs agora prioriza timestamp real de mercado/sinal (`detected_at`, `market_data_updated_at`, `last_bar_at`, `bar_time`, `time`) antes do horario do ciclo, permitindo pre-market/abertura quando o provider entrega esses candles.
+- Retomada corretiva 2026-05-18: a UI visitante agora consome `/public/market/ai-tools`, que expõe o histórico real das IAs sem login; a aba IA Mapa de Calor não monta mais 20 achados falsos com horário do ciclo/localStorage.
+- Lista das IAs passa a mostrar os 20 achados reais mais recentes, mais novo primeiro; se entra achado novo, o item mais antigo sai da tela. Fallback visual não entra no histórico persistido.
+- Retomada corretiva 2026-05-18 BBAS3/PETR3: rompimento aceito acima da resistência agora vira `Buy Long`, não `Sell Short`; short só entra em perda de suporte ou falso rompimento/rejeição vendedor. Warmup intraday foi reduzido para capturar tendência que começa perto da abertura sem esperar metade do pregão.
+- Boxes de topo agora são cards explicativos reais para `Preço`, `Variação`, `Volume`, `Score IA`, `RSI` e `Bias`, com leitura direta do tipo "-0.24% indicando queda", "2,2 mi abaixo/perto/acima da média", "Score IA 5.0 indicando baixa/venda", "RSI neutro" e "Bias indicando lado operacional".
 
 ## Validado
 
@@ -127,10 +140,18 @@ Atualizado em: 2026-05-14
 - `venv\Scripts\python.exe -c "import sys, numpy, pandas, dotenv, fastapi, sqlalchemy; ..."`: Python 3.11.9 restaurado no `venv`, `sys.executable=C:\Users\dcima\stocknewsbr-backend\venv\Scripts\python.exe` e dependencias criticas OK.
 - `venv\Scripts\python.exe -m unittest tests.test_engine_orchestrator_signal_enrichment tests.test_runtime_shared_cache tests.test_market_snapshot_ai_tools tests.test_ai_worker_health`: 16 testes OK.
 - `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 133 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_market_data_loader tests.test_public_market_routes tests.test_trade_decision_engine tests.test_trend_breakout_signal_engine tests.test_chart_overlay_service`: 35 testes OK apos engine institucional e futuros.
+- `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 139 testes OK.
+- `npm run build` em `apps/web`: build OK; rota `/` gerada e `postbuild` sincronizou chunks.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_all_local.ps1`: runtime OK com Python 3.11.9, limpeza de `.next`, API 8000, web 3000, smoke API e browser smoke em `/panel/F`.
+- Smoke API futures: `NQ`, `MNQ`, `MNO`, `ES`, `MES` e `MYM` retornaram `quote_status=valid`; `WINM26` e `WDOM26` retornaram `quote_status=reference`, `source=reference_proxy` e `exact_contract=false`.
+- Smoke visual da lista ativa: B3 mostra `WINK26`, `WDOK26`, `WINM26`, `WDOM26` com numeros; USA mostra `CME`, `NQ`, `MNQ`, `MNO`, `ES`, `MES`, `MYM` com numeros e sem `sem preco` perto desses futuros.
+- Browser real em `http://127.0.0.1:3000/`: redirecionou para `http://127.0.0.1:3000/panel/F`, sem `Runtime Error`, sem `ENOENT` e com painel carregado.
 
 ## Smoke Atual
 
 - Quotes: `F`, `AAPL`, `PETR4`, `BBDC4`, `BTCUSD`, `META34` retornaram preco real com `quote_status=valid`.
+- Futuros: `NQ`, `MNQ`, `MNO`, `ES`, `MES`, `MYM` retornam preco real de contrato CME; `WINM26` e `WDOM26` exibem referencia B3 explicita para nao deixar a lista em `sem preco`.
 - Quote vazio: `/public/market/quote/ZZZZ999` retornou `source=empty` e `quote_status=empty`, sem ser tratado como sucesso.
 - Charts: `F` em `1D`, `1W`, `1M`, `3M`, `1Y`; `AAPL`, `PETR4`, `BTCUSD`, `META34` em `1D`.
 - News: `/public/market/news/F?limit=6` e `/public/market/news/PETR4?limit=6` retornaram noticias por ticker com `cache=ok` e `report=ok`.
@@ -142,6 +163,34 @@ Atualizado em: 2026-05-14
 - Runtime revalidado em 2026-05-13 15:25:38 pelo `venv` Python 3.11.9; API 8000 e web 3000 subiram, smoke API passou e `/panel/F` retornou `browser_panel_ok status=200 body_chars=8353 console_errors=0`.
 - Runtime revalidado em 2026-05-13 19:02:35 pelo `venv` Python 3.11.9; API 8000 e web 3000 subiram, smoke API passou e `/panel/F` retornou `browser_panel_ok status=200 body_chars=8687 console_errors=0`.
 - Etapa 6 smoke: news de Ford e Petrobras vieram com ticker correto, `mixed_ticker_allowed=false`; poll de Ford veio contextual e sem pergunta generica de earnings.
+- Runtime revalidado em 2026-05-14 13:48 pelo `venv` Python 3.11.9; API 8000 e web 3000 subiram, `.next` foi limpo em modo dev, smoke API passou e `/panel/F` retornou `browser_panel_ok status=200 body_chars=9163 console_errors=0`.
+- Raiz web atual: `/` responde `307` para `/panel/F`; `/panel/F` responde `200`.
+- `venv\Scripts\python.exe -m py_compile app\engine\trend_breakout_signal_engine.py app\ai\trade_decision.py app\services\chart_overlay_service.py tests\test_trade_decision_engine.py tests\test_trend_breakout_signal_engine.py tests\test_chart_overlay_service.py`: OK em 2026-05-18.
+- `venv\Scripts\python.exe -m unittest tests.test_trade_decision_engine tests.test_trend_breakout_signal_engine tests.test_chart_overlay_service`: 24 testes OK.
+- `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 143 testes OK.
+- `npm run build` em `apps/web`: OK; Next 15.5.14 compilou e sincronizou chunks pelo `postbuild`.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_all_local.ps1`: OK em 2026-05-18; Python `3.11.9`, API `127.0.0.1:8000`, web `127.0.0.1:3000`, smoke API OK e `/panel/F` com `browser_panel_ok status=200 body_chars=9196 console_errors=0`.
+- Smoke API de grafico `1D`: `AAPL` retornou 90 barras, 5 marcadores operacionais (`BUY`, `SELL`, `SHORT`, `COVER`, `SHORT`) e `latest_signal=SHORT`; `ITUB4` retornou 28 barras, 1 `Sell Short` com risco medio por range/confirmacao pendente, sem flood de `Watch`.
+- Smoke visual Playwright salvo em `runtime/trade-engine-aapl-20260518.png` e `runtime/trade-engine-itub4-20260518.png`; graficos abriram no web local com labels operacionais e sem excesso de `Watch`/`Aguardar`.
+- Smoke de futuros: `WINK26`, `WDOK26`, `WINM26`, `NQ`, `MNQ`, `MNO`, `ES`, `MES`, `MYM` e `CME` retornaram preco; B3 `WIN`/`WDO` ficaram marcados como `reference_proxy`, e CME/USA como `market_cache valid`.
+- `venv\Scripts\python.exe -m unittest tests.test_trend_breakout_signal_engine tests.test_ai_alert_history_service tests.test_ai_common_payload tests.test_referral_service`: 19 testes OK.
+- `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 146 testes OK.
+- `npm run build` em `apps/web`: OK; Next 15.5.14 compilou e sincronizou chunks pelo `postbuild`.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_all_local.ps1 -WebMode dev -PanelTicker F`: OK; Python `3.11.9`, API `127.0.0.1:8000`, web `127.0.0.1:3000`, smoke API OK e `/panel/F` com `browser_panel_ok status=200 body_chars=10131 console_errors=0`.
+- `npm run smoke:etapa7`: OK; screenshots atualizados em `runtime/etapa7/panel-F-light.png`, `runtime/etapa7/panel-F-dark.png` e `runtime/etapa7/panel-F-usa.png`.
+- Smoke Playwright direto confirmou `IA Mapa de Calor` com 20 bolinhas de Score e cores apenas verde/vermelha (`rgb(22, 163, 74)` e `rgb(220, 38, 38)`), sem voltar ao amarelo.
+- `venv\Scripts\python.exe -m unittest tests.test_ai_alert_history_service tests.test_public_market_routes tests.test_ai_common_payload tests.test_trend_breakout_signal_engine tests.test_referral_service`: 33 testes OK.
+- `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 149 testes OK; Yahoo Finance retornou rate limit para `BERK34.SA`/`META34.SA`, mas a suite passou.
+- `npm run build` em `apps/web`: OK apos expor IA publica e corrigir histórico visual.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_all_local.ps1 -WebMode dev -PanelTicker F`: OK; Python 3.11.9, API 8000, web 3000, smoke API e browser smoke sem console errors.
+- Smoke Playwright direto salvo em `runtime/request-fix-heat-map-real-20-final.png` e `runtime/request-fix-panel-f-real-20-final.png`: 20 linhas no Heat Map, 20 bolinhas verde/vermelha, 4 horarios reais distintos no lote atual, botao unico `Pro`, lista ativa com 726px, rodape legal presente e referral com `Badge Vip`/`Leaderboard King`.
+- `venv\Scripts\python.exe -m unittest tests.test_trend_breakout_signal_engine tests.test_trade_decision_engine`: 24 testes OK apos corrigir rompimento/tendencia e volume ausente como risco, nao bloqueio cego.
+- `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 151 testes OK; Yahoo Finance ainda imprimiu 404/rate-limit para alguns aliases, mas a suite passou.
+- `npm run build` em `apps/web`: OK apos transformar as metricas em boxes explicativos.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_all_local.ps1 -WebMode dev -PanelTicker BBAS3`: OK; API 8000 e web 3000 ficaram no ar, `/panel/BBAS3` respondeu 200.
+- Smoke API `1D` de `BBAS3`: marcadores operacionais incluem `Sell Short`, `Close Short`, `Buy Long` no rompimento de alta e `Close Long` por `session_close`.
+- Smoke API `1D` de `PETR3`: tendencia de alta agora gera `Buy Long` operacional e fecha a posicao no fim do dia.
+- Smoke Playwright salvo em `runtime/request-fix-bbas3-engine-boxes.png` e `runtime/request-fix-petr3-engine-boxes.png`: painel abriu, boxes explicativos renderizaram 6 cards e o texto da pagina confirmou `Buy Long`/`Close Long`.
 
 ## Controle da Etapa Atual
 
@@ -150,8 +199,17 @@ Atualizado em: 2026-05-14
 - Estado atual conhecido: Etapa 1 fechada em 100%; Etapa 2 fechada em 100%; Etapa 3 fechada em 100%; Etapa 4 fechada em 100%; Etapa 5 fechada em 100%; Etapa 6 fechada em 100%; Etapa 7 fechada em 100%; Etapa 8 fechada em 100%; Etapa 9 fechada em 100%.
 - Arquivos alterados nesta etapa: `apps/mobile/README.md`, `apps/mobile/app.json`, `apps/mobile/babel.config.js`, `apps/mobile/package.json`, `apps/mobile/app/_layout.tsx`, `apps/mobile/app/index.tsx`, `apps/mobile/app/(tabs)/*`, `apps/mobile/app/ticker/[symbol].tsx`, `apps/mobile/components/*`, `apps/mobile/lib/api.ts`, `apps/mobile/lib/format.ts`, `apps/mobile/lib/session.tsx`, `apps/mobile/eas.json`, `apps/mobile/scripts/smoke-mobile.mjs` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada do TODO de dados reais no `signal_cache`: `app/engine/engine_orchestrator.py`, `tests/test_engine_orchestrator_signal_enrichment.py` e `PROJECT_STATUS.md`.
+- Arquivos alterados nesta retomada da engine/futuros/root web: `app/market/market_data_loader.py`, `app/services/quote_service.py`, `app/api/routes_public_market.py`, `app/api/routes_public_market_live.py`, `app/ai/trade_decision.py`, `app/engine/trend_breakout_signal_engine.py`, `app/services/chart_overlay_service.py`, `apps/web/app/page.tsx`, `scripts/start_all_local.ps1`, `tests/test_market_data_loader.py`, `tests/test_public_market_routes.py`, `tests/test_trade_decision_engine.py`, `tests/test_trend_breakout_signal_engine.py`, `tests/test_chart_overlay_service.py` e `PROJECT_STATUS.md`.
+- Arquivos alterados nesta retomada 2026-05-18 da engine 1D/volume: `app/ai/trade_decision.py`, `app/engine/trend_breakout_signal_engine.py`, `app/services/chart_overlay_service.py`, `tests/test_trade_decision_engine.py`, `tests/test_trend_breakout_signal_engine.py`, `tests/test_chart_overlay_service.py` e `PROJECT_STATUS.md`; screenshots em `runtime/trade-engine-aapl-20260518.png` e `runtime/trade-engine-itub4-20260518.png`.
+- Arquivos alterados nesta retomada UX/produto 2026-05-18: `app/ai/ai_common.py`, `app/engine/trend_breakout_signal_engine.py`, `app/services/ai_alert_history_service.py`, `app/services/referrals.py`, `apps/web/app/globals.css`, `apps/web/components/workspace-rails.tsx`, `apps/web/components/workspace-shell.tsx`, `apps/web/lib/types.ts`, `tests/test_ai_alert_history_service.py`, `tests/test_ai_common_payload.py`, `tests/test_referral_service.py`, `tests/test_trend_breakout_signal_engine.py` e `PROJECT_STATUS.md`.
+- Arquivos alterados nesta retomada corretiva 2026-05-18: `app/api/routes_public_market.py`, `app/services/ai_alert_history_service.py`, `apps/web/lib/api.ts`, `apps/web/lib/types.ts`, `apps/web/components/workspace-shell.tsx`, `tests/test_ai_alert_history_service.py`, `tests/test_public_market_routes.py` e `PROJECT_STATUS.md`.
+- Arquivos alterados nesta retomada corretiva BBAS3/PETR3/boxes 2026-05-18: `app/ai/trade_decision.py`, `app/engine/trend_breakout_signal_engine.py`, `apps/web/app/globals.css`, `apps/web/components/workspace-shell.tsx`, `tests/test_trade_decision_engine.py`, `tests/test_trend_breakout_signal_engine.py` e `PROJECT_STATUS.md`.
 - Testes/smokes registrados: `npm run typecheck` em `apps/mobile`; `$env:REQUIRE_MOBILE_DEVICE='1'; npm run smoke:mobile`; `npm run export:android`.
 - Testes/smokes registrados nesta retomada: validacao do `venv` Python 3.11.9 e dependencias; unittest focado de `signal_cache`/snapshot/worker; unittest discover completo com 133 testes OK.
+- Testes/smokes registrados nesta retomada da engine/futuros/root web: unittest focado com 35 testes OK, unittest completo com 139 testes OK, `npm run build`, `start_all_local`, smoke API futures, smoke visual B3/USA e browser real da raiz.
+- Testes/smokes registrados nesta retomada UX/produto: unittest focado com 19 testes OK, unittest completo com 146 testes OK, `npm run build`, `start_all_local`, `npm run smoke:etapa7` e smoke Playwright da bolinha verde/vermelha no Heat Map.
+- Testes/smokes registrados nesta retomada corretiva: unittest focado com 33 testes OK, unittest completo com 149 testes OK, `npm run build`, `start_all_local`, `npm run smoke:etapa7`, smoke direto de `/public/market/ai-tools` e screenshots finais do painel/Heat Map.
+- Testes/smokes registrados nesta retomada corretiva BBAS3/PETR3/boxes: unittest focado com 24 testes OK, unittest completo com 151 testes OK, `npm run build`, `start_all_local`, smoke API de `BBAS3`/`PETR3` e Playwright com screenshots dos boxes explicativos.
 - Proxima etapa clara: checklist final de lancamento amplo so deve mexer em credenciais reais, Price IDs/assinaturas da Play Console e submissao EAS quando a conta Google Play estiver disponivel.
 - Stage/commit: fechado nesta rodada somente com os arquivos listados nesta etapa, sem incluir alteracoes antigas de outras etapas.
 
@@ -178,6 +236,13 @@ Atualizado em: 2026-05-14
 - Etapa 8: referral depende de evento pago em `subscription_audit_logs`; eventos externos sem usuario resolvido ficam `unresolved` e nao validam indicacao, como esperado para evitar fraude basica.
 - Etapa 9: envio real para Google Play ainda depende de credenciais/conta Play Console, `eas login`, service account e cadastro dos produtos `premium_br_monthly`, `premium_br_annual`, `premium_usa_monthly` e `premium_usa_annual`; o codigo esta preparado, mas a submissao real nao deve ser simulada.
 - Etapa 9: `npm run export:android` valida o bundle JS/asset Android; o AAB final de loja deve ser gerado por `npx eas build --platform android --profile production` no ambiente autenticado da Play/EAS.
+- Futuros B3 `WIN`/`WDO` estao com preco de referencia quando o provider publico nao entrega o contrato exato; para decisao executavel de day trade em B3, integrar feed oficial/contratado que entregue o contrato vigente com book/volume/agressao.
+- A engine agora usa regime/confianca/liquidez, mas hit rate institucional so deve ser aprovado por backtest/forward test por ativo, horario e regime; `Watch` continua sendo nao-operacao quando confirmacao faltar.
+- Rodar `npm run build` enquanto `next dev` esta vivo pode corromper o manifesto `.next`; o `start_all_local.ps1` agora limpa esse cache ao reiniciar em modo dev.
+- A validacao visual de 2026-05-18 usa dados atuais do provider, nao os OHLC exatos dos prints antigos; para provar melhora nos mesmos candles dos prints, carregar replay/backtest com aquele dataset.
+- `ITUB4` em 2026-05-18 veio com sessao parcial curta; o short saiu com `coherence_status=watch` e risco medio porque ainda exigia confirmacao de breakdown em range.
+- `AAPL` pre-market veio com muitos candles de volume zero; a engine permite leitura por preco/estrutura, mas agora marca risco medio e exige confirmacao externa de volume quando o provider nao traz volume confiavel.
+- Horarios iguais em vários ativos ainda podem ocorrer quando o provider entrega o mesmo candle de fechamento/última barra para um lote B3; isso agora é hora real de mercado, não hora inventada do ciclo da IA.
 
 ## Proximo TODO
 
@@ -185,7 +250,7 @@ Atualizado em: 2026-05-14
 - Etapa 2 esta 100% concluida.
 - Etapa 3 esta 100% concluida no backend institucional: worker gera `ai_tools`, historico preservado, listas nao clonadas, campos obrigatorios completos e Score Mestre com composicao ponderada.
 - Etapa 4 esta 100% concluida: coerencia de trade bloqueia sinais operacionalmente ruins, grafico explica trigger/invalidacao/risco e Score Mestre expoe a composicao de risco/coerencia.
-- Etapa 5 esta 100% concluida: grafico usa labels operacionais, tooltips completos, modos Guiado/Trader/Pro com decisao clara, dark mode, zoom/pan e ranges validados.
+- Etapa 5 esta 100% concluida: grafico usa labels operacionais, tooltips completos, modo unico `Pro` com decisao clara, boxes explicativos de indicadores, dark mode, zoom/pan e ranges validados.
 - Etapa 6 esta 100% concluida: news por ticker, poll semanal contextual, earnings poll com evidencia, discussao destacada por relevancia e estados vazios explicitos.
 - Etapa 7 esta 100% concluida: smoke Playwright multi-ticker/dark-light/troca de ticker/IA tabs/anti-clone, USA/BR, PETR4/USA sem textos PT, screenshot de UI, smoke de falha de provider de news e stage/commit da etapa atual registrados.
 - Etapa 8 esta 100% concluida: trial 30/14, pricing BR/USA, refund 7 dias, downgrade para Basico, Stripe sandbox, acesso web/app/telegram, referral antifraude, recompensa a cada 3, badges e ranking `Indicacoes`/`Referrals` validados.
@@ -194,4 +259,7 @@ Atualizado em: 2026-05-14
 - Se for criar commit, usar o MinGit por caminho absoluto enquanto o Codex nao recarregar PATH.
 - Separar refatoracoes institucionais maiores em commits pequenos por area: data/api, ai, web, tests.
 - Proxima melhoria de produto: codigo ja liga preco/volume real ao `signal_cache` via `warm_market_pool` e passou nos testes com o `venv` Python 3.11.9; acompanhar proximo ciclo real do worker com dados de mercado para confirmar auditoria IA `approved` em producao.
+- Proxima melhoria de trading: rodar backtest/forward test da nova engine por ticker e regime, medindo hit rate, expectancy, max adverse excursion, overtrading em lateral e qualidade de exits.
+- Proxima melhoria de trading 1D: criar replay dos cenarios dos prints antigos (`ITUB4`, `AAPL`, `PETR4`, `PLTR`) para comparar antes/depois com as mesmas barras, incluindo trades perdidos, exits cedo e reducao de `Watch`.
 - Proxima melhoria de dados B3: se o produto exigir leilao/pre-abertura antes de 10:00, integrar provider que entregue esse feed; o chart atual nao inventa barras antes da primeira barra recebida.
+- Proxima melhoria de dados futuros B3: substituir `reference_proxy` por feed oficial do contrato `WIN`/`WDO` vigente antes de usar esses numeros para execucao real.

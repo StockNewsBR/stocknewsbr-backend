@@ -13,6 +13,7 @@ export type RankingRow = {
   score: number;
   trend?: string | null;
   rsi?: number | string | null;
+  rel_volume?: number | string | null;
   breakout?: boolean;
   price?: number | null;
 };
@@ -48,11 +49,23 @@ export type AiToolRow = {
   ai_comment?: string;
   trigger?: string;
   invalidation?: string;
+  market_data_updated_at?: string | number | null;
+  last_bar_at?: string | number | null;
+  bar_time?: string | number | null;
+  time?: string | number | null;
+  timestamp?: string | number | null;
+  quote_time?: string | number | null;
+  provider_timestamp?: string | number | null;
+  created_at?: string | number | null;
   updated_at?: string;
+  detected_at?: string;
+  last_seen_at?: string;
+  active?: boolean;
 };
 
 export type WorkspaceAiTools = {
   heat_map: AiToolRow[];
+  radar: AiToolRow[];
   breakout_probability: AiToolRow[];
   institutional_flow: AiToolRow[];
   smart_money: AiToolRow[];
@@ -62,6 +75,15 @@ export type WorkspaceAiTools = {
   liquidity_map: AiToolRow[];
   market_regime: AiToolRow[];
   master_score: AiToolRow[];
+};
+
+export type PublicAiToolsPayload = {
+  reset_key: string;
+  updated_at?: string | null;
+  max_rows_per_tool: number;
+  reset_hour: number;
+  timezone: string;
+  tools: Partial<WorkspaceAiTools>;
 };
 
 export type HelpGuide = {
@@ -110,7 +132,13 @@ export type FeedPost = {
   timestamp?: number;
   likes?: number;
   liked_by_me?: boolean;
+  reposts?: number;
+  reposted_by_me?: boolean;
+  my_repost_quote_text?: string | null;
+  is_followed_by_me?: boolean;
   comments?: FeedComment[];
+  discussion_relevance_score?: number;
+  discussion_relevance_reason?: string[];
 };
 
 export type ChatMessage = {
@@ -190,13 +218,31 @@ export type ChartBar = {
   volume?: number;
   ema9?: number;
   ema21?: number;
+  supertrend?: number | null;
+  supertrend_side?: "buy" | "sell" | "neutral" | string | null;
 };
 
 export type ChartMarker = {
   type?: string;
   side?: "buy" | "sell" | "neutral";
+  ticker?: string;
+  shape?: string;
+  color?: string;
   price?: number;
   time?: string;
+  label?: string;
+  action_label?: string;
+  operational_note?: string;
+  score?: number | null;
+  reason?: string | null;
+  reason_text?: string | null;
+  trigger?: string | null;
+  confirmation?: string | null;
+  invalidation?: string | null;
+  risk?: string | null;
+  risk_level?: string | null;
+  coherence_status?: string | null;
+  derived?: boolean | null;
 };
 
 export type ChartZone = {
@@ -215,6 +261,10 @@ export type ChartPayload = {
     ticker?: string;
     latest_close?: number;
     trend_bias?: string;
+    latest_signal?: string;
+    markers?: number;
+    bullish_markers?: number;
+    bearish_markers?: number;
   };
 };
 
@@ -222,6 +272,62 @@ export type FeedPayload = {
   symbol: string;
   count: number;
   posts: FeedPost[];
+  featured_posts?: FeedPost[];
+  discussion_state?: {
+    symbol?: string;
+    status?: string;
+    message?: string;
+    count?: number;
+    featured_count?: number;
+  };
+};
+
+export type NewsItem = {
+  id: string;
+  ticker: string;
+  title: string;
+  summary?: string;
+  card_summary?: string | null;
+  source: string;
+  source_domain?: string | null;
+  url?: string | null;
+  published_at?: string | null;
+  sector?: string | null;
+  industry?: string | null;
+  labels?: string[];
+  entities?: string[];
+  impact?: string | null;
+  impact_label?: string | null;
+  impact_reason?: string | null;
+  why_it_matters?: string | null;
+  editorial?: string | null;
+  market_context?: string | null;
+  relevance_score?: number | null;
+  ranking_score?: number | null;
+  confidence_score?: number | null;
+  useful?: boolean | null;
+  story_key?: string | null;
+  same_story_count?: number | null;
+  source_count?: number | null;
+  sources?: string[];
+  direct_ticker_match?: boolean | null;
+  directness_score?: number | null;
+  ambiguity_score?: number | null;
+  ambiguity_flags?: string[];
+  trader_takeaway?: string | null;
+};
+
+export type NewsPayload = {
+  symbol: string;
+  items: NewsItem[];
+  count: number;
+  requested_symbol?: string;
+  status?: string;
+  message?: string;
+  state?: Record<string, unknown>;
+  scope?: Record<string, unknown>;
+  report?: Record<string, unknown>;
+  cache?: Record<string, unknown>;
 };
 
 export type PollOption = {
@@ -237,6 +343,12 @@ export type PollPayload = {
   options?: PollOption[];
   total_votes?: number;
   status?: string;
+  timing_bucket?: string;
+  earnings_week?: boolean;
+  template_id?: string;
+  context?: Record<string, unknown>;
+  report?: Record<string, unknown>;
+  quality?: Record<string, unknown>;
 };
 
 export type ChatHistoryPayload = {
@@ -263,6 +375,13 @@ export type UserAccess = {
   };
   trial_expires_at?: string | null;
   plan_expires_at?: string | null;
+  subscription_provider?: string | null;
+  subscription_origin?: string | null;
+  subscription_product_id?: string | null;
+  legal_notice_version?: string | null;
+  accepted_terms_at?: string | null;
+  accepted_privacy_at?: string | null;
+  accepted_risk_notice_at?: string | null;
 };
 
 export type AuthFlowResponse = {
@@ -293,6 +412,19 @@ export type QuotePayload = {
   volume?: number;
   high?: number;
   low?: number;
+  source?: string;
+  quote_status?: "valid" | "partial" | "empty" | "stale" | string;
+  stale?: boolean;
+};
+
+export type PublicInsightPayload = {
+  symbol: string;
+  score?: number | null;
+  rsi?: number | null;
+  rel_volume?: number | null;
+  trend_bias?: string | null;
+  signal?: string | null;
+  summary?: Record<string, unknown>;
 };
 
 export type UploadResponse = {

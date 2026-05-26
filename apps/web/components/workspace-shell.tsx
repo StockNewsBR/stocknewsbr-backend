@@ -25,6 +25,7 @@ import {
   getChart,
   getChatHistory,
   getFeed,
+  getPublicAiTools,
   getPublicInsight,
   getPublicChart,
   getPublicQuote,
@@ -67,6 +68,7 @@ import type {
   NewsPayload,
   PollPayload,
   PollOption,
+  PublicAiToolsPayload,
   PublicBootstrap,
   PublicInsightPayload,
   QuotePayload,
@@ -200,7 +202,7 @@ const WORKSPACE_PERSONAS: Record<
   }
 > = {
   guiado: {
-    label: "Guiado",
+    label: "Pro",
     subtitle: "Explica melhor o que importa primeiro.",
     emphasis: "Comece por preço, notícia útil e leitura final da IA.",
     feedHint: "Use o feed para contexto; confirme tudo no gráfico.",
@@ -221,7 +223,7 @@ const WORKSPACE_PERSONAS: Record<
 
 const WORKSPACE_PERSONAS_EN: Record<WorkspacePersona, (typeof WORKSPACE_PERSONAS)[WorkspacePersona]> = {
   guiado: {
-    label: "Guided",
+    label: "Pro",
     subtitle: "Explains what matters first.",
     emphasis: "Start with price, useful news and the final AI read.",
     feedHint: "Use the feed for context; confirm everything on the chart.",
@@ -239,6 +241,8 @@ const WORKSPACE_PERSONAS_EN: Record<WorkspacePersona, (typeof WORKSPACE_PERSONAS
     feedHint: "Ignore noise and treat news as a trigger only with price confirmation.",
   },
 };
+
+const VISIBLE_WORKSPACE_PERSONAS: WorkspacePersona[] = ["guiado"];
 
 const TOP_TAB_TEXT: Record<string, string> = {
   grafico: "IA Gráfico/ Rede Social",
@@ -1316,11 +1320,17 @@ function normalizeAlertEpoch(value?: unknown) {
 
 function resolveAiAlertTimestamp(row: AiToolRow, fallbackIso?: unknown) {
   return (
+    normalizeAlertTimestamp(row.market_data_updated_at) ||
+    normalizeAlertTimestamp(row.last_bar_at) ||
+    normalizeAlertTimestamp(row.bar_time) ||
+    normalizeAlertTimestamp(row.time) ||
+    normalizeAlertTimestamp(row.timestamp) ||
+    normalizeAlertTimestamp(row.quote_time) ||
+    normalizeAlertTimestamp(row.provider_timestamp) ||
     normalizeAlertTimestamp(row.detected_at) ||
     normalizeAlertTimestamp(row.updated_at) ||
     normalizeAlertTimestamp(row.last_seen_at) ||
-    normalizeAlertTimestamp((row as any).timestamp) ||
-    normalizeAlertTimestamp((row as any).created_at) ||
+    normalizeAlertTimestamp(row.created_at) ||
     normalizeAlertTimestamp(fallbackIso)
   );
 }
@@ -1358,6 +1368,15 @@ function aiAlertComparableSignature(row: AiToolRow) {
     row.trigger ?? "",
     row.invalidation ?? "",
   ].join("|");
+}
+
+function isNewerAiAlert(next: AiToolRow, current?: AiToolRow | null) {
+  if (!current) return true;
+  const nextTime = Date.parse(resolveAiAlertTimestamp(next) || "");
+  const currentTime = Date.parse(resolveAiAlertTimestamp(current) || "");
+  if (!Number.isFinite(nextTime)) return false;
+  if (!Number.isFinite(currentTime)) return true;
+  return nextTime > currentTime;
 }
 
 function withAlertTimestamp(row: AiToolRow, fallbackIso: string): AiToolRow {
@@ -1446,6 +1465,7 @@ function selectDiverseByLens<T>(
 
   for (const row of rows) tryPush(row, true, true);
   for (const row of rows) tryPush(row, true, false);
+  for (const row of rows) tryPush(row, false, false);
   return selected.slice(0, limit);
 }
 
@@ -3213,6 +3233,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
   const [, setBootstrap] = useState<PublicBootstrap | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
+  const [publicAiTools, setPublicAiTools] = useState<PublicAiToolsPayload | null>(null);
   const [access, setAccess] = useState<UserAccess | null>(null);
   const [chart, setChart] = useState<any>(null);
   const [publicChart, setPublicChart] = useState<any>(null);
@@ -3250,7 +3271,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [remoteSearchSymbols, setRemoteSearchSymbols] = useState<string[]>([]);
   const [customWatchItems, setCustomWatchItems] = useState<WatchlistItem[]>([]);
   const [activeWatchSymbols, setActiveWatchSymbols] = useState<string[]>(() => PRELOADED_UNIVERSE.map((item) => item.symbol));
-  const [workspacePersona, setWorkspacePersona] = useState<WorkspacePersona>("trader");
+  const [workspacePersona, setWorkspacePersona] = useState<WorkspacePersona>("guiado");
   const [appLocale, setAppLocale] = useState<AppLocale>(readInitialLocale);
   const isUsLocale = appLocale === "en-US";
 
@@ -3404,16 +3425,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
   useEffect(() => {
     const storedPersona = window.localStorage.getItem("stocknewsbr.workspace_persona");
-    if (storedPersona === "guiado" || storedPersona === "trader" || storedPersona === "pro") {
+    if (storedPersona === "guiado") {
       setWorkspacePersona(storedPersona);
       return;
     }
     if (focusedTab) return;
-    if (!token) {
-      setWorkspacePersona("guiado");
-      return;
-    }
-    setWorkspacePersona("trader");
+    setWorkspacePersona("guiado");
   }, [focusedTab, token]);
 
   useEffect(() => {
@@ -3573,15 +3590,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         getPublicInsight(deferredTicker, chartInterval),
         getPublicChart(deferredTicker, chartInterval),
         getNews(null, deferredTicker),
+        getPublicAiTools(),
       ])
         .then((results) => {
           if (cancelled) return;
 
-          const [quoteResult, insightResult, chartResult, newsResult] = results;
+          const [quoteResult, insightResult, chartResult, newsResult, aiToolsResult] = results;
           const nextQuote = quoteResult.status === "fulfilled" ? quoteResult.value : null;
           const nextInsight = insightResult.status === "fulfilled" ? insightResult.value : null;
           const nextChart = chartResult.status === "fulfilled" ? chartResult.value : null;
           const nextNews = newsResult.status === "fulfilled" ? newsResult.value : null;
+          const nextPublicAiTools = aiToolsResult.status === "fulfilled" ? aiToolsResult.value : null;
 
           if (nextQuote?.symbol) {
             const normalizedQuoteSymbol = normalizeSymbol(nextQuote.symbol);
@@ -3598,6 +3617,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           });
           setQuote(nextQuote);
           setNews(nextNews);
+          setPublicAiTools(nextPublicAiTools);
         })
         .catch((requestError: Error) => {
           if (!cancelled) setError(requestError.message);
@@ -3645,6 +3665,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }
     setPublicQuotes({});
     setPublicInsight(null);
+    setPublicAiTools(null);
 
     let cancelled = false;
     setLoading(true);
@@ -4713,7 +4734,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       displayQuote?.volume,
     ],
   );
-  const derivedPublicInsight = useMemo(() => {
+  const derivedPublicInsight = useMemo<PublicInsightPayload | null>(() => {
     if (currentPublicInsight) return currentPublicInsight;
 
     const derivedTrend =
@@ -4743,6 +4764,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       symbol: selectedTicker,
       score: derivedScore ?? currentDerivedScore ?? null,
       rsi: currentRanking?.rsi != null ? Number(currentRanking.rsi) : null,
+      rel_volume: currentRanking?.rel_volume != null ? Number(currentRanking.rel_volume) : null,
       trend_bias: derivedTrend || null,
       signal:
         derivedTrend && /alta|bull|compra/i.test(String(derivedTrend))
@@ -4756,6 +4778,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     currentDerivedScore,
     currentPublicInsight,
     currentRanking?.rsi,
+    currentRanking?.rel_volume,
     currentRanking?.score,
     currentRanking?.trend,
     displayQuote,
@@ -4815,8 +4838,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const symbolLabel = currentWatchItem?.label || symbolName(selectedTicker);
   const currentAiKey = AI_TOOL_TAB_MAP[currentTab as keyof typeof AI_TOOL_TAB_MAP];
   const currentAiRows: AiToolRow[] = useMemo(
-    () => (currentAiKey ? workspace?.ai_tools?.[currentAiKey] : undefined) || [],
-    [currentAiKey, workspace?.ai_tools],
+    () => (currentAiKey ? workspace?.ai_tools?.[currentAiKey] || publicAiTools?.tools?.[currentAiKey] : undefined) || [],
+    [currentAiKey, workspace?.ai_tools, publicAiTools?.tools],
   );
   const newsRows = useMemo(
     () =>
@@ -4868,39 +4891,97 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       }),
     [activeNews?.items, selectedTicker, appLocale, isUsLocale],
   );
-  const stats = useMemo(() => [
-    { label: isUsLocale ? "Price" : "Preço", value: formatLocalePrice(displayQuote?.price, appLocale) },
-    { label: isUsLocale ? "Change" : "Variação", value: formatSignedPercent(displayQuote?.change_pct) },
-    { label: "Volume", value: formatCompact(displayQuote?.volume) },
-    {
-      label: isUsLocale ? "AI Score" : "Score IA",
-      value:
-        effectiveAiScore != null
-          ? Number(effectiveAiScore).toFixed(1)
-          : "n/a",
-    },
-    {
-      label: "RSI",
-      value:
-        currentRanking?.rsi != null
-          ? String(currentRanking.rsi)
-          : derivedPublicInsight?.rsi != null
-            ? String(derivedPublicInsight.rsi)
-            : "n/a",
-    },
-    {
-      label: "Bias",
-      value: localizeUiText(chartForDisplay?.summary?.trend_bias || currentRanking?.trend || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || "n/a", appLocale, selectedTicker),
-    },
-  ], [
+  const stats = useMemo(() => {
+    const changeValue = formatSignedPercent(displayQuote?.change_pct);
+    const volumeValue = formatCompact(displayQuote?.volume);
+    const aiScoreValue = effectiveAiScore != null ? Number(effectiveAiScore).toFixed(1) : "n/a";
+    const changeNumber = Number(displayQuote?.change_pct || 0);
+    const rsiRaw =
+      currentRanking?.rsi != null
+        ? Number(currentRanking.rsi)
+        : derivedPublicInsight?.rsi != null
+          ? Number(derivedPublicInsight.rsi)
+          : null;
+    const rsiValue = rsiRaw != null && Number.isFinite(rsiRaw) ? rsiRaw.toFixed(1) : "n/a";
+    const biasValue = localizeUiText(chartForDisplay?.summary?.trend_bias || currentRanking?.trend || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || "n/a", appLocale, selectedTicker);
+    const changeDirection = changeNumber < 0
+      ? (isUsLocale ? "falling" : "queda")
+      : changeNumber > 0
+        ? (isUsLocale ? "rising" : "alta")
+        : (isUsLocale ? "stable" : "estável");
+    const relVolume = Number(currentRanking?.rel_volume ?? derivedPublicInsight?.rel_volume ?? 0);
+    const volumeContext = Number.isFinite(relVolume) && relVolume > 0
+      ? relVolume < 0.8
+        ? (isUsLocale ? "below this asset's average" : "abaixo da média deste ativo")
+        : relVolume > 1.2
+          ? (isUsLocale ? "above this asset's average" : "acima da média deste ativo")
+          : (isUsLocale ? "near this asset's average" : "perto da média deste ativo")
+      : (isUsLocale ? "compare with the asset average before acting" : "compare com a média do ativo antes de agir");
+    const scoreNumber = Number(effectiveAiScore);
+    const scoreHint = Number.isFinite(scoreNumber)
+      ? scoreNumber >= 7
+        ? (isUsLocale ? `${aiScoreValue} favors strength/buy only with confirmation.` : `${aiScoreValue} favorece força/compra apenas com confirmação.`)
+        : scoreNumber <= 5.5
+          ? (isUsLocale ? `${aiScoreValue} indicates weak/sell bias; avoid long without confirmation.` : `${aiScoreValue} indicando baixa/venda; evite compra sem confirmação.`)
+          : (isUsLocale ? `${aiScoreValue} is moderate: wait for price/volume confirmation.` : `${aiScoreValue} é moderado: aguarde confirmação de preço/volume.`)
+      : (isUsLocale ? "No AI score confirmed for this asset yet." : "Sem Score IA confirmado para este ativo ainda.");
+    const rsiHint = rsiRaw != null && Number.isFinite(rsiRaw)
+      ? rsiRaw >= 70
+        ? (isUsLocale ? `${rsiValue}: overbought; avoid chasing price.` : `${rsiValue}: sobrecomprado; evite perseguir preço.`)
+        : rsiRaw <= 30
+          ? (isUsLocale ? `${rsiValue}: oversold; watch reaction before selling late.` : `${rsiValue}: sobrevenda; observe reação antes de vender atrasado.`)
+          : (isUsLocale ? `${rsiValue}: neutral now.` : `${rsiValue}: neutro no momento.`)
+      : (isUsLocale ? "RSI missing from the current payload." : "RSI ausente no payload atual.");
+
+    return [
+      {
+        label: isUsLocale ? "Price" : "Preço",
+        value: formatLocalePrice(displayQuote?.price, appLocale),
+        hint: isUsLocale ? "Current valid quote used by chart and AI." : "Cotação válida usada pelo gráfico e pela IA.",
+        tone: "neutral",
+      },
+      {
+        label: isUsLocale ? "Change" : "Variação",
+        value: changeValue,
+        hint: isUsLocale ? `${changeValue} indicates ${changeDirection} now.` : `${changeValue} indicando ${changeDirection} do ativo.`,
+        tone: changeNumber > 0 ? "up" : changeNumber < 0 ? "down" : "neutral",
+      },
+      {
+        label: "Volume",
+        value: volumeValue,
+        hint: isUsLocale ? `${volumeValue}; ${volumeContext}.` : `${volumeValue}, ${volumeContext}.`,
+        tone: Number.isFinite(relVolume) && relVolume > 1.2 ? "up" : Number.isFinite(relVolume) && relVolume > 0 && relVolume < 0.8 ? "down" : "neutral",
+      },
+      {
+        label: isUsLocale ? "AI Score" : "Score IA",
+        value: aiScoreValue,
+        hint: scoreHint,
+        tone: Number.isFinite(scoreNumber) && scoreNumber >= 7 ? "up" : Number.isFinite(scoreNumber) && scoreNumber <= 5.5 ? "down" : "neutral",
+      },
+      {
+        label: "RSI",
+        value: rsiValue,
+        hint: rsiHint,
+        tone: rsiRaw != null && Number.isFinite(rsiRaw) && (rsiRaw >= 70 || rsiRaw <= 30) ? "watch" : "neutral",
+      },
+      {
+        label: "Bias",
+        value: biasValue,
+        hint: isUsLocale ? `${biasValue} indicates the operating side until price invalidates it.` : `${biasValue} indicando o lado operacional do ativo.`,
+        tone: movementClass(null, biasValue, scoreNumber),
+      },
+    ];
+  }, [
     displayQuote?.price,
     displayQuote?.change_pct,
     displayQuote?.volume,
     effectiveAiScore,
     currentRanking?.rsi,
+    currentRanking?.rel_volume,
     currentRanking?.trend,
     chartForDisplay?.summary?.trend_bias,
     derivedPublicInsight?.score,
+    derivedPublicInsight?.rel_volume,
     derivedPublicInsight?.rsi,
     derivedPublicInsight?.trend_bias,
     derivedPublicInsight?.signal,
@@ -5094,10 +5175,23 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           trend: trend || "monitorando",
         });
         const rowUpdatedAt =
-          normalizeAlertTimestamp(row.detected_at ?? row.updated_at ?? row.last_seen_at ?? (row as any).timestamp ?? (row as any).created_at) ||
+          resolveAiAlertTimestamp(row, symbol === selectedTicker ? chartLatestEpoch : undefined) ||
           (symbol === selectedTicker ? normalizeAlertTimestamp(chartLatestEpoch) : undefined);
         const rowLastSeenAt =
-          normalizeAlertTimestamp(row.last_seen_at ?? row.updated_at ?? (row as any).timestamp ?? (row as any).created_at) ||
+          resolveAiAlertTimestamp(
+            {
+              ...(row as AiToolRow),
+              market_data_updated_at: undefined,
+              last_bar_at: undefined,
+              bar_time: undefined,
+              time: undefined,
+              timestamp: undefined,
+              quote_time: undefined,
+              provider_timestamp: undefined,
+              detected_at: row.last_seen_at || row.updated_at || row.detected_at,
+            },
+            rowUpdatedAt,
+          ) ||
           rowUpdatedAt;
         const backendSignal = String(row.signal || "").trim();
         const backendState = String(row.state || "").trim();
@@ -5130,111 +5224,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           last_seen_at: rowLastSeenAt ?? undefined,
         };
       });
-      const backendSymbols = new Set(backendRows.map((row) => normalizeSymbol(String(row.ticker || ""))));
-      const extraRows = expandedToolCandidates
-        .filter((item) => !backendSymbols.has(normalizeSymbol(item.symbol)))
-        .slice(0, 20)
-        .map((item) => {
-          const normalizedItemSymbol = normalizeSymbol(item.symbol);
-          const quote = resolveQuoteForSymbol(normalizedItemSymbol, publicQuotes, tickerTapeQuotes);
-          const watchItem = watchUniverse.find((candidate) => candidate.symbol === normalizedItemSymbol);
-          const changePct = quote?.change_pct ?? watchItem?.changePct ?? item.changePct ?? null;
-          const trend = item.trend || (normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal : null) || chartForDisplay?.summary?.trend_bias || "monitorando";
-          const rsi = item.rsi ?? (normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.rsi : null) ?? derivePublicRsi(changePct, trend);
-          const resolvedVolume = firstFiniteNumber(quote?.volume, item.volume, watchItem?.volume);
-          const rvol = deriveRelativeVolume(resolvedVolume);
-          const adx = deriveAdx(changePct, rsi, trend);
-          const atrPct = deriveAtrPct(changePct, rsi, resolvedVolume);
-          const score =
-            usableScore(
-              item.score,
-              normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.score : null,
-              derivePublicScore({
-                changePct,
-                rsi,
-                trend,
-                volume: resolvedVolume,
-              }),
-            ) ?? 5;
-          const narrative = buildPublicToolNarrative({
-            tabId: currentTab,
-            symbol: normalizedItemSymbol,
-            score: Number(score),
-            changePct,
-            price: quote?.price ?? item.price ?? watchItem?.price ?? null,
-            volume: resolvedVolume,
-            rsi,
-            rvol,
-            adx,
-            atrPct,
-            trend,
-          });
-          const lensMetrics = buildToolLensMetrics({
-            tabId: currentTab,
-            score: Number(score),
-            changePct,
-            volume: resolvedVolume,
-            rvol,
-            rsi,
-            adx,
-            atr_pct: atrPct,
-            trend,
-          });
-
-          return {
-            ticker: normalizedItemSymbol,
-            name: item.label || symbolName(normalizedItemSymbol),
-            tool: currentAiKey,
-            score: Number(score),
-            signal: narrative.signal,
-            state: narrative.state,
-            confidence: Math.round(Math.max(45, Math.min(95, Number(score) * 10))),
-            price: quote?.price ?? item.price ?? watchItem?.price ?? null,
-            change_pct: changePct,
-            volume: resolvedVolume,
-            rel_volume: rvol,
-            rsi,
-            adx,
-            atr_pct: atrPct,
-            metrics: lensMetrics,
-            ai_comment: narrative.ai_comment,
-            trigger: narrative.trigger,
-            invalidation: narrative.invalidation,
-            updated_at:
-              normalizeAlertTimestamp(item.timestamp) ||
-              (normalizedItemSymbol === selectedTicker ? normalizeAlertTimestamp(chartLatestEpoch) ?? undefined : undefined),
-            detected_at:
-              normalizeAlertTimestamp(item.timestamp) ||
-              (normalizedItemSymbol === selectedTicker ? normalizeAlertTimestamp(chartLatestEpoch) ?? undefined : undefined),
-          } satisfies AiToolRow;
-        });
-
-      const sortedRows = [...backendRows, ...extraRows].sort((a, b) => (
-        scoreToolCandidateForTab(currentTab, {
-          symbol: b.ticker,
-          changePct: b.change_pct,
-          score: b.score,
-          volume: b.volume,
-          rvol: b.rel_volume ?? (b as any).rvol,
-          rsi: b.rsi,
-          adx: b.adx,
-          atr_pct: b.atr_pct,
-          trend: b.state || b.signal,
-        }) -
-        scoreToolCandidateForTab(currentTab, {
-          symbol: a.ticker,
-          changePct: a.change_pct,
-          score: a.score,
-          volume: a.volume,
-          rvol: a.rel_volume ?? (a as any).rvol,
-          rsi: a.rsi,
-          adx: a.adx,
-          atr_pct: a.atr_pct,
-          trend: a.state || a.signal,
+      return [...backendRows]
+        .sort((a, b) => {
+          const bTime = Date.parse(resolveAiAlertTimestamp(b) || "");
+          const aTime = Date.parse(resolveAiAlertTimestamp(a) || "");
+          if (Number.isFinite(bTime) && Number.isFinite(aTime) && bTime !== aTime) return bTime - aTime;
+          return Number(b.score || 0) - Number(a.score || 0);
         })
-      ));
-
-      return selectDiverseByLens(sortedRows, currentTab, 20, (row) => row.ticker);
+        .slice(0, 20);
     }
 
     const sourceCandidates = expandedToolCandidates
@@ -5355,7 +5352,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     chartLatestEpoch,
   ]);
   const [aiAlertResetKey, setAiAlertResetKey] = useState(() => getAlertResetKey());
-  const [aiAlertHistory, setAiAlertHistory] = useState<Record<string, { resetKey: string; rows: AiToolRow[] }>>({});
+  const [aiAlertHistory, setAiAlertHistory] = useState<Record<string, { resetKey: string; rows: AiToolRow[]; source?: "real" }>>({});
 
   useEffect(() => {
     const timer = window.setInterval(() => setAiAlertResetKey(getAlertResetKey()), 60_000);
@@ -5366,7 +5363,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     try {
       const raw = window.localStorage.getItem(AI_ALERT_HISTORY_STORAGE_KEY);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as { resetKey?: string; tabs?: Record<string, { resetKey: string; rows: AiToolRow[] }> };
+      const parsed = JSON.parse(raw) as { resetKey?: string; tabs?: Record<string, { resetKey: string; rows: AiToolRow[]; source?: "real" }> };
       setAiAlertHistory(parsed.resetKey === aiAlertResetKey && parsed.tabs ? parsed.tabs : {});
     } catch {
       setAiAlertHistory({});
@@ -5384,15 +5381,29 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }
   }, [aiAlertHistory, aiAlertResetKey]);
 
+  const realAiVisibleRows = useMemo(() => {
+    if (!currentAiKey || !currentAiRows.length || !visibleAiRows.length) return [];
+    const realKeys = new Set(
+      currentAiRows.map((row) =>
+        aiAlertSignalKey({
+          ...(row as AiToolRow),
+          tool: currentAiKey,
+          ticker: normalizeSymbol(String((row as any).ticker || (row as any).symbol || "")),
+        }),
+      ),
+    );
+    return visibleAiRows.filter((row) => realKeys.has(aiAlertSignalKey(row)));
+  }, [currentAiKey, currentAiRows, visibleAiRows]);
+
   useEffect(() => {
-    if (!currentAiKey || !visibleAiRows.length) return;
+    if (!currentAiKey || !realAiVisibleRows.length) return;
     const detectedAt = new Date().toISOString();
-    const incoming = visibleAiRows.map((row) => withAlertTimestamp(row, detectedAt));
+    const incoming = realAiVisibleRows.map((row) => withAlertTimestamp(row, detectedAt));
     if (!incoming.length) return;
 
     setAiAlertHistory((current) => {
       const currentBucket = current[currentTab];
-      const retained = currentBucket?.resetKey === aiAlertResetKey ? currentBucket.rows : [];
+      const retained = currentBucket?.resetKey === aiAlertResetKey && currentBucket.source === "real" ? currentBucket.rows : [];
       const byKey = new Map<string, AiToolRow>();
 
       for (const row of retained) {
@@ -5403,21 +5414,31 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         const key = aiAlertSignalKey(row);
         const existing = byKey.get(key);
         if (existing && aiAlertComparableSignature(existing) === aiAlertComparableSignature(row)) {
-          byKey.set(key, existing);
+          if (isNewerAiAlert(row, existing)) {
+            byKey.set(key, {
+              ...existing,
+              ...row,
+              updated_at: row.updated_at || row.detected_at || existing.updated_at,
+              detected_at: row.detected_at || row.updated_at || existing.detected_at,
+              last_seen_at: row.last_seen_at || row.updated_at || row.detected_at || existing.last_seen_at,
+            });
+          } else {
+            byKey.set(key, existing);
+          }
           continue;
         }
         byKey.set(key, {
           ...(existing || {}),
           ...row,
-          updated_at: existing?.updated_at || row.updated_at,
-          detected_at: existing?.detected_at || row.detected_at || row.updated_at,
+          updated_at: isNewerAiAlert(row, existing) ? row.updated_at : existing?.updated_at || row.updated_at,
+          detected_at: isNewerAiAlert(row, existing) ? row.detected_at || row.updated_at : existing?.detected_at || row.detected_at || row.updated_at,
           last_seen_at: row.last_seen_at || row.updated_at || existing?.last_seen_at,
         });
       }
 
       const rows = Array.from(byKey.values())
-        .sort((a, b) => Date.parse(resolveAiAlertTimestamp(a) || "") - Date.parse(resolveAiAlertTimestamp(b) || ""))
-        .slice(-20);
+        .sort((a, b) => Date.parse(resolveAiAlertTimestamp(b) || "") - Date.parse(resolveAiAlertTimestamp(a) || ""))
+        .slice(0, 20);
 
       if (
         currentBucket?.resetKey === aiAlertResetKey &&
@@ -5431,11 +5452,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         ...current,
         [currentTab]: {
           resetKey: aiAlertResetKey,
+          source: "real",
           rows,
         },
       };
     });
-  }, [aiAlertResetKey, currentAiKey, currentTab, visibleAiRows]);
+  }, [aiAlertResetKey, currentAiKey, currentTab, realAiVisibleRows]);
 
   const fallbackAlertTimestamp = useMemo(() => new Date().toISOString(), [aiAlertResetKey, currentTab]);
   const visibleAiRowsWithTimestamps = useMemo(
@@ -5443,7 +5465,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     [fallbackAlertTimestamp, visibleAiRows],
   );
   const currentTabAlertRows =
-    aiAlertHistory[currentTab]?.resetKey === aiAlertResetKey && aiAlertHistory[currentTab]?.rows.length
+    currentAiRows.length &&
+    aiAlertHistory[currentTab]?.resetKey === aiAlertResetKey &&
+    aiAlertHistory[currentTab]?.source === "real" &&
+    aiAlertHistory[currentTab]?.rows.length
       ? aiAlertHistory[currentTab].rows
       : visibleAiRowsWithTimestamps;
   const showSymbolHeader = currentTab === "grafico";
@@ -5560,7 +5585,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const persona = (isUsLocale ? WORKSPACE_PERSONAS_EN : WORKSPACE_PERSONAS)[workspacePersona];
     const topNews = newsRows[0];
     const topDiscussion = featuredDiscussionPosts[0] || discussionPosts[0];
-    const leadingTool = currentTabAlertRows.at(-1) || currentAiRows[0];
+    const leadingTool = currentTabAlertRows[0] || currentAiRows[0];
     const decisionCards = buildChartDecisionCards(chartForDisplay, selectedTicker, displayQuote?.price, appLocale);
     const priceText =
       displayQuote?.price != null
@@ -5590,7 +5615,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
     if (workspacePersona === "guiado") {
       return {
-        title: isUsLocale ? "Guided Workflow" : "Roteiro guiado",
+        title: isUsLocale ? "Pro Workflow" : "Roteiro Pro",
         body: isUsLocale ? "Read what to do, watch or avoid before checking news and community." : "Leia o que fazer, observar ou evitar antes de olhar notícia e comunidade.",
         emphasis: persona.emphasis,
         cards: decisionCards.map((card) => localizeGuideCard(card, appLocale)),
@@ -6432,8 +6457,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             <div className="snbr-tool-stack">
               <p className="snbr-tool-lens">
                 {isUsLocale
-                  ? `Latest lens findings: ${currentTabAlertRows.length}/20. The list resets at 07:00 and keeps the most recent finding last.`
-                  : `Últimos achados da lente: ${currentTabAlertRows.length}/20. A lista zera às 07:00 e mantém o achado mais recente por último.`}
+                  ? `Visible lens findings: ${currentTabAlertRows.length}/20. A new finding appears first and the oldest visible row leaves the screen.`
+                  : `Achados visíveis da lente: ${currentTabAlertRows.length}/20. Um novo achado aparece primeiro e o último visível sai da tela.`}
               </p>
               {currentTabAlertRows.map((item, index) => {
                 const watchItem = watchUniverse.find((candidate) => candidate.symbol === item.ticker);
@@ -6464,6 +6489,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                         <div className="snbr-asset-box-head">
                           <strong>{item.ticker}</strong>
                           <span className={cx("snbr-side-badge", scoreClass(item.score))}>
+                            {currentTab === "heat-map" ? <i className={cx("snbr-score-dot", tone)} aria-hidden="true" /> : null}
                             Score {item.score.toFixed(1)}
                           </span>
                         </div>
@@ -6601,6 +6627,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                     <div className="snbr-asset-box-head">
                       <strong>{item.symbol}</strong>
                       <span className={cx("snbr-side-badge", scoreClass(item.score))}>
+                        {currentTab === "heat-map" ? <i className={cx("snbr-score-dot", tone)} aria-hidden="true" /> : null}
                         Score {item.score != null ? item.score.toFixed(1) : "n/a"}
                       </span>
                     </div>
@@ -6906,8 +6933,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             <span>{isUsLocale ? "Reward rule" : "Regra de prêmio"}</span>
             <strong>
               {isUsLocale
-                ? "3 paid referrals = 1 free month. 10 = Badge Vip. 100+ = Leaderboard VIP."
-                : "3 indicações pagas = 1 mês grátis. 10 = Badge Vip. 100+ = Leaderboard VIP."}
+                ? "3 valid paid referrals = 1 free month. 10 = Badge Vip. 100+ = Leaderboard King."
+                : "3 indicações pagas e válidas = 1 mês grátis. 10 = Badge Vip. 100+ = Leaderboard King."}
             </strong>
           </div>
         </div>
@@ -7615,11 +7642,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               ) : null}
             </div>
 
-            <div className="snbr-stat-strip">
+            <div className="snbr-stat-strip" aria-label={isUsLocale ? "Indicator explanation boxes" : "Boxes explicativos dos indicadores"}>
               {stats.map((item) => (
-                <div key={item.label} className="snbr-stat-cell">
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
+                <div key={item.label} className={cx("snbr-stat-cell", item.tone)}>
+                  <span className="snbr-stat-label">{item.label}</span>
+                  <strong className="snbr-stat-value">{item.value}</strong>
+                  {item.hint ? <small className="snbr-stat-help">{item.hint}</small> : null}
                 </div>
               ))}
             </div>
@@ -7643,7 +7671,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   <p>{focusGuide.body}</p>
                 </div>
                 <div className="snbr-persona-switch" role="tablist" aria-label={isUsLocale ? "Workspace use profile" : "Perfil de uso do workspace"}>
-                  {(Object.keys(WORKSPACE_PERSONAS) as WorkspacePersona[]).map((personaKey) => (
+                  {VISIBLE_WORKSPACE_PERSONAS.map((personaKey) => (
                     <button
                       key={personaKey}
                       className={cx("snbr-persona-chip", workspacePersona === personaKey && "active")}

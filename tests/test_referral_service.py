@@ -109,7 +109,7 @@ class ReferralServiceTests(unittest.TestCase):
     def test_badges_follow_requested_thresholds(self):
         self.assertIsNone(referral_badge(9))
         self.assertEqual(referral_badge(10), "Badge Vip")
-        self.assertEqual(referral_badge(100), "Leaderboard VIP")
+        self.assertEqual(referral_badge(100), "Leaderboard King")
 
 
 if __name__ == "__main__":

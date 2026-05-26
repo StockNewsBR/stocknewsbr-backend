@@ -40,6 +40,47 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def coerce_iso(value: Any, fallback: str | None = None) -> str:
+    if isinstance(value, str) and value.strip():
+        raw = value.strip()
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(raw)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc).isoformat()
+        except ValueError:
+            return raw
+
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+        except (OverflowError, OSError, ValueError):
+            pass
+
+    return fallback or now_iso()
+
+
+def market_timestamp(row: Dict[str, Any]) -> Any:
+    for key in (
+        "market_data_updated_at",
+        "last_bar_at",
+        "bar_time",
+        "time",
+        "timestamp",
+        "quote_time",
+        "provider_timestamp",
+        "detected_at",
+        "updated_at",
+        "last_seen_at",
+    ):
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
 def get_symbol(row: Dict[str, Any]) -> str:
     return (
         row.get("ticker")
@@ -51,12 +92,29 @@ def get_symbol(row: Dict[str, Any]) -> str:
 
 
 def get_name(row: Dict[str, Any]) -> str:
+    symbol = get_symbol(row)
     return (
         row.get("name")
         or row.get("company")
         or row.get("description")
-        or get_symbol(row)
+        or _fallback_name(symbol)
     )
+
+
+def _fallback_name(symbol: str) -> str:
+    normalized = str(symbol or "").upper().strip()
+    if not normalized:
+        return "UNKNOWN"
+    if normalized.endswith(".SA"):
+        base = normalized[:-3]
+        if base.endswith("34"):
+            return f"{base} BDR"
+        return base
+    if normalized.endswith("-USD"):
+        return normalized.replace("-USD", " Crypto")
+    if normalized.isalpha() and len(normalized) <= 6:
+        return f"{normalized} US"
+    return normalized
 
 
 def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -135,6 +193,41 @@ def confidence_from_inputs(row: Dict[str, Any], extra: float = 0.0) -> int:
     return safe_int(clamp(base + extra, 5, 100))
 
 
+def _news_context(row: Dict[str, Any]) -> Dict[str, Any]:
+    raw = row.get("news_context") or row.get("news") or row.get("news_report")
+    ticker = str(row.get("ticker") or row.get("symbol") or "UNKNOWN")
+
+    if isinstance(raw, dict):
+        context = dict(raw)
+        context.setdefault("ticker", ticker)
+        context.setdefault("status", "available")
+        return context
+
+    if isinstance(raw, list):
+        return {
+            "ticker": ticker,
+            "status": "available" if raw else "empty",
+            "items": raw[:3],
+        }
+
+    return {
+        "ticker": ticker,
+        "status": "not_linked",
+        "summary": "Sem noticia acoplada ao ciclo deste alerta.",
+    }
+
+
+def _reason_from_metrics(tool: str, state: str, score: float, metrics: Dict[str, Any]) -> str:
+    metric_parts = []
+    for key, value in list((metrics or {}).items())[:5]:
+        if isinstance(value, float):
+            metric_parts.append(f"{key}={value:.2f}")
+        else:
+            metric_parts.append(f"{key}={value}")
+    metric_text = ", ".join(metric_parts) if metric_parts else "sem metricas adicionais"
+    return f"{tool} calculou estado {state} com score {score:.1f}; base: {metric_text}."
+
+
 def build_payload(
     row: Dict[str, Any],
     tool: str,
@@ -144,8 +237,16 @@ def build_payload(
     trigger: str,
     invalidation: str,
     metrics: Optional[Dict[str, Any]] = None,
+    reason: str | None = None,
+    news_context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     score = round(clamp(score), 1)
+    metric_payload = dict(metrics or {})
+    for metric_key in ("data_quality", "source_score", "source_score_rank"):
+        if row.get(metric_key) not in (None, ""):
+            metric_payload.setdefault(metric_key, row.get(metric_key))
+    timestamp = coerce_iso(market_timestamp(row))
+    reason_text = reason or _reason_from_metrics(tool, state, score, metric_payload)
     return {
         "ticker": row.get("ticker", "UNKNOWN"),
         "name": row.get("name", row.get("ticker", "UNKNOWN")),
@@ -162,13 +263,26 @@ def build_payload(
         "rsi": round(safe_float(row.get("rsi", 50.0)), 2),
         "adx": round(safe_float(row.get("adx", 15.0)), 2),
         "atr_pct": round(safe_float(row.get("atr_pct", 1.0)), 2),
-        "metrics": metrics or {},
+        "metrics": metric_payload,
         "ai_comment": ai_comment,
         "trigger": trigger,
         "invalidation": invalidation,
-        "updated_at": now_iso(),
+        "invalidacao": invalidation,
+        "reason": reason_text,
+        "news_context": news_context or _news_context(row),
+        "detected_at": timestamp,
+        "updated_at": timestamp,
+        "last_seen_at": timestamp,
     }
 
 
 def top_n(results: Iterable[Dict[str, Any]], limit: int = 12) -> List[Dict[str, Any]]:
-    return sorted(results, key=lambda x: x.get("score", 0), reverse=True)[: max(1, limit)]
+    return sorted(
+        results,
+        key=lambda x: (
+            x.get("_rank_score", x.get("_sort_score", x.get("score", 0))),
+            x.get("score", 0),
+            x.get("confidence", 0),
+        ),
+        reverse=True,
+    )[: max(1, limit)]

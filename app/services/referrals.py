@@ -51,7 +51,7 @@ def _masked_name(user: User | None) -> str:
 
 def referral_badge(total_validated: int) -> str | None:
     if total_validated >= LEADERBOARD_BADGE_AT:
-        return "Leaderboard VIP"
+        return "Leaderboard King"
     if total_validated >= VIP_BADGE_AT:
         return "Badge Vip"
     return None
@@ -290,7 +290,7 @@ def referral_leaderboard(db: Session, limit: int = 50):
         "items": rows,
         "rules": {
             "valid_after_days": REFUND_WINDOW_DAYS + 1,
-            "reward": "1 month after each 3 paid referrals",
+            "reward": "1 free month after each 3 paid referrals; 10 adds Badge Vip; 100+ adds Leaderboard King",
             "vip_badge_at": VIP_BADGE_AT,
             "leaderboard_badge_at": LEADERBOARD_BADGE_AT,
         },
