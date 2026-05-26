@@ -1,294 +1,156 @@
+import { Redirect } from "expo-router";
 import { useEffect, useState } from "react";
-import {
-  Linking,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View
-} from "react-native";
-import * as SecureStore from "expo-secure-store";
+import { Linking, ScrollView, Text, View } from "react-native";
 
-import { getAccess, getChart, getPoll, getWorkspace, loginJson, logoutAuth, requestTelegramLink, verifyLoginOtp } from "@/lib/api";
+import { Button, Card, Divider, Field, Pill, SectionHeader, StatTile, theme } from "@/components/ui";
+import { getBillingPricing } from "@/lib/api";
+import { useSession } from "@/lib/session";
 
-const styles = {
-  screen: { flex: 1, backgroundColor: "#061018" } as const,
-  container: { padding: 20, gap: 16 } as const,
-  title: { color: "#eef4fb", fontSize: 28, fontWeight: "700" as const },
-  subtitle: { color: "#8fa4b8", fontSize: 14 },
-  card: {
-    backgroundColor: "#101c2b",
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
-    gap: 10
-  } as const,
-  input: {
-    backgroundColor: "#0c1622",
-    color: "#eef4fb",
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)"
-  } as const,
-  button: {
-    backgroundColor: "#1fd38a",
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: "center" as const
-  },
-  buttonSecondary: {
-    backgroundColor: "#182434",
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: "center" as const
-  },
-  buttonText: { color: "#061018", fontWeight: "700" as const },
-  buttonTextSecondary: { color: "#eef4fb", fontWeight: "700" as const },
-  row: {
-    flexDirection: "row" as const,
-    justifyContent: "space-between" as const,
-    alignItems: "center" as const
-  },
-  chip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.06)"
-  } as const,
-  chipText: { color: "#8fa4b8", fontSize: 12 },
-  rankingRow: {
-    flexDirection: "row" as const,
-    justifyContent: "space-between" as const,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.06)"
-  } as const
-};
-
-export default function HomeScreen() {
+export default function AuthGateScreen() {
+  const { ready, token, bootstrap, challenge, busy, error, signIn, verifyOtp, clearError } = useSession();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [otpCode, setOtpCode] = useState("");
-  const [loginToken, setLoginToken] = useState("");
-  const [debugOtpCode, setDebugOtpCode] = useState("");
-  const [token, setToken] = useState("");
-  const [error, setError] = useState("");
-  const [ticker, setTicker] = useState("PETR4");
-  const [workspace, setWorkspace] = useState<any>(null);
-  const [chart, setChart] = useState<any>(null);
-  const [poll, setPoll] = useState<any>(null);
-  const [access, setAccess] = useState<any>(null);
-  const [telegramLink, setTelegramLink] = useState<any>(null);
+  const [otp, setOtp] = useState("");
+  const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [brPricing, setBrPricing] = useState<Record<string, any> | null>(null);
+  const [usaPricing, setUsaPricing] = useState<Record<string, any> | null>(null);
 
   useEffect(() => {
-    SecureStore.getItemAsync("stocknewsbr.token").then((stored) => {
-      if (stored) {
-        setToken(stored);
-      }
-    });
-  }, []);
+    if (error) {
+      setLocalError(error);
+    }
+  }, [error]);
 
   useEffect(() => {
-    if (!token) return;
+    let mounted = true;
 
     Promise.all([
-      getAccess(token),
-      getWorkspace(token),
-      getChart(token, ticker),
-      getPoll(ticker)
-    ])
-      .then(([nextAccess, nextWorkspace, nextChart, nextPoll]) => {
-        setAccess(nextAccess);
-        setWorkspace(nextWorkspace);
-        setChart(nextChart);
-        setPoll(nextPoll);
-      })
-      .catch((requestError) => {
-        setError(requestError instanceof Error ? requestError.message : "Erro ao carregar");
-      });
-  }, [token, ticker]);
-
-  async function handleLogin() {
-    try {
-      setError("");
-      const currentDeviceId = (await SecureStore.getItemAsync("stocknewsbr.device_id")) || `mobile-${Date.now()}`;
-      await SecureStore.setItemAsync("stocknewsbr.device_id", currentDeviceId);
-      const payload: any = await loginJson(email, password, {
-        channel: "app",
-        device_id: currentDeviceId,
-        device_label: "expo_mobile_app"
-      });
-
-      if (payload?.otp_required && payload?.login_token) {
-        setLoginToken(payload.login_token);
-        setOtpCode("");
-        setDebugOtpCode(payload.debug_otp_code || "");
+      getBillingPricing("BR").catch(() => null),
+      getBillingPricing("USA").catch(() => null),
+    ]).then(([nextBrPricing, nextUsaPricing]) => {
+      if (!mounted) {
         return;
       }
+      setBrPricing(nextBrPricing);
+      setUsaPricing(nextUsaPricing);
+    });
 
-      await SecureStore.setItemAsync("stocknewsbr.token", payload.access_token);
-      setToken(payload.access_token);
-      setLoginToken("");
-      setDebugOtpCode("");
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  if (ready && token) {
+    return <Redirect href="/(tabs)" />;
+  }
+
+  async function handleSignIn() {
+    setLocalError(null);
+    setLocalMessage(null);
+    clearError();
+
+    try {
+      const result = await signIn(email.trim(), password);
+      if (result.otpRequired) {
+        setLocalMessage("Conta Premium exige confirmacao por email.");
+      } else {
+        setLocalMessage("Sessao liberada com sucesso.");
+      }
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha no login");
+      setLocalError(requestError instanceof Error ? requestError.message : "login_failed");
     }
   }
 
   async function handleVerifyOtp() {
-    try {
-      setError("");
-      const payload: any = await verifyLoginOtp(loginToken, otpCode);
-      await SecureStore.setItemAsync("stocknewsbr.token", payload.access_token);
-      setToken(payload.access_token);
-      setLoginToken("");
-      setOtpCode("");
-      setDebugOtpCode("");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha no codigo");
-    }
-  }
-
-  async function handleLogout() {
-    if (token) {
-      try {
-        await logoutAuth(token);
-      } catch {}
-    }
-    await SecureStore.deleteItemAsync("stocknewsbr.token");
-    setToken("");
-    setAccess(null);
-    setWorkspace(null);
-    setChart(null);
-    setPoll(null);
-    setLoginToken("");
-    setOtpCode("");
-    setDebugOtpCode("");
-    setTelegramLink(null);
-  }
-
-  async function handleTelegramLink() {
-    if (!token) return;
+    setLocalError(null);
+    setLocalMessage(null);
+    clearError();
 
     try {
-      setError("");
-      const payload = await requestTelegramLink(token, "app");
-      setTelegramLink(payload);
-      if (payload?.deep_link) {
-        await Linking.openURL(payload.deep_link);
-      }
+      await verifyOtp(otp.trim());
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao gerar link do Telegram");
+      setLocalError(requestError instanceof Error ? requestError.message : "otp_failed");
     }
   }
+
+  async function openPublicSite() {
+    const url = bootstrap?.launch_roadmap?.domain || "https://www.stocknewsbr.com";
+    try {
+      await Linking.openURL(url);
+    } catch (requestError) {
+      setLocalError(requestError instanceof Error ? requestError.message : "open_site_failed");
+    }
+  }
+
+  const legacyPricing = bootstrap?.pricing || {};
+  const brPlan = brPricing?.selected || brPricing?.plans?.BR || {};
+  const usaPlan = usaPricing?.selected || usaPricing?.plans?.USA || {};
+  const brTrialDays = brPlan.trial_days || legacyPricing?.trial_days || 30;
+  const usaTrialDays = usaPlan.trial_days || brTrialDays;
+  const refundDays = brPricing?.refund_window_days || usaPricing?.refund_window_days || 7;
 
   return (
-    <View style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>StockNewsBR</Text>
-        <Text style={styles.subtitle}>Android-first app conectado ao backend real.</Text>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: theme.colors.background }}
+      contentContainerStyle={{ padding: 20, gap: 16 }}
+      keyboardShouldPersistTaps="handled"
+    >
+      <View style={{ gap: 8, paddingTop: 16 }}>
+        <Pill label="StockNewsBR Mobile" tone="accent" />
+        <Text style={{ color: theme.colors.text, fontSize: 32, fontWeight: "800", lineHeight: 36 }}>
+          A central completa do projeto no celular.
+        </Text>
+        <Text style={{ color: theme.colors.muted, fontSize: 15, lineHeight: 22 }}>
+          Login, mercado, social, polls e telegram em um fluxo unico, rapido e sem crash.
+        </Text>
+      </View>
 
-        {!token && !loginToken ? (
-          <View style={styles.card}>
-            <Text style={{ color: "#eef4fb", fontSize: 18, fontWeight: "700" }}>Entrar</Text>
-            <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor="#8fa4b8" />
-            <TextInput style={styles.input} value={password} secureTextEntry onChangeText={setPassword} placeholder="Senha" placeholderTextColor="#8fa4b8" />
-            <Pressable style={styles.button} onPress={handleLogin}>
-              <Text style={styles.buttonText}>Entrar</Text>
-            </Pressable>
-            <Text style={styles.subtitle}>Premium confirma o login com codigo por email. Trial e Free entram direto.</Text>
-            {error ? <Text style={{ color: "#ff6b6b" }}>{error}</Text> : null}
-          </View>
-        ) : !token ? (
-          <View style={styles.card}>
-            <Text style={{ color: "#eef4fb", fontSize: 18, fontWeight: "700" }}>Codigo por email</Text>
-            <Text style={styles.subtitle}>Conta Premium protegida com OTP no email.</Text>
-            <TextInput style={styles.input} value={otpCode} onChangeText={setOtpCode} placeholder="Codigo de 6 digitos" placeholderTextColor="#8fa4b8" />
-            <Pressable style={styles.button} onPress={handleVerifyOtp}>
-              <Text style={styles.buttonText}>Validar codigo</Text>
-            </Pressable>
-            <Pressable style={styles.buttonSecondary} onPress={() => { setLoginToken(""); setOtpCode(""); setDebugOtpCode(""); }}>
-              <Text style={styles.buttonTextSecondary}>Voltar</Text>
-            </Pressable>
-            {debugOtpCode ? <Text style={styles.subtitle}>Codigo local: {debugOtpCode}</Text> : null}
-            {error ? <Text style={{ color: "#ff6b6b" }}>{error}</Text> : null}
-          </View>
-        ) : (
+      <Card>
+        <SectionHeader title="Acesso" subtitle="Use a conta do produto. Trial entra direto; Premium pode pedir OTP por email." />
+        <Field value={email} onChangeText={setEmail} placeholder="Email" keyboardType="email-address" autoCapitalize="none" />
+        <Field value={password} onChangeText={setPassword} placeholder="Senha" secureTextEntry />
+        <Button label="Entrar no app" onPress={handleSignIn} loading={busy} />
+        {challenge ? (
           <>
-            <View style={styles.card}>
-              <View style={styles.row}>
-                <View>
-                  <Text style={{ color: "#eef4fb", fontSize: 18, fontWeight: "700" }}>
-                    {access?.display_name || access?.email || "Usuario"}
-                  </Text>
-                  <Text style={styles.subtitle}>Plano: {access?.plan || "n/a"}</Text>
-                </View>
-                <Pressable style={styles.buttonSecondary} onPress={handleLogout}>
-                  <Text style={styles.buttonTextSecondary}>Sair</Text>
-                </Pressable>
-              </View>
-              <Text style={styles.subtitle}>
-                Politica de sessao: {access?.session_policy || "shared"} | OTP Premium: {access?.otp_required_on_login ? "ativo" : "nao"}
-              </Text>
-              {access?.access?.telegram ? (
-                <Pressable style={styles.buttonSecondary} onPress={handleTelegramLink}>
-                  <Text style={styles.buttonTextSecondary}>Gerar link seguro do Telegram</Text>
-                </Pressable>
-              ) : null}
-              {telegramLink ? (
-                <Text style={styles.subtitle}>
-                  Codigo: {telegramLink.link_code} {telegramLink.deep_link ? "| bot aberto automaticamente" : ""}
-                </Text>
-              ) : null}
-            </View>
-
-            <View style={styles.card}>
-              <Text style={{ color: "#eef4fb", fontSize: 18, fontWeight: "700" }}>Ticker monitorado</Text>
-              <TextInput style={styles.input} value={ticker} onChangeText={(value) => setTicker(value.toUpperCase())} placeholder="PETR4" placeholderTextColor="#8fa4b8" />
-              <View style={styles.row}>
-                <View style={styles.chip}>
-                  <Text style={styles.chipText}>Workspace tabs: {workspace?.tabs?.length || 0}</Text>
-                </View>
-                <View style={styles.chip}>
-                  <Text style={styles.chipText}>Markers: {chart?.markers?.length || 0}</Text>
-                </View>
-              </View>
-              <Text style={styles.subtitle}>
-                No app as tabs ficam internas em tela unica. Popout e multi-monitor existem so na web.
-              </Text>
-            </View>
-
-            <View style={styles.card}>
-              <Text style={{ color: "#eef4fb", fontSize: 18, fontWeight: "700" }}>Ranking</Text>
-              {(workspace?.ranking || []).slice(0, 6).map((row: any) => (
-                <View key={row.symbol} style={styles.rankingRow}>
-                  <View>
-                    <Text style={{ color: "#eef4fb" }}>{row.symbol}</Text>
-                    <Text style={styles.subtitle}>Trend: {row.trend || "n/a"}</Text>
-                  </View>
-                  <Text style={{ color: "#1fd38a", fontWeight: "700" }}>
-                    {Number(row.score || 0).toFixed(2)}
-                  </Text>
-                </View>
-              ))}
-            </View>
-
-            <View style={styles.card}>
-              <Text style={{ color: "#eef4fb", fontSize: 18, fontWeight: "700" }}>Poll</Text>
-              <Text style={styles.subtitle}>{poll?.question || `Poll ativa para ${ticker}`}</Text>
-              {(poll?.options || []).map((option: any) => (
-                <View key={option.key} style={styles.rankingRow}>
-                  <Text style={{ color: "#eef4fb", flex: 1 }}>{option.label}</Text>
-                  <Text style={styles.subtitle}>{option.votes} votos</Text>
-                </View>
-              ))}
-            </View>
+            <Divider />
+            <Pill label={challenge.session_policy || "email otp"} tone="warning" />
+            <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 18 }}>
+              Confirme o codigo recebido por email para concluir o login Premium.
+            </Text>
+            <Field value={otp} onChangeText={setOtp} placeholder="Codigo de 6 digitos" keyboardType="numeric" />
+            <Button label="Validar codigo" onPress={handleVerifyOtp} loading={busy} />
+            {challenge.debug_otp_code ? <Text style={{ color: theme.colors.muted, fontSize: 12 }}>Codigo local: {challenge.debug_otp_code}</Text> : null}
           </>
-        )}
-      </ScrollView>
-    </View>
+        ) : null}
+        {localMessage ? <Text style={{ color: theme.colors.accent, fontSize: 13 }}>{localMessage}</Text> : null}
+        {localError ? <Text style={{ color: theme.colors.danger, fontSize: 13 }}>{localError}</Text> : null}
+      </Card>
+
+      <Card>
+        <SectionHeader title="Plano e lancamento" subtitle="Trial, Premium e regra de refund sincronizados com o backend." />
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+          <StatTile label="Trial BR" value={`${brTrialDays} dias`} />
+          <StatTile label="Trial USA" value={`${usaTrialDays} dias`} />
+          <StatTile label="BR mensal" value={`R$ ${brPlan.monthly_amount ?? 49}`} tone="accent" />
+          <StatTile label="BR anual" value={`R$ ${brPlan.annual_amount ?? 500}`} tone="info" />
+          <StatTile label="USA mensal" value={`$${usaPlan.monthly_amount ?? 49}`} tone="accent" />
+          <StatTile label="USA anual" value={`$${usaPlan.annual_amount ?? 500}`} tone="info" />
+          <StatTile label="Principal" value={bootstrap?.primary_launch_platform || "google_app"} tone="warning" />
+          <StatTile label="Refund" value={`${refundDays} dias`} />
+        </View>
+        <Divider />
+        <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
+          Conta internacional usa assinatura USA: Premium $49/month ou $500 upfront. Depois da janela de refund de 7 dias, nao ha devolucao do valor pago.
+        </Text>
+      </Card>
+
+      <Card>
+        <SectionHeader title="Atalhos" subtitle="Se quiser validar a plataforma publica, o dominio oficial abre daqui." />
+        <View style={{ gap: 10 }}>
+          <Button label="Abrir site oficial" onPress={openPublicSite} variant="secondary" />
+        </View>
+      </Card>
+    </ScrollView>
   );
 }

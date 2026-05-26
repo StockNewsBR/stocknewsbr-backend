@@ -16,6 +16,7 @@ class WorkspaceLayoutPayload(BaseModel):
     tabs: list[str] = Field(default_factory=list)
     pinned_ticker: str = Field(default="PETR4", max_length=16)
     opened_popouts: list[str] = Field(default_factory=list)
+    chart_settings: dict = Field(default_factory=dict)
 
 
 router = APIRouter(prefix="/web", tags=["web"])

@@ -7,7 +7,10 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "smoke:mobile": "node scripts/smoke-mobile.mjs",
+    "export:android": "expo export --platform android --output-dir dist/android"
   },
   "dependencies": {
     "expo": "^53.0.0",

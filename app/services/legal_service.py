@@ -1,3 +1,6 @@
+from app.services.access_service import pricing_catalog
+
+
 LEGAL_NOTICE_TEXT = (
     "O StockNewsBR e uma plataforma de inteligencia de mercado com IA, analise "
     "quantitativa e comunidade financeira. Todo o conteudo possui carater "
@@ -38,7 +41,10 @@ EDUCATION_DESCRIPTION = (
 )
 
 PRICING = {
-    "trial_days": 90,
+    "trial_days": 30,
+    "trial_policy": "Trial inicial de 30 dias. Depois de 30 dias do lancamento, novos trials passam para 14 dias e migram automaticamente para Basico ao vencer.",
+    "refund_window_days": 7,
+    "refund_policy": "Cancelamento com reembolso em ate 7 dias para contas Brasil e internacionais. Apos 7 dias nao ha reembolso.",
     "free_plan": {
         "name": "Basico",
         "price_brl_monthly": 0,
@@ -55,6 +61,18 @@ PRICING = {
         "price_brl": 500,
         "billing_cycle": "anual",
         "includes": ["app", "website", "telegram", "ferramentas de IA", "ranking", "alertas"],
+    },
+    "international_monthly": {
+        "name": "USA Premium Monthly",
+        "price_usd": 49,
+        "billing_cycle": "monthly",
+        "includes": ["app", "website", "telegram", "AI tools", "rankings", "alerts"],
+    },
+    "international_annual": {
+        "name": "USA Premium Annual",
+        "price_usd": 500,
+        "billing_cycle": "annual",
+        "includes": ["app", "website", "telegram", "AI tools", "rankings", "alerts"],
     },
 }
 
@@ -156,13 +174,26 @@ OFFICIAL_CHANNELS = {
 }
 
 
+def get_public_pricing():
+    catalog = pricing_catalog()
+    selected = catalog["selected"]
+    return {
+        **PRICING,
+        "trial_days": selected["trial_days"],
+        "trial_shortens_after_days": catalog["trial_shortens_after_days"],
+        "post_launch_trial_days": catalog["post_launch_trial_days"],
+        "markets": catalog["plans"],
+        "selected_market": catalog["market"],
+    }
+
+
 def get_public_bootstrap():
     return {
         "brand": "StockNewsBR",
         "primary_launch_platform": "google_app",
         "subscription_unlocks": ["google_app", "website", "telegram"],
         "launch_roadmap": LAUNCH_ROADMAP,
-        "pricing": PRICING,
+        "pricing": get_public_pricing(),
         "google_play_description": GOOGLE_PLAY_DESCRIPTION,
         "education_description": EDUCATION_DESCRIPTION,
         "subscription_terms": SUBSCRIPTION_TERMS_TEXT,

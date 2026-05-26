@@ -59,7 +59,7 @@ from app.services.access_service import (
 )
 from app.services.email_service import send_login_code_email
 from app.services.legal_service import get_public_bootstrap
-from app.services.referrals import register_referral
+from app.services.referrals import register_referral, validate_referrals
 
 logger = logging.getLogger("stocknewsbr.auth")
 
@@ -381,6 +381,8 @@ def subscription_sync(
         status=current_user.plan_status,
         payload_excerpt=str(payload.model_dump()),
     )
+    if payload.activate:
+        validate_referrals(db)
 
     db.add(current_user)
     db.commit()

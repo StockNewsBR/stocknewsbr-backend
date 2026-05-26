@@ -127,6 +127,27 @@ def run_ai_worker_cycle() -> Dict[str, Any]:
     if import_health["failed"]:
         report["status"] = "degraded"
 
+    health_flags = []
+    snapshot_state = self_heal["snapshot_info"]
+
+    if len(signals) == 0:
+        health_flags.append("signals_empty")
+
+    if not signal_info.get("timestamp"):
+        health_flags.append("signal_cache_missing")
+
+    if int(snapshot_state.get("signals") or 0) == 0:
+        health_flags.append("snapshot_empty")
+
+    if not snapshot_state.get("timestamp"):
+        health_flags.append("snapshot_missing")
+
+    if snapshot_state.get("age_seconds") is not None and snapshot_state.get("age_seconds") > SNAPSHOT_STALE_SECONDS:
+        health_flags.append("snapshot_stale")
+
+    if health_flags:
+        report["status"] = "degraded"
+
     report.update(
         {
             "metrics": metrics,
@@ -140,6 +161,7 @@ def run_ai_worker_cycle() -> Dict[str, Any]:
                 "rebuilt_snapshot": self_heal["rebuilt_snapshot"],
                 "weekly_polls_ready": len(polls),
             },
+            "health_flags": health_flags,
             "product": {
                 "primary_launch_platform": bootstrap["primary_launch_platform"],
                 "subscription_unlocks": bootstrap["subscription_unlocks"],
