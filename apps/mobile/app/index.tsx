@@ -141,7 +141,7 @@ export default function AuthGateScreen() {
         </View>
         <Divider />
         <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
-          Conta internacional usa assinatura USA: Premium $49/month ou $500 upfront. Depois da janela de refund de 7 dias, nao ha devolucao do valor pago.
+          Assinatura, preco e reembolso ficam no Google Play. Depois da janela de refund, o acesso segue ate o fim do periodo pago.
         </Text>
       </Card>
 

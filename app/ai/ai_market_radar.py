@@ -104,7 +104,9 @@ def analyze_symbol(symbol):
             period="10d",
             interval="15m",
             progress=False,
-            auto_adjust=True
+            auto_adjust=True,
+            threads=False,
+            timeout=8,
         )
 
         if df is None or len(df) < MIN_ROWS:

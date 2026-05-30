@@ -3,17 +3,19 @@
 # Fast + Crash Safe
 # =====================================================
 
+from __future__ import annotations
+
 import logging
 import os
 import time
 
-import pandas as pd
 from fastapi import APIRouter, Depends
 
 from app.cache.market_data_cache import get_market_data
 from app.cache.snapshot_cache import get_snapshot_info, get_snapshot_signals
 from app.config import SYMBOLS
 from app.dependencies import require_active_plan
+from app.system.system_metrics import current_provider_call_source
 
 logger = logging.getLogger("stocknewsbr.ranking")
 
@@ -31,6 +33,7 @@ ALLOW_NETWORK_FALLBACK = str(
 _RANK_CACHE = {
     "data": [],
     "timestamp": 0.0,
+    "snapshot_signature": "",
 }
 
 
@@ -137,8 +140,8 @@ def fetch_market_data():
         return None
 
 
-def _normalize_snapshot_ranking():
-    snapshot_info = get_snapshot_info()
+def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
+    snapshot_info = snapshot_info or get_snapshot_info()
     signal_count = int(snapshot_info.get("signals", 0) or 0)
     age_seconds = snapshot_info.get("age_seconds")
 
@@ -179,6 +182,19 @@ def _normalize_snapshot_ranking():
     return results
 
 
+def _snapshot_signature(snapshot_info: dict) -> str:
+    timestamp = (
+        snapshot_info.get("timestamp")
+        or snapshot_info.get("updated_at")
+        or snapshot_info.get("generated_at")
+        or snapshot_info.get("last_good_timestamp")
+    )
+    signals = int(snapshot_info.get("signals", 0) or 0)
+    has_signals = bool(snapshot_info.get("has_signals"))
+    is_empty = bool(snapshot_info.get("is_empty"))
+    return f"{timestamp}|{signals}|{int(has_signals)}|{int(is_empty)}"
+
+
 def _get_symbol_frame(data, symbol):
     if data is None:
         return None
@@ -204,28 +220,38 @@ def _get_symbol_frame(data, symbol):
 
 def generate_ranking(force_refresh: bool = False):
     now = time.time()
+    snapshot_info = get_snapshot_info()
+    snapshot_signature = _snapshot_signature(snapshot_info)
 
     if (
         not force_refresh
         and _RANK_CACHE["data"]
+        and _RANK_CACHE.get("snapshot_signature") == snapshot_signature
         and now - _RANK_CACHE["timestamp"] < CACHE_TTL
     ):
         return list(_RANK_CACHE["data"])
 
-    snapshot_results = _normalize_snapshot_ranking()
+    snapshot_results = _normalize_snapshot_ranking(snapshot_info)
 
     if snapshot_results:
         _RANK_CACHE["data"] = list(snapshot_results)
         _RANK_CACHE["timestamp"] = now
+        _RANK_CACHE["snapshot_signature"] = snapshot_signature
         return list(snapshot_results)
 
-    if not ALLOW_NETWORK_FALLBACK:
-        return list(_RANK_CACHE["data"])
+    if not ALLOW_NETWORK_FALLBACK or current_provider_call_source() == "http":
+        _RANK_CACHE["data"] = []
+        _RANK_CACHE["timestamp"] = now
+        _RANK_CACHE["snapshot_signature"] = snapshot_signature
+        return []
 
     data = fetch_market_data()
 
     if data is None:
-        return list(_RANK_CACHE["data"])
+        _RANK_CACHE["data"] = []
+        _RANK_CACHE["timestamp"] = now
+        _RANK_CACHE["snapshot_signature"] = snapshot_signature
+        return []
 
     results = []
 
@@ -243,6 +269,7 @@ def generate_ranking(force_refresh: bool = False):
 
     _RANK_CACHE["data"] = list(results)
     _RANK_CACHE["timestamp"] = now
+    _RANK_CACHE["snapshot_signature"] = snapshot_signature
 
     return results
 

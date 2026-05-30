@@ -112,6 +112,7 @@ export function WorkspaceLeftRail({
         {accessCard}
         {authCard}
         {notificationCard}
+        {toolsCard}
 
         <div className="snbr-search-block">
           <div className="snbr-section-head compact">
@@ -145,8 +146,6 @@ export function WorkspaceLeftRail({
             </button>
           </div>
         </div>
-
-        {toolsCard}
 
         <div className="snbr-side-card snbr-active-list-shell">
           <div className="snbr-watch-toolbar snbr-watch-toolbar-inline">
@@ -193,8 +192,8 @@ export function WorkspaceLeftRail({
             <p>{isEnglish ? "©2026 StockNewsBR. All rights reserved." : "©2026 StockNewsBR. Todos os direitos reservados."}</p>
             <p>
               {isEnglish
-                ? "Market data comes from public/connected providers and internal caches identified by each payload. Futures may show explicit reference pricing when an exact public contract is unavailable; crypto data uses public crypto providers when available."
-                : "Dados de mercado vêm de provedores públicos/conectados e caches internos identificados em cada payload. Futuros podem mostrar preço de referência explícito quando o contrato público exato não estiver disponível; cripto usa provedores públicos quando houver dado."}
+                ? "Market data comes from public/connected providers and internal caches identified by each payload. Crypto data uses public crypto providers when available."
+                : "Dados de mercado vêm de provedores públicos/conectados e caches internos identificados em cada payload. Cripto usa provedores públicos quando houver dado."}
             </p>
             <p>
               {isEnglish

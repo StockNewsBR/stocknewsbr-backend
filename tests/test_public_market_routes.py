@@ -70,17 +70,18 @@ class PublicMarketRouteTests(unittest.TestCase):
                 "cache": {"status": "warm"},
                 "source": "public",
             },
-        ):
+        ) as build_payload:
             payload = routes_public_market.public_news("AAPL", limit=3)
 
         self.assertEqual(payload["symbol"], "AAPL")
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["source"], "public")
+        build_payload.assert_called_once_with("AAPL", limit=3, source="public", allow_fetch=False)
 
     def test_public_ai_tools_returns_visible_history_contract(self):
         with patch.object(
             routes_public_market,
-            "get_ai_alert_history_snapshot",
+            "build_public_ai_tools_payload",
             return_value={
                 "reset_key": "2026-05-18",
                 "max_rows_per_tool": 20,
@@ -92,6 +93,35 @@ class PublicMarketRouteTests(unittest.TestCase):
         self.assertEqual(payload["reset_key"], "2026-05-18")
         self.assertEqual(payload["max_rows_per_tool"], 20)
         self.assertEqual(payload["tools"]["heat_map"][0]["ticker"], "F")
+
+    def test_public_bundle_uses_cached_snapshot_payloads(self):
+        with patch.object(
+            routes_public_market_live,
+            "cached_price_payloads",
+            return_value={"F": {"symbol": "F", "price": 14.9, "volume": 1_000_000, "source": "snapshot"}},
+        ), patch.object(
+            routes_public_market_live,
+            "public_market_insight",
+            return_value={"symbol": "F", "score": 6.2},
+        ), patch.object(
+            routes_public_market_live,
+            "public_market_chart",
+            return_value={"ticker": "F", "ohlc": [{"close": 14.9}], "series": [], "markers": [], "zones": [], "summary": {}},
+        ), patch.object(
+            routes_public_market_live,
+            "build_public_news_payload",
+            return_value={"symbol": "F", "items": [], "count": 0},
+        ), patch.object(
+            routes_public_market_live,
+            "build_public_ai_tools_payload",
+            return_value={"tools": {"master_score": []}, "source": "snapshot"},
+        ):
+            payload = routes_public_market_live.public_market_bundle("F", interval="1D")
+
+        self.assertEqual(payload["symbol"], "F")
+        self.assertEqual(payload["quote"]["price"], 14.9)
+        self.assertEqual(payload["insight"]["score"], 6.2)
+        self.assertEqual(payload["source"], "cache_snapshot_bundle")
 
     def test_public_chart_returns_overlay_payload(self):
         ohlc = [{"time": 1, "close": 10.0, "high": 11.0, "low": 9.5}]
@@ -116,6 +146,7 @@ class PublicMarketRouteTests(unittest.TestCase):
             payload = routes_public_market_live.public_market_chart("petr4")
 
         self.assertEqual(payload["ticker"], "PETR4")
+        self.assertEqual(payload["interval"], "1D")
         self.assertEqual(payload["summary"]["trend_bias"], "alta")
         self.assertEqual(payload["series"][0]["close"], 10.0)
 
@@ -179,6 +210,34 @@ class PublicMarketRouteTests(unittest.TestCase):
         self.assertEqual(payload["ticker"], "F")
         self.assertEqual(payload["status"], "empty")
         self.assertTrue(payload["fallback"])
+        self.assertEqual(payload["ohlc"], [])
+        self.assertEqual(payload["summary"]["provider_status"], "empty_chart")
+
+    def test_public_chart_blocks_synthetic_quote_fallback_for_b3_futures(self):
+        with patch.object(routes_public_market_live, "load_public_chart_rows", return_value=[]), patch.object(
+            routes_public_market_live,
+            "_build_quote_fallback_chart",
+            return_value=[{"time": 1, "close": 176000, "source": "quote_cache_fallback"}],
+        ) as fallback:
+            payload = routes_public_market_live.public_market_chart("WINK26", range_value="1D")
+
+        fallback.assert_not_called()
+        self.assertEqual(payload["ticker"], "WINK26")
+        self.assertEqual(payload["status"], "empty")
+        self.assertEqual(payload["ohlc"], [])
+        self.assertEqual(payload["summary"]["provider_status"], "b3_future_exact_chart_unavailable")
+
+    def test_public_chart_blocks_synthetic_quote_fallback_for_equities(self):
+        with patch.object(routes_public_market_live, "load_public_chart_rows", return_value=[]), patch.object(
+            routes_public_market_live,
+            "_build_quote_fallback_chart",
+            return_value=[{"time": 1, "close": 14.9, "source": "quote_cache_fallback"}],
+        ) as fallback:
+            payload = routes_public_market_live.public_market_chart("F", range_value="1D")
+
+        fallback.assert_not_called()
+        self.assertEqual(payload["ticker"], "F")
+        self.assertEqual(payload["status"], "empty")
         self.assertEqual(payload["ohlc"], [])
         self.assertEqual(payload["summary"]["provider_status"], "empty_chart")
 

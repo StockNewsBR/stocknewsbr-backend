@@ -6,13 +6,11 @@ from fastapi import APIRouter, Depends
 import logging
 
 from app.dependencies import require_channel_access
-from app.market.market_data_loader import get_chart_data
+from app.engine.signal_engine import build_chart_signal_payload
+from app.market.market_data_loader import get_cached_chart_data
 from app.cache.signal_cache import signal_cache
 from app.services.chart_overlay_service import build_chart_overlays
-from app.engine.trend_breakout_signal_engine import (
-    build_trend_breakout_payload,
-    resolve_chart_timeframe,
-)
+from app.system.system_metrics import record_cache_access
 
 router = APIRouter(
     prefix="/web",
@@ -37,7 +35,8 @@ def get_chart(ticker: str, interval: str = "1D"):
     try:
 
         ticker = ticker.upper()
-        ohlc = get_chart_data(ticker, interval=interval)
+        ohlc = get_cached_chart_data(ticker, interval=interval) or []
+        record_cache_access("chart", bool(ohlc), "web_chart")
 
         if not ohlc:
             return {}
@@ -73,16 +72,12 @@ def get_chart(ticker: str, interval: str = "1D"):
         except Exception:
             pass
 
-        chart_signal = build_trend_breakout_payload(
-            ticker,
-            ohlc,
-            timeframe=resolve_chart_timeframe(interval),
-        )
+        chart_signal = build_chart_signal_payload(ticker, ohlc, interval=interval)
 
         if chart_signal:
             signals.append(chart_signal)
 
-        overlays = build_chart_overlays(ticker, ohlc, signals)
+        overlays = build_chart_overlays(ticker, ohlc, signals, interval=interval)
 
         return {
 

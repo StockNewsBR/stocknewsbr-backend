@@ -185,6 +185,7 @@ def _coherence_context_row(
     display: str,
     ai_bias: Dict[str, Any],
     close: float,
+    volume: float,
     ema_mid: float,
     volume_rel: float,
     volume_known: bool,
@@ -213,6 +214,8 @@ def _coherence_context_row(
         "liquidity_map_state": ai_bias.get("liquidity_map_state"),
         "heat_map_score": ai_bias.get("heat_map_score"),
         "master_score": ai_bias.get("master_score"),
+        "price": close,
+        "volume": volume,
         "above_vwap": close >= ema_mid if ema_mid > 0 else False,
         "rel_volume": volume_rel,
         "volume_known": bool(volume_known),
@@ -265,6 +268,8 @@ _REASON_COPY = {
     "opposite_signal": "Sinal oposto confirmado com score suficiente.",
     "protect_profit": "Protecao de ganho apos deslocamento favoravel.",
     "micro_structure_loss": "Perda curta de estrutura antes de virar prejuizo operacional.",
+    "support_break": "Perda de suporte junto com VWAP/media; tese long invalidada pela estrutura.",
+    "resistance_break": "Rompimento de resistencia junto com VWAP/media; tese short invalidada pela estrutura.",
     "session_close": "Fechamento operacional no final do dia para nao carregar posicao overnight.",
 }
 
@@ -1200,6 +1205,7 @@ def build_trend_breakout_payload(
             display=display,
             ai_bias=ai_bias,
             close=close,
+            volume=volume,
             ema_mid=vwap,
             volume_rel=volume_rel,
             volume_known=volume_known,
@@ -1443,6 +1449,22 @@ def build_trend_breakout_payload(
                 and score_short >= (score_long + settings["min_score_edge"])
                 and volume_rel >= 0.95
             )
+            support_break_against_long_soft = (
+                support > 0
+                and close < (support - buffer)
+                and close < min(ema_mid, vwap)
+                and volume_rel >= 0.8
+                and not long_continuation_intact
+            )
+            support_break_against_long_hard = (
+                support > 0
+                and low < (support - buffer)
+                and close <= (support - (buffer * 0.35))
+                and close < _safe_float(prev_row["low"])
+                and (close < min(ema_fast, ema_mid) or score_short >= (score_long - 1))
+                and (volume <= 0 or volume_rel >= 0.55 or score_short >= (score_long - 1))
+            )
+            support_break_against_long = support_break_against_long_soft or support_break_against_long_hard
             confirmed_opposite = (
                 (short_pullback or short_breakout or short_liquidity_reversal or short_continuation)
                 and score_short >= required_score_short
@@ -1453,6 +1475,7 @@ def build_trend_breakout_payload(
             should_exit_long = (
                 time_stop
                 or micro_structure_loss
+                or support_break_against_long
                 or ai_bias["exit_long_on_ai"]
                 or protect_profit
                 or confirmed_opposite
@@ -1464,6 +1487,8 @@ def build_trend_breakout_payload(
                     reason = "ai_regime_flip"
                 elif confirmed_opposite:
                     reason = "opposite_signal"
+                elif support_break_against_long:
+                    reason = "support_break"
                 elif protect_profit:
                     reason = "protect_profit"
                 elif micro_structure_loss:
@@ -1475,10 +1500,10 @@ def build_trend_breakout_payload(
                         event_type="SELL",
                         price=close,
                         time_value=event_time,
-                        score=score_short if reason == "opposite_signal" else score_long,
+                        score=score_short if reason in {"opposite_signal", "support_break", "micro_structure_loss"} else score_long,
                         reason=reason,
                         coherence=sell_coherence,
-                        confidence=short_confidence if reason == "opposite_signal" else long_confidence,
+                        confidence=short_confidence if reason in {"opposite_signal", "support_break", "micro_structure_loss"} else long_confidence,
                         chart_regime_state=chart_regime_state,
                         liquidity_event=liquidity_event,
                     )
@@ -1513,6 +1538,22 @@ def build_trend_breakout_payload(
                 and score_long >= (score_short + settings["min_score_edge"])
                 and volume_rel >= 0.95
             )
+            resistance_break_against_short_soft = (
+                resistance > 0
+                and close > (resistance + buffer)
+                and close > max(ema_mid, vwap)
+                and volume_rel >= 0.8
+                and not short_continuation_intact
+            )
+            resistance_break_against_short_hard = (
+                resistance > 0
+                and high > (resistance + buffer)
+                and close >= (resistance + (buffer * 0.35))
+                and close > _safe_float(prev_row["high"])
+                and (close > max(ema_fast, ema_mid) or score_long >= (score_short - 1))
+                and (volume <= 0 or volume_rel >= 0.55 or score_long >= (score_short - 1))
+            )
+            resistance_break_against_short = resistance_break_against_short_soft or resistance_break_against_short_hard
             confirmed_opposite = (
                 (long_pullback or long_breakout or long_liquidity_reversal or long_continuation)
                 and score_long >= required_score_long
@@ -1523,6 +1564,7 @@ def build_trend_breakout_payload(
             should_exit_short = (
                 time_stop
                 or micro_structure_loss
+                or resistance_break_against_short
                 or ai_bias["exit_short_on_ai"]
                 or protect_profit
                 or confirmed_opposite
@@ -1534,6 +1576,8 @@ def build_trend_breakout_payload(
                     reason = "ai_regime_flip"
                 elif confirmed_opposite:
                     reason = "opposite_signal"
+                elif resistance_break_against_short:
+                    reason = "resistance_break"
                 elif protect_profit:
                     reason = "protect_profit"
                 elif micro_structure_loss:
@@ -1545,10 +1589,10 @@ def build_trend_breakout_payload(
                         event_type="COVER",
                         price=close,
                         time_value=event_time,
-                        score=score_long if reason == "opposite_signal" else score_short,
+                        score=score_long if reason in {"opposite_signal", "resistance_break", "micro_structure_loss"} else score_short,
                         reason=reason,
                         coherence=cover_coherence,
-                        confidence=long_confidence if reason == "opposite_signal" else short_confidence,
+                        confidence=long_confidence if reason in {"opposite_signal", "resistance_break", "micro_structure_loss"} else short_confidence,
                         chart_regime_state=chart_regime_state,
                         liquidity_event=liquidity_event,
                     )

@@ -22,21 +22,14 @@ import {
   deletePost,
   getAccess,
   getBootstrap,
-  getChart,
   getChatHistory,
   getFeed,
-  getPublicAiTools,
-  getPublicInsight,
-  getPublicChart,
-  getPublicQuote,
+  getPublicMarketBundle,
   getPublicQuotesRobust,
-  getNews,
-  getMediaStatus,
   getPoll,
-  getPushStatus,
-  getQuote,
   searchAssets,
   getWorkspace,
+  getWorkspaceTickerBundle,
   followUser,
   likePost,
   loginJson,
@@ -88,6 +81,13 @@ type Props = {
 type ChartSettings = {
   show_markers: boolean;
   show_zones: boolean;
+  show_price_line: boolean;
+  show_vwap: boolean;
+  show_averages: boolean;
+  show_macd: boolean;
+  show_rsi: boolean;
+  show_supertrend: boolean;
+  show_volume: boolean;
 };
 
 type WatchlistItem = {
@@ -98,6 +98,8 @@ type WatchlistItem = {
   changePct?: number | null;
   change?: number | null;
   volume?: number | null;
+  averageVolume?: number | null;
+  relVolume?: number | null;
   score?: number | null;
   trend?: string | null;
   rsi?: number | null;
@@ -155,20 +157,20 @@ const AI_TOOL_TAB_MAP = {
 } as const;
 
 const TAB_META: Record<string, { label: string; short: string }> = {
-  grafico: { label: "📈 IA Gráfico / Rede Social", short: "Gráfico/Rede Social" },
+  grafico: { label: "📈 Gráfico IA / Rede Social", short: "Gráfico/Rede Social" },
   news: { label: "📰 Notícias", short: "Notícias" },
   busca: { label: "🔎 Busca", short: "Busca" },
-  "heat-map": { label: "🗺 IA Mapa de Calor", short: "Mapa" },
-  radar: { label: "⚡ IA Radar", short: "Radar" },
-  "breakout-probability": { label: "🎯 IA Probabilidade de Breakout", short: "Breakout" },
-  "volatility-squeeze": { label: "🟣 IA Compressão de Volatilidade", short: "Squeeze" },
-  "institutional-flow": { label: "🏦 IA Fluxo Institucional", short: "Fluxo" },
-  "smart-money": { label: "💼 IA Dinheiro Inteligente", short: "Smart" },
-  accumulation: { label: "📦 IA Acumulação", short: "Acumulação" },
-  "liquidity-sweep": { label: "🧲 IA Varredura de Liquidez", short: "Varredura" },
-  "liquidity-map": { label: "🧭 IA Liquidity Map", short: "IA Liquidity Map" },
-  "market-regime": { label: "📊 IA Regime de Mercado", short: "Regime" },
-  "master-score": { label: "⭐ IA Score Mestre", short: "Score" },
+  "heat-map": { label: "🗺 Mapa de Calor", short: "Mapa" },
+  radar: { label: "⚡ Radar", short: "Radar" },
+  "breakout-probability": { label: "🎯 Breakout", short: "Breakout" },
+  "volatility-squeeze": { label: "🟣 Squeeze", short: "Squeeze" },
+  "institutional-flow": { label: "🏦 Fluxo Institucional", short: "Fluxo" },
+  "smart-money": { label: "💼 Dinheiro Inteligente", short: "Smart" },
+  accumulation: { label: "📦 Acumulação", short: "Acumulação" },
+  "liquidity-sweep": { label: "🧲 Varredura de Liquidez", short: "Varredura" },
+  "liquidity-map": { label: "🧭 Mapa de Liquidez", short: "Liquidez" },
+  "market-regime": { label: "📊 Regime de Mercado", short: "Regime" },
+  "master-score": { label: "⭐ Score Mestre", short: "Score Mestre" },
   referrals: { label: "🤝 Indicações", short: "Indicações" },
   education: { label: "🎓 Ajuda Educacional para o Trader", short: "Ajuda" },
 };
@@ -177,17 +179,17 @@ const TAB_META_EN: Record<string, { label: string; short: string }> = {
   grafico: { label: "📈 AI Chart / Social Network", short: "Chart/Social" },
   news: { label: "📰 News", short: "News" },
   busca: { label: "🔎 Search", short: "Search" },
-  "heat-map": { label: "🗺 AI Heat Map", short: "Heat Map" },
-  radar: { label: "⚡ AI Radar", short: "Radar" },
-  "breakout-probability": { label: "🎯 AI Breakout Probability", short: "Breakout" },
-  "volatility-squeeze": { label: "🟣 AI Volatility Squeeze", short: "Squeeze" },
-  "institutional-flow": { label: "🏦 AI Institutional Flow", short: "Flow" },
-  "smart-money": { label: "💼 AI Smart Money", short: "Smart" },
-  accumulation: { label: "📦 AI Accumulation", short: "Accumulation" },
-  "liquidity-sweep": { label: "🧲 AI Liquidity Sweep", short: "Sweep" },
-  "liquidity-map": { label: "🧭 AI Liquidity Map", short: "Liquidity Map" },
-  "market-regime": { label: "📊 AI Market Regime", short: "Regime" },
-  "master-score": { label: "⭐ AI Master Score", short: "Master Score" },
+  "heat-map": { label: "🗺 Heat Map", short: "Heat Map" },
+  radar: { label: "⚡ Radar", short: "Radar" },
+  "breakout-probability": { label: "🎯 Breakout", short: "Breakout" },
+  "volatility-squeeze": { label: "🟣 Squeeze", short: "Squeeze" },
+  "institutional-flow": { label: "🏦 Institutional Flow", short: "Flow" },
+  "smart-money": { label: "💼 Smart Money", short: "Smart" },
+  accumulation: { label: "📦 Accumulation", short: "Accumulation" },
+  "liquidity-sweep": { label: "🧲 Liquidity Sweep", short: "Sweep" },
+  "liquidity-map": { label: "🧭 Liquidity Map", short: "Liquidity Map" },
+  "market-regime": { label: "📊 Market Regime", short: "Regime" },
+  "master-score": { label: "⭐ Master Score", short: "Master Score" },
   referrals: { label: "🤝 Referrals", short: "Referrals" },
   education: { label: "🎓 Trader Help", short: "Help" },
 };
@@ -245,18 +247,18 @@ const WORKSPACE_PERSONAS_EN: Record<WorkspacePersona, (typeof WORKSPACE_PERSONAS
 const VISIBLE_WORKSPACE_PERSONAS: WorkspacePersona[] = ["guiado"];
 
 const TOP_TAB_TEXT: Record<string, string> = {
-  grafico: "IA Gráfico/ Rede Social",
+  grafico: "Gráfico IA / Rede Social",
   news: "Notícias",
-  "heat-map": "IA Mapa de Calor",
-  radar: "IA Radar",
-  "breakout-probability": "IA Breakout",
-  "volatility-squeeze": "IA Squeeze",
-  "institutional-flow": "IA Fluxo",
-  "smart-money": "IA Smart",
-  accumulation: "IA Acumulação",
-  "liquidity-sweep": "IA Varredura",
-  "liquidity-map": "IA Liquidity Map",
-  "market-regime": "IA Regime",
+  "heat-map": "Mapa de Calor",
+  radar: "Radar",
+  "breakout-probability": "Breakout",
+  "volatility-squeeze": "Squeeze",
+  "institutional-flow": "Fluxo",
+  "smart-money": "Smart Money",
+  accumulation: "Acumulação",
+  "liquidity-sweep": "Varredura",
+  "liquidity-map": "Mapa de Liquidez",
+  "market-regime": "Regime",
   "master-score": "Score Mestre",
   referrals: "Indicações",
   education: "Ajuda",
@@ -265,16 +267,16 @@ const TOP_TAB_TEXT: Record<string, string> = {
 const TOP_TAB_TEXT_EN: Record<string, string> = {
   grafico: "AI Chart / Social",
   news: "News",
-  "heat-map": "AI Heat Map",
-  radar: "AI Radar",
-  "breakout-probability": "AI Breakout",
-  "volatility-squeeze": "AI Squeeze",
-  "institutional-flow": "AI Flow",
-  "smart-money": "AI Smart",
-  accumulation: "AI Accumulation",
-  "liquidity-sweep": "AI Sweep",
-  "liquidity-map": "AI Liquidity Map",
-  "market-regime": "AI Regime",
+  "heat-map": "Heat Map",
+  radar: "Radar",
+  "breakout-probability": "Breakout",
+  "volatility-squeeze": "Squeeze",
+  "institutional-flow": "Flow",
+  "smart-money": "Smart Money",
+  accumulation: "Accumulation",
+  "liquidity-sweep": "Sweep",
+  "liquidity-map": "Liquidity Map",
+  "market-regime": "Regime",
   "master-score": "Master Score",
   referrals: "Referrals",
   education: "Help",
@@ -283,6 +285,7 @@ const TOP_TAB_TEXT_EN: Record<string, string> = {
 const TAB_ORDER = [
   "grafico",
   "news",
+  "master-score",
   "heat-map",
   "radar",
   "breakout-probability",
@@ -293,12 +296,13 @@ const TAB_ORDER = [
   "liquidity-sweep",
   "liquidity-map",
   "market-regime",
-  "master-score",
   "referrals",
   "education",
 ];
 
 const TOP_BAR_TAB_IDS = TAB_ORDER.filter((id) => id !== "busca");
+const SIMPLE_TOP_TAB_IDS = new Set(["grafico", "news", "master-score", "referrals", "education"]);
+const WORKSPACE_MODE_STORAGE_KEY = "stocknewsbr.workspace_mode";
 const DETACHABLE_IA_TABS = new Set([
   "grafico",
   "heat-map",
@@ -315,20 +319,20 @@ const DETACHABLE_IA_TABS = new Set([
 ]);
 
 const FALLBACK_TABS: WorkspaceTab[] = [
-  { id: "grafico", title: "IA Gráfico / Rede Social" },
+  { id: "grafico", title: "Gráfico IA / Rede Social" },
   { id: "news", title: "Notícias" },
+  { id: "master-score", title: "Score Mestre" },
   { id: "busca", title: "Busca" },
-  { id: "heat-map", title: "IA Mapa de Calor" },
-  { id: "radar", title: "IA Radar" },
-  { id: "breakout-probability", title: "IA Probabilidade de Breakout" },
-  { id: "volatility-squeeze", title: "IA Compressão de Volatilidade" },
-  { id: "institutional-flow", title: "IA Fluxo Institucional" },
-  { id: "smart-money", title: "IA Dinheiro Inteligente" },
-  { id: "accumulation", title: "IA Acumulação" },
-  { id: "liquidity-sweep", title: "IA Varredura de Liquidez" },
-  { id: "liquidity-map", title: "IA Liquidity Map" },
-  { id: "market-regime", title: "IA Regime de Mercado" },
-  { id: "master-score", title: "IA Score Mestre" },
+  { id: "heat-map", title: "Mapa de Calor" },
+  { id: "radar", title: "Radar" },
+  { id: "breakout-probability", title: "Breakout" },
+  { id: "volatility-squeeze", title: "Squeeze" },
+  { id: "institutional-flow", title: "Fluxo Institucional" },
+  { id: "smart-money", title: "Dinheiro Inteligente" },
+  { id: "accumulation", title: "Acumulação" },
+  { id: "liquidity-sweep", title: "Varredura de Liquidez" },
+  { id: "liquidity-map", title: "Mapa de Liquidez" },
+  { id: "market-regime", title: "Regime de Mercado" },
   { id: "referrals", title: "Indicações" },
   { id: "education", title: "Ajuda Educacional para o Trader" },
 ];
@@ -337,9 +341,17 @@ const CATEGORY_ORDER = ["B3", "BDR", "Crypto", "USA"] as const;
 const DEFAULT_CHART_SETTINGS: ChartSettings = {
   show_markers: true,
   show_zones: true,
+  show_price_line: true,
+  show_vwap: true,
+  show_averages: true,
+  show_macd: false,
+  show_rsi: false,
+  show_supertrend: true,
+  show_volume: true,
 };
 const APP_LOCALE_STORAGE_KEY = "snbr-app-locale";
-const AI_ALERT_HISTORY_STORAGE_KEY = "snbr-ai-alert-history-v5";
+const AI_ALERT_HISTORY_STORAGE_KEY = "snbr-ai-alert-history-v6";
+const AI_FINDING_SOUND_STORAGE_KEY = "stocknewsbr.ai_finding_sound";
 const MAINTENANCE_NOTICES = [
   {
     id: "maintenance-window",
@@ -420,7 +432,6 @@ function b3FutureLabel(symbol: string, locale: AppLocale = "pt-BR") {
 }
 
 const WATCHLIST_B3 = [
-  ...buildRollingB3Futures(),
   "ITUB4.SA", "BBDC4.SA", "BBAS3.SA", "SANB11.SA", "BPAC11.SA",
   "VALE3.SA", "PETR4.SA", "PETR3.SA", "SUZB3.SA", "KLBN11.SA",
   "ELET3.SA", "ELET6.SA", "CPFE3.SA", "EQTL3.SA",
@@ -458,7 +469,7 @@ const BDR_UNDERLYING: Record<string, string> = {
 };
 
 const WATCHLIST_US = [
-  "CME", "NQ", "MNQ", "MNO", "ES", "MES", "MYM",
+  "F", "AAL",
   "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
   "AMD", "INTC", "AVGO", "TSM",
   "JPM", "BAC", "GS",
@@ -493,290 +504,123 @@ const FIXED_TAPE_SYMBOLS = [
 ];
 
 const HELP_MANUAL_ITEMS = [
-  "🧠 Heat Map → mostra ativos fortes (🟢 compra) e fracos (🔴 venda).",
-  "⚡ Radar → detecta ativos que começaram a se mover rápido.",
-  "🎯 Probabilidade de Breakout → indica rompimento de resistência importante.",
-  "🟣 Compressão de Volatilidade → alerta quando o mercado está “quieto” e pode explodir.",
-  "🏦 Fluxo Institucional → identifica entrada de grandes investidores.",
-  "💰 Dinheiro Inteligente → mostra sinais dos grandes players antes de movimentos fortes.",
-  "🏛 Acumulação → detecta compras discretas de instituições.",
-  "🧲 Varredura de Liquidez → mostra rompimentos falsos para buscar liquidez.",
-  "🧭 IA Liquidity Map → indica onde há concentração de stops e liquidez.",
-  "📊 Regime de Mercado → classifica o mercado: 📈 alta, 📉 baixa ou ➡ lateral.",
-  "⭐ Score Mestre → pontuação geral da oportunidade (90 = forte, 70 = moderada, <50 = fraca).",
   "📈 Gráfico IA → exibe sinais no gráfico: COMPRA, VENDA A DESCOBERTO ou ⚠ encerrar posição.",
+  "⭐ AI Score Mestre → pontuação geral da oportunidade (90 = forte, 70 = moderada, <50 = fraca). Revê todas as IAs e gera o Score Mestre.",
+  "🧠 AI Heat Map → mostra ativos mais fortes (🟢 compra) e mais fracos (🔴 venda).",
+  "⚡ AI Radar → detecta ativos que começaram a se mover com velocidade.",
+  "🎯 AI Probabilidade de Breakout → indica rompimento de resistências importantes.",
+  "🟣 AI Compressão de Volatilidade → alerta quando o mercado está quieto e pode explodir.",
+  "🏦 AI Fluxo Institucional → identifica entrada de grandes investidores.",
+  "💰 AI Dinheiro Inteligente → revela sinais dos grandes players antes de movimentos fortes.",
+  "🏛 AI Acumulação → detecta compras discretas de instituições.",
+  "🧲 AI Varredura de Liquidez → mostra rompimentos falsos para buscar liquidez.",
+  "🧭 AI Mapa de Liquidez → indica onde há concentração de stops e liquidez.",
+  "📊 AI Regime de Mercado → classifica o mercado: 📈 alta, 📉 baixa ou ➡ lateral.",
 ];
 
 const HELP_MANUAL_ITEMS_EN = [
-  "🧠 Heat Map → shows strong assets (🟢 buy) and weak assets (🔴 sell).",
-  "⚡ Radar → detects assets that started moving fast.",
-  "🎯 Breakout Probability → highlights important resistance breakouts.",
-  "🟣 Volatility Squeeze → warns when the market is quiet and may expand.",
-  "🏦 Institutional Flow → identifies large investor participation.",
-  "💰 Smart Money → surfaces signals from large players before stronger moves.",
-  "🏛 Accumulation → detects discreet institutional buying.",
-  "🧲 Liquidity Sweep → flags false breakouts used to seek liquidity.",
-  "🧭 AI Liquidity Map → shows where stops and liquidity are concentrated.",
-  "📊 Market Regime → classifies the market: 📈 uptrend, 📉 downtrend or ➡ range.",
-  "⭐ Master Score → consolidated opportunity score (90 = strong, 70 = moderate, <50 = weak).",
   "📈 AI Chart / Social Network → displays BUY LONG, CLOSE LONG, SELL SHORT or CLOSE SHORT markers.",
+  "⭐ AI Master Score → consolidated opportunity score (90 = strong, 70 = moderate, <50 = weak). It reviews all AIs and generates the Master Score.",
+  "🧠 AI Heat Map → shows the strongest assets (🟢 buy) and weakest assets (🔴 sell).",
+  "⚡ AI Radar → detects assets that started moving with speed.",
+  "🎯 AI Breakout Probability → highlights important resistance breakouts.",
+  "🟣 AI Volatility Squeeze → warns when the market is quiet and may expand.",
+  "🏦 AI Institutional Flow → identifies large investor participation.",
+  "💰 AI Smart Money → reveals large-player signals before stronger moves.",
+  "🏛 AI Accumulation → detects discreet institutional buying.",
+  "🧲 AI Liquidity Sweep → flags false breakouts used to seek liquidity.",
+  "🧭 AI Liquidity Map → shows where stops and liquidity are concentrated.",
+  "📊 AI Market Regime → classifies the market: 📈 uptrend, 📉 downtrend or ➡ range.",
 ];
 
 const EDUCATIONAL_HELP_SECTIONS = [
   {
-    title: "📚 Ajuda Educacional para o Trader",
+    title: "📚 Guia Rápido StockNewsBR",
     body: [
-      "Bem-vindo ao StockNewsBR 🚀",
-      "Aqui você encontra ferramentas de Inteligência Artificial que analisam o mercado em tempo real e transformam dados complexos em informações simples para qualquer trader. 📊",
-      "Nosso objetivo é: te ajudar a enxergar oportunidades de forma clara e prática.",
+      "Inteligência de Mercado com IA para Traders da B3, BDRs, Ações dos EUA e Cripto.",
+      "Nosso objetivo é simples: transformar dados complexos em oportunidades claras e práticas para o day trader.",
     ],
   },
   {
-    title: "🧠 IA Heat Map",
+    title: "🏛 Sobre a empresa",
     body: [
-      "Mostra quais ativos estão mais fortes ou mais fracos.",
-      "• 🟢 Verde = força compradora",
-      "• 🔴 Vermelho = pressão vendedora",
-      "👉 Exemplo: Se PETR4 aparece verde, significa que está ganhando força no momento. 📈",
+      "StockNewsBR é a plataforma inteligente que transforma dados em oportunidades. Com tecnologia de IA e cálculos financeiros quânticos, oferece análises exclusivas para traders da B3, BDRs, ações dos EUA e criptoativos.",
+      "Nosso objetivo é entregar insights rápidos, decisões mais seguras e aumentar seu potencial de lucro com melhor tomada de decisão.",
     ],
   },
   {
-    title: "⚡ IA Radar",
+    title: "🖥️ Plataforma Web Trader Desk",
     body: [
-      "Detecta ativos que começaram a se mover rápido.",
-      "👉 Exemplo: Uma ação dispara com aumento de volume. O Radar te avisa na hora. ⚡",
-    ],
-  },
-  {
-    title: "🎯 IA Probabilidade de Rompimento",
-    body: [
-      "Indica quando um ativo está prestes a romper uma resistência.",
-      "👉 Exemplo: Um papel ficou entre 10 e 10.20. Se romper 10.20 com volume, pode iniciar uma alta forte. 🚀",
-    ],
-  },
-  {
-    title: "🟣 IA Compressão de Volatilidade",
-    body: [
-      "Mostra quando o mercado está “quieto demais” e pode explodir em movimento.",
-      "👉 Exemplo: Preço andando de lado por dias → depois vem uma expansão forte. 💥",
-    ],
-  },
-  {
-    title: "🏦 IA Fluxo Institucional",
-    body: [
-      "Detecta entrada de investidores grandes (institucionais).",
-      "👉 Exemplo: Um ativo sobe com volume muito acima da média → sinal de possível compra institucional. 🏦",
-    ],
-  },
-  {
-    title: "💰 IA Dinheiro Inteligente",
-    body: [
-      "Mostra sinais de movimentação dos grandes players.",
-      "👉 Exemplo: Volume crescente antes de uma alta ou queda forte. 📊",
-    ],
-  },
-  {
-    title: "🏛 IA Acumulação",
-    body: [
-      "Identifica quando grandes investidores estão comprando aos poucos.",
-      "👉 Exemplo: Preço estável, mas volume aumentando devagar. 📈",
-    ],
-  },
-  {
-    title: "🧲 IA Varredura de Liquidez",
-    body: [
-      "Mostra quando o mercado busca liquidez antes de mudar de direção.",
-      "👉 Exemplo: Preço rompe o topo, ativa stops e depois volta para baixo. 🧲",
-    ],
-  },
-  {
-    title: "🗺 IA Liquidity Map",
-    body: [
-      "Mostra onde há maior concentração de liquidez.",
-      "👉 Exemplo: Muitos stops acima de um nível → preço tende a buscar esse ponto. 🗺",
-    ],
-  },
-  {
-    title: "📊 IA Market Regime",
-    body: [
-      "Mostra o tipo de mercado atual:",
-      "• 📈 Tendência de alta",
-      "• 📉 Tendência de baixa",
-      "• ➡ Mercado lateral",
-      "👉 Isso ajuda a escolher a estratégia certa.",
-    ],
-  },
-  {
-    title: "⭐ IA Master Score",
-    body: [
-      "Pontuação geral da IA sobre oportunidades.",
-      "👉 Exemplo:",
-      "• Score 90 → oportunidade forte",
-      "• Score 70 → moderada",
-      "• Score < 50 → baixa probabilidade",
-    ],
-  },
-  {
-    title: "📈 IA Gráfico",
-    body: [
-      "Mostra o gráfico com sinais da IA:",
-      "• 📈 BUY",
-      "• 📉 SHORT",
-      "• ⚠ Encerrar posição",
-      "👉 Ajuda a identificar pontos de entrada e saída.",
-    ],
-  },
-  {
-    title: "🖥️ Versão Web Trader Desk",
-    body: [
-      "Plataforma inspirada nos terminais de Hedge Funds dos EUA.",
-      "• Suporte a múltiplos monitores 🖥️",
-      "• Velocidade e análise avançada 🤖📊",
-      "👉 Exemplo de uso:",
-      "• Monitor 1 → 🧠 Heat Map",
-      "• Monitor 2 → ⚡ Radar",
-      "• Monitor 3 → 🎯 Breakout",
-      "... e assim por diante.",
-      "Se tiver apenas um monitor, basta abrir cada IA em abas diferentes do navegador. 📊",
+      "Inspirada nos terminais de Hedge Funds dos EUA.",
+      "• Suporte a múltiplos monitores.",
+      "• Velocidade e análise avançada.",
+      "• Interface simples e prática para operação diária.",
+      "Exemplo de uso: Monitor 1 → Heat Map; Monitor 2 → Radar; Monitor 3 → Breakout.",
+      "Com apenas um monitor, basta alternar entre as abas da plataforma.",
     ],
   },
   {
     title: "⚠ Importante",
     body: [
-      "• As análises são apoio inteligente, não garantias.",
-      "• Sempre use gestão de risco.",
-      "• O mercado é dinâmico, e disciplina é essencial.",
-      "• 👉 Agora você tem um guia rápido para consultar em segundos e não perder nenhuma oportunidade! 🚀📊",
-      "👉 Boas trades e muito sucesso! 🚀📈",
+      "As análises são apoio inteligente, não garantias.",
+      "Gestão de risco e disciplina são essenciais.",
+      "O mercado é dinâmico: esteja preparado para agir rápido.",
+    ],
+  },
+  {
+    title: "🎯 Por que escolher StockNewsBR?",
+    body: [
+      "Clareza: informações complexas traduzidas em sinais simples.",
+      "Velocidade: análise em tempo real para não perder oportunidades.",
+      "Confiança: ferramentas de IA, cálculos financeiros quânticos e estratégias institucionais inspiradas nos terminais de Hedge Funds dos EUA.",
+      "Educação: explicações práticas para aplicar nas suas trades.",
+      "StockNewsBR: inteligência para melhor tomada de decisão.",
     ],
   },
 ];
 
 const EDUCATIONAL_HELP_SECTIONS_EN = [
   {
-    title: "📚 Trader Educational Help",
+    title: "📚 Quick StockNewsBR Guide",
     body: [
-      "Welcome to StockNewsBR.",
-      "Here you find AI tools that analyze the market in real time and turn complex data into a simple trader screen.",
-      "The goal is to help you see opportunities clearly and act only after price, volume and risk confirm the thesis.",
+      "Market Intelligence with AI for B3, BDRs, US Stocks and Crypto traders.",
+      "The goal is simple: turn complex data into clear, practical opportunities for day traders.",
     ],
   },
   {
-    title: "🧠 AI Heat Map",
+    title: "🏛 About the company",
     body: [
-      "Shows which assets are stronger or weaker.",
-      "• 🟢 Green = buying strength",
-      "• 🔴 Red = selling pressure",
-      "Example: if PETR4 appears green, the asset is gaining relative strength now.",
-    ],
-  },
-  {
-    title: "⚡ AI Radar",
-    body: [
-      "Detects assets that started moving quickly.",
-      "Example: a stock accelerates with higher volume and Radar alerts it immediately.",
-    ],
-  },
-  {
-    title: "🎯 AI Breakout Probability",
-    body: [
-      "Indicates when an asset is close to breaking an important resistance.",
-      "Example: price stayed between 10 and 10.20. If it breaks 10.20 with volume, a stronger trend may start.",
-    ],
-  },
-  {
-    title: "🟣 AI Volatility Squeeze",
-    body: [
-      "Shows when volatility is too compressed and the next expansion may matter.",
-      "Example: price moves sideways for days, then a strong expansion starts.",
-    ],
-  },
-  {
-    title: "🏦 AI Institutional Flow",
-    body: [
-      "Detects participation from larger investors.",
-      "Example: an asset rises with volume far above average, suggesting possible institutional buying.",
-    ],
-  },
-  {
-    title: "💰 AI Smart Money",
-    body: [
-      "Shows signs of large-player positioning.",
-      "Example: rising volume before a strong move up or down.",
-    ],
-  },
-  {
-    title: "🏛 AI Accumulation",
-    body: [
-      "Identifies when large investors may be building a position gradually.",
-      "Example: stable price with volume slowly rising.",
-    ],
-  },
-  {
-    title: "🧲 AI Liquidity Sweep",
-    body: [
-      "Shows when the market seeks liquidity before changing direction.",
-      "Example: price breaks a high, triggers stops and then rejects back down.",
-    ],
-  },
-  {
-    title: "🗺 AI Liquidity Map",
-    body: [
-      "Shows where liquidity is concentrated.",
-      "Example: many stops above a level can attract price before a reaction.",
-    ],
-  },
-  {
-    title: "📊 AI Market Regime",
-    body: [
-      "Shows the current market type:",
-      "• 📈 Uptrend",
-      "• 📉 Downtrend",
-      "• ➡ Range",
-      "This helps choose the right strategy for the current environment.",
-    ],
-  },
-  {
-    title: "⭐ AI Master Score",
-    body: [
-      "The consolidated AI opportunity score.",
-      "Example:",
-      "• Score 90 = strong opportunity",
-      "• Score 70 = moderate",
-      "• Score < 50 = low probability",
-    ],
-  },
-  {
-    title: "📈 AI Chart",
-    body: [
-      "Shows chart signals with operational labels:",
-      "• Buy Long",
-      "• Close Long",
-      "• Sell Short",
-      "• Close Short",
-      "It helps identify entries, exits and invalidation points.",
+      "StockNewsBR is an intelligent platform that turns data into opportunities. With AI technology and quantum financial calculations, it provides exclusive analysis for B3, BDR, US stock and crypto traders.",
+      "The goal is to deliver fast insights, safer decisions and better decision-making potential.",
     ],
   },
   {
     title: "🖥️ Web Trader Desk",
     body: [
-      "A web desk inspired by institutional trading terminals.",
-      "• Multi-monitor workflow",
-      "• Fast AI and market analysis",
-      "Example:",
-      "• Monitor 1 → Heat Map",
-      "• Monitor 2 → Radar",
-      "• Monitor 3 → Breakout",
-      "With one monitor, open each AI in a different browser tab.",
+      "Inspired by US hedge fund terminals.",
+      "• Multi-monitor support.",
+      "• Speed and advanced analysis.",
+      "• Simple, practical interface for daily trading.",
+      "Example: Monitor 1 → Heat Map; Monitor 2 → Radar; Monitor 3 → Breakout.",
+      "With one monitor, just switch between the platform tabs.",
     ],
   },
   {
     title: "⚠ Important",
     body: [
-      "• AI analysis is decision support, not a guarantee.",
-      "• Always use risk management.",
-      "• Markets are dynamic and discipline matters.",
-      "• Use this guide as a quick reference before acting on any setup.",
+      "The analyses are intelligent support, not guarantees.",
+      "Risk management and discipline are essential.",
+      "The market is dynamic: be ready to act quickly.",
+    ],
+  },
+  {
+    title: "🎯 Why choose StockNewsBR?",
+    body: [
+      "Clarity: complex information translated into simple signals.",
+      "Speed: real-time analysis so opportunities are not missed.",
+      "Confidence: AI tools, quantum financial calculations and institutional strategies inspired by US hedge fund terminals.",
+      "Education: practical explanations to apply in your trades.",
+      "StockNewsBR: intelligence for better decision-making.",
     ],
   },
 ];
@@ -787,7 +631,8 @@ const INSTITUTIONAL_SECTIONS = [
     label: "1️⃣ Sobre a empresa",
     title: "🏛 Sobre a empresa",
     body: [
-      "StockNewsBR é uma plataforma brasileira de Inteligência de Mercado com IA para traders de B3, BDR, ações dos EUA e cripto.",
+      "StockNewsBR é a plataforma inteligente que transforma dados em oportunidades. Com tecnologia de IA e cálculos financeiros quânticos, oferece análises exclusivas para traders da B3, BDRs, ações dos EUA e criptoativos.",
+      "Nosso objetivo é entregar insights rápidos, decisões mais seguras e aumentar seu potencial de lucro com melhor tomada de decisão.",
       "A proposta do produto é transformar leitura institucional, fluxo, estrutura e contexto do mercado em uma tela simples, rápida e prática para operação diária.",
     ],
   },
@@ -880,7 +725,8 @@ const INSTITUTIONAL_SECTIONS_EN = [
     label: "1️⃣ About the company",
     title: "🏛 About the company",
     body: [
-      "StockNewsBR is a market-intelligence platform using AI for B3, BDR, US equities, futures and crypto traders.",
+      "StockNewsBR is an intelligent platform that turns data into opportunities. With AI technology and quantum financial calculations, it provides exclusive analysis for B3, BDR, US stock and crypto traders.",
+      "The goal is to deliver fast insights, safer decisions and better decision-making potential.",
       "The product turns institutional reading, flow, structure and market context into a fast daily trading workspace.",
     ],
   },
@@ -1012,6 +858,7 @@ const COMPANY_HINTS: Record<string, string> = {
   QCOM34: "Qualcomm BDR",
   IVVB11: "ETF IVVB11",
   AAPL: "Apple Inc",
+  AAL: "American Airlines Group",
   MSFT: "Microsoft",
   GOOGL: "Alphabet",
   AMZN: "Amazon",
@@ -1046,117 +893,117 @@ const COMPANY_HINTS: Record<string, string> = {
 
 const TOOL_COPY: Record<string, { title: string; description: string; explanation: string }> = {
   "heat-map": {
-    title: "🗺 IA Mapa de Calor",
+    title: "🗺 Mapa de Calor",
     description: "Mostra quais ativos estão mais fortes ou mais fracos no mercado.",
     explanation: "🟢 Verde = força compradora. 🔴 Vermelho = pressão vendedora. Exemplo: se PETR4 aparece bem verde, o ativo está ganhando força agora.",
   },
   radar: {
-    title: "⚡ IA Radar",
+    title: "⚡ Radar",
     description: "Detecta ativos que começaram a se movimentar rapidamente no mercado.",
     explanation: "Funciona como um radar para encontrar oportunidades antes da maioria dos traders perceber.",
   },
   "breakout-probability": {
-    title: "🎯 IA Probabilidade de Breakout",
+    title: "🎯 Breakout",
     description: "Identifica quando um ativo está próximo de romper uma resistência importante.",
     explanation: "Breakout significa que o preço pode iniciar uma tendência forte. Exemplo: se romper uma faixa lateral com volume, a probabilidade sobe.",
   },
   "volatility-squeeze": {
-    title: "🟣 IA Compressão de Volatilidade",
+    title: "🟣 Squeeze",
     description: "Detecta momentos em que a volatilidade do mercado está muito comprimida.",
-    explanation: "Depois de muita compressão costuma vir expansão forte. A IA busca exatamente esse ponto.",
+    explanation: "Depois de muita compressão costuma vir expansão forte. A leitura busca exatamente esse ponto.",
   },
   "institutional-flow": {
-    title: "🏦 IA Fluxo Institucional",
+    title: "🏦 Fluxo Institucional",
     description: "Identifica quando investidores institucionais estão entrando no mercado.",
     explanation: "Instituições movem muito volume e muitas vezes iniciam movimentos importantes antes do varejo perceber.",
   },
   "smart-money": {
-    title: "💼 IA Dinheiro Inteligente",
+    title: "💼 Dinheiro Inteligente",
     description: "Busca sinais de movimentação de grandes players antes de movimentos importantes no mercado.",
     explanation: "É a leitura do dinheiro inteligente: absorção, deslocamento e volume anormal.",
   },
   accumulation: {
-    title: "📦 IA Acumulação",
+    title: "📦 Acumulação",
     description: "Detecta quando um ativo está sendo acumulado lentamente por grandes investidores.",
     explanation: "A acumulação costuma acontecer com preço estável e volume subindo aos poucos, sem chamar tanta atenção do mercado.",
   },
   "liquidity-sweep": {
-    title: "🧲 IA Varredura de Liquidez",
+    title: "🧲 Varredura de Liquidez",
     description: "Detecta quando o mercado busca liquidez antes de mudar de direção.",
     explanation: "É quando o preço varre stops, busca liquidez e depois reage na direção contrária.",
   },
   "liquidity-map": {
-    title: "🧭 IA Liquidity Map",
+    title: "🧭 Mapa de Liquidez",
     description: "Mostra onde existe maior concentração de liquidez no mercado.",
     explanation: "Esses pontos costumam atrair o preço e ajudam o trader a entender onde a reação pode acontecer.",
   },
   "market-regime": {
-    title: "📊 IA Regime de Mercado",
+    title: "📊 Regime de Mercado",
     description: "Mostra qual é o tipo de mercado atual.",
-    explanation: "A IA identifica se o mercado está em tendência de alta, tendência de baixa ou lateral, para o trader usar a ferramenta certa no cenário certo.",
+    explanation: "Identifica se o mercado está em tendência de alta, tendência de baixa ou lateral, para o trader usar a ferramenta certa no cenário certo.",
   },
   "master-score": {
-    title: "⭐ IA Score Mestre",
+    title: "⭐ Score Mestre",
     description: "É a pontuação geral do sistema.",
-    explanation: "Combina diversas análises da IA para classificar oportunidades. Score alto = oportunidade mais forte.",
+    explanation: "Combina regime, fluxo, liquidez, timing e risco para classificar oportunidades. Score alto = oportunidade mais forte.",
   },
 };
 
 const TOOL_COPY_EN: Record<string, { title: string; description: string; explanation: string }> = {
   "heat-map": {
-    title: "🗺 AI Heat Map",
+    title: "🗺 Heat Map",
     description: "Shows which assets are stronger or weaker in the market.",
     explanation: "🟢 Green = buying strength. 🔴 Red = selling pressure. If PETR4 appears strongly green, the asset is gaining strength now.",
   },
   radar: {
-    title: "⚡ AI Radar",
+    title: "⚡ Radar",
     description: "Detects assets that started moving quickly.",
     explanation: "Works as a radar for opportunities before most traders notice the move.",
   },
   "breakout-probability": {
-    title: "🎯 AI Breakout Probability",
+    title: "🎯 Breakout",
     description: "Identifies when an asset is close to breaking important resistance.",
     explanation: "Breakout means price may start a stronger trend. If range breaks with volume, probability improves.",
   },
   "volatility-squeeze": {
-    title: "🟣 AI Volatility Squeeze",
+    title: "🟣 Squeeze",
     description: "Detects moments when market volatility is highly compressed.",
-    explanation: "After strong compression, expansion often follows. This AI looks for that point.",
+    explanation: "After strong compression, expansion often follows. This read looks for that point.",
   },
   "institutional-flow": {
-    title: "🏦 AI Institutional Flow",
+    title: "🏦 Institutional Flow",
     description: "Identifies when institutional investors may be entering the market.",
     explanation: "Institutions move large volume and often start important moves before retail notices.",
   },
   "smart-money": {
-    title: "💼 AI Smart Money",
+    title: "💼 Smart Money",
     description: "Looks for large-player movement before important market moves.",
     explanation: "It reads smart money through absorption, displacement and abnormal volume.",
   },
   accumulation: {
-    title: "📦 AI Accumulation",
+    title: "📦 Accumulation",
     description: "Detects when an asset may be slowly accumulated by large investors.",
     explanation: "Accumulation often appears as stable price with gradually rising volume.",
   },
   "liquidity-sweep": {
-    title: "🧲 AI Liquidity Sweep",
+    title: "🧲 Liquidity Sweep",
     description: "Detects when the market seeks liquidity before changing direction.",
     explanation: "Price sweeps stops, takes liquidity and then reacts in the opposite direction.",
   },
   "liquidity-map": {
-    title: "🧭 AI Liquidity Map",
+    title: "🧭 Liquidity Map",
     description: "Shows where liquidity is more concentrated in the market.",
     explanation: "These zones often attract price and help the trader understand where reaction can happen.",
   },
   "market-regime": {
-    title: "📊 AI Market Regime",
+    title: "📊 Market Regime",
     description: "Shows the current market environment.",
-    explanation: "The AI identifies uptrend, downtrend or range so the trader uses the right tool for the right scenario.",
+    explanation: "Identifies uptrend, downtrend or range so the trader uses the right tool for the right scenario.",
   },
   "master-score": {
-    title: "⭐ AI Master Score",
+    title: "⭐ Master Score",
     description: "The system's consolidated score.",
-    explanation: "Combines several AI reads to classify opportunities. Higher score means stronger opportunity.",
+    explanation: "Combines regime, flow, liquidity, timing and risk to classify opportunities. Higher score means stronger opportunity.",
   },
 };
 
@@ -1218,6 +1065,37 @@ function sameChartRequest(chart: any, ticker: string, interval: string) {
   return String(chart?.interval || chart?.summary?.interval || "1D").toUpperCase() === String(interval || "1D").toUpperCase();
 }
 
+function chartFallbackShape(interval: string) {
+  const normalizedInterval = String(interval || "1D").toUpperCase();
+  const now = Date.now();
+  if (normalizedInterval === "1D") {
+    return { count: 78, stepMs: 5 * 60 * 1000, startMs: now - 77 * 5 * 60 * 1000 };
+  }
+  if (normalizedInterval === "1W") {
+    return { count: 7, stepMs: 24 * 60 * 60 * 1000, startMs: now - 6 * 24 * 60 * 60 * 1000 };
+  }
+  if (normalizedInterval === "1M") {
+    return { count: 22, stepMs: 24 * 60 * 60 * 1000, startMs: now - 21 * 24 * 60 * 60 * 1000 };
+  }
+  if (normalizedInterval === "3M") {
+    return { count: 63, stepMs: 24 * 60 * 60 * 1000, startMs: now - 62 * 24 * 60 * 60 * 1000 };
+  }
+  if (normalizedInterval === "6M") {
+    return { count: 90, stepMs: 2 * 24 * 60 * 60 * 1000, startMs: now - 178 * 24 * 60 * 60 * 1000 };
+  }
+  if (normalizedInterval === "YTD") {
+    const yearStart = new Date(new Date(now).getFullYear(), 0, 1).getTime();
+    const days = Math.max(1, Math.ceil((now - yearStart) / (24 * 60 * 60 * 1000)));
+    const count = Math.min(120, days + 1);
+    const stepMs = Math.max(24 * 60 * 60 * 1000, Math.ceil(days / Math.max(count - 1, 1)) * 24 * 60 * 60 * 1000);
+    return { count, stepMs, startMs: now - (count - 1) * stepMs };
+  }
+  if (normalizedInterval === "1Y") {
+    return { count: 122, stepMs: 3 * 24 * 60 * 60 * 1000, startMs: now - 363 * 24 * 60 * 60 * 1000 };
+  }
+  return { count: 156, stepMs: 7 * 24 * 60 * 60 * 1000, startMs: now - 155 * 7 * 24 * 60 * 60 * 1000 };
+}
+
 function topTabText(tabId: string, fallback: string, locale: AppLocale = "pt-BR") {
   const copy = locale === "en-US" ? TOP_TAB_TEXT_EN : TOP_TAB_TEXT;
   return copy[tabId] || fallback;
@@ -1237,6 +1115,14 @@ function symbolName(symbol: string, locale: AppLocale = "pt-BR") {
 function displayWatchlistLabel(item: { symbol: string; label?: string | null }, locale: AppLocale = "pt-BR") {
   if (locale !== "en-US") return item.label || symbolName(item.symbol, locale);
   return b3FutureLabel(item.symbol, locale) || DERIVATIVE_HINTS[item.symbol] || COMPANY_HINTS[item.symbol] || item.label || item.symbol;
+}
+
+const REMOVED_FUTURES_SYMBOLS = new Set(["CME", "NQ", "MNQ", "MNO", "ES", "MES", "MYM"]);
+
+function isRemovedFutureSymbol(symbol?: string | null) {
+  const normalized = normalizeSymbol(String(symbol || ""));
+  if (!normalized) return false;
+  return /^(WIN|WDO)[FGHJKMNQUVXZ]\d{2}$/.test(normalized) || REMOVED_FUTURES_SYMBOLS.has(normalized);
 }
 
 function resolveTypedSymbol(raw: string) {
@@ -1273,6 +1159,255 @@ function formatRelativeTime(timestamp?: number | null, locale: AppLocale = "pt-B
   return `${Math.floor(diffSeconds / 86400)} d`;
 }
 
+function formatNewsClock(value?: string | null, locale: AppLocale = "pt-BR") {
+  if (!value) return locale === "en-US" ? "no time" : "sem horário";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return locale === "en-US" ? "no time" : "sem horário";
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed);
+}
+
+function expandPortugueseMarketTerms(value?: string | null) {
+  return String(value || "")
+    .replace(/\bM\s*&\s*A\b/gi, "Fusões e aquisições")
+    .replace(/\bMergers?\s*&\s*Acquisitions?\b/gi, "Fusões e aquisições");
+}
+
+function newsThemeFromText(value?: string | null) {
+  const normalized = normalizeUiText(value);
+  if (!normalized) return "";
+  if (normalized.includes("m&a") || normalized.includes("fusoes e aquisicoes") || normalized.includes("merger") || normalized.includes("acquisition")) return "mna";
+  if (normalized.includes("dividend") || normalized.includes("dividendo") || normalized.includes("income investors")) return "dividend";
+  if (normalized.includes(" ev") || normalized.includes(" evs") || normalized.includes("electric vehicle") || normalized.includes("veiculo eletrico")) return "ev";
+  if (normalized.includes("mover") || normalized.includes("destaque")) return "movers";
+  return "";
+}
+
+function newsFieldMatchesTheme(value: string | null | undefined, titleTheme: string) {
+  const fieldTheme = newsThemeFromText(value);
+  return !titleTheme || !fieldTheme || fieldTheme === titleTheme;
+}
+
+function localizedNewsFallbackLine(item: NewsItem, symbol: string, locale: AppLocale, kind: "summary" | "trader" | "why" | "context") {
+  const theme = newsThemeFromText(item.title || item.summary || item.card_summary);
+  const ticker = normalizeSymbol(symbol) || "ativo";
+
+  const pt = {
+    mna: {
+      summary: `Fusões e aquisições em ${ticker} podem criar prêmio de evento; confirme preço e volume.`,
+      trader: `Para trader: trate a notícia como contexto e só opere se ${ticker} confirmar fluxo.`,
+      why: `Pode alterar expectativa de lucro, múltiplos e precificação do setor.`,
+      context: `Evento corporativo pode acelerar reprecificação, mas não substitui gatilho no gráfico.`,
+    },
+    dividend: {
+      summary: `Dividendos em ${ticker} aumentam interesse de renda, mas exigem qualidade de caixa e tendência confirmando.`,
+      trader: `Para trader: não compre só pelo yield; espere preço, volume e regime alinharem.`,
+      why: `Dividend yield muda a atratividade, mas pode esconder risco de queda ou lucro menor.`,
+      context: `Leitura de renda deve ser confirmada por fluxo e suporte no preço.`,
+    },
+    ev: {
+      summary: `Notícia de EV/baterias muda a leitura estratégica; confirme impacto em demanda, margem e fluxo.`,
+      trader: `Para trader: use a manchete como alerta e espere reação real do preço em ${ticker}.`,
+      why: `EVs e armazenamento podem mexer em crescimento, capex e percepção de longo prazo.`,
+      context: `Tema estratégico costuma gerar volatilidade; o gráfico decide o timing.`,
+    },
+    movers: {
+      summary: `Lista de destaques mostra contexto relativo; compare força antes de usar como gatilho.`,
+      trader: `Para trader: use a lista para filtrar ativos e só aja com confirmação no gráfico.`,
+      why: `Movers ajudam a ver onde o mercado está concentrando atenção e volume.`,
+      context: `Contexto de mercado, não recomendação isolada de operação.`,
+    },
+    generic: {
+      summary: `Notícia relevante em ${ticker}; confirme impacto em preço, volume e leitura da IA.`,
+      trader: `Para trader: espere confirmação operacional antes de agir em ${ticker}.`,
+      why: `A manchete pode alterar percepção de risco, lucro ou fluxo do ativo.`,
+      context: `Use como contexto e valide no gráfico antes de entrar ou sair.`,
+    },
+  } as const;
+
+  const en = {
+    mna: {
+      summary: `M&A involving ${ticker} can create event premium; confirm price and volume first.`,
+      trader: `Trader note: treat the headline as context and trade only if ${ticker} confirms flow.`,
+      why: `It can change earnings expectations, multiples and sector pricing.`,
+      context: `Corporate events can accelerate repricing, but the chart still controls timing.`,
+    },
+    dividend: {
+      summary: `Dividend news in ${ticker} improves income appeal, but cash quality and trend must confirm.`,
+      trader: `Trader note: do not buy on yield alone; wait for price, volume and regime alignment.`,
+      why: `Dividend yield changes attractiveness, but can hide downside or weaker earnings risk.`,
+      context: `Income reads need flow and price support confirmation.`,
+    },
+    ev: {
+      summary: `EV/battery news changes the strategic read; confirm demand, margin and flow impact.`,
+      trader: `Trader note: use the headline as an alert and wait for real price reaction in ${ticker}.`,
+      why: `EV and storage themes can affect growth, capex and long-term perception.`,
+      context: `Strategic themes often add volatility; the chart decides timing.`,
+    },
+    movers: {
+      summary: `Mover lists are relative-market context; compare strength before using them as a trigger.`,
+      trader: `Trader note: use the list to filter assets and act only with chart confirmation.`,
+      why: `Movers show where attention and volume are concentrating.`,
+      context: `Market context, not a standalone trading recommendation.`,
+    },
+    generic: {
+      summary: `Relevant news in ${ticker}; confirm price, volume and AI impact before acting.`,
+      trader: `Trader note: wait for operational confirmation before acting in ${ticker}.`,
+      why: `The headline may change perceived risk, earnings or flow for the asset.`,
+      context: `Use it as context and validate on the chart before entering or exiting.`,
+    },
+  } as const;
+
+  const group = (theme || "generic") as keyof typeof pt;
+  return locale === "en-US" ? en[group][kind] : pt[group][kind];
+}
+
+function buildNewsTraderTakeaway(item: NewsItem, symbol: string, locale: AppLocale, index = 0) {
+  const ticker = normalizeSymbol(symbol) || (locale === "en-US" ? "the asset" : "o ativo");
+  const text = normalizeUiText(
+    [
+      item.title,
+      item.summary,
+      item.card_summary,
+      item.why_it_matters,
+      ...(Array.isArray(item.labels) ? item.labels : []),
+      ...(Array.isArray(item.entities) ? item.entities : []),
+    ].filter(Boolean).join(" "),
+  );
+  const impact = normalizeUiText(item.impact || item.impact_label || "");
+  const isBullish = impact.includes("bull") || impact.includes("positivo") || impact.includes("alta");
+  const isBearish = impact.includes("bear") || impact.includes("negativo") || impact.includes("baixa");
+  const theme = newsThemeFromText(text);
+
+  const ptRotations = [
+    `Para trader: acompanhe ${ticker} pelo preço e volume; só transforme a manchete em operação se houver confirmação no gráfico.`,
+    `Para trader: use a notícia de ${ticker} como contexto e aguarde fluxo real antes de comprar, vender ou encerrar.`,
+    `Para trader: compare a reação de ${ticker} com o setor; sem confirmação, a leitura fica apenas como alerta.`,
+  ];
+  const enRotations = [
+    `Trader note: track ${ticker} through price and volume; turn the headline into a trade only after chart confirmation.`,
+    `Trader note: use the ${ticker} headline as context and wait for real flow before buying, selling or closing.`,
+    `Trader note: compare ${ticker}'s reaction with the sector; without confirmation, keep it as an alert only.`,
+  ];
+
+  if (locale === "en-US") {
+    if (theme === "mna") return `Trader note: event risk can reprice ${ticker}; wait for spread, volume and price confirmation before acting.`;
+    if (theme === "dividend") return `Trader note: do not buy ${ticker} on yield alone; confirm cash quality, trend and volume first.`;
+    if (theme === "ev") return `Trader note: EV or battery news can move expectations; let ${ticker}'s price reaction confirm the trade.`;
+    if (theme === "movers") return `Trader note: mover lists are filters, not signals; trade ${ticker} only if relative strength and volume confirm.`;
+    if (text.includes("earnings") || text.includes("guidance") || text.includes("resultado")) return `Trader note: earnings or guidance can change ${ticker}'s intraday trend; watch price, volume and margin reaction.`;
+    if (text.includes("regulation") || text.includes("regulacao")) return `Trader note: regulatory news can increase volatility in ${ticker}; reduce size until direction is confirmed.`;
+    if (isBullish) return `Trader note: favor continuation in ${ticker} only if buyers hold the breakout and volume confirms.`;
+    if (isBearish) return `Trader note: prioritize protection or short-side setups in ${ticker} only if support fails with volume.`;
+    return enRotations[index % enRotations.length];
+  }
+
+  if (theme === "mna") return `Para trader: evento de fusões e aquisições pode reprecificar ${ticker}; espere preço, spread e volume confirmarem antes de agir.`;
+  if (theme === "dividend") return `Para trader: não compre ${ticker} só pelo dividendo; confirme caixa, tendência e volume antes da entrada.`;
+  if (theme === "ev") return `Para trader: notícia de EV ou baterias pode mexer nas expectativas; deixe a reação do preço em ${ticker} confirmar o trade.`;
+  if (theme === "movers") return `Para trader: lista de destaques é filtro, não sinal; opere ${ticker} só se força relativa e volume confirmarem.`;
+  if (text.includes("earnings") || text.includes("guidance") || text.includes("resultado")) return `Para trader: resultado ou guidance pode mudar a tendência intraday de ${ticker}; monitore preço, volume e margem.`;
+  if (text.includes("regulation") || text.includes("regulacao")) return `Para trader: notícia regulatória pode aumentar volatilidade em ${ticker}; reduza tamanho até confirmar direção.`;
+  if (isBullish) return `Para trader: priorize continuação compradora em ${ticker} só se compradores sustentarem rompimento e volume confirmar.`;
+  if (isBearish) return `Para trader: priorize proteção ou venda em ${ticker} só se suporte falhar com volume.`;
+  return ptRotations[index % ptRotations.length];
+}
+
+function clampHeadline(value: string, maxLength = 130) {
+  const cleaned = value.trim().replace(/\s+/g, " ");
+  return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 3)}...` : cleaned;
+}
+
+function translateEnglishNewsHeadlineToPt(value?: string | null, symbol?: string | null) {
+  const title = String(value || "").trim();
+  if (!title) return "";
+  if (looksPortuguese(title)) return clampHeadline(expandPortugueseMarketTerms(title));
+
+  const ticker = normalizeSymbol(String(symbol || "")) || "ativo";
+  const normalized = title
+    .replace(/[’]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const batteryDeal = normalized.match(/^(.+?)\s+and\s+(.+?)\s+signs?\s+major\s+battery\s+storage\s+supply\s+deal$/i);
+  if (batteryDeal) {
+    return clampHeadline(`${batteryDeal[1]} e ${batteryDeal[2]} assinam grande acordo de fornecimento de armazenamento em baterias`);
+  }
+
+  const evDrawingBoard = normalized.match(/^(.+?)\s+CEOs?\s+go\s+back\s+to\s+the\s+drawing\s+board\s+with\s+EVs$/i);
+  if (evDrawingBoard) {
+    return clampHeadline(`CEOs de ${evDrawingBoard[1]} revisam estratégia de veículos elétricos`);
+  }
+
+  const dividendYield = normalized.match(/^Is\s+a\s+(.+?)\s+Dividend\s+Yield\s+Enough\s+to\s+Make\s+This\s+Stock\s+a\s+Buy\s+for\s+Income\s+Investors\??$/i);
+  if (dividendYield) {
+    return clampHeadline(`Rendimento de dividendos de ${dividendYield[1]} é suficiente para tornar ${ticker} uma compra para investidores de renda?`);
+  }
+
+  const movers = normalized.match(/^(?:these\s+)?stocks\s+are\s+today'?s\s+movers:\s*(.+)$/i);
+  if (movers) {
+    const list = movers[1]
+      .replace(/,\s*and\s+more\.?$/i, " e mais")
+      .replace(/\s+and\s+/gi, " e ");
+    return clampHeadline(`Ações em destaque hoje: ${list}`);
+  }
+
+  const firstCustomerStorage = normalized.match(/^(.+?)\s+lands\s+its\s+first\s+customer\s+in\s+battery\s+storage\s+deal$/i);
+  if (firstCustomerStorage) {
+    return clampHeadline(`${firstCustomerStorage[1]} conquista primeiro cliente em acordo de armazenamento em baterias`);
+  }
+
+  const firstGridStorage = normalized.match(/^(.+?)\s+signs?\s+first\s+grid\s+storage\s+deal\s+with\s+(.+?),\s+up\s+to\s+(.+)$/i);
+  if (firstGridStorage) {
+    return clampHeadline(`${firstGridStorage[1]} assina primeiro acordo de armazenamento de rede com ${firstGridStorage[2]}, de até ${firstGridStorage[3]}`);
+  }
+
+  const europeanGrowthStorage = normalized.match(/^(.+?)\s+details\s+european\s+growth\s+strategy,\s+signs?\s+(.+?)\s+energy-storage\s+agreement$/i);
+  if (europeanGrowthStorage) {
+    return clampHeadline(`${europeanGrowthStorage[1]} detalha estratégia de crescimento na Europa e assina acordo de armazenamento de energia com ${europeanGrowthStorage[2]}`);
+  }
+
+  const acquisition = normalized.match(/^(.+?)\s+(?:to\s+)?acquires?\s+(.+)$/i);
+  if (acquisition) {
+    return clampHeadline(`${acquisition[1]} compra ${acquisition[2]}`);
+  }
+
+  const merger = normalized.match(/^(.+?)\s+and\s+(.+?)\s+announce\s+merger/i);
+  if (merger) {
+    return clampHeadline(`${merger[1]} e ${merger[2]} anunciam fusão`);
+  }
+
+  const cleaned = normalized
+    .replace(/\bM\s*&\s*A\b/gi, "fusões e aquisições")
+    .replace(/\bMergers?\s*&\s*Acquisitions?\b/gi, "fusões e aquisições")
+    .replace(/\btoday'?s\b/gi, "de hoje")
+    .replace(/\bstocks?\b/gi, "ações")
+    .replace(/\bmovers?\b/gi, "destaques")
+    .replace(/\bmajor\b/gi, "grande")
+    .replace(/\bsupply deal\b/gi, "acordo de fornecimento")
+    .replace(/\bbattery storage\b/gi, "armazenamento em baterias")
+    .replace(/\benergy-storage agreement\b/gi, "acordo de armazenamento de energia")
+    .replace(/\beuropean growth strategy\b/gi, "estratégia de crescimento na Europa")
+    .replace(/\bgrid storage\b/gi, "armazenamento de rede")
+    .replace(/\bfirst customer\b/gi, "primeiro cliente")
+    .replace(/\bdeal\b/gi, "acordo")
+    .replace(/\bsigns?\b/gi, "assina")
+    .replace(/\blands\b/gi, "conquista")
+    .replace(/\bdetails\b/gi, "detalha")
+    .replace(/\bfirst\b/gi, "primeiro")
+    .replace(/\bwith\b/gi, "com")
+    .replace(/\bup to\b/gi, "até")
+    .replace(/\bcustomer\b/gi, "cliente")
+    .replace(/\bmore\b/gi, "mais")
+    .replace(/\band\b/gi, "e");
+
+  if (cleaned !== normalized) return clampHeadline(cleaned);
+  return `Manchete internacional sobre ${ticker}`;
+}
+
 function getSaoPauloParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat("en-GB", {
     timeZone: "America/Sao_Paulo",
@@ -1300,6 +1435,26 @@ function isB3MarketOpen(date = new Date()) {
   if (!openDays.includes(weekday)) return false;
   const minutes = hour * 60 + minute;
   return minutes >= 10 * 60 && minutes <= 17 * 60;
+}
+
+function marketSessionLabel(symbol: string, locale: AppLocale = "pt-BR", date = new Date()) {
+  const { weekday, hour, minute } = getSaoPauloParts(date);
+  const minutes = hour * 60 + minute;
+  const isWeekday = ["mon", "tue", "wed", "thu", "fri"].includes(weekday);
+  const closed = locale === "en-US" ? "Market closed" : "Mercado fechado";
+
+  if (!isWeekday) return closed;
+
+  if (isB3Symbol(symbol)) {
+    if (minutes >= 9 * 60 + 45 && minutes < 10 * 60) return locale === "en-US" ? "Pre-open" : "Pré-abertura";
+    if (minutes >= 10 * 60 && minutes <= 17 * 60 + 55) return locale === "en-US" ? "Market open" : "Mercado aberto";
+    return closed;
+  }
+
+  if (minutes >= 5 * 60 && minutes < 10 * 60 + 30) return locale === "en-US" ? "Pre-market" : "Pré-mercado";
+  if (minutes >= 10 * 60 + 30 && minutes <= 17 * 60) return locale === "en-US" ? "Market open" : "Mercado aberto";
+  if (minutes > 17 * 60 && minutes <= 21 * 60) return locale === "en-US" ? "After-hours" : "Após o fechamento";
+  return closed;
 }
 
 function normalizeAlertTimestamp(value?: unknown) {
@@ -1332,6 +1487,16 @@ function resolveAiAlertTimestamp(row: AiToolRow, fallbackIso?: unknown) {
     normalizeAlertTimestamp(row.last_seen_at) ||
     normalizeAlertTimestamp(row.created_at) ||
     normalizeAlertTimestamp(fallbackIso)
+  );
+}
+
+function resolveAiFindingTimestamp(row: AiToolRow) {
+  return (
+    normalizeAlertTimestamp(row.detected_at) ||
+    normalizeAlertTimestamp(row.timestamp) ||
+    normalizeAlertTimestamp(row.created_at) ||
+    normalizeAlertTimestamp(row.updated_at) ||
+    normalizeAlertTimestamp(row.last_seen_at)
   );
 }
 
@@ -1379,8 +1544,8 @@ function isNewerAiAlert(next: AiToolRow, current?: AiToolRow | null) {
   return nextTime > currentTime;
 }
 
-function withAlertTimestamp(row: AiToolRow, fallbackIso: string): AiToolRow {
-  const detectedAt = resolveAiAlertTimestamp(row, fallbackIso) || fallbackIso;
+function withAlertTimestamp(row: AiToolRow, fallbackIso?: string): AiToolRow {
+  const detectedAt = resolveAiFindingTimestamp(row) || normalizeAlertTimestamp(fallbackIso) || undefined;
   const lastSeenAt =
     normalizeAlertTimestamp(row.last_seen_at) ||
     normalizeAlertTimestamp(row.updated_at) ||
@@ -1388,9 +1553,8 @@ function withAlertTimestamp(row: AiToolRow, fallbackIso: string): AiToolRow {
 
   return {
     ...row,
-    updated_at: detectedAt,
-    detected_at: detectedAt,
-    last_seen_at: lastSeenAt,
+    ...(detectedAt ? { updated_at: normalizeAlertTimestamp(row.updated_at) || detectedAt, detected_at: normalizeAlertTimestamp(row.detected_at) || detectedAt } : {}),
+    ...(lastSeenAt ? { last_seen_at: lastSeenAt } : {}),
   };
 }
 
@@ -1519,7 +1683,7 @@ function formatPrice(value?: number | null) {
 
 function isBrazilianMarketSymbol(symbol?: string | null) {
   const normalized = normalizeSymbol(String(symbol || ""));
-  return /^[A-Z]{4}\d{1,2}$/.test(normalized) || normalized.startsWith("WIN") || normalized.startsWith("WDO");
+  return /^[A-Z]{4}\d{1,2}$/.test(normalized) || /^[A-Z0-9]{3,5}34$/.test(normalized) || normalized.startsWith("WIN") || normalized.startsWith("WDO");
 }
 
 function parsePriceNumber(value: unknown) {
@@ -1559,6 +1723,25 @@ function formatCompact(value?: number | null) {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(Number(value));
+}
+
+function formatVolumeLong(value?: number | null, locale: AppLocale = "pt-BR") {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return locale === "en-US" ? "not available" : "indisponível";
+  const numberLocale = locale === "en-US" ? "en-US" : "pt-BR";
+  if (numeric >= 1_000_000_000) {
+    const valueText = (numeric / 1_000_000_000).toLocaleString(numberLocale, { maximumFractionDigits: 1 });
+    return locale === "en-US" ? `${valueText} billion` : `${valueText} bilhões`;
+  }
+  if (numeric >= 1_000_000) {
+    const valueText = (numeric / 1_000_000).toLocaleString(numberLocale, { maximumFractionDigits: 1 });
+    return locale === "en-US" ? `${valueText} million` : `${valueText} milhões`;
+  }
+  if (numeric >= 1_000) {
+    const valueText = (numeric / 1_000).toLocaleString(numberLocale, { maximumFractionDigits: 1 });
+    return locale === "en-US" ? `${valueText} thousand` : `${valueText} mil`;
+  }
+  return numeric.toLocaleString(numberLocale, { maximumFractionDigits: 0 });
 }
 
 function formatWatchlistPrimaryValue(
@@ -1687,6 +1870,19 @@ function deriveRelativeVolume(volume?: number | null) {
   return clampNumber(Number((numeric / 1_000_000).toFixed(2)), 0.1, 9.9);
 }
 
+function calculateRelativeVolume(volume?: number | null, averageVolume?: number | null) {
+  const current = Number(volume);
+  const average = Number(averageVolume);
+  if (!Number.isFinite(current) || current <= 0 || !Number.isFinite(average) || average <= 0) return null;
+  return clampNumber(Number((current / average).toFixed(2)), 0.1, 12);
+}
+
+function estimateRelativeVolumeFromActivity(volume?: number | null) {
+  const current = Number(volume);
+  if (!Number.isFinite(current) || current <= 0) return null;
+  return clampNumber(Number((Math.log10(current) - 6).toFixed(2)), 0.6, 3);
+}
+
 function deriveAdx(changePct?: number | null, rsi?: number | null, trend?: string | null) {
   const change = Math.abs(Number(changePct || 0));
   const rsiValue = Number(rsi);
@@ -1722,6 +1918,22 @@ function firstFiniteNumber(...values: Array<unknown>) {
   return null;
 }
 
+function firstValidRsiNumber(...values: Array<unknown>) {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0 && numeric <= 100) return numeric;
+  }
+  return null;
+}
+
+function firstPositiveFiniteNumber(...values: Array<unknown>) {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  }
+  return null;
+}
+
 function firstNonZeroFiniteNumber(...values: Array<unknown>) {
   for (const value of values) {
     const numeric = Number(value);
@@ -1753,18 +1965,55 @@ function deriveChartMovement(chart?: ChartPayload | null) {
   };
 }
 
-function formatLiquidityVolume(volume?: number | null, rvol?: number | null) {
+function deriveChartVolume(chart?: ChartPayload | null) {
+  const rows = chart?.ohlc?.length ? chart.ohlc : chart?.series || [];
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const volume = firstPositiveFiniteNumber((rows[index] as any).volume);
+    if (volume != null) return volume;
+  }
+  return null;
+}
+
+function formatLiquidityVolume(volume?: number | null, rvol?: number | null, locale: AppLocale = "pt-BR") {
   const numericVolume = firstFiniteNumber(volume);
   if (numericVolume != null && numericVolume > 0) return formatCompact(numericVolume);
   const numericRvol = firstFiniteNumber(rvol);
-  if (numericRvol != null) return `RVOL ${numericRvol.toFixed(2)}`;
-  return "sem leitura";
+  if (numericRvol != null && numericRvol > 0) return `RVOL ${numericRvol.toFixed(2)}`;
+  return locale === "en-US" ? "No real volume" : "Sem volume real";
+}
+
+function aiToolDataQuality(row?: Partial<AiToolRow> | null) {
+  const rawRow = (row || {}) as any;
+  const metrics = rawRow.metrics;
+  const direct = rawRow.data_quality ?? rawRow.dataQuality ?? metrics?.data_quality ?? metrics?.dataQuality;
+  const text = String(direct ?? (typeof metrics === "string" ? metrics : "")).toLowerCase();
+  if (text.includes("score_only")) return "score_only";
+  if (text.includes("empty") || text.includes("missing")) return "missing";
+  if (text.includes("real") || text.includes("confirmed")) return "real";
+  return String(direct || "").trim().toLowerCase();
+}
+
+function isOperationalAiFinding(row?: Partial<AiToolRow> | null) {
+  const rawRow = (row || {}) as any;
+  const price = firstFiniteNumber(rawRow.price);
+  const volume = firstFiniteNumber(rawRow.volume);
+  const quality = aiToolDataQuality(row);
+  if (quality === "score_only" || quality === "missing") return false;
+  return price != null && price > 0 && volume != null && volume > 0;
 }
 
 function looksPortuguese(text?: string | null) {
   const value = String(text || "").trim();
   if (!value) return false;
-  return /[ãõçáéíóúàêô]|preço|mercado|ação|acao|notícia|noticia|volume|alta|baixa|trimestre|resultado|ativo|risco|fluxo/i.test(value);
+  const normalized = normalizeUiText(value);
+  const hasPortugueseMarketTerm =
+    /\b(preco|mercado|acao|noticia|volume|alta|baixa|trimestre|resultado|ativo|risco|fluxo|regulacao|leitura|sinal|comprador|vendedor|lateral|rompimento|suporte|resistencia)\b/.test(
+      normalized,
+    );
+  if (hasPortugueseMarketTerm) return true;
+  const hasAccent = /[ãõçáéíóúàêô]/i.test(value);
+  const hasPortugueseConnector = /\b(de|da|do|das|dos|para|por|com|sem|em|ao|aos|uma|um|que|se|nao|apos|ate)\b/.test(normalized);
+  return hasAccent && hasPortugueseConnector;
 }
 
 function normalizeUiText(value?: string | null) {
@@ -1787,7 +2036,39 @@ function translatePtToEn(value?: string | null, symbol?: string | null) {
   if (!original) return "";
   const ticker = normalizeSymbol(String(symbol || "")) || "this ticker";
   const normalized = normalizeUiText(original);
+  const normalizedKey = normalized.replace(/[.,;:!?]+$/g, "");
+  const exactTranslations: Record<string, string> = {
+    "leitura favoravel ao ativo no curto prazo": "Short-term read is favorable for the asset.",
+    "manchete relevante, mas ainda ambigua ou indireta para o papel; precisa de confirmacao": "Relevant headline, but still ambiguous or indirect for the stock; wait for confirmation.",
+    "consumo": "Consumer",
+    "varejo": "Retail",
+    "energia": "Energy",
+    "petroleo e gas": "Oil and gas",
+    "financeiro": "Financials",
+    "financeiro / bancos": "Financials / Banks",
+    "bancos": "Banks",
+    "bancos de investimento": "Investment banks",
+    "macro / mercado": "Macro / Market",
+    "mercado": "Market",
+    "geral": "General",
+    "macro": "Macro",
+    "tecnologia": "Technology",
+    "resultado": "Earnings",
+    "guidance": "Guidance",
+    "regulacao": "Regulation",
+    "juridico": "Legal",
+    "fato relevante": "Material fact",
+    "fusoes e aquisicoes": "M&A",
+    "m&a": "M&A",
+  };
+  if (exactTranslations[normalized] || exactTranslations[normalizedKey]) return exactTranslations[normalized] || exactTranslations[normalizedKey];
 
+  if (normalized.includes("leitura favoravel ao ativo") || normalized.includes("leitura favoravel ao asset")) {
+    return "Short-term read is favorable for the asset.";
+  }
+  if (normalized.includes("pode gerar reprecificacao rapida") || normalized.includes("pode gerar repricing rapida")) {
+    return `Can generate quick repricing in ${ticker} through event premium and strategic read.`;
+  }
   if (normalized.includes("para trader") && normalized.includes("reacao de preco") && normalized.includes("volume")) {
     return `Trader note: monitor price and volume reaction in ${ticker} because the read may turn into an intraday trend.`;
   }
@@ -1799,6 +2080,51 @@ function translatePtToEn(value?: string | null, symbol?: string | null) {
   }
   if (normalized.includes("para trader") && normalized.includes("monitore")) {
     return `Trader note: monitor ${ticker} price, volume and flow before acting.`;
+  }
+  if (normalized.includes("evento de m&a") || normalized.includes("evento de fusoes e aquisicoes")) {
+    return "M&A event can create event premium and accelerate repricing.";
+  }
+  if (normalized.includes("m&a em") || normalized.includes("fusoes e aquisicoes em")) {
+    return `M&A involving ${ticker} favors upside only if price and volume confirm.`;
+  }
+  if (normalized.includes("resultado") && normalized.includes("macro") && normalized.includes("zona neutra")) {
+    return `Earnings and macro context keep ${ticker} neutral; treat it as context until price confirms direction.`;
+  }
+  if ((normalized.includes("fusoes e aquisicoes") || normalized.includes("m&a")) && normalized.includes("macro") && normalized.includes("favorece alta")) {
+    return `M&A and macro context favor upside in ${ticker}, but only after price and volume confirm.`;
+  }
+  if (normalized.includes("macro em") && normalized.includes("favorece alta")) {
+    return `Macro context favors upside in ${ticker}; confirm with price, volume and flow before acting.`;
+  }
+  if (normalized.includes("noticia para") && normalized.includes("favorece alta")) {
+    return `News context favors upside in ${ticker}; confirm with price, volume and flow before acting.`;
+  }
+  if (normalized.includes("importa porque") && normalized.includes("pano de fundo macro")) {
+    return "It matters because the macro backdrop can change market flow and risk appetite.";
+  }
+  if (normalized.includes("ajuda a entender") && normalized.includes("fluxo")) {
+    return `Helps explain the flow and context that may affect ${ticker} in the short term.`;
+  }
+  if (normalized.includes("contexto mais ligado") && normalized.includes("fluxo do papel")) {
+    return "Context is more tied to the sector and short-term stock flow.";
+  }
+  if ((normalized.includes("resultado") || normalized.includes("guidance")) && normalized.includes("favorece alta")) {
+    return `Earnings or guidance favor upside in ${ticker}; confirm with price, volume and flow.`;
+  }
+  if ((normalized.includes("resultado") || normalized.includes("guidance")) && normalized.includes("zona neutra")) {
+    return `Earnings or guidance keep ${ticker} neutral; wait for price confirmation.`;
+  }
+  if (normalized.includes("regulacao") && normalized.includes("zona neutra")) {
+    return `Regulatory context keeps ${ticker} neutral; use it as context until price confirms direction.`;
+  }
+  if (normalized.includes("pode mexer") && (normalized.includes("risco percebido") || normalized.includes("risk percebido"))) {
+    return `It can change perceived risk in ${ticker} and the sector read.`;
+  }
+  if (normalized.includes("noticia regulatoria") || normalized.includes("news regulatoria")) {
+    return "Regulatory news can increase volatility and affect the sector.";
+  }
+  if (normalized.includes("resultado") && normalized.includes("fato relevante")) {
+    return `Earnings or material facts keep ${ticker} in context; confirm with price before acting.`;
   }
   if (normalized === "serie ohlc do provider") return "provider OHLC series";
   if (normalized === "preco real confirmado") return "confirmed real price";
@@ -1840,12 +2166,26 @@ function translatePtToEn(value?: string | null, symbol?: string | null) {
   if (normalized.includes("perde a leitura se score cair")) {
     return "The read fails if Score drops, relative strength turns neutral or the opposite side dominates the tape.";
   }
+  if (normalized.includes("baixar prioridade se score cair")) {
+    return "Lower priority if Score drops, volume diverges or another main AI points to the opposite direction.";
+  }
   if (normalized.includes("mapa so autoriza") || normalized.includes("mapa só autoriza")) {
     return `Heat Map only authorizes action if ${ticker} keeps relative strength, RVOL confirms and price breaks the tactical level.`;
   }
   if (normalized.includes("close sell descoberta") || normalized.includes("vwap") && normalized.includes("short")) {
     return "Close short if VWAP/EMA21 recovers or institutional buying appears.";
   }
+  if (normalized.includes("leitura operacional esta incompleta")) {
+    return "The operational read is incomplete. Treat the panel as context and avoid execution until price and volume are confirmed.";
+  }
+  if (normalized.includes("sem volume real")) return "No real volume";
+  if (normalized.includes("volume pouco confiavel")) return "Unreliable or missing volume";
+  if (normalized.includes("fluxo institucional sem leitura")) return "Institutional flow without read";
+  if (normalized.includes("score mestre sem leitura")) return "Master Score without confirmed reading";
+  if (normalized.includes("tendencia principal")) return original.replace(/Tendência principal/gi, "Main trend").replace(/tendencia principal/gi, "main trend");
+  if (normalized.includes("conviccao forte")) return original.replace(/Convicção forte/gi, "Strong conviction").replace(/conviccao forte/gi, "strong conviction");
+  if (normalized.includes("conviccao moderada")) return original.replace(/Convicção moderada/gi, "Moderate conviction").replace(/conviccao moderada/gi, "moderate conviction");
+  if (normalized.includes("pouca conviccao")) return original.replace(/Pouca convicção/gi, "Low conviction").replace(/pouca conviccao/gi, "low conviction");
   if (normalized.includes("risco baixo") && normalized.includes("filtros principais alinhados")) {
     return "Low risk: main filters are aligned.";
   }
@@ -1853,6 +2193,22 @@ function translatePtToEn(value?: string | null, symbol?: string | null) {
 
   return original
     .replace(/Preço/g, "Price")
+    .replace(/preço pendente/g, "pending price")
+    .replace(/Preço pendente/g, "Pending price")
+    .replace(/volume pendente/g, "pending volume")
+    .replace(/Volume pendente/g, "Pending volume")
+    .replace(/RSI pendente/g, "pending RSI")
+    .replace(/\bFusões e aquisições\b/gi, "M&A")
+    .replace(/\bfusões e aquisições\b/gi, "M&A")
+    .replace(/\bEvento\b/g, "Event")
+    .replace(/\bevento\b/g, "event")
+    .replace(/\bprêmio\b/g, "premium")
+    .replace(/\bpremio\b/g, "premium")
+    .replace(/\breprecificação\b/g, "repricing")
+    .replace(/\breprecificacao\b/g, "repricing")
+    .replace(/\bacelerar\b/g, "accelerate")
+    .replace(/\balterar\b/g, "change")
+    .replace(/\bfato relevante\b/g, "material fact")
     .replace(/preço/g, "price")
     .replace(/Variação/g, "Change")
     .replace(/variação/g, "change")
@@ -1862,6 +2218,29 @@ function translatePtToEn(value?: string | null, symbol?: string | null) {
     .replace(/estado/g, "state")
     .replace(/Leitura principal/g, "Main read")
     .replace(/leitura principal/g, "main read")
+    .replace(/leitura adicional/g, "additional read")
+    .replace(/Leitura adicional/g, "Additional read")
+    .replace(/leitura operacional/g, "operational read")
+    .replace(/Leitura operacional/g, "Operational read")
+    .replace(/no Score Mestre/g, "in Master Score")
+    .replace(/No Score Mestre/g, "In Master Score")
+    .replace(/no mapa de liquidez/g, "in the liquidity map")
+    .replace(/no Mapa de Liquidez/g, "in the Liquidity Map")
+    .replace(/no radar/g, "on radar")
+    .replace(/No radar/g, "On radar")
+    .replace(/em probabilidade de rompimento/g, "in breakout probability")
+    .replace(/em fluxo institucional/g, "in institutional flow")
+    .replace(/em smart money/g, "in smart money")
+    .replace(/em acumulação/g, "in accumulation")
+    .replace(/em acumulacao/g, "in accumulation")
+    .replace(/em varredura/g, "in liquidity sweep")
+    .replace(/em regime/g, "in regime")
+    .replace(/Direção final/g, "Final direction")
+    .replace(/Direcao final/g, "Final direction")
+    .replace(/direção final/g, "final direction")
+    .replace(/direcao final/g, "final direction")
+    .replace(/Operação preferida/g, "Preferred operation")
+    .replace(/operacao preferida/g, "preferred operation")
     .replace(/Invalidação/g, "Invalidation")
     .replace(/Invalidacao/g, "Invalidation")
     .replace(/invalidação/g, "invalidation")
@@ -1925,22 +2304,22 @@ function translatePtToEn(value?: string | null, symbol?: string | null) {
     .replace(/Médio/g, "Medium")
     .replace(/medio/g, "medium")
     .replace(/Medio/g, "Medium")
-    .replace(/baixo/g, "low")
-    .replace(/Baixo/g, "Low")
-    .replace(/alto/g, "high")
-    .replace(/Alto/g, "High")
+    .replace(/\bbaixo\b/g, "low")
+    .replace(/\bBaixo\b/g, "Low")
+    .replace(/\balto\b/g, "high")
+    .replace(/\bAlto\b/g, "High")
     .replace(/compra/g, "buy")
     .replace(/Compra/g, "Buy")
     .replace(/venda/g, "sell")
     .replace(/Venda/g, "Sell")
-    .replace(/alta/g, "uptrend")
-    .replace(/Alta/g, "Uptrend")
-    .replace(/baixa/g, "downtrend")
-    .replace(/Baixa/g, "Downtrend")
-    .replace(/neutro/g, "neutral")
-    .replace(/Neutro/g, "Neutral")
-    .replace(/lateral/g, "range")
-    .replace(/Lateral/g, "Range")
+    .replace(/\balta\b/g, "uptrend")
+    .replace(/\bAlta\b/g, "Uptrend")
+    .replace(/\bbaixa\b/g, "downtrend")
+    .replace(/\bBaixa\b/g, "Downtrend")
+    .replace(/\bneutro\b/g, "neutral")
+    .replace(/\bNeutro\b/g, "Neutral")
+    .replace(/\blateral\b/g, "range")
+    .replace(/\bLateral\b/g, "Range")
     .replace(/risco/g, "risk")
     .replace(/Risco/g, "Risk")
     .replace(/fluxo/g, "flow")
@@ -1960,6 +2339,22 @@ function translatePtToEn(value?: string | null, symbol?: string | null) {
     .replace(/Suporte/g, "Support")
     .replace(/sem leitura/g, "no read")
     .replace(/Sem leitura/g, "No read")
+    .replace(/sem volume real/g, "no real volume")
+    .replace(/Sem volume real/g, "No real volume")
+    .replace(/sem volume confiável/g, "no reliable volume")
+    .replace(/sem volume confiavel/g, "no reliable volume")
+    .replace(/Sem volume confiável/g, "No reliable volume")
+    .replace(/Sem volume confiavel/g, "No reliable volume")
+    .replace(/pouco confiável/g, "unreliable")
+    .replace(/pouco confiavel/g, "unreliable")
+    .replace(/ausente/g, "missing")
+    .replace(/Ausente/g, "Missing")
+    .replace(/tendência principal/g, "main trend")
+    .replace(/Tendência principal/g, "Main trend")
+    .replace(/tendencia principal/g, "main trend")
+    .replace(/Tendencia principal/g, "Main trend")
+    .replace(/fluxo institucional/g, "institutional flow")
+    .replace(/Fluxo institucional/g, "Institutional flow")
     .replace(/filtros principais alinhados/g, "main filters are aligned")
     .replace(/Filtros principais alinhados/g, "Main filters are aligned")
     .replace(/aguardar/g, "wait")
@@ -1970,8 +2365,25 @@ function translatePtToEn(value?: string | null, symbol?: string | null) {
 
 function localizeUiText(value?: string | null, locale: AppLocale = "pt-BR", symbol?: string | null) {
   const text = String(value || "").trim();
-  if (locale !== "en-US" || !text) return text;
+  if (!text) return "";
+  if (locale !== "en-US") return expandPortugueseMarketTerms(text);
   return translatePtToEn(text, symbol);
+}
+
+function localizeNewsField(item: NewsItem, symbol: string, locale: AppLocale, field: keyof NewsItem, kind: "summary" | "trader" | "why" | "context") {
+  const titleTheme = newsThemeFromText(item.title);
+  const raw = String((item as any)[field] || "").trim();
+  if (raw && newsFieldMatchesTheme(raw, titleTheme)) {
+    const translated = localizeUiText(raw, locale, symbol);
+    if (translated && !(locale === "en-US" && looksPortuguese(translated))) return translated;
+  }
+  return localizedNewsFallbackLine(item, symbol, locale, kind);
+}
+
+function localizeInvalidationText(value: string | null | undefined, locale: AppLocale, symbol?: string | null) {
+  const text = localizeUiText(value || (locale === "en-US" ? "No invalidation defined." : "Sem invalidação definida."), locale, symbol);
+  if (/^(se|if)\s*:/i.test(text)) return text;
+  return `${locale === "en-US" ? "IF:" : "Se:"} ${text}`;
 }
 
 function portugueseNewsInsight(text: string | null | undefined, symbol: string) {
@@ -2045,9 +2457,36 @@ function newsMatchesSelectedTicker(item: NewsItem, symbol: string) {
   return aliasHit;
 }
 
+function newsDedupeKey(item: NewsItem, symbol: string) {
+  const storyKey = normalizeUiText(item.story_key || "");
+  if (storyKey) return `story:${storyKey}`;
+  const url = String(item.url || "").trim().toLowerCase();
+  if (url) return `url:${url.split("#", 1)[0].split("?", 1)[0].replace(/\/$/, "")}`;
+  const raw = [
+    item.title,
+    item.trader_takeaway,
+    item.card_summary,
+    item.summary,
+    item.why_it_matters,
+  ].find((value) => normalizeUiText(value).length > 0);
+  const normalized = normalizeUiText(raw || "");
+  return normalized ? `text:${normalized.slice(0, 180)}` : `id:${item.id || symbol}`;
+}
+
+function dedupeNewsForTicker(items: NewsItem[], symbol: string) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = newsDedupeKey(item, symbol);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function portugueseNewsTitle(item: NewsItem, symbol: string) {
   const title = String(item.title || "").trim();
-  if (looksPortuguese(title)) return title;
+  const translatedTitle = translateEnglishNewsHeadlineToPt(title, symbol);
+  if (translatedTitle) return translatedTitle;
 
   const candidate = [
     item.trader_takeaway,
@@ -2058,14 +2497,14 @@ function portugueseNewsTitle(item: NewsItem, symbol: string) {
   ].find((value) => looksPortuguese(value));
 
   if (candidate) {
-    const cleaned = String(candidate).trim().replace(/\s+/g, " ");
-    return cleaned.length > 120 ? `${cleaned.slice(0, 117)}...` : cleaned;
+    return clampHeadline(expandPortugueseMarketTerms(candidate), 120);
   }
 
   return `Notícia relevante para ${symbol}`;
 }
 
 function portugueseNewsBody(item: NewsItem, symbol: string) {
+  const titleTheme = newsThemeFromText(item.title);
   const candidate = [
     item.editorial,
     item.why_it_matters,
@@ -2074,14 +2513,13 @@ function portugueseNewsBody(item: NewsItem, symbol: string) {
     item.trader_takeaway,
     item.card_summary,
     item.summary,
-  ].find((value) => looksPortuguese(value));
+  ].find((value) => looksPortuguese(value) && newsFieldMatchesTheme(value, titleTheme));
 
   if (candidate) {
-    const cleaned = String(candidate).trim().replace(/\s+/g, " ");
-    return cleaned.length > 180 ? `${cleaned.slice(0, 177)}...` : cleaned;
+    return clampHeadline(expandPortugueseMarketTerms(candidate), 180);
   }
 
-  return `Sem resumo em português disponível para ${symbol}.`;
+  return localizedNewsFallbackLine(item, symbol, "pt-BR", "summary");
 }
 
 function displayNewsTitle(item: NewsItem, symbol: string, locale: AppLocale) {
@@ -2108,6 +2546,7 @@ function displayNewsTitle(item: NewsItem, symbol: string, locale: AppLocale) {
 function displayNewsBody(item: NewsItem, symbol: string, locale: AppLocale) {
   if (locale !== "en-US") return portugueseNewsBody(item, symbol);
 
+  const titleTheme = newsThemeFromText(item.title);
   const candidate = [
     item.editorial,
     item.why_it_matters,
@@ -2116,10 +2555,10 @@ function displayNewsBody(item: NewsItem, symbol: string, locale: AppLocale) {
     item.trader_takeaway,
     item.card_summary,
     item.summary,
-  ].find((value) => String(value || "").trim());
+  ].find((value) => String(value || "").trim() && newsFieldMatchesTheme(value, titleTheme));
   const translated = localizeUiText(candidate || "", locale, symbol);
   if (translated) return translated.length > 190 ? `${translated.slice(0, 187)}...` : translated;
-  return `No English summary available for ${symbol}.`;
+  return localizedNewsFallbackLine(item, symbol, locale, "summary");
 }
 
 function localizeImpactLabel(value: string | null | undefined, locale: AppLocale) {
@@ -2166,15 +2605,20 @@ function describeVolumeContext(volumeLabel: string, changePct?: number | null, v
   return "volume ainda sem leitura confiável; não transforme ausência de dado em sinal.";
 }
 
-function chartActionLabel(marker?: ChartPayload["markers"][number] | null) {
+function chartActionLabel(marker?: ChartPayload["markers"][number] | null, locale: AppLocale = "pt-BR") {
   const explicit = String(marker?.action_label || marker?.label || "").trim();
   const type = String(marker?.type || explicit || "").toUpperCase();
-  if (explicit && !["BUY", "SELL", "SHORT", "COVER"].includes(explicit.toUpperCase())) return explicit;
-  if (type === "BUY") return "Buy Long";
-  if (type === "SELL") return "Close Long";
-  if (type === "SHORT") return "Sell Short";
-  if (type === "COVER") return "Close Short";
-  return marker?.derived ? "Watch" : "Aguardar";
+  const normalizedExplicit = explicit.toUpperCase();
+  if (normalizedExplicit === "BUY" || normalizedExplicit === "BUY LONG") return locale === "en-US" ? "Buy Long" : "Comprar";
+  if (normalizedExplicit === "SELL" || normalizedExplicit === "CLOSE LONG") return locale === "en-US" ? "Close Long" : "Encerrar long";
+  if (normalizedExplicit === "SHORT" || normalizedExplicit === "SELL SHORT") return locale === "en-US" ? "Sell Short" : "Short";
+  if (normalizedExplicit === "COVER" || normalizedExplicit === "CLOSE SHORT") return locale === "en-US" ? "Close Short" : "Encerrar short";
+  if (explicit) return explicit;
+  if (type === "BUY") return locale === "en-US" ? "Buy Long" : "Comprar";
+  if (type === "SELL") return locale === "en-US" ? "Close Long" : "Encerrar long";
+  if (type === "SHORT") return locale === "en-US" ? "Sell Short" : "Short";
+  if (type === "COVER") return locale === "en-US" ? "Close Short" : "Encerrar short";
+  return locale === "en-US" ? "Watch" : "Aguardar";
 }
 
 function chartDirectionText(label: string, locale: AppLocale = "pt-BR") {
@@ -2186,10 +2630,10 @@ function chartDirectionText(label: string, locale: AppLocale = "pt-BR") {
     if (normalized.includes("close short")) return "Close short if VWAP/EMA21 recovers or institutional buying appears.";
     return "Watch; no operational order until confirmation is complete.";
   }
-  if (normalized.includes("buy long")) return "Abrir long apenas se o trigger confirmar; não comprar resistência sem rompimento.";
-  if (normalized.includes("close long")) return "Encerrar long ou evitar nova compra até o preço recuperar estrutura.";
-  if (normalized.includes("sell short")) return "Abrir short apenas com perda de suporte/VWAP e volume vendedor.";
-  if (normalized.includes("close short")) return "Encerrar short se houver recuperação de VWAP/EMA21 ou compra institucional.";
+  if (normalized.includes("buy long") || normalized.includes("comprar")) return "Comprar apenas se o trigger confirmar; não comprar resistência sem rompimento.";
+  if (normalized.includes("close long") || normalized.includes("encerrar long")) return "Encerrar long ou evitar nova compra até o preço recuperar estrutura.";
+  if (normalized.includes("sell short") || normalized.includes("short")) return "Abrir short apenas com perda de suporte/VWAP e volume vendedor.";
+  if (normalized.includes("close short") || normalized.includes("encerrar short")) return "Encerrar short se houver recuperação de VWAP/EMA21 ou compra institucional.";
   return "Observar; sem ordem operacional enquanto faltar confirmação.";
 }
 
@@ -2213,7 +2657,7 @@ function buildChartDecisionCards(
   const isEnglish = locale === "en-US";
   const rows = chart?.ohlc?.length ? chart.ohlc : chart?.series || [];
   const marker = latestChartMarker(chart);
-  const actionLabel = chartActionLabel(marker);
+  const actionLabel = chartActionLabel(marker, locale);
   const trend = chart?.summary?.trend_bias || "sem regime";
   const latestSignal = chart?.summary?.latest_signal || marker?.type || "WATCH";
   const missing: string[] = [];
@@ -2262,6 +2706,505 @@ function buildChartDecisionCards(
         ? cleanEnglishDecisionText(String(marker?.risk || ""), riskFallback, symbol)
         : String(marker?.risk || `Risco ${marker?.risk_level || "medio"}; controle tamanho e evite lateralizacao.`),
     },
+  ];
+}
+
+type DecisionTone = "bullish" | "bearish" | "neutral" | "watch" | "exit";
+
+type EssentialDecisionCard = {
+  label: string;
+  value: string;
+  tone: DecisionTone;
+};
+
+type StrategicConclusion = {
+  headline: string;
+  focus: string;
+  basis: string[];
+  tone: DecisionTone;
+  stamp: string;
+  sections?: Array<{
+    title: string;
+    body?: string;
+    items?: string[];
+  }>;
+};
+
+function currentFiveMinuteBucket() {
+  return Math.floor(Date.now() / (5 * 60_000)) * 5;
+}
+
+function decisionToneFromText(...values: Array<unknown>): DecisionTone {
+  const normalized = values
+    .map((value) => normalizeUiText(String(value || "")))
+    .filter(Boolean)
+    .join(" ");
+  if (!normalized) return "neutral";
+  if (/\b(encerrar|cover|close short|close long|saida|sair|exit)\b/.test(normalized)) return "exit";
+  if (/\b(short|sell short|venda descoberta|vender|venda|bear|baixa|queda|vendedor|distribuicao|negativo)\b/.test(normalized)) return "bearish";
+  if (/\b(long|buy long|comprar|compra|bull|alta|comprador|acumulacao|positivo|forca)\b/.test(normalized)) return "bullish";
+  return "neutral";
+}
+
+function decisionDirectionLabel(tone: DecisionTone, locale: AppLocale) {
+  if (tone === "exit") return locale === "en-US" ? "Exit" : "Saída";
+  if (tone === "bullish") return locale === "en-US" ? "Up" : "Alta";
+  if (tone === "bearish") return locale === "en-US" ? "Down" : "Baixa";
+  return locale === "en-US" ? "Range" : "Lateral";
+}
+
+function decisionTradeLabel(tone: DecisionTone, score: number | null, hasCoreData: boolean, conflict: boolean, locale: AppLocale) {
+  if (tone === "exit") return locale === "en-US" ? "Close position" : "Encerrar posição";
+  if (!hasCoreData || conflict) return locale === "en-US" ? "Wait" : "Aguardar";
+  const strongEnough = score == null || score >= 6;
+  if (tone === "bullish" && strongEnough) return locale === "en-US" ? "Buy/Long" : "Comprar";
+  if (tone === "bearish" && strongEnough) return locale === "en-US" ? "Sell/Short" : "Vender/Short";
+  return locale === "en-US" ? "Wait" : "Aguardar";
+}
+
+function tonesConflict(left: DecisionTone, right: DecisionTone) {
+  return (left === "bullish" && right === "bearish") || (left === "bearish" && right === "bullish");
+}
+
+function resolveFlowCard(rows: AiToolRow[], locale: AppLocale): EssentialDecisionCard {
+  const ranked = [...rows].sort((a, b) => Number(b.confidence || b.score || 0) - Number(a.confidence || a.score || 0));
+  const best = ranked[0];
+  if (!best) {
+    return { label: locale === "en-US" ? "Institutional Flow" : "Fluxo Institucional", value: locale === "en-US" ? "No read" : "Sem leitura", tone: "neutral" };
+  }
+  const tone = decisionToneFromText(best.signal, best.state, best.ai_comment);
+  const side = tone === "bullish"
+    ? (locale === "en-US" ? "Buyer" : "Comprador")
+    : tone === "bearish"
+      ? (locale === "en-US" ? "Seller" : "Vendedor")
+      : (locale === "en-US" ? "Neutral" : "Neutro");
+  const score = Number(best.score);
+  const suffix = Number.isFinite(score) ? ` ${score.toFixed(1)}` : "";
+  return {
+    label: locale === "en-US" ? "Institutional Flow" : "Fluxo Institucional",
+    value: `${side}${suffix}`,
+    tone: tone === "exit" ? "neutral" : tone,
+  };
+}
+
+function resolveLiquidityTarget(chart: ChartPayload | null, price: number | null | undefined, tone: DecisionTone, locale: AppLocale) {
+  const zones = Array.isArray(chart?.zones) ? chart?.zones || [] : [];
+  const priceNumber = firstFiniteNumber(price);
+  const preferred = zones
+    .filter((zone: any) => {
+      const label = normalizeUiText(zone?.label);
+      if (tone === "bearish") return label.includes("suporte") || label.includes("support");
+      if (tone === "bullish") return label.includes("resistencia") || label.includes("resistance");
+      return true;
+    })
+    .map((zone: any) => {
+      const zonePrice = firstFiniteNumber(zone?.price);
+      const distance = priceNumber != null && zonePrice != null ? Math.abs(zonePrice - priceNumber) : Number.MAX_SAFE_INTEGER;
+      return { zone, distance };
+    })
+    .sort((a, b) => a.distance - b.distance)[0]?.zone || zones[0];
+  if (!preferred) return locale === "en-US" ? "No level" : "Sem nível";
+  const rawLabel = String(preferred.label || "");
+  const label = locale === "en-US"
+    ? localizeUiText(rawLabel.replace("RESISTENCIA", "RESISTANCE").replace("SUPORTE", "SUPPORT"), locale)
+    : rawLabel;
+  return `${label || (locale === "en-US" ? "Level" : "Nível")}: ${formatLocalePrice(preferred.price, locale)}`;
+}
+
+function resolveRiskCard(score: number | null, hasCoreData: boolean, conflict: boolean, locale: AppLocale, rsi?: number | string | null): EssentialDecisionCard {
+  const label = locale === "en-US" ? "Risk" : "Risco";
+  const rsiNumber = firstValidRsiNumber(rsi);
+  const extremeRsi = rsiNumber != null && (rsiNumber >= 70 || rsiNumber <= 30);
+  if (!hasCoreData || conflict || score == null) return { label, value: locale === "en-US" ? "High" : "Alto", tone: "bearish" };
+  if (score >= 7 && !extremeRsi) return { label, value: locale === "en-US" ? "Low" : "Baixo", tone: "bullish" };
+  return { label, value: locale === "en-US" ? "Medium" : "Médio", tone: "watch" };
+}
+
+function buildStrategicConclusion(input: {
+  locale: AppLocale;
+  minuteTick: number;
+  symbol: string;
+  score: number | null;
+  direction: string;
+  trade: string;
+  regime: string;
+  flow: string;
+  liquidity: string;
+  risk: string;
+  rsi: number | null;
+  volume: number | null;
+  averageVolume: number | null;
+  relVolume: number | null;
+  hasCoreData: boolean;
+}): StrategicConclusion {
+  const isEnglish = input.locale === "en-US";
+  const assetLabel = input.symbol || (isEnglish ? "the asset" : "o ativo");
+  const score = input.score;
+  const regimeTone = decisionToneFromText(input.regime);
+  const flowTone = decisionToneFromText(input.flow);
+  const directionTone = decisionToneFromText(input.direction, input.trade);
+  const riskTone = decisionToneFromText(input.risk);
+  const weakScore = score == null || score < 5.5;
+  const strongScore = score != null && score >= 7;
+  const moderateScore = score != null && score >= 5.5 && score < 7;
+  const hasVolume = input.volume != null && input.volume > 0;
+  const calculatedRvol = firstPositiveFiniteNumber(
+    input.relVolume,
+    calculateRelativeVolume(input.volume, input.averageVolume),
+  );
+  const estimatedRvol = calculatedRvol == null ? estimateRelativeVolumeFromActivity(input.volume) : null;
+  const resolvedRvol = calculatedRvol ?? estimatedRvol;
+  const rvolIsEstimated = calculatedRvol == null && estimatedRvol != null;
+  const rvolBasis = resolvedRvol != null
+    ? resolvedRvol >= 1.2
+      ? (isEnglish
+          ? `Relative Volume (RVOL): ${resolvedRvol.toFixed(2)}${rvolIsEstimated ? " estimated from current activity" : ""}. The asset is trading above normal volume, which can indicate stronger institutional interest and more relevant moves.`
+          : `Volume Relativo (RVOL): ${resolvedRvol.toFixed(2)}${rvolIsEstimated ? " estimado pela atividade atual" : ""}. Significa que o ativo está negociando ${resolvedRvol.toFixed(2)} vezes acima do volume normal, o que costuma indicar maior interesse institucional e movimentos mais relevantes.`)
+      : resolvedRvol < 0.8
+        ? (isEnglish
+            ? `Relative Volume (RVOL): ${resolvedRvol.toFixed(2)}${rvolIsEstimated ? " estimated from current activity" : ""}. The asset is trading below normal volume, so conviction is weaker.`
+            : `Volume Relativo (RVOL): ${resolvedRvol.toFixed(2)}${rvolIsEstimated ? " estimado pela atividade atual" : ""}. O ativo negocia abaixo do volume normal, então a convicção é menor.`)
+        : (isEnglish
+            ? `Relative Volume (RVOL): ${resolvedRvol.toFixed(2)}${rvolIsEstimated ? " estimated from current activity" : ""}. Volume is close to the normal range, so price needs more confirmation.`
+            : `Volume Relativo (RVOL): ${resolvedRvol.toFixed(2)}${rvolIsEstimated ? " estimado pela atividade atual" : ""}. O volume está perto do normal, então o preço ainda precisa confirmar melhor.`)
+    : (isEnglish
+        ? "Relative Volume (RVOL): unavailable."
+        : "Volume Relativo (RVOL): indisponível.");
+  const volumeBasis = hasVolume
+    ? (isEnglish ? `Volume: current ${formatVolumeLong(input.volume, input.locale)}` : `Volume: atual de ${formatVolumeLong(input.volume, input.locale)}`)
+    : (isEnglish ? "Volume: unavailable" : "Volume: indisponível");
+  const rsiBasis = input.rsi == null
+    ? (isEnglish ? "RSI: not available." : "RSI: sem leitura.")
+    : input.rsi >= 70
+      ? (isEnglish ? `RSI: overbought at ${input.rsi.toFixed(1)}.` : `RSI: sobrecomprado nos ${input.rsi.toFixed(1)}.`)
+      : input.rsi <= 30
+        ? (isEnglish ? `RSI: oversold at ${input.rsi.toFixed(1)}.` : `RSI: em sobrevenda nos ${input.rsi.toFixed(1)}.`)
+        : (isEnglish ? `RSI: neutral at ${input.rsi.toFixed(1)}.` : `RSI: neutro nos ${input.rsi.toFixed(1)}.`);
+  const scoreBasis = score == null
+    ? (isEnglish ? "Master Score: no confirmed reading" : "Score Mestre: sem leitura confirmada")
+    : score < 5.5
+      ? (isEnglish ? `Low conviction: Score ${score.toFixed(1)}` : `Pouca convicção: Score ${score.toFixed(1)}`)
+      : score < 7
+        ? (isEnglish ? `Moderate conviction: Score ${score.toFixed(1)}` : `Convicção moderada: Score ${score.toFixed(1)}`)
+        : (isEnglish ? `Strong conviction: Score ${score.toFixed(1)}` : `Convicção forte: Score ${score.toFixed(1)}`);
+  const regimeBasis = input.regime
+    ? (isEnglish ? `Main trend (BIAS): ${input.regime}` : `Tendência principal (BIAS): ${input.regime}`)
+    : (isEnglish ? "Main trend (BIAS): no clear read" : "Tendência principal (BIAS): sem leitura clara");
+  const flowBasis = input.flow
+    ? (isEnglish ? `Institutional flow: ${input.flow}` : `Fluxo institucional: ${input.flow}`)
+    : (isEnglish ? "Institutional flow without read" : "Fluxo institucional sem leitura");
+  const basis = [regimeBasis, scoreBasis, flowBasis, volumeBasis, rvolBasis, rsiBasis];
+  const focusPt = [
+    "Foco agora: aguardar confirmação de preço, volume ou fluxo antes de agir.",
+    "Foco agora: evitar entrada impulsiva enquanto a convicção não aumentar.",
+    "Foco agora: respeitar liquidez e risco; o gráfico precisa confirmar o próximo passo.",
+  ];
+  const focusEn = [
+    "Focus now: wait for price, volume or flow confirmation before acting.",
+    "Focus now: avoid impulsive entries until conviction improves.",
+    "Focus now: respect liquidity and risk; the chart must confirm the next step.",
+  ];
+  const focusIndex = Math.abs(Math.floor(input.minuteTick / 5)) % 3;
+  const focus = (isEnglish ? focusEn : focusPt)[focusIndex];
+  const stamp = new Date(input.minuteTick * 60_000).toLocaleTimeString(isEnglish ? "en-US" : "pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const normalizedDirection = normalizeUiText(input.direction);
+  const normalizedTrade = normalizeUiText(input.trade);
+  const normalizedRegime = normalizeUiText(input.regime);
+  const bearishContext =
+    directionTone === "bearish" ||
+    regimeTone === "bearish" ||
+    normalizedDirection.includes("baixa") ||
+    normalizedDirection.includes("short") ||
+    normalizedTrade.includes("short") ||
+    normalizedTrade.includes("venda") ||
+    normalizedRegime.includes("baixa");
+  const protectiveContext =
+    directionTone === "exit" ||
+    normalizedDirection.includes("saida") ||
+    normalizedTrade.includes("encerrar") ||
+    normalizedTrade.includes("cover") ||
+    riskTone === "bearish";
+
+  if ((bearishContext || protectiveContext) && flowTone !== "bullish") {
+    return {
+      headline: isEnglish ? "Current Scenario" : "Cenário Atual",
+      focus: isEnglish
+        ? "Focus now: avoid impulsive entries until conviction improves."
+        : "Foco agora: evitar entrada impulsiva enquanto a convicção não aumentar.",
+      basis,
+      tone: "bearish",
+      stamp,
+      sections: isEnglish
+        ? [
+            {
+              title: "Current Scenario",
+              body: `At this moment, ${assetLabel} shows higher downside probability or the need for caution instead of upside. Avoid long positions until the technical structure shows improvement, or consider short-side execution.`,
+            },
+            {
+              title: "Strategic Directive",
+              items: [
+                "Preserve capital",
+                "Reduce position size",
+                "Wait for confirmation before entering",
+                "Avoid aggressive entries",
+              ],
+            },
+            {
+              title: "Between Buy And Sell",
+              items: [
+                "The sell side has stronger arguments than the buy side",
+                "Resistance zones are holding price",
+                "Flow and aggression favor sellers",
+              ],
+            },
+            {
+              title: "Interpretation",
+              body: "There is no certainty of a drop, but the current scenario favors short-side operations. Downside probability is higher than upside probability.",
+            },
+          ]
+        : [
+            {
+              title: "📉 Cenário Atual",
+              body: `O ativo ${assetLabel}: no momento, a análise indica maior probabilidade de queda ou necessidade de cautela, em vez de alta. A recomendação é evitar posições compradas até que a estrutura técnica mostre sinais de melhora. Ou comprar vendido.`,
+            },
+            {
+              title: "🎯 Diretriz Estratégica",
+              items: [
+                "Preservar capital",
+                "Reduzir tamanho das operações",
+                "Aguardar confirmações antes de entrar",
+                "Evitar entradas agressivas",
+              ],
+            },
+            {
+              title: "⚖️ Entre compra e venda",
+              items: [
+                "A venda apresenta mais argumentos do que a compra",
+                "Resistências estão segurando o preço",
+                "Fluxo e agressão favorecem os vendedores",
+              ],
+            },
+            {
+              title: "🔎 Interpretação",
+              body: "Não há certeza de queda, mas o cenário atual favorece operações vendidas (short). A probabilidade de baixa é maior do que de alta.",
+            },
+          ],
+    };
+  }
+
+  if (!input.hasCoreData || !hasVolume) {
+    return {
+      headline: isEnglish
+        ? "The operational read is incomplete. Treat the panel as context and avoid execution until price and volume are confirmed."
+        : "A leitura operacional está incompleta. Use o painel como contexto e evite execução até preço e volume ficarem confirmados.",
+      focus,
+      basis,
+      tone: "watch",
+      stamp,
+    };
+  }
+
+  if ((directionTone === "exit" || normalizeUiText(input.trade).includes("encerrar") || normalizeUiText(input.trade).includes("close")) && !strongScore) {
+    return {
+      headline: isEnglish
+        ? "The system is prioritizing protection. There is not enough evidence to open a new position now."
+        : "O sistema está priorizando proteção. Ainda não há evidência suficiente para abrir uma nova posição agora.",
+      focus,
+      basis,
+      tone: "exit",
+      stamp,
+    };
+  }
+
+  if (regimeTone === "bullish" && weakScore) {
+    return {
+      headline: isEnglish
+        ? "The larger trend is still bullish, but there is not enough strength right now to justify a buy."
+        : "A tendência maior ainda é de alta, mas neste momento não há força suficiente para justificar uma compra.",
+      focus,
+      basis,
+      tone: "watch",
+      stamp,
+    };
+  }
+
+  if (regimeTone === "bearish" && weakScore) {
+    return {
+      headline: isEnglish
+        ? "The structure remains weak. Avoid buying against the tape until flow or price reverses clearly."
+        : "A estrutura continua fraca. Evite compra contra o movimento até fluxo ou preço virarem com clareza.",
+      focus,
+      basis,
+      tone: "bearish",
+      stamp,
+    };
+  }
+
+  if (strongScore && (directionTone === "bullish" || regimeTone === "bullish") && flowTone !== "bearish" && riskTone !== "bearish") {
+    return {
+      headline: isEnglish
+        ? "The read favors continuation or buying, but the entry still needs chart confirmation."
+        : "A leitura favorece continuação ou compra, mas a entrada ainda precisa de confirmação no gráfico.",
+      focus,
+      basis,
+      tone: "bullish",
+      stamp,
+    };
+  }
+
+  if (strongScore && (directionTone === "bearish" || regimeTone === "bearish") && flowTone !== "bullish") {
+    return {
+      headline: isEnglish
+        ? "Current Scenario"
+        : "Cenário Atual",
+      focus: isEnglish
+        ? "Focus now: avoid impulsive entries until conviction improves."
+        : "Foco agora: evitar entrada impulsiva enquanto a convicção não aumentar.",
+      basis,
+      tone: "bearish",
+      stamp,
+      sections: isEnglish
+        ? [
+            {
+              title: "Current Scenario",
+              body: `At this moment, ${assetLabel} shows higher downside probability or the need for caution instead of chasing upside. Avoid long exposure until the technical structure starts improving, or consider short-side execution only with confirmation.`,
+            },
+            {
+              title: "Strategic Directive",
+              items: [
+                "Preserve capital",
+                "Reduce position size",
+                "Wait for confirmation before entering",
+                "Avoid aggressive entries",
+              ],
+            },
+            {
+              title: "Between Buy And Sell",
+              items: [
+                "The sell side has stronger arguments than the buy side",
+                "Resistance zones are holding price",
+                "Flow and aggression favor sellers",
+              ],
+            },
+            {
+              title: "Interpretation",
+              body: "There is no certainty of a drop, but the current scenario favors short-side operations. Downside probability is higher than upside probability.",
+            },
+          ]
+        : [
+            {
+              title: "📉 Cenário Atual",
+              body: `O ativo ${assetLabel}: no momento, a análise indica maior probabilidade de queda ou necessidade de cautela, em vez de alta. A recomendação é evitar posições compradas até que a estrutura técnica mostre sinais de melhora. Ou comprar vendido.`,
+            },
+            {
+              title: "🎯 Diretriz Estratégica",
+              items: [
+                "Preservar capital",
+                "Reduzir tamanho das operações",
+                "Aguardar confirmações antes de entrar",
+                "Evitar entradas agressivas",
+              ],
+            },
+            {
+              title: "⚖️ Entre compra e venda",
+              items: [
+                "A venda apresenta mais argumentos do que a compra",
+                "Resistências estão segurando o preço",
+                "Fluxo e agressão favorecem os vendedores",
+              ],
+            },
+            {
+              title: "🔎 Interpretação",
+              body: "Não há certeza de queda, mas o cenário atual favorece operações vendidas (short). A probabilidade de baixa é maior do que a de alta.",
+            },
+          ],
+    };
+  }
+
+  return {
+    headline: moderateScore
+      ? (isEnglish
+          ? "The opportunity is moderate. The best action is to wait for confirmation instead of forcing a trade."
+          : "A oportunidade é moderada. A melhor ação é aguardar confirmação em vez de forçar operação.")
+      : (isEnglish
+          ? "The reading is neutral. Let price, liquidity and flow choose the direction."
+          : "A leitura está neutra. Deixe preço, liquidez e fluxo definirem a direção."),
+    focus,
+    basis,
+    tone: "watch",
+    stamp,
+  };
+}
+
+function strategicSectionsForRender(conclusion: StrategicConclusion, locale: AppLocale, symbol: string) {
+  const isEnglish = locale === "en-US";
+  const assetLabel = normalizeSymbol(symbol) || (isEnglish ? "the asset" : "o ativo");
+  const basisText = conclusion.basis.join(" | ");
+  const scoreLine = conclusion.basis.find((item) => /score|convic/i.test(item)) || "";
+  const regimeLine = conclusion.basis.find((item) => /bias|trend|tend[eê]ncia|regime/i.test(item)) || "";
+  const flowLine = conclusion.basis.find((item) => /flow|fluxo/i.test(item)) || "";
+  const volumeLine = conclusion.basis.find((item) => /^volume:/i.test(item)) || "";
+  const rvolLine = conclusion.basis.find((item) => /rvol|volume relativo/i.test(item)) || "";
+  const rsiLine = conclusion.basis.find((item) => /^rsi:/i.test(item)) || "";
+  const lowConviction = /low conviction|pouca convic/i.test(basisText);
+  const strongConviction = /strong conviction|convic[cç][aã]o forte/i.test(basisText);
+  const noFlow = /no read|sem leitura/i.test(flowLine);
+  const hasVolumeBoost = /above normal|acima do volume normal|maior interesse institucional/i.test(rvolLine);
+
+  const contextPt = [regimeLine, scoreLine, volumeLine, rsiLine].filter(Boolean).join("; ");
+  const contextEn = contextPt;
+  const basePt = contextPt ? ` Base da leitura: ${contextPt}.` : "";
+  const baseEn = contextEn ? ` Read basis: ${contextEn}.` : "";
+
+  if (isEnglish) {
+    if (conclusion.tone === "bullish") {
+      return [
+        { title: "Current Scenario", body: `${assetLabel}: the main read favors upside, but execution still needs price, volume and flow confirmation.${baseEn}` },
+        { title: "Strategic Directive", items: ["Preserve capital", "Buy only after confirmation", "Avoid chasing price", hasVolumeBoost ? "Respect the stronger volume impulse" : "Use smaller size while volume confirmation is limited"] },
+        { title: "Between Buy And Sell", items: ["Buy has more arguments if the breakout holds", "Sell gains strength if support or VWAP fails", noFlow ? "Institutional flow is not confirmed yet" : "Institutional flow is part of the confirmation"] },
+        { title: "Interpretation", body: strongConviction ? "Upside probability is better than downside, but this is still not permission to enter without a valid trigger." : "The scenario is constructive, but conviction is not strong enough to force an entry." },
+      ];
+    }
+    if (conclusion.tone === "bearish" || conclusion.tone === "exit") {
+      return [
+        { title: "Current Scenario", body: `At this moment, ${assetLabel} shows higher downside probability or the need for caution instead of upside. Avoid long positions until the technical structure shows improvement, or consider short-side execution.${baseEn}` },
+        { title: "Strategic Directive", items: ["Preserve capital", "Reduce position size", "Wait for confirmation before entering", "Avoid aggressive entries"] },
+        { title: "Between Buy And Sell", items: ["The sell side has stronger arguments than the buy side", "Resistance zones are holding price", noFlow ? "Flow is not confirming buyers" : "Flow and aggression favor sellers"] },
+        { title: "Interpretation", body: "There is no certainty of a drop, but the current scenario favors short-side operations. Downside probability is higher than upside probability." },
+      ];
+    }
+    return [
+      { title: "Current Scenario", body: `${assetLabel}: the read is still inconclusive. Use the panel as context and wait for price, volume and flow to align before executing.${baseEn}` },
+      { title: "Strategic Directive", items: ["Preserve capital", "Operate smaller size", "Wait for confirmation before entering", "Avoid aggressive entries"] },
+      { title: "Between Buy And Sell", items: ["Buy needs breakout or buyer flow confirmation", "Sell needs support loss or seller pressure confirmation", "Without confirmation, waiting is the strongest decision"] },
+      { title: "Interpretation", body: lowConviction ? "Conviction is low, so the best professional read is to monitor instead of force a trade." : "The setup is moderate or neutral; let price and liquidity define the next side." },
+    ];
+  }
+
+  if (conclusion.tone === "bullish") {
+    return [
+      { title: "📈 Cenário Atual", body: `O ativo ${assetLabel}: a leitura principal favorece alta, mas a execução ainda precisa de confirmação de preço, volume e fluxo.${basePt}` },
+      { title: "🎯 Diretriz Estratégica", items: ["Preservar capital", "Comprar somente com confirmação", "Evitar perseguir preço", hasVolumeBoost ? "Respeitar o impulso de volume mais forte" : "Reduzir tamanho enquanto o volume não confirmar melhor"] },
+      { title: "⚖️ Entre compra e venda", items: ["A compra tem mais argumentos se o rompimento sustentar", "A venda ganha força se perder suporte ou VWAP", noFlow ? "Fluxo institucional ainda não confirma compradores" : "Fluxo institucional entra como confirmação"] },
+      { title: "🔎 Interpretação", body: strongConviction ? "A probabilidade de alta é melhor do que a de baixa, mas ainda não autoriza entrada sem gatilho válido." : "O cenário é construtivo, mas a convicção ainda não é forte o suficiente para forçar entrada." },
+    ];
+  }
+  if (conclusion.tone === "bearish" || conclusion.tone === "exit") {
+    return [
+      { title: "📉 Cenário Atual", body: `O ativo ${assetLabel}: no momento, a análise indica maior probabilidade de queda ou necessidade de cautela, em vez de alta. A recomendação é evitar posições compradas até que a estrutura técnica mostre sinais de melhora. Ou comprar vendido.${basePt}` },
+      { title: "🎯 Diretriz Estratégica", items: ["Preservar capital", "Reduzir tamanho das operações", "Aguardar confirmações antes de entrar", "Evitar entradas agressivas"] },
+      { title: "⚖️ Entre compra e venda", items: ["A venda apresenta mais argumentos do que a compra", "Resistências estão segurando o preço", noFlow ? "Fluxo ainda não confirma compradores" : "Fluxo e agressão favorecem os vendedores"] },
+      { title: "🔎 Interpretação", body: "Não há certeza de queda, mas o cenário atual favorece operações vendidas (short). A probabilidade de baixa é maior do que a de alta." },
+    ];
+  }
+  return [
+    { title: "🔎 Cenário Atual", body: `O ativo ${assetLabel}: a leitura ainda está inconclusiva. Use o painel como contexto e aguarde preço, volume e fluxo alinharem antes de executar.${basePt}` },
+    { title: "🎯 Diretriz Estratégica", items: ["Preservar capital", "Operar com tamanho menor", "Aguardar confirmação antes de entrar", "Evitar entradas agressivas"] },
+    { title: "⚖️ Entre compra e venda", items: ["A compra precisa de rompimento ou fluxo comprador", "A venda precisa de perda de suporte ou pressão vendedora", "Sem confirmação, aguardar é a melhor decisão"] },
+    { title: "🔎 Interpretação", body: lowConviction ? "A convicção está baixa, então a leitura profissional é monitorar em vez de forçar operação." : "O setup está moderado ou neutro; deixe preço e liquidez definirem o próximo lado." },
   ];
 }
 
@@ -2504,28 +3447,7 @@ function buildQuoteFallbackChart(
   if (price == null || price <= 0) return null;
 
   const normalizedInterval = String(interval || "1D").toUpperCase();
-  const countByInterval: Record<string, number> = {
-    "1D": 48,
-    "1W": 40,
-    "1M": 44,
-    "3M": 52,
-    "6M": 60,
-    YTD: 58,
-    "1Y": 64,
-    ALL: 72,
-  };
-  const stepMsByInterval: Record<string, number> = {
-    "1D": 5 * 60 * 1000,
-    "1W": 60 * 60 * 1000,
-    "1M": 24 * 60 * 60 * 1000,
-    "3M": 2 * 24 * 60 * 60 * 1000,
-    "6M": 4 * 24 * 60 * 60 * 1000,
-    YTD: 5 * 24 * 60 * 60 * 1000,
-    "1Y": 6 * 24 * 60 * 60 * 1000,
-    ALL: 10 * 24 * 60 * 60 * 1000,
-  };
-  const count = countByInterval[normalizedInterval] || 48;
-  const stepMs = stepMsByInterval[normalizedInterval] || stepMsByInterval["1D"];
+  const { count, stepMs, startMs } = chartFallbackShape(normalizedInterval);
   const change = firstFiniteNumber(quote?.change);
   const changePct = firstFiniteNumber(quote?.change_pct) ?? 0;
   const startPrice = change != null ? Math.max(price - change, price * 0.97) : price * (1 - changePct / 100);
@@ -2533,7 +3455,6 @@ function buildQuoteFallbackChart(
   const trendText = String(trend || "").toLowerCase();
   const bullish = changePct > 0 || trendText.includes("alta") || trendText.includes("buy") || trendText.includes("compra");
   const volatility = Math.max(price * 0.0015, Math.abs(price - startPrice) * 0.18, price * 0.0008);
-  const now = Date.now();
   const ohlc = Array.from({ length: count }, (_, index) => {
     const t = count === 1 ? 1 : index / (count - 1);
     const wave = Math.sin((index + seed) * 0.72) * volatility + Math.cos((index + seed) * 0.31) * volatility * 0.55;
@@ -2543,7 +3464,7 @@ function buildQuoteFallbackChart(
     const high = Math.max(open, close) + volatility * (0.8 + ((index + seed) % 5) / 10);
     const low = Math.min(open, close) - volatility * (0.8 + ((index + seed) % 4) / 10);
     return {
-      time: new Date(now - (count - 1 - index) * stepMs).toISOString(),
+      time: new Date(startMs + index * stepMs).toISOString(),
       open,
       high,
       low,
@@ -2553,31 +3474,20 @@ function buildQuoteFallbackChart(
       ema21: close,
       supertrend: close,
       supertrend_side: bullish ? "buy" : "sell",
+      source: "quote_visual_fallback",
     };
   });
   const highs = ohlc.map((bar) => bar.high);
   const lows = ohlc.map((bar) => bar.low);
   const resistance = Math.max(...highs);
   const support = Math.min(...lows);
-  const markerIndexes = [Math.floor(count * 0.22), Math.floor(count * 0.48), Math.floor(count * 0.73), count - 2]
-    .filter((index, position, indexes) => index > 0 && index < count && indexes.indexOf(index) === position);
-  const markers = markerIndexes.map((index, markerIndex) => {
-    const side: "buy" | "sell" = markerIndex % 2 === 0 ? "buy" : "sell";
-    return {
-      time: ohlc[index].time,
-      price: ohlc[index].close,
-      side,
-      label: side === "buy" ? "BUY" : "SELL",
-      score: Math.max(1, Math.round(Math.abs(changePct) * 10) + markerIndex + 1),
-    };
-  });
 
   return {
     ticker: normalizeSymbol(symbol),
     interval: normalizedInterval,
     ohlc,
     series: ohlc,
-    markers,
+    markers: [],
     zones: [
       { label: "resistência", price: resistance },
       { label: "suporte", price: support },
@@ -2586,7 +3496,13 @@ function buildQuoteFallbackChart(
       ticker: normalizeSymbol(symbol),
       latest_close: price,
       trend_bias: bullish ? "alta" : changePct < 0 ? "baixa" : "lateral",
+      source: "quote_visual_fallback",
+      fallback: true,
+      synthetic: true,
+      interval: normalizedInterval,
     },
+    fallback: true,
+    synthetic: true,
   };
 }
 
@@ -2916,6 +3832,38 @@ function formatAiUpdatedAt(value?: string | null, locale: AppLocale = "pt-BR") {
   });
 }
 
+function playMoneyFindingSound() {
+  if (typeof window === "undefined") return;
+  const AudioCtor = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioCtor) return;
+
+  const context = new AudioCtor();
+  const now = context.currentTime;
+  const notes = [
+    { frequency: 880, start: 0, duration: 0.09 },
+    { frequency: 1174.66, start: 0.1, duration: 0.11 },
+    { frequency: 1567.98, start: 0.22, duration: 0.16 },
+  ];
+
+  notes.forEach((note) => {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = "triangle";
+    oscillator.frequency.setValueAtTime(note.frequency, now + note.start);
+    gain.gain.setValueAtTime(0.001, now + note.start);
+    gain.gain.exponentialRampToValueAtTime(0.18, now + note.start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + note.start + note.duration);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(now + note.start);
+    oscillator.stop(now + note.start + note.duration + 0.03);
+  });
+
+  window.setTimeout(() => {
+    void context.close().catch(() => undefined);
+  }, 650);
+}
+
 function getTabMeta(tab: WorkspaceTab, locale: AppLocale = "pt-BR") {
   const copy = locale === "en-US" ? TAB_META_EN : TAB_META;
   return copy[tab.id] || { label: tab.title, short: tab.title };
@@ -2949,9 +3897,35 @@ async function fetchReferralLeaderboard(limit = 50): Promise<ReferralLeaderboard
 }
 
 function readInitialLocale(): AppLocale {
-  if (typeof window === "undefined") return "pt-BR";
-  const saved = window.localStorage.getItem(APP_LOCALE_STORAGE_KEY);
+  const saved = readStorageValue(APP_LOCALE_STORAGE_KEY);
   return saved === "en-US" ? "en-US" : "pt-BR";
+}
+
+function readStorageValue(key: string) {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorageValue(key: string, value: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Storage can be unavailable in private/locked browser contexts.
+  }
+}
+
+function removeStorageValue(key: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Best-effort cleanup only.
+  }
 }
 
 function localizeGuideCard(card: { label: string; value: string }, locale: AppLocale) {
@@ -2994,10 +3968,34 @@ function localizeGuideCard(card: { label: string; value: string }, locale: AppLo
 
 function localizePollText(value: string | undefined, locale: AppLocale, selectedTicker: string) {
   if (locale !== "en-US" || !value) return value || "";
+  const normalized = normalizeUiText(value);
+  const ticker = normalizeSymbol(selectedTicker);
+
+  if (
+    normalized.includes("nesta semana") &&
+    (normalized.includes("confirmacao mais importante") || normalized.includes("mais importante vem")) &&
+    normalized.includes("volume") &&
+    normalized.includes("rompimento") &&
+    normalized.includes("defesa de faixa")
+  ) {
+    return `${ticker}: this week, does the most important confirmation come from breakout volume or range defense?`;
+  }
+  if (normalized.includes("sem enquete institucional carregada")) {
+    return `${ticker}: no institutional poll is loaded; which confirmation is still missing to validate this week's thesis?`;
+  }
+  if (normalized.includes("volume confirma rompimento da faixa")) return "Volume confirms the range breakout";
+  if (normalized.includes("volume no rompimento")) return "Breakout volume";
+  if (normalized.includes("preco romper nivel com volume real")) return "Price breaks a level with real volume";
+  if (normalized.includes("fluxo ou noticia confirmar contexto")) return "Flow or news confirms the context";
+  if (normalized.includes("defesa de faixa ainda manda")) return "Range defense is still in control";
+  if (normalized.includes("defesa de faixa")) return "Range defense";
+
   return localizeUiText(value
     .replace(`${selectedTicker}: sem evento dominante, o mercado precisa confirmar fluxo comprador ou rejeicao de risco?`, `${selectedTicker}: with no dominant event, does the market need to confirm buying flow or risk rejection?`)
     .replace("Fluxo comprador precisa aparecer", "Buying flow needs to appear")
     .replace("Rejeicao de risco ainda pesa", "Risk rejection still weighs")
+    .replace("Volume confirma rompimento da faixa", "Volume confirms the range breakout")
+    .replace("Defesa de faixa ainda manda", "Range defense is still in control")
     .replace("sem evento dominante", "no dominant event")
     .replace("mercado precisa confirmar", "market needs to confirm")
     .replace("fluxo comprador", "buying flow")
@@ -3008,14 +4006,14 @@ function getBrowserDeviceId() {
   if (typeof window === "undefined") return "web-browser";
 
   const storageKey = "stocknewsbr.web_device_id";
-  const current = window.localStorage.getItem(storageKey);
+  const current = readStorageValue(storageKey);
 
   if (current) return current;
 
   const created = typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `browser-${Date.now()}`;
-  window.localStorage.setItem(storageKey, created);
+  writeStorageValue(storageKey, created);
   return created;
 }
 
@@ -3036,12 +4034,13 @@ function buildWatchlist(
   const bySymbol = new Map<string, WatchlistItem>();
 
   for (const item of [...PRELOADED_UNIVERSE, ...customItems]) {
+    if (isRemovedFutureSymbol(item.symbol)) continue;
     bySymbol.set(item.symbol, { ...item });
   }
 
   for (const row of ranking || []) {
     const symbol = normalizeSymbol(String(row.symbol || ""));
-    if (!symbol) continue;
+    if (!symbol || isRemovedFutureSymbol(symbol)) continue;
 
     const current = bySymbol.get(symbol) || {
       symbol,
@@ -3059,7 +4058,7 @@ function buildWatchlist(
 
   for (const row of signals || []) {
     const symbol = normalizeSymbol(String(row.symbol || row.ticker || ""));
-    if (!symbol) continue;
+    if (!symbol || isRemovedFutureSymbol(symbol)) continue;
 
     const current = bySymbol.get(symbol) || {
       symbol,
@@ -3077,7 +4076,7 @@ function buildWatchlist(
 
     for (const [symbol, liveQuote] of Object.entries(quoteMap || {})) {
       const normalized = normalizeSymbol(symbol);
-      if (!normalized) continue;
+      if (!normalized || isRemovedFutureSymbol(normalized)) continue;
       const current = bySymbol.get(normalized) || {
         symbol: normalized,
         label: symbolName(normalized),
@@ -3121,7 +4120,7 @@ function buildWatchlist(
 
 function buildSyntheticSearchCandidate(query: string, existingSymbols: string[]) {
   const normalized = normalizeSymbol(query);
-  if (!normalized || existingSymbols.includes(normalized)) return null;
+  if (!normalized || existingSymbols.includes(normalized) || isRemovedFutureSymbol(normalized)) return null;
 
   let category: string | null = null;
 
@@ -3271,13 +4270,21 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [remoteSearchSymbols, setRemoteSearchSymbols] = useState<string[]>([]);
   const [customWatchItems, setCustomWatchItems] = useState<WatchlistItem[]>([]);
   const [activeWatchSymbols, setActiveWatchSymbols] = useState<string[]>(() => PRELOADED_UNIVERSE.map((item) => item.symbol));
-  const [workspacePersona, setWorkspacePersona] = useState<WorkspacePersona>("guiado");
+  const [advancedMode, setAdvancedMode] = useState(false);
   const [appLocale, setAppLocale] = useState<AppLocale>(readInitialLocale);
   const isUsLocale = appLocale === "en-US";
+  const normalizedAccessPlan = String(access?.plan || "").toLowerCase();
+  const normalizedAccessStatus = String(access?.plan_status || "").toLowerCase();
+  const proModeLocked = Boolean(
+    token &&
+      access &&
+      (["free", "basic", "basico", "básico"].includes(normalizedAccessPlan) ||
+        ["expired", "inactive", "cancelled", "canceled", "trial_expired"].includes(normalizedAccessStatus)),
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(APP_LOCALE_STORAGE_KEY, appLocale);
+    writeStorageValue(APP_LOCALE_STORAGE_KEY, appLocale);
     document.documentElement.lang = appLocale === "en-US" ? "en-US" : "pt-BR";
     document.documentElement.dataset.locale = appLocale;
   }, [appLocale]);
@@ -3309,7 +4316,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, [activeTab, focusedTab]);
 
   const publicWatchSymbols = useMemo(
-    () => Array.from(new Set([...PRELOADED_UNIVERSE.map((item) => item.symbol), ...customWatchItems.map((item) => item.symbol), selectedTicker])),
+    () => Array.from(new Set([...PRELOADED_UNIVERSE.map((item) => item.symbol), ...customWatchItems.map((item) => item.symbol), selectedTicker])).filter((symbol) => !isRemovedFutureSymbol(symbol)),
     [customWatchItems, selectedTicker],
   );
   const publicTickerTapeSymbols = useMemo(
@@ -3321,6 +4328,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       Array.from(
         new Set(
           [...PRELOADED_UNIVERSE, ...customWatchItems]
+            .filter((item) => !isRemovedFutureSymbol(item.symbol))
             .filter((item) => activeWatchSymbols.includes(item.symbol))
             .filter((item) => watchCategory === "Todos" || item.category === watchCategory)
             .map((item) => item.symbol),
@@ -3345,7 +4353,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         ...fromCategory("BDR", 12),
         ...fromCategory("Crypto", 8),
         ...fromCategory("USA", 18),
-        ...customWatchItems.map((item) => item.symbol),
+        ...customWatchItems.map((item) => item.symbol).filter((symbol) => !isRemovedFutureSymbol(symbol)),
       ]),
     );
   }, [activeWatchSymbols, customWatchItems, selectedTicker]);
@@ -3355,12 +4363,23 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const visiblePublicWatchKey = visiblePublicWatchSymbols.slice(0, 48).join("|");
   const [tickerTapePaused, setTickerTapePaused] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [aiFindingSound, setAiFindingSound] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("preferencias");
   const [accountPanel, setAccountPanel] = useState<AccountPanel>("perfil");
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(true);
+  const [strategicConclusionOpen, setStrategicConclusionOpen] = useState(true);
+  const [strategicAnalysisMinute, setStrategicAnalysisMinute] = useState(() => currentFiveMinuteBucket());
   const [selectedInstitutionalSectionId, setSelectedInstitutionalSectionId] = useState<string | null>(null);
   const [showMarkers, setShowMarkers] = useState(DEFAULT_CHART_SETTINGS.show_markers);
   const [showZones, setShowZones] = useState(DEFAULT_CHART_SETTINGS.show_zones);
+  const [showPriceLine, setShowPriceLine] = useState(DEFAULT_CHART_SETTINGS.show_price_line);
+  const [showVwap, setShowVwap] = useState(DEFAULT_CHART_SETTINGS.show_vwap);
+  const [showAverages, setShowAverages] = useState(DEFAULT_CHART_SETTINGS.show_averages);
+  const [showMacd, setShowMacd] = useState(DEFAULT_CHART_SETTINGS.show_macd);
+  const [showRsi, setShowRsi] = useState(DEFAULT_CHART_SETTINGS.show_rsi);
+  const [showSupertrend, setShowSupertrend] = useState(DEFAULT_CHART_SETTINGS.show_supertrend);
+  const [showVolume, setShowVolume] = useState(DEFAULT_CHART_SETTINGS.show_volume);
   const [mobileWatchlistOpen, setMobileWatchlistOpen] = useState(false);
   const [mobileInsightsOpen, setMobileInsightsOpen] = useState(false);
 
@@ -3400,6 +4419,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const tabListRef = useRef<HTMLDivElement | null>(null);
   const composerCardRef = useRef<HTMLDivElement | null>(null);
   const leftRailRef = useRef<HTMLElement | null>(null);
+  const aiSoundLastKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     publicQuotesRef.current = publicQuotes;
@@ -3412,7 +4432,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   useEffect(() => {
     const stored =
       queryToken ||
-      window.localStorage.getItem("stocknewsbr.token") ||
+      readStorageValue("stocknewsbr.token") ||
       process.env.NEXT_PUBLIC_DEFAULT_TOKEN ||
       "";
 
@@ -3424,28 +4444,29 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, []);
 
   useEffect(() => {
-    const storedPersona = window.localStorage.getItem("stocknewsbr.workspace_persona");
-    if (storedPersona === "guiado") {
-      setWorkspacePersona(storedPersona);
-      return;
-    }
-    if (focusedTab) return;
-    setWorkspacePersona("guiado");
-  }, [focusedTab, token]);
+    const storedMode = readStorageValue(WORKSPACE_MODE_STORAGE_KEY);
+    setAdvancedMode(storedMode === "pro");
+  }, []);
 
   useEffect(() => {
-    window.localStorage.setItem("stocknewsbr.workspace_persona", workspacePersona);
-  }, [workspacePersona]);
+    writeStorageValue(WORKSPACE_MODE_STORAGE_KEY, advancedMode ? "pro" : "simple");
+  }, [advancedMode]);
+
+  useEffect(() => {
+    if (proModeLocked && advancedMode) setAdvancedMode(false);
+  }, [advancedMode, proModeLocked]);
 
   useEffect(() => {
     setPredictionSymbol(selectedTicker);
   }, [selectedTicker]);
 
   useEffect(() => {
-    const storedDark = window.localStorage.getItem("stocknewsbr.dark_mode");
+    const storedDark = readStorageValue("stocknewsbr.dark_mode");
     if (storedDark === "1") setDarkMode(true);
+    const storedAiFindingSound = readStorageValue(AI_FINDING_SOUND_STORAGE_KEY);
+    if (storedAiFindingSound === "1") setAiFindingSound(true);
 
-    const storedBlocked = window.localStorage.getItem("stocknewsbr.blocked_users");
+    const storedBlocked = readStorageValue("stocknewsbr.blocked_users");
     if (storedBlocked) {
       try {
         const parsed = JSON.parse(storedBlocked);
@@ -3455,7 +4476,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       }
     }
 
-    const storedSilenced = window.localStorage.getItem("stocknewsbr.silenced_users");
+    const storedSilenced = readStorageValue("stocknewsbr.silenced_users");
     if (storedSilenced) {
       try {
         const parsed = JSON.parse(storedSilenced);
@@ -3467,22 +4488,43 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem("stocknewsbr.dark_mode", darkMode ? "1" : "0");
+    writeStorageValue("stocknewsbr.dark_mode", darkMode ? "1" : "0");
   }, [darkMode]);
 
   useEffect(() => {
-    window.localStorage.setItem("stocknewsbr.blocked_users", JSON.stringify(blockedUsers));
+    writeStorageValue(AI_FINDING_SOUND_STORAGE_KEY, aiFindingSound ? "1" : "0");
+  }, [aiFindingSound]);
+
+  useEffect(() => {
+    writeStorageValue("stocknewsbr.blocked_users", JSON.stringify(blockedUsers));
   }, [blockedUsers]);
 
   useEffect(() => {
-    window.localStorage.setItem("stocknewsbr.silenced_users", JSON.stringify(silencedUsers));
+    writeStorageValue("stocknewsbr.silenced_users", JSON.stringify(silencedUsers));
   }, [silencedUsers]);
 
   useEffect(() => {
     const chartSettings = workspace?.layout?.chart_settings;
     setShowMarkers(chartSettings?.show_markers ?? DEFAULT_CHART_SETTINGS.show_markers);
     setShowZones(chartSettings?.show_zones ?? DEFAULT_CHART_SETTINGS.show_zones);
-  }, [workspace?.layout?.chart_settings?.show_markers, workspace?.layout?.chart_settings?.show_zones]);
+    setShowPriceLine(chartSettings?.show_price_line ?? DEFAULT_CHART_SETTINGS.show_price_line);
+    setShowVwap(chartSettings?.show_vwap ?? DEFAULT_CHART_SETTINGS.show_vwap);
+    setShowAverages(chartSettings?.show_averages ?? DEFAULT_CHART_SETTINGS.show_averages);
+    setShowMacd(chartSettings?.show_macd ?? DEFAULT_CHART_SETTINGS.show_macd);
+    setShowRsi(chartSettings?.show_rsi ?? DEFAULT_CHART_SETTINGS.show_rsi);
+    setShowSupertrend(chartSettings?.show_supertrend ?? DEFAULT_CHART_SETTINGS.show_supertrend);
+    setShowVolume(chartSettings?.show_volume ?? DEFAULT_CHART_SETTINGS.show_volume);
+  }, [
+    workspace?.layout?.chart_settings?.show_markers,
+    workspace?.layout?.chart_settings?.show_zones,
+    workspace?.layout?.chart_settings?.show_price_line,
+    workspace?.layout?.chart_settings?.show_vwap,
+    workspace?.layout?.chart_settings?.show_averages,
+    workspace?.layout?.chart_settings?.show_macd,
+    workspace?.layout?.chart_settings?.show_rsi,
+    workspace?.layout?.chart_settings?.show_supertrend,
+    workspace?.layout?.chart_settings?.show_volume,
+  ]);
 
   useEffect(() => {
     if (focusedTab || (!postMenuId && !composerEmojiOpen && !composerGifOpen)) return;
@@ -3579,28 +4621,21 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setAccess(null);
       setWorkspace(null);
       setChart(null);
-      setPublicChart((current: any) => (sameSymbol(current?.ticker || current?.summary?.ticker, deferredTicker) ? current : null));
+      setPublicChart((current: any) => (sameChartRequest(current, deferredTicker, chartInterval) ? current : null));
       setFeed(null);
       setRoom(null);
       setPushStatus(null);
       setMediaStatus(null);
 
-      Promise.allSettled([
-        getPublicQuote(deferredTicker),
-        getPublicInsight(deferredTicker, chartInterval),
-        getPublicChart(deferredTicker, chartInterval),
-        getNews(null, deferredTicker),
-        getPublicAiTools(),
-      ])
-        .then((results) => {
+      getPublicMarketBundle(deferredTicker, chartInterval)
+        .then((bundle) => {
           if (cancelled) return;
 
-          const [quoteResult, insightResult, chartResult, newsResult, aiToolsResult] = results;
-          const nextQuote = quoteResult.status === "fulfilled" ? quoteResult.value : null;
-          const nextInsight = insightResult.status === "fulfilled" ? insightResult.value : null;
-          const nextChart = chartResult.status === "fulfilled" ? chartResult.value : null;
-          const nextNews = newsResult.status === "fulfilled" ? newsResult.value : null;
-          const nextPublicAiTools = aiToolsResult.status === "fulfilled" ? aiToolsResult.value : null;
+          const nextQuote = bundle?.quote || null;
+          const nextInsight = bundle?.insight || null;
+          const nextChart = bundle?.chart || null;
+          const nextNews = bundle?.news || null;
+          const nextPublicAiTools = bundle?.ai_tools || null;
 
           if (nextQuote?.symbol) {
             const normalizedQuoteSymbol = normalizeSymbol(nextQuote.symbol);
@@ -3609,14 +4644,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             setTickerTapeQuotes((current) => mergeQuoteState(current, { [normalizedQuoteSymbol]: normalizedQuote }));
           }
           setPublicInsight(sameSymbol(nextInsight?.symbol, deferredTicker) ? { ...nextInsight, symbol: deferredTicker } : null);
-          setPublicChart((current: any) => {
-            const hasNextChart = Boolean(sameChartRequest(nextChart, deferredTicker, chartInterval) && (nextChart?.ohlc?.length || nextChart?.series?.length));
-            if (hasNextChart) return { ...nextChart, ticker: deferredTicker };
-            if (sameChartRequest(current, deferredTicker, chartInterval) && (current?.ohlc?.length || current?.series?.length)) return current;
-            return nextChart;
-          });
+          setPublicChart(sameChartRequest(nextChart, deferredTicker, chartInterval) ? { ...nextChart, ticker: deferredTicker } : null);
           setQuote(nextQuote);
-          setNews(nextNews);
+          setNews((current) => {
+            const currentCount = Number(current?.count ?? current?.items?.length ?? 0);
+            const nextCount = Number(nextNews?.count ?? nextNews?.items?.length ?? 0);
+            if (sameSymbol(current?.symbol, deferredTicker) && currentCount > 0 && nextCount <= 0) return current;
+            return nextNews;
+          });
           setPublicAiTools(nextPublicAiTools);
         })
         .catch((requestError: Error) => {
@@ -3626,7 +4661,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           if (!cancelled) setLoading(false);
         });
 
-      getPublicQuotesRobust(publicTickerTapeSymbols, 12, 2)
+      const initialQuoteSymbols = Array.from(new Set([...priorityPublicWatchSymbols, ...publicTickerTapeSymbols]));
+
+      getPublicQuotesRobust(initialQuoteSymbols, 32, 0)
         .then((nextQuotes) => {
           if (cancelled) return;
           const quoteMap = Object.fromEntries((nextQuotes?.items || []).map((item) => [item.symbol, item]));
@@ -3634,21 +4671,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           setPublicQuotes((current) => mergeQuoteState(current, quoteMap));
         })
         .catch(() => {
-          // The selected ticker fetch above keeps the main page useful even if some tape quotes time out.
-        });
-
-      getPublicQuotesRobust(priorityPublicWatchSymbols, 8, 2)
-        .then((nextQuotes) => {
-          if (cancelled) return;
-          const quoteMap = Object.fromEntries((nextQuotes?.items || []).map((item) => [item.symbol, item]));
-          setPublicQuotes((current) => mergeQuoteState(current, quoteMap));
-        })
-        .catch(() => {
-          // Visible cards keep their static labels; the full watchlist load below still gets a chance.
+          // The selected ticker bundle keeps the main page useful even if some tape quotes time out.
         });
 
       const fullWatchlistTimer = window.setTimeout(() => {
-        getPublicQuotesRobust(publicWatchSymbols, 16, 2)
+        getPublicQuotesRobust(publicWatchSymbols, 48, 0)
           .then((nextQuotes) => {
             if (cancelled) return;
             const quoteMap = Object.fromEntries((nextQuotes?.items || []).map((item) => [item.symbol, item]));
@@ -3674,29 +4701,29 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     Promise.all([
       getAccess(token),
       getWorkspace(token),
-      getChart(token, deferredTicker, chartInterval),
-      getFeed(token, deferredTicker),
-      getNews(token, deferredTicker),
-      getChatHistory(token, deferredTicker),
-      getQuote(token, deferredTicker),
-      getPushStatus(token),
-      getMediaStatus(token),
+      getWorkspaceTickerBundle(token, deferredTicker, chartInterval),
     ])
-      .then(([nextAccess, nextWorkspace, nextChart, nextFeed, nextNews, nextRoom, nextQuote, nextPush, nextMedia]) => {
+      .then(([nextAccess, nextWorkspace, nextTickerBundle]) => {
         if (cancelled) return;
 
         startTransition(() => {
           const nextTabs = buildTabs(nextWorkspace.tabs);
           setAccess(nextAccess);
           setWorkspace(nextWorkspace);
-          setChart(nextChart);
+          setChart(nextTickerBundle.chart || null);
           setPublicChart(null);
-          setFeed(nextFeed);
-          setNews(nextNews);
-          setRoom(nextRoom);
-          setQuote(nextQuote);
-          setPushStatus(nextPush as Record<string, unknown>);
-          setMediaStatus(nextMedia as Record<string, unknown>);
+          setFeed(nextTickerBundle.feed || null);
+          setNews((current) => {
+            const nextNews = nextTickerBundle.news || null;
+            const currentCount = Number(current?.count ?? current?.items?.length ?? 0);
+            const nextCount = Number(nextNews?.count ?? nextNews?.items?.length ?? 0);
+            if (sameSymbol(current?.symbol, deferredTicker) && currentCount > 0 && nextCount <= 0) return current;
+            return nextNews;
+          });
+          setRoom(nextTickerBundle.room || null);
+          setQuote(nextTickerBundle.quote || null);
+          setPushStatus(nextWorkspace.push as Record<string, unknown>);
+          setMediaStatus(nextWorkspace.media as Record<string, unknown>);
           setTabs(nextTabs);
 
           if (!focusedTab) {
@@ -3718,7 +4745,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [token, deferredTicker, chartInterval, focusedTab, priorityPublicWatchKey, publicTickerTapeKey, publicWatchKey]);
+  }, [token, deferredTicker, chartInterval, focusedTab, priorityPublicWatchKey, publicTickerTapeKey, publicWatchKey, strategicAnalysisMinute]);
 
   useEffect(() => {
     if (token) return;
@@ -3732,17 +4759,25 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const retries = [1800, 5200, 9500];
     const timers = retries.map((delay) =>
       window.setTimeout(() => {
-        Promise.allSettled([getPublicChart(deferredTicker, chartInterval), getPublicInsight(deferredTicker, chartInterval)])
-          .then(([chartResult, insightResult]) => {
+        getPublicMarketBundle(deferredTicker, chartInterval)
+          .then((bundle) => {
             if (cancelled) return;
-            if (chartResult.status === "fulfilled" && sameSymbol(chartResult.value?.ticker || chartResult.value?.summary?.ticker, deferredTicker)) {
-              setPublicChart((current: any) => {
-                if (!(chartResult.value?.ohlc?.length || chartResult.value?.series?.length)) return current;
-                if (sameChartRequest(current, deferredTicker, chartInterval) && (current?.ohlc?.length || current?.series?.length)) return current;
-                return { ...chartResult.value, ticker: deferredTicker };
-              });
+            const nextQuote = bundle?.quote || null;
+            const nextInsight = bundle?.insight || null;
+            const nextChart = bundle?.chart || null;
+            const nextNews = bundle?.news || null;
+            const nextPublicAiTools = bundle?.ai_tools || null;
+            if (nextQuote?.symbol) {
+              const normalizedQuoteSymbol = normalizeSymbol(nextQuote.symbol);
+              const normalizedQuote = { ...nextQuote, symbol: normalizedQuoteSymbol };
+              setPublicQuotes((current) => mergeQuoteState(current, { [normalizedQuoteSymbol]: normalizedQuote }));
+              setTickerTapeQuotes((current) => mergeQuoteState(current, { [normalizedQuoteSymbol]: normalizedQuote }));
+              setQuote(nextQuote);
             }
-            if (insightResult.status === "fulfilled" && sameSymbol(insightResult.value?.symbol, deferredTicker)) {
+            if (sameSymbol(nextChart?.ticker || nextChart?.summary?.ticker, deferredTicker)) {
+              setPublicChart(sameChartRequest(nextChart, deferredTicker, chartInterval) ? { ...nextChart, ticker: deferredTicker } : null);
+            }
+            if (sameSymbol(nextInsight?.symbol, deferredTicker)) {
               setPublicInsight((current) => {
                 if (
                   sameSymbol(current?.symbol, deferredTicker) &&
@@ -3750,9 +4785,18 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 ) {
                   return current;
                 }
-                return { ...insightResult.value, symbol: deferredTicker };
+                return { ...nextInsight, symbol: deferredTicker };
               });
             }
+            if (nextNews) {
+              setNews((current) => {
+                const currentCount = Number(current?.count ?? current?.items?.length ?? 0);
+                const nextCount = Number(nextNews?.count ?? nextNews?.items?.length ?? 0);
+                if (sameSymbol(current?.symbol, deferredTicker) && currentCount > 0 && nextCount <= 0) return current;
+                return nextNews;
+              });
+            }
+            if (nextPublicAiTools) setPublicAiTools(nextPublicAiTools);
           })
           .catch(() => undefined);
       }, delay),
@@ -3774,6 +4818,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     publicInsight?.rsi,
     publicInsight?.trend_bias,
     publicInsight?.signal,
+    strategicAnalysisMinute,
   ]);
 
   useEffect(() => {
@@ -3794,7 +4839,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
     let cancelled = false;
     const timeout = window.setTimeout(() => {
-      getPublicQuotesRobust(missingTapeSymbols, 12, 2)
+      getPublicQuotesRobust(missingTapeSymbols, 32, 0)
         .then((nextQuotes) => {
           if (cancelled) return;
           const quoteMap = Object.fromEntries((nextQuotes?.items || []).map((item) => [item.symbol, item]));
@@ -3833,7 +4878,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
     let cancelled = false;
     const timeout = window.setTimeout(() => {
-      getPublicQuotesRobust(missingSymbols, 6, 2)
+      getPublicQuotesRobust(missingSymbols, 32, 0)
         .then((nextQuotes) => {
           if (cancelled) return;
           const quoteMap = Object.fromEntries((nextQuotes?.items || []).map((item) => [item.symbol, item]));
@@ -3875,7 +4920,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       cursor = cursor + 12 >= missing.length ? 0 : cursor + 12;
       if (!chunk.length) return;
 
-        getPublicQuotesRobust(chunk, 12, 2)
+        getPublicQuotesRobust(chunk, 32, 0)
         .then((nextQuotes) => {
           if (cancelled) return;
           const quoteMap = Object.fromEntries((nextQuotes?.items || []).map((item) => [item.symbol, item]));
@@ -3958,7 +5003,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         throw new Error(payload.detail || "Falha ao entrar");
       }
 
-      window.localStorage.setItem("stocknewsbr.token", payload.access_token);
+      writeStorageValue("stocknewsbr.token", payload.access_token);
       setToken(payload.access_token);
       setPendingLoginToken("");
       setDebugOtpCode("");
@@ -3976,7 +5021,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         throw new Error(payload.detail || "Codigo invalido");
       }
 
-      window.localStorage.setItem("stocknewsbr.token", payload.access_token);
+      writeStorageValue("stocknewsbr.token", payload.access_token);
       setToken(payload.access_token);
       setPendingLoginToken("");
       setOtpCode("");
@@ -3995,7 +5040,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       }
     }
 
-    window.localStorage.removeItem("stocknewsbr.token");
+    removeStorageValue("stocknewsbr.token");
     setToken("");
     setAccess(null);
     setWorkspace(null);
@@ -4036,7 +5081,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         avatar_url: nextAvatarUrl,
       });
 
-      window.localStorage.setItem("stocknewsbr.token", token);
+      writeStorageValue("stocknewsbr.token", token);
       startTransition(() => {
         setAccess(nextAccess);
         setProfileAvatarUrl(nextAccess.avatar_url || "");
@@ -4065,6 +5110,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       const nextChartSettings = {
         show_markers: chartSettings?.show_markers ?? workspace?.layout?.chart_settings?.show_markers ?? showMarkers,
         show_zones: chartSettings?.show_zones ?? workspace?.layout?.chart_settings?.show_zones ?? showZones,
+        show_price_line: chartSettings?.show_price_line ?? workspace?.layout?.chart_settings?.show_price_line ?? showPriceLine,
+        show_vwap: chartSettings?.show_vwap ?? workspace?.layout?.chart_settings?.show_vwap ?? showVwap,
+        show_averages: chartSettings?.show_averages ?? workspace?.layout?.chart_settings?.show_averages ?? showAverages,
+        show_macd: chartSettings?.show_macd ?? workspace?.layout?.chart_settings?.show_macd ?? showMacd,
+        show_rsi: chartSettings?.show_rsi ?? workspace?.layout?.chart_settings?.show_rsi ?? showRsi,
+        show_supertrend: chartSettings?.show_supertrend ?? workspace?.layout?.chart_settings?.show_supertrend ?? showSupertrend,
+        show_volume: chartSettings?.show_volume ?? workspace?.layout?.chart_settings?.show_volume ?? showVolume,
       };
       const nextLayout = await saveWorkspaceLayout(token, {
         tabs: nextTabs.map((tab) => tab.id),
@@ -4096,6 +5148,27 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     if (key === "show_zones") {
       setShowZones(value);
     }
+    if (key === "show_price_line") {
+      setShowPriceLine(value);
+    }
+    if (key === "show_vwap") {
+      setShowVwap(value);
+    }
+    if (key === "show_averages") {
+      setShowAverages(value);
+    }
+    if (key === "show_macd") {
+      setShowMacd(value);
+    }
+    if (key === "show_rsi") {
+      setShowRsi(value);
+    }
+    if (key === "show_supertrend") {
+      setShowSupertrend(value);
+    }
+    if (key === "show_volume") {
+      setShowVolume(value);
+    }
     void persistLayout(tabs, undefined, undefined, { [key]: value });
   }
 
@@ -4125,7 +5198,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
   function handleAddToActiveList() {
     const symbol = resolveTypedSymbol(watchlistQuery.trim() || tickerInput.trim() || selectedTicker);
-    if (!symbol) return;
+    if (!symbol || isRemovedFutureSymbol(symbol)) return;
 
     const baseItem =
       PRELOADED_UNIVERSE.find((item) => item.symbol === symbol) ||
@@ -4446,12 +5519,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     setComposerGifOpen(false);
   }
 
-  function openYahooGifSearch() {
+  function openGifSearch() {
     const queryText = (gifQuery.trim() || `${selectedTicker} ${symbolName(selectedTicker)} stock market gif`).replace(/\s+/g, " ");
     const query = encodeURIComponent(queryText);
-    const opened = window.open(`https://images.search.yahoo.com/search/images?p=${query}&imgty=gif&fr=yfp-t`, "_blank", "noopener,noreferrer");
+    const opened = window.open(`https://tenor.com/search/${query}-gifs`, "_blank", "noopener,noreferrer");
     if (!opened) {
-      setError("Yahoo bloqueou a nova aba de GIF. Libere pop-ups ou abra a busca de GIF novamente.");
+      setError(isUsLocale ? "The GIF window was blocked. Allow pop-ups and try again." : "A janela de GIF foi bloqueada. Libere pop-ups e tente novamente.");
     }
   }
 
@@ -4552,18 +5625,25 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const currentTabs = useMemo(() => (tabs.length ? tabs : buildTabs()), [tabs]);
   const tabsById = useMemo(() => new Map(currentTabs.map((tab) => [tab.id, tab] as const)), [currentTabs]);
   const visibleTabs = useMemo(
-    () => TOP_BAR_TAB_IDS.map((id) => tabsById.get(id)).filter(Boolean) as WorkspaceTab[],
-    [tabsById],
+    () => TOP_BAR_TAB_IDS
+      .filter((id) => advancedMode || SIMPLE_TOP_TAB_IDS.has(id))
+      .map((id) => tabsById.get(id))
+      .filter(Boolean) as WorkspaceTab[],
+    [advancedMode, tabsById],
   );
+
+  useEffect(() => {
+    if (focusedTab || advancedMode || SIMPLE_TOP_TAB_IDS.has(currentTab)) return;
+    setActiveTab("grafico");
+  }, [advancedMode, currentTab, focusedTab]);
+
   const activeChart = useMemo(
     () => {
-      const liveChartTicker = normalizeSymbol(String(chart?.ticker || chart?.summary?.ticker || ""));
-      const guestChartTicker = normalizeSymbol(String(publicChart?.ticker || publicChart?.summary?.ticker || ""));
-      const liveChart = liveChartTicker === selectedTicker ? chart : null;
-      const guestChart = guestChartTicker === selectedTicker ? publicChart : null;
+      const liveChart = sameChartRequest(chart, selectedTicker, chartInterval) ? chart : null;
+      const guestChart = sameChartRequest(publicChart, selectedTicker, chartInterval) ? publicChart : null;
       return liveChart || guestChart;
     },
-    [chart, publicChart, selectedTicker],
+    [chart, chartInterval, publicChart, selectedTicker],
   );
   const activeFeed = useMemo(() => (feed?.symbol && normalizeSymbol(feed.symbol) === selectedTicker ? feed : null), [feed, selectedTicker]);
   const activeNews = useMemo(
@@ -4621,6 +5701,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const bySymbol = new Map(liveWatchlist.map((item) => [item.symbol, item]));
 
     for (const item of [...PRELOADED_UNIVERSE, ...customWatchItems]) {
+      if (isRemovedFutureSymbol(item.symbol)) continue;
       if (!activeSet.has(item.symbol)) continue;
       if (!bySymbol.has(item.symbol)) {
         bySymbol.set(item.symbol, { ...item });
@@ -4657,7 +5738,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   );
   const remoteSearchItems = useMemo(
     () =>
-      remoteSearchSymbols.map((symbol) => {
+      remoteSearchSymbols.filter((symbol) => !isRemovedFutureSymbol(symbol)).map((symbol) => {
         const normalized = normalizeSymbol(symbol);
         return watchUniverse.find((item) => item.symbol === normalized) || {
           symbol: normalized,
@@ -4695,11 +5776,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     if (token || quoteHasMarketValue(currentPublicQuote)) return;
 
     let cancelled = false;
-    const retryDelays = [500, 1800, 4200, 8000];
+    const retryDelays = [1800, 6000];
     const timers = retryDelays.map((delay) =>
       window.setTimeout(() => {
-        getPublicQuote(deferredTicker)
-          .then((nextQuote) => {
+        getPublicQuotesRobust([deferredTicker], 1, 0)
+          .then((nextQuotes) => {
+            const nextQuote = (nextQuotes?.items || [])[0];
             if (cancelled || normalizeSymbol(nextQuote?.symbol || "") !== deferredTicker) return;
             const normalizedQuote = { ...nextQuote, symbol: deferredTicker };
             setQuote(normalizedQuote);
@@ -4786,47 +5868,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   ]);
   const chartForDisplay = useMemo(() => {
     const hasLiveSeries = Boolean(activeChart?.ohlc?.length || activeChart?.series?.length);
-    const fallbackChart = buildQuoteFallbackChart(
-      selectedTicker,
-      chartInterval,
-      displayQuote,
-      activeChart?.summary?.trend_bias ||
-        currentRanking?.trend ||
-        derivedPublicInsight?.trend_bias ||
-        derivedPublicInsight?.signal ||
-        null,
-    );
-
-    if (!hasLiveSeries) return fallbackChart;
-    if (!activeChart) return fallbackChart;
-
-    return {
-      ...activeChart,
-      markers: activeChart.markers?.length ? activeChart.markers : fallbackChart?.markers || [],
-      zones: activeChart.zones?.length ? activeChart.zones : fallbackChart?.zones || [],
-      summary: {
-        ...(fallbackChart?.summary || {}),
-        ...(activeChart.summary || {}),
-      },
-    };
+    if (!hasLiveSeries || !activeChart) return null;
+    return activeChart;
   }, [
     activeChart,
-    chartInterval,
-    currentRanking?.trend,
-    derivedPublicInsight?.signal,
-    derivedPublicInsight?.trend_bias,
-    displayQuote?.change,
-    displayQuote?.change_pct,
-    displayQuote?.price,
-    displayQuote?.volume,
-    selectedTicker,
   ]);
   const chartMovement = useMemo(
     () => deriveChartMovement(activeChart || chartForDisplay),
     [activeChart, chartForDisplay],
   );
-  const chartLatestEpoch = useMemo(
-    () => chartLatestAlertEpoch(activeChart || chartForDisplay),
+  const chartVolume = useMemo(
+    () => deriveChartVolume(activeChart || chartForDisplay),
     [activeChart, chartForDisplay],
   );
   const effectiveAiScore = useMemo(
@@ -4835,27 +5887,89 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   );
   const priceMovementValue = firstNonZeroFiniteNumber(displayQuote?.change, chartMovement?.change) ?? (displayQuote?.change ?? null);
   const priceMovementPercent = firstNonZeroFiniteNumber(displayQuote?.change_pct, chartMovement?.changePct) ?? (displayQuote?.change_pct ?? null);
+  const headerVolume = firstPositiveFiniteNumber(displayQuote?.volume, chartVolume);
   const symbolLabel = currentWatchItem?.label || symbolName(selectedTicker);
   const currentAiKey = AI_TOOL_TAB_MAP[currentTab as keyof typeof AI_TOOL_TAB_MAP];
   const currentAiRows: AiToolRow[] = useMemo(
     () => (currentAiKey ? workspace?.ai_tools?.[currentAiKey] || publicAiTools?.tools?.[currentAiKey] : undefined) || [],
     [currentAiKey, workspace?.ai_tools, publicAiTools?.tools],
   );
+  const aiToolFindingCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const [tabId, toolKey] of Object.entries(AI_TOOL_TAB_MAP)) {
+      const typedKey = toolKey as keyof WorkspaceData["ai_tools"];
+      const rows = [
+        ...(workspace?.ai_tools?.[typedKey] || []),
+        ...(publicAiTools?.tools?.[typedKey] || []),
+      ];
+      const unique = new Set<string>();
+      rows.forEach((row) => {
+        const ticker = normalizeSymbol(String((row as any).ticker || (row as any).symbol || ""));
+        if (!ticker) return;
+        const candidate = { ...(row as AiToolRow), tool: toolKey, ticker };
+        if (!isOperationalAiFinding(candidate)) return;
+        unique.add(aiAlertSignalKey(candidate));
+      });
+      counts[tabId] = unique.size;
+    }
+    return counts;
+  }, [publicAiTools?.tools, workspace?.ai_tools]);
+  const aiFindingSignalKey = useMemo(() => {
+    const signatures: string[] = [];
+    for (const [, toolKey] of Object.entries(AI_TOOL_TAB_MAP)) {
+      const typedKey = toolKey as keyof WorkspaceData["ai_tools"];
+      const rows = [
+        ...(workspace?.ai_tools?.[typedKey] || []),
+        ...(publicAiTools?.tools?.[typedKey] || []),
+      ];
+      rows.forEach((row) => {
+        const ticker = normalizeSymbol(String((row as any).ticker || (row as any).symbol || ""));
+        if (!ticker) return;
+        const candidate = { ...(row as AiToolRow), tool: toolKey, ticker };
+        if (!isOperationalAiFinding(candidate)) return;
+        signatures.push(aiAlertComparableSignature(candidate));
+      });
+    }
+    return Array.from(new Set(signatures)).sort().join("||");
+  }, [publicAiTools?.tools, workspace?.ai_tools]);
+  useEffect(() => {
+    if (!aiFindingSound) {
+      aiSoundLastKeyRef.current = aiFindingSignalKey;
+      return;
+    }
+    if (aiSoundLastKeyRef.current === null) {
+      aiSoundLastKeyRef.current = aiFindingSignalKey;
+      return;
+    }
+    if (aiFindingSignalKey && aiFindingSignalKey !== aiSoundLastKeyRef.current) {
+      playMoneyFindingSound();
+    }
+    aiSoundLastKeyRef.current = aiFindingSignalKey;
+  }, [aiFindingSignalKey, aiFindingSound]);
   const newsRows = useMemo(
-    () =>
-      ((activeNews?.items || []) as NewsItem[])
-        .filter((item) => newsMatchesSelectedTicker(item, selectedTicker))
-        .map((item, index) => {
-        const publishedAt = item.published_at ? Date.parse(item.published_at) : Number.NaN;
-        const age = Number.isFinite(publishedAt) ? formatRelativeTime(Math.floor(publishedAt / 1000), appLocale) : (isUsLocale ? "now" : "agora");
+    () => {
+      const matchedNews = dedupeNewsForTicker(
+        ((activeNews?.items || []) as NewsItem[]).filter((item) => newsMatchesSelectedTicker(item, selectedTicker)),
+        selectedTicker,
+      );
+      return matchedNews.map((item, index) => {
+        const publishedAtSource = item.published_at || item.detected_at || null;
+        const publishedAt = publishedAtSource ? Date.parse(publishedAtSource) : Number.NaN;
+        const publishedAtIso = Number.isFinite(publishedAt) ? publishedAtSource : null;
+        const publishedTime = formatNewsClock(publishedAtIso, appLocale);
+        const age = publishedTime;
         const labels = Array.isArray(item.labels) ? item.labels.filter(Boolean) : [];
-        const entities = Array.isArray(item.entities) ? item.entities.filter(Boolean) : [];
+        const entities = Array.isArray(item.entities)
+          ? item.entities.filter(Boolean).map((entity) => appLocale === "en-US" ? localizeUiText(entity, appLocale, selectedTicker) : expandPortugueseMarketTerms(entity))
+          : [];
         const impact = localizeImpactLabel(item.impact_label || item.impact || "Neutro", appLocale);
         const title = displayNewsTitle(item, selectedTicker, appLocale);
+        const rawHeadline = String(item.title || "").trim();
+        const headline = isUsLocale ? clampHeadline(rawHeadline || title, 150) : title;
         const cardSummary = displayNewsBody(item, selectedTicker, appLocale);
-        const traderTakeaway = localizeUiText(item.trader_takeaway || "", appLocale, selectedTicker);
-        const whyItMatters = localizeUiText(item.why_it_matters || "", appLocale, selectedTicker);
-        const marketContext = localizeUiText(item.market_context || "", appLocale, selectedTicker);
+        const traderTakeaway = buildNewsTraderTakeaway(item, selectedTicker, appLocale, index);
+        const whyItMatters = localizeNewsField(item, selectedTicker, appLocale, "why_it_matters", "why");
+        const marketContext = localizeNewsField(item, selectedTicker, appLocale, "market_context", "context");
         const sector = localizeUiText(item.sector || "", appLocale, selectedTicker);
         const industry = localizeUiText(item.industry || "", appLocale, selectedTicker);
         const labelsForLocale = labels.map((label) => localizeUiText(label, appLocale, selectedTicker));
@@ -4863,9 +5977,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         return {
           id: item.id || `${selectedTicker}-${index}`,
           symbol: item.ticker || selectedTicker,
+          headline,
           title,
           source: item.source || "Yahoo Finance",
           age,
+          publishedTime,
           sector,
           industry,
           labels: labelsForLocale,
@@ -4888,20 +6004,15 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           impactReason: localizeUiText(item.impact_reason || "", appLocale, selectedTicker),
           url: item.url || null,
         };
-      }),
+      });
+    },
     [activeNews?.items, selectedTicker, appLocale, isUsLocale],
   );
   const stats = useMemo(() => {
     const changeValue = formatSignedPercent(displayQuote?.change_pct);
-    const volumeValue = formatCompact(displayQuote?.volume);
     const aiScoreValue = effectiveAiScore != null ? Number(effectiveAiScore).toFixed(1) : "n/a";
     const changeNumber = Number(displayQuote?.change_pct || 0);
-    const rsiRaw =
-      currentRanking?.rsi != null
-        ? Number(currentRanking.rsi)
-        : derivedPublicInsight?.rsi != null
-          ? Number(derivedPublicInsight.rsi)
-          : null;
+    const rsiRaw = firstValidRsiNumber(currentRanking?.rsi, derivedPublicInsight?.rsi);
     const rsiValue = rsiRaw != null && Number.isFinite(rsiRaw) ? rsiRaw.toFixed(1) : "n/a";
     const biasValue = localizeUiText(chartForDisplay?.summary?.trend_bias || currentRanking?.trend || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || "n/a", appLocale, selectedTicker);
     const changeDirection = changeNumber < 0
@@ -4909,14 +6020,31 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       : changeNumber > 0
         ? (isUsLocale ? "rising" : "alta")
         : (isUsLocale ? "stable" : "estável");
-    const relVolume = Number(currentRanking?.rel_volume ?? derivedPublicInsight?.rel_volume ?? 0);
-    const volumeContext = Number.isFinite(relVolume) && relVolume > 0
+    const quoteAverageVolume = firstPositiveFiniteNumber(
+      (displayQuote as any)?.average_volume,
+      (displayQuote as any)?.averageVolume,
+      (displayQuote as any)?.avg_volume,
+      currentWatchItem?.averageVolume,
+    );
+    const relVolume = firstPositiveFiniteNumber(
+      currentRanking?.rel_volume,
+      derivedPublicInsight?.rel_volume,
+      (displayQuote as any)?.rel_volume,
+      (displayQuote as any)?.rvol,
+      currentWatchItem?.relVolume,
+      calculateRelativeVolume(headerVolume, quoteAverageVolume),
+    );
+    const hasVolume = headerVolume != null && headerVolume > 0;
+    const volumeValue = formatLiquidityVolume(headerVolume, relVolume, appLocale);
+    const volumeContext = relVolume != null
       ? relVolume < 0.8
         ? (isUsLocale ? "below this asset's average" : "abaixo da média deste ativo")
         : relVolume > 1.2
           ? (isUsLocale ? "above this asset's average" : "acima da média deste ativo")
-          : (isUsLocale ? "near this asset's average" : "perto da média deste ativo")
-      : (isUsLocale ? "compare with the asset average before acting" : "compare com a média do ativo antes de agir");
+        : (isUsLocale ? "near this asset's average" : "perto da média deste ativo")
+      : hasVolume
+        ? (isUsLocale ? "real volume confirmed; RVOL depends on historical average" : "volume real confirmado; RVOL depende da média histórica")
+        : (isUsLocale ? "no reliable volume in the current provider payload" : "sem volume confiável no payload atual");
     const scoreNumber = Number(effectiveAiScore);
     const scoreHint = Number.isFinite(scoreNumber)
       ? scoreNumber >= 7
@@ -4924,7 +6052,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         : scoreNumber <= 5.5
           ? (isUsLocale ? `${aiScoreValue} indicates weak/sell bias; avoid long without confirmation.` : `${aiScoreValue} indicando baixa/venda; evite compra sem confirmação.`)
           : (isUsLocale ? `${aiScoreValue} is moderate: wait for price/volume confirmation.` : `${aiScoreValue} é moderado: aguarde confirmação de preço/volume.`)
-      : (isUsLocale ? "No AI score confirmed for this asset yet." : "Sem Score IA confirmado para este ativo ainda.");
+      : (isUsLocale ? "No Master Score confirmed for this asset yet." : "Sem Score Mestre confirmado para este ativo ainda.");
     const rsiHint = rsiRaw != null && Number.isFinite(rsiRaw)
       ? rsiRaw >= 70
         ? (isUsLocale ? `${rsiValue}: overbought; avoid chasing price.` : `${rsiValue}: sobrecomprado; evite perseguir preço.`)
@@ -4937,7 +6065,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       {
         label: isUsLocale ? "Price" : "Preço",
         value: formatLocalePrice(displayQuote?.price, appLocale),
-        hint: isUsLocale ? "Current valid quote used by chart and AI." : "Cotação válida usada pelo gráfico e pela IA.",
+        hint: isUsLocale ? "Current quote" : "Cotação atual",
         tone: "neutral",
       },
       {
@@ -4950,10 +6078,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         label: "Volume",
         value: volumeValue,
         hint: isUsLocale ? `${volumeValue}; ${volumeContext}.` : `${volumeValue}, ${volumeContext}.`,
-        tone: Number.isFinite(relVolume) && relVolume > 1.2 ? "up" : Number.isFinite(relVolume) && relVolume > 0 && relVolume < 0.8 ? "down" : "neutral",
+        tone: relVolume != null && relVolume > 1.2 ? "up" : relVolume != null && relVolume < 0.8 ? "down" : "neutral",
       },
       {
-        label: isUsLocale ? "AI Score" : "Score IA",
+        label: isUsLocale ? "Master Score" : "Score Mestre",
         value: aiScoreValue,
         hint: scoreHint,
         tone: Number.isFinite(scoreNumber) && scoreNumber >= 7 ? "up" : Number.isFinite(scoreNumber) && scoreNumber <= 5.5 ? "down" : "neutral",
@@ -4974,21 +6102,23 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, [
     displayQuote?.price,
     displayQuote?.change_pct,
-    displayQuote?.volume,
+    headerVolume,
     effectiveAiScore,
     currentRanking?.rsi,
     currentRanking?.rel_volume,
     currentRanking?.trend,
+    currentWatchItem?.averageVolume,
+    currentWatchItem?.relVolume,
     chartForDisplay?.summary?.trend_bias,
     derivedPublicInsight?.score,
     derivedPublicInsight?.rel_volume,
     derivedPublicInsight?.rsi,
     derivedPublicInsight?.trend_bias,
     derivedPublicInsight?.signal,
-    chartLatestEpoch,
     isUsLocale,
     appLocale,
     selectedTicker,
+    displayQuote,
   ]);
   const tapeItems = useMemo(
     () =>
@@ -5041,7 +6171,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         price: firstFiniteNumber(row?.price, existing.price, watchItem?.price, quote?.price),
         changePct: firstFiniteNumber(row?.changePct, row?.change_pct, existing.changePct, watchItem?.changePct, quote?.change_pct),
         rsi: firstFiniteNumber(row?.rsi, existing.rsi, watchItem?.rsi),
-        volume: firstFiniteNumber(row?.volume, existing.volume, watchItem?.volume, quote?.volume),
+        volume: firstPositiveFiniteNumber(row?.volume, existing.volume, watchItem?.volume, quote?.volume),
         timestamp: normalizeAlertEpoch(row?.timestamp ?? row?.detected_at ?? row?.updated_at ?? row?.last_seen_at ?? row?.created_at ?? existing.timestamp),
       });
     };
@@ -5072,12 +6202,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     displayQuote?.price,
     displayQuote?.volume,
     priceMovementPercent,
-    chartLatestEpoch,
   ]);
   const toolCandidates = useMemo(
     () =>
       [...toolCandidatesSource]
-        .filter((row) => scoreToolCandidateForTab(currentTab, row) > -999)
+        .filter((row) => isOperationalAiFinding(row as Partial<AiToolRow>) && scoreToolCandidateForTab(currentTab, row) > -999)
         .sort((a, b) => scoreToolCandidateForTab(currentTab, b) - scoreToolCandidateForTab(currentTab, a))
         .slice(0, 80)
         .map((row, index) => {
@@ -5108,13 +6237,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           trend: currentRanking?.trend || activeChart?.summary?.trend_bias || "monitorando",
           price: displayQuote?.price ?? null,
           changePct: displayQuote?.change_pct ?? null,
-          rsi: currentRanking?.rsi != null ? Number(currentRanking.rsi) : null,
+          rsi: firstValidRsiNumber(currentRanking?.rsi),
           volume: displayQuote?.volume ?? null,
-          timestamp: chartLatestEpoch,
+          timestamp: null,
         };
         return { ...fallback, id: `${fallback.symbol}-${index}` };
       }),
-    [toolCandidates, selectedTicker, symbolLabel, currentRanking?.score, currentRanking?.trend, currentRanking?.rsi, activeChart?.summary?.trend_bias, displayQuote?.price, displayQuote?.change_pct, displayQuote?.volume, chartLatestEpoch],
+    [toolCandidates, selectedTicker, symbolLabel, currentRanking?.score, currentRanking?.trend, currentRanking?.rsi, activeChart?.summary?.trend_bias, displayQuote?.price, displayQuote?.change_pct, displayQuote?.volume],
   );
   const visibleAiRows = useMemo<AiToolRow[]>(() => {
     if (!currentAiKey) return [];
@@ -5130,8 +6259,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           (symbol === selectedTicker ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal : null) ||
           activeChart?.summary?.trend_bias ||
           null;
-        const rsi = row.rsi ?? (symbol === selectedTicker ? derivedPublicInsight?.rsi : null) ?? derivePublicRsi(changePct, trend);
-        const resolvedVolume = firstFiniteNumber(row.volume, (row as any).volume_24h, quote?.volume);
+        const rsi = firstValidRsiNumber(row.rsi, symbol === selectedTicker ? derivedPublicInsight?.rsi : null, derivePublicRsi(changePct, trend));
+        const resolvedVolume = firstPositiveFiniteNumber(row.volume, (row as any).volume_24h, quote?.volume);
         const score = usableScore(
           row.score,
           symbol === selectedTicker ? derivedPublicInsight?.score : null,
@@ -5174,25 +6303,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           atr_pct: atrPct,
           trend: trend || "monitorando",
         });
-        const rowUpdatedAt =
-          resolveAiAlertTimestamp(row, symbol === selectedTicker ? chartLatestEpoch : undefined) ||
-          (symbol === selectedTicker ? normalizeAlertTimestamp(chartLatestEpoch) : undefined);
-        const rowLastSeenAt =
-          resolveAiAlertTimestamp(
-            {
-              ...(row as AiToolRow),
-              market_data_updated_at: undefined,
-              last_bar_at: undefined,
-              bar_time: undefined,
-              time: undefined,
-              timestamp: undefined,
-              quote_time: undefined,
-              provider_timestamp: undefined,
-              detected_at: row.last_seen_at || row.updated_at || row.detected_at,
-            },
-            rowUpdatedAt,
-          ) ||
-          rowUpdatedAt;
+        const rowDetectedAt = resolveAiFindingTimestamp(row) ?? undefined;
+        const rowUpdatedAt = normalizeAlertTimestamp(row.updated_at) || rowDetectedAt;
+        const rowLastSeenAt = normalizeAlertTimestamp(row.last_seen_at) || rowUpdatedAt || rowDetectedAt;
         const backendSignal = String(row.signal || "").trim();
         const backendState = String(row.state || "").trim();
         const backendComment = String(row.ai_comment || "").trim();
@@ -5220,11 +6333,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           trigger: backendTrigger || narrative.trigger,
           invalidation: backendInvalidation || narrative.invalidation,
           updated_at: rowUpdatedAt ?? undefined,
-          detected_at: rowUpdatedAt ?? undefined,
+          detected_at: rowDetectedAt ?? undefined,
           last_seen_at: rowLastSeenAt ?? undefined,
         };
       });
       return [...backendRows]
+        .filter(isOperationalAiFinding)
         .sort((a, b) => {
           const bTime = Date.parse(resolveAiAlertTimestamp(b) || "");
           const aTime = Date.parse(resolveAiAlertTimestamp(a) || "");
@@ -5241,8 +6355,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         const watchItem = watchUniverse.find((candidate) => candidate.symbol === normalizedItemSymbol);
         const changePct = quote?.change_pct ?? watchItem?.changePct ?? null;
         const trend = item.trend || (normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal : null) || chartForDisplay?.summary?.trend_bias || "monitorando";
-        const rsi = item.rsi ?? (normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.rsi : null) ?? derivePublicRsi(changePct, trend);
-        const resolvedVolume = firstFiniteNumber(quote?.volume, item.volume, watchItem?.volume);
+        const rsi = firstValidRsiNumber(item.rsi, normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.rsi : null, derivePublicRsi(changePct, trend));
+        const resolvedVolume = firstPositiveFiniteNumber(quote?.volume, item.volume, watchItem?.volume);
         const rvol = deriveRelativeVolume(resolvedVolume);
         const adx = deriveAdx(changePct, rsi, trend);
         const atrPct = deriveAtrPct(changePct, rsi, resolvedVolume);
@@ -5274,7 +6388,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           atr_pct: atrPct,
         };
       })
-      .filter((item) => scoreToolCandidateForTab(currentTab, item) > -999)
+      .filter((item) => isOperationalAiFinding(item as Partial<AiToolRow>) && scoreToolCandidateForTab(currentTab, item) > -999)
       .sort((a, b) => {
         return scoreToolCandidateForTab(currentTab, b) - scoreToolCandidateForTab(currentTab, a);
       });
@@ -5326,12 +6440,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         ai_comment: narrative.ai_comment,
         trigger: narrative.trigger,
         invalidation: narrative.invalidation,
-        updated_at:
-          normalizeAlertTimestamp(item.timestamp) ||
-          (item.symbol === selectedTicker ? normalizeAlertTimestamp(chartLatestEpoch) ?? undefined : undefined),
-        detected_at:
-          normalizeAlertTimestamp(item.timestamp) ||
-          (item.symbol === selectedTicker ? normalizeAlertTimestamp(chartLatestEpoch) ?? undefined : undefined),
+        updated_at: normalizeAlertTimestamp(item.timestamp) ?? undefined,
+        detected_at: normalizeAlertTimestamp(item.timestamp) ?? undefined,
       };
     });
   }, [
@@ -5349,7 +6459,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     derivedPublicInsight?.rsi,
     derivedPublicInsight?.trend_bias,
     derivedPublicInsight?.signal,
-    chartLatestEpoch,
   ]);
   const [aiAlertResetKey, setAiAlertResetKey] = useState(() => getAlertResetKey());
   const [aiAlertHistory, setAiAlertHistory] = useState<Record<string, { resetKey: string; rows: AiToolRow[]; source?: "real" }>>({});
@@ -5360,8 +6469,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, []);
 
   useEffect(() => {
+    const timer = window.setInterval(() => setStrategicAnalysisMinute(currentFiveMinuteBucket()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(AI_ALERT_HISTORY_STORAGE_KEY);
+      const raw = readStorageValue(AI_ALERT_HISTORY_STORAGE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw) as { resetKey?: string; tabs?: Record<string, { resetKey: string; rows: AiToolRow[]; source?: "real" }> };
       setAiAlertHistory(parsed.resetKey === aiAlertResetKey && parsed.tabs ? parsed.tabs : {});
@@ -5372,7 +6486,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(
+      writeStorageValue(
         AI_ALERT_HISTORY_STORAGE_KEY,
         JSON.stringify({ resetKey: aiAlertResetKey, tabs: aiAlertHistory }),
       );
@@ -5384,21 +6498,21 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const realAiVisibleRows = useMemo(() => {
     if (!currentAiKey || !currentAiRows.length || !visibleAiRows.length) return [];
     const realKeys = new Set(
-      currentAiRows.map((row) =>
-        aiAlertSignalKey({
+      currentAiRows
+        .map((row) => ({
           ...(row as AiToolRow),
           tool: currentAiKey,
           ticker: normalizeSymbol(String((row as any).ticker || (row as any).symbol || "")),
-        }),
-      ),
+        }))
+        .filter(isOperationalAiFinding)
+        .map((row) => aiAlertSignalKey(row)),
     );
     return visibleAiRows.filter((row) => realKeys.has(aiAlertSignalKey(row)));
   }, [currentAiKey, currentAiRows, visibleAiRows]);
 
   useEffect(() => {
     if (!currentAiKey || !realAiVisibleRows.length) return;
-    const detectedAt = new Date().toISOString();
-    const incoming = realAiVisibleRows.map((row) => withAlertTimestamp(row, detectedAt));
+    const incoming = realAiVisibleRows.map((row) => withAlertTimestamp(row));
     if (!incoming.length) return;
 
     setAiAlertHistory((current) => {
@@ -5459,20 +6573,19 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     });
   }, [aiAlertResetKey, currentAiKey, currentTab, realAiVisibleRows]);
 
-  const fallbackAlertTimestamp = useMemo(() => new Date().toISOString(), [aiAlertResetKey, currentTab]);
   const visibleAiRowsWithTimestamps = useMemo(
-    () => visibleAiRows.map((row) => withAlertTimestamp(row, fallbackAlertTimestamp)),
-    [fallbackAlertTimestamp, visibleAiRows],
+    () => visibleAiRows.map((row) => withAlertTimestamp(row)),
+    [visibleAiRows],
   );
-  const currentTabAlertRows =
+  const currentTabAlertRows = (
     currentAiRows.length &&
     aiAlertHistory[currentTab]?.resetKey === aiAlertResetKey &&
     aiAlertHistory[currentTab]?.source === "real" &&
     aiAlertHistory[currentTab]?.rows.length
       ? aiAlertHistory[currentTab].rows
-      : visibleAiRowsWithTimestamps;
+      : visibleAiRowsWithTimestamps
+  ).filter(isOperationalAiFinding);
   const showSymbolHeader = currentTab === "grafico";
-  const guestCta = !token;
   const profileName = access?.display_name || access?.email || "Trader";
   const activePoll = useMemo(
     () => (sameSymbol(poll?.symbol, selectedTicker) ? normalizePollPayload(poll, selectedTicker) : buildFallbackPoll(selectedTicker)),
@@ -5575,99 +6688,155 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           : (isUsLocale ? "Low" : "Baixo");
   const volumeScore = calibrateVolumeMeterValue(rawVolumeScore, volumeLabel);
   const priceDirectionClass = movementClass(priceMovementPercent, currentRanking?.trend, currentRanking?.score);
-  const priceMovementLabel = priceDirectionClass === "up"
-    ? (isUsLocale ? "Pre-market" : "Pré-mercado")
-    : priceDirectionClass === "down"
-      ? (isUsLocale ? "After-hours" : "Após o fechamento")
-      : (isUsLocale ? "Market" : "Mercado");
+  const priceMovementLabel = marketSessionLabel(selectedTicker, appLocale);
   const hasPriceMovement = priceMovementValue != null || priceMovementPercent != null;
-  const focusGuide = useMemo(() => {
-    const persona = (isUsLocale ? WORKSPACE_PERSONAS_EN : WORKSPACE_PERSONAS)[workspacePersona];
-    const topNews = newsRows[0];
-    const topDiscussion = featuredDiscussionPosts[0] || discussionPosts[0];
-    const leadingTool = currentTabAlertRows[0] || currentAiRows[0];
-    const decisionCards = buildChartDecisionCards(chartForDisplay, selectedTicker, displayQuote?.price, appLocale);
-    const priceText =
-      displayQuote?.price != null
-        ? (isUsLocale
-          ? `${selectedTicker} at ${formatAssetMoney(displayQuote.price, selectedTicker, appLocale)} (${formatSignedPercent(priceMovementPercent)}).`
-          : `${selectedTicker} em ${formatAssetMoney(displayQuote.price, selectedTicker, appLocale)} (${formatSignedPercent(priceMovementPercent)}).`)
-        : (isUsLocale ? `${selectedTicker} still has no confirmed provider price.` : `${selectedTicker} ainda sem preço confirmado no provider.`);
-    const chartBias = chartForDisplay?.summary?.trend_bias || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || null;
-    const chartBiasText = localizeUiText(chartBias || "", appLocale, selectedTicker);
-    const newsInsight = topNews?.traderTakeaway || topNews?.whyItMatters || topNews?.cardSummary;
-    const aiText =
-      effectiveAiScore != null
-        ? (isUsLocale ? `AI Score ${Number(effectiveAiScore).toFixed(1)} with ${chartBiasText || "neutral"} bias.` : `Score IA ${Number(effectiveAiScore).toFixed(1)} com bias ${chartBias || "neutro"}; ${describeDayTradeBias(chartBias, effectiveAiScore, priceMovementPercent)}`)
-        : chartBias
-          ? (isUsLocale ? `Public chart shows ${chartBiasText} bias.` : `Gráfico público aponta bias ${chartBias}.`)
-          : (isUsLocale ? "Use chart and news as confirmation until the worker ranks this asset." : "Use o gráfico e a notícia como confirmação até o worker ranquear este ativo.");
-    const volumeText =
-      volumeScore != null
-        ? (isUsLocale ? `Market volume ${formatCompact(displayQuote?.volume)}; social read ${volumeLabel.toLowerCase()}.` : `Volume de mercado em ${formatCompact(displayQuote?.volume)}; leitura social ${volumeLabel.toLowerCase()}; ${describeVolumeContext(volumeLabel, priceMovementPercent, volumeScore)}`)
-        : (isUsLocale ? "Social volume is still low; prioritize price, candle and objective news." : "Volume social ainda baixo; priorize preço, candle e notícia objetiva.");
-    const newsText = topNews
-      ? (isUsLocale ? `Featured news: ${newsInsight || topNews.title}` : `Notícia em foco: ${portugueseNewsInsight(newsInsight, selectedTicker)}`)
-      : (isUsLocale ? "No strong news now; price and chart carry the initial decision." : "Sem notícia forte agora; preço e gráfico carregam a decisão inicial.");
-    const feedText = topDiscussion
-      ? (isUsLocale ? `Featured feed: ${topDiscussion.user} is leading the conversation on ${topDiscussion.ticker || selectedTicker}.` : `Feed em foco: ${topDiscussion.user} puxando a conversa em ${topDiscussion.ticker || selectedTicker}.`)
-      : (isUsLocale ? `Feed is still empty for ${selectedTicker}; use the composer or poll to start the discussion.` : `Feed ainda vazio em ${selectedTicker}; use o composer ou a poll para abrir discussão.`);
-
-    if (workspacePersona === "guiado") {
-      return {
-        title: isUsLocale ? "Pro Workflow" : "Roteiro Pro",
-        body: isUsLocale ? "Read what to do, watch or avoid before checking news and community." : "Leia o que fazer, observar ou evitar antes de olhar notícia e comunidade.",
-        emphasis: persona.emphasis,
-        cards: decisionCards.map((card) => localizeGuideCard(card, appLocale)),
-      };
-    }
-
-    if (workspacePersona === "pro") {
-      return {
-        title: isUsLocale ? "Operational Mode" : "Modo operacional",
-        body: isUsLocale ? `Prioritize ${selectedTicker}, position signal, invalidation and risk before noise.` : `Priorize ${selectedTicker}, sinal de posição, invalidação e risco antes do ruído.`,
-        emphasis: leadingTool
-          ? (isUsLocale ? `Leading AI now: ${leadingTool.ticker} with ${localizeUiText(leadingTool.state || "active read", appLocale, leadingTool.ticker)}.` : `IA líder agora: ${leadingTool.ticker} com ${leadingTool.state || "leitura ativa"}.`)
-          : persona.emphasis,
-        bullets: [
-          aiText,
-          volumeText,
-          leadingTool
-            ? `IA líder agora: ${leadingTool.ticker} com ${leadingTool.state || "leitura ativa"}.`
-            : `Sem líder interno ainda; use ${chartBias || "bias público"} como leitura provisória.`,
-        ],
-        cards: decisionCards.map((card) => localizeGuideCard(card, appLocale)),
-      };
-    }
-
-    return {
-      title: isUsLocale ? "Trader Mode" : "Modo trader",
-      body: isUsLocale ? "Balance current read, direction, confirmation, invalidation and risk in one view." : "Equilibre leitura atual, direção, confirmação, invalidação e risco na mesma dobra.",
-      emphasis: `${priceText} ${newsText} ${feedText}`,
-      cards: decisionCards.map((card) => localizeGuideCard(card, appLocale)),
-    };
+  const essentialDecisionCards = useMemo(() => {
+    const scoreValue = effectiveAiScore != null && Number.isFinite(Number(effectiveAiScore))
+      ? Number(effectiveAiScore)
+      : numericRankingScore != null
+        ? numericRankingScore / 10
+        : null;
+    const scoreTone: DecisionTone = scoreValue == null ? "neutral" : scoreValue >= 6 ? "bullish" : scoreValue <= 4.8 ? "bearish" : "neutral";
+    const chartTicker = normalizeSymbol(String(chartForDisplay?.summary?.ticker || chartForDisplay?.ticker || ""));
+    const chartMatchesTicker = !chartTicker || chartTicker === selectedTicker;
+    const decisionChart = chartMatchesTicker ? chartForDisplay : null;
+    const marker = latestChartMarker(decisionChart);
+    const rawMarkerTone = decisionToneFromText(chartActionLabel(marker, appLocale), marker?.type, marker?.label, marker?.action_label);
+    const markerTone = rawMarkerTone === "exit" && scoreTone === "bullish" ? "watch" : rawMarkerTone;
+    const trendTone = decisionToneFromText(trendText, decisionChart?.summary?.trend_bias, derivedPublicInsight?.trend_bias, derivedPublicInsight?.signal);
+    const sameTicker = (row: AiToolRow) => normalizeSymbol(row.ticker || "") === selectedTicker;
+    const toolRows = (keys: Array<keyof WorkspaceData["ai_tools"]>) =>
+      keys.flatMap((key) => [
+        ...(workspace?.ai_tools?.[key] || []),
+        ...(publicAiTools?.tools?.[key] || []),
+      ]).filter(sameTicker);
+    const flowCard = resolveFlowCard(toolRows(["institutional_flow", "smart_money", "accumulation"]), appLocale);
+    const flowTone = flowCard.tone;
+    const directionTone = markerTone !== "neutral"
+      ? markerTone
+      : trendTone !== "neutral"
+        ? trendTone
+        : flowTone !== "neutral"
+          ? flowTone
+          : scoreTone;
+    const structuralConflict = markerTone !== "exit" && (tonesConflict(trendTone, flowTone) || tonesConflict(directionTone, flowTone));
+    const scoreConflict = markerTone !== "exit" && scoreTone !== "neutral" && directionTone !== "neutral" && directionTone !== "exit" && tonesConflict(directionTone, scoreTone);
+    const conflict = structuralConflict || scoreConflict;
+    const hasCoreData = Boolean(chartMatchesTicker && hasRenderedChartData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
+    const tradeTone = conflict ? "watch" : directionTone === "exit" ? "exit" : directionTone;
+    const scoreCardTone: DecisionTone = scoreValue == null ? "neutral" : scoreValue >= 7 ? "bullish" : scoreValue <= 5.5 ? "bearish" : "watch";
+    const riskCard = resolveRiskCard(scoreValue, hasCoreData, conflict, appLocale, currentRanking?.rsi ?? derivedPublicInsight?.rsi);
+    const regimeValue = humanizeMachineLabel(decisionChart?.summary?.trend_bias || trendText || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || "", appLocale);
+    return [
+      {
+        label: isUsLocale ? "Master Score" : "Score Mestre",
+        value: scoreValue != null ? scoreValue.toFixed(1) : "n/a",
+        tone: scoreCardTone,
+      },
+      {
+        label: isUsLocale ? "Likely Direction" : "Direção provável",
+        value: decisionDirectionLabel(directionTone, appLocale),
+        tone: directionTone === "exit" ? "watch" : directionTone,
+      },
+      {
+        label: isUsLocale ? "Suggested Trade" : "Trade sugerido",
+        value: decisionTradeLabel(directionTone, scoreValue, hasCoreData, conflict, appLocale),
+        tone: tradeTone,
+      },
+      {
+        label: isUsLocale ? "Regime" : "Regime",
+        value: regimeValue || (isUsLocale ? "No read" : "Sem leitura"),
+        tone: trendTone === "exit" ? "neutral" : trendTone,
+      },
+      flowCard,
+      {
+        label: isUsLocale ? "Liquidity Target" : "Liquidez alvo",
+        value: resolveLiquidityTarget(decisionChart, displayQuote?.price, directionTone, appLocale),
+        tone: directionTone === "exit" ? "watch" : directionTone,
+      },
+      riskCard,
+    ];
   }, [
     appLocale,
+    chartForDisplay,
+    currentRanking?.rsi,
+    derivedPublicInsight?.rsi,
+    derivedPublicInsight?.signal,
+    derivedPublicInsight?.trend_bias,
+    displayQuote?.price,
+    effectiveAiScore,
+    headerVolume,
+    hasRenderedChartData,
     isUsLocale,
-    workspacePersona,
-    newsRows,
-    discussionPosts,
-    featuredDiscussionPosts,
-    currentAiRows,
-    currentTabAlertRows,
+    numericRankingScore,
+    publicAiTools?.tools,
     selectedTicker,
+    trendText,
+    workspace?.ai_tools,
+  ]);
+  const strategicConclusion = useMemo(() => {
+    const scoreValue = effectiveAiScore != null && Number.isFinite(Number(effectiveAiScore))
+      ? Number(effectiveAiScore)
+      : numericRankingScore != null
+        ? numericRankingScore / 10
+        : null;
+    const rsiNumber = firstValidRsiNumber(currentRanking?.rsi, derivedPublicInsight?.rsi);
+    const averageVolume = firstPositiveFiniteNumber(
+      (displayQuote as any)?.average_volume,
+      (displayQuote as any)?.averageVolume,
+      (displayQuote as any)?.avg_volume,
+      currentWatchItem?.averageVolume,
+    );
+    const resolvedVolume = firstPositiveFiniteNumber(headerVolume, displayQuote?.volume);
+    const relVolume = firstPositiveFiniteNumber(
+      currentRanking?.rel_volume,
+      derivedPublicInsight?.rel_volume,
+      (displayQuote as any)?.rel_volume,
+      (displayQuote as any)?.rvol,
+      currentWatchItem?.relVolume,
+      calculateRelativeVolume(resolvedVolume, averageVolume),
+    );
+    const [scoreCard, directionCard, tradeCard, regimeCard, flowCard, liquidityCard, riskCard] = essentialDecisionCards;
+    return buildStrategicConclusion({
+      locale: appLocale,
+      minuteTick: strategicAnalysisMinute,
+      symbol: selectedTicker,
+      score: scoreValue,
+      direction: directionCard?.value || "",
+      trade: tradeCard?.value || "",
+      regime: regimeCard?.value || "",
+      flow: flowCard?.value || "",
+      liquidity: liquidityCard?.value || "",
+      risk: riskCard?.value || "",
+      rsi: rsiNumber,
+      volume: resolvedVolume,
+      averageVolume,
+      relVolume,
+      hasCoreData: Boolean(hasRenderedChartData && displayQuote?.price != null && resolvedVolume != null && resolvedVolume > 0 && scoreCard?.value),
+    });
+  }, [
+    appLocale,
+    currentRanking?.rel_volume,
+    currentRanking?.rsi,
+    currentWatchItem?.averageVolume,
+    currentWatchItem?.relVolume,
+    derivedPublicInsight?.rel_volume,
+    derivedPublicInsight?.rsi,
+    displayQuote,
     displayQuote?.price,
     displayQuote?.volume,
     effectiveAiScore,
-    derivedPublicInsight?.trend_bias,
-    derivedPublicInsight?.signal,
-    chartForDisplay?.summary?.trend_bias,
-    chartForDisplay,
-    priceMovementPercent,
-    volumeScore,
-    volumeLabel,
+    essentialDecisionCards,
+    hasRenderedChartData,
+    headerVolume,
+    numericRankingScore,
+    selectedTicker,
+    strategicAnalysisMinute,
   ]);
-
+  const strategicConclusionSections = useMemo(
+    () => strategicSectionsForRender(strategicConclusion, appLocale, selectedTicker),
+    [appLocale, selectedTicker, strategicConclusion],
+  );
   useEffect(() => {
     if (currentTab !== "education" || !educationAnchor) return;
 
@@ -5682,6 +6851,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   function openInstitutionalSection(sectionId: string) {
     setSelectedInstitutionalSectionId(sectionId);
     setEducationAnchor(sectionId);
+    setAdvancedMode(true);
     if (!focusedTab) {
       startTransition(() => {
         setActiveTab("education");
@@ -5949,8 +7119,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                         onChange={(event) => setGifQuery(event.target.value)}
                         placeholder={isUsLocale ? `Search GIF: ${selectedTicker}` : `Buscar GIF: ${selectedTicker}`}
                       />
-                      <button className="snbr-button subtle" onClick={openYahooGifSearch} type="button">
-                        {isUsLocale ? "Search Yahoo" : "Buscar no Yahoo"}
+                      <button className="snbr-button subtle" onClick={openGifSearch} type="button">
+                        {isUsLocale ? "Open GIFs" : "Abrir GIFs"}
                       </button>
                     </div>
                     <div className="snbr-gif-quick-grid">
@@ -6137,8 +7307,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       onChange={(event) => setGifQuery(event.target.value)}
                       placeholder={isUsLocale ? `Search GIF: ${selectedTicker}` : `Buscar GIF: ${selectedTicker}`}
                     />
-                    <button className="snbr-button subtle" onClick={openYahooGifSearch} type="button">
-                      {isUsLocale ? "Search Yahoo" : "Buscar no Yahoo"}
+                    <button className="snbr-button subtle" onClick={openGifSearch} type="button">
+                      {isUsLocale ? "Open GIFs" : "Abrir GIFs"}
                     </button>
                   </div>
                   <div className="snbr-gif-quick-grid">
@@ -6466,8 +7636,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 const tone = aiSignalTone(item.signal);
                 const resolvedChangePct = item.change_pct ?? watchItem?.changePct ?? null;
                 const resolvedPrice = firstFiniteNumber(item.price, watchItem?.price, quote?.price);
-                const resolvedVolume = firstFiniteNumber(item.volume, watchItem?.volume, quote?.volume);
-                const resolvedRsi = item.rsi ?? derivePublicRsi(resolvedChangePct, item.state || item.signal || watchItem?.trend || null);
+                const resolvedVolume = firstPositiveFiniteNumber(item.volume, watchItem?.volume, quote?.volume);
+                const resolvedRsi = firstValidRsiNumber(item.rsi, derivePublicRsi(resolvedChangePct, item.state || item.signal || watchItem?.trend || null));
                 const resolvedRvol = item.rel_volume ?? deriveRelativeVolume(resolvedVolume);
                 const resolvedAdx = item.adx ?? deriveAdx(resolvedChangePct, resolvedRsi, item.state || item.signal || watchItem?.trend || null);
                 const resolvedAtrPct = item.atr_pct ?? deriveAtrPct(resolvedChangePct, resolvedRsi, resolvedVolume);
@@ -6483,7 +7653,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                           <h3>{isUsLocale ? "Asset Panel" : "Painel do ativo"}</h3>
                           <p>{isUsLocale ? "Daily alert from the current lens, with detection time and execution criteria." : "Alerta diário da lente atual, com horário detectado e critérios de execução."}</p>
                         </div>
-                        <span className="snbr-chip">{isUsLocale ? "Found" : "Encontrado"}: {formatAiUpdatedAt(resolveAiAlertTimestamp(item), appLocale)}</span>
+                        <span className="snbr-chip">{isUsLocale ? "Found" : "Encontrado"}: {formatAiUpdatedAt(resolveAiFindingTimestamp(item), appLocale)}</span>
                       </div>
                       <button className="snbr-asset-box snbr-asset-box-large" onClick={() => selectTicker(item.ticker)} type="button">
                         <div className="snbr-asset-box-head">
@@ -6505,11 +7675,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                           </div>
                           <div>
                             <small>Volume</small>
-                            <strong>{formatLiquidityVolume(resolvedVolume, resolvedRvol)}</strong>
+                            <strong>{formatLiquidityVolume(resolvedVolume, resolvedRvol, appLocale)}</strong>
                           </div>
                           <div>
                             <small>RVOL</small>
-                            <strong>{resolvedRvol != null ? resolvedRvol.toFixed(2) : (isUsLocale ? "no read" : "sem leitura")}</strong>
+                            <strong>{resolvedRvol != null && resolvedRvol > 0 ? resolvedRvol.toFixed(2) : (isUsLocale ? "no read" : "sem leitura")}</strong>
                           </div>
                           <div>
                             <small>{isUsLocale ? "Confidence" : "Confiança"}</small>
@@ -6542,14 +7712,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                         </div>
                         <div className="snbr-tool-reading-card">
                           <span>{isUsLocale ? "Invalidation" : "Invalidação"}</span>
-                          <strong>{localizeUiText(item.invalidation || (isUsLocale ? "No invalidation defined." : "Sem invalidação definida."), appLocale, item.ticker)}</strong>
+                          <strong>{localizeInvalidationText(item.invalidation, appLocale, item.ticker)}</strong>
                         </div>
                           <div className="snbr-tool-reading-card">
                             <span>{isUsLocale ? "Context" : "Contexto"}</span>
                             <strong className={cx("snbr-tone-tag", tone)}>
                               {tone === "bullish" ? (isUsLocale ? "🐂 Buy" : "🐂 Compra") : tone === "bearish" ? (isUsLocale ? "🐻 Sell" : "🐻 Venda") : (isUsLocale ? "Watching" : "Monitorando")}
                             </strong>
-                          <p>RSI {resolvedRsi != null ? resolvedRsi.toFixed(1) : (isUsLocale ? "no read" : "sem leitura")} • RVOL {resolvedRvol != null ? resolvedRvol.toFixed(2) : (isUsLocale ? "no read" : "sem leitura")} • ADX {resolvedAdx != null ? resolvedAdx.toFixed(1) : (isUsLocale ? "no read" : "sem leitura")} • ATR {resolvedAtrPct != null ? resolvedAtrPct.toFixed(1) : (isUsLocale ? "no read" : "sem leitura")}%</p>
+                          <p>RSI {resolvedRsi != null ? resolvedRsi.toFixed(1) : (isUsLocale ? "no read" : "sem leitura")} • RVOL {resolvedRvol != null && resolvedRvol > 0 ? resolvedRvol.toFixed(2) : (isUsLocale ? "no read" : "sem leitura")} • ADX {resolvedAdx != null ? resolvedAdx.toFixed(1) : (isUsLocale ? "no read" : "sem leitura")} • ATR {resolvedAtrPct != null ? resolvedAtrPct.toFixed(1) : (isUsLocale ? "no read" : "sem leitura")}%</p>
                           </div>
                           {metricEntries.length ? (
                             <div className="snbr-tool-reading-card snbr-tool-metrics-card">
@@ -6572,8 +7742,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             </div>
           ) : (
             <div className="snbr-empty-thread">
-              <strong>{isUsLocale ? "No specific reads in the current snapshot." : "Sem leituras específicas no snapshot atual."}</strong>
-              <p>{isUsLocale ? "This AI backend is already connected, but no asset entered the current worker cut." : "O backend desta IA já está ligado, mas nenhum ativo entrou no recorte atual do worker."}</p>
+              <strong>{isUsLocale ? "No operational read with confirmed price and volume." : "Sem leitura operacional com preço e volume confirmados."}</strong>
+              <p>{isUsLocale ? "Score-only or zero-volume rows are kept as context, but they are not counted as findings." : "Linhas score_only ou com volume zerado ficam apenas como contexto; não contam como achado."}</p>
             </div>
           )}
         </section>
@@ -6608,8 +7778,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   const quote = resolveQuoteForSymbol(item.symbol, publicQuotes, tickerTapeQuotes);
                   const resolvedChangePct = item.changePct ?? watchItem?.changePct ?? quote?.change_pct ?? null;
                   const resolvedPrice = firstFiniteNumber(item.price, watchItem?.price, quote?.price);
-                  const resolvedVolume = firstFiniteNumber(item.volume, watchItem?.volume, quote?.volume);
-                  const resolvedRsi = item.rsi ?? derivePublicRsi(resolvedChangePct, item.trend || watchItem?.trend || null);
+                  const resolvedVolume = firstPositiveFiniteNumber(item.volume, watchItem?.volume, quote?.volume);
+                  const resolvedRsi = firstValidRsiNumber(item.rsi, derivePublicRsi(resolvedChangePct, item.trend || watchItem?.trend || null));
                   const resolvedRvol = deriveRelativeVolume(resolvedVolume);
                   const resolvedAdx = deriveAdx(resolvedChangePct, resolvedRsi, item.trend || watchItem?.trend || null);
                   const resolvedAtrPct = deriveAtrPct(resolvedChangePct, resolvedRsi, resolvedVolume);
@@ -6621,7 +7791,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       <h3>{isUsLocale ? "Asset Panel" : "Painel do ativo"}</h3>
                       <p>{isUsLocale ? "Alert from the current lens, with detection time and setup parameters." : "Alerta da lente atual, com horário detectado e parâmetros do setup."}</p>
                     </div>
-                    <span className="snbr-chip">{isUsLocale ? "Found" : "Encontrado"}: {formatAiUpdatedAt(normalizeAlertTimestamp(item.timestamp) || normalizeAlertTimestamp(chartLatestEpoch), appLocale)}</span>
+                    <span className="snbr-chip">{isUsLocale ? "Found" : "Encontrado"}: {formatAiUpdatedAt(normalizeAlertTimestamp(item.timestamp), appLocale)}</span>
                   </div>
                   <button className="snbr-asset-box snbr-asset-box-large" onClick={() => selectTicker(item.symbol)} type="button">
                     <div className="snbr-asset-box-head">
@@ -6643,10 +7813,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       </div>
                       <div>
                         <small>Volume</small>
-                        <strong>{formatLiquidityVolume(resolvedVolume, resolvedRvol)}</strong>
+                        <strong>{formatLiquidityVolume(resolvedVolume, resolvedRvol, appLocale)}</strong>
                       </div>
                       <div>
-                        <small>{isUsLocale ? "AI Score" : "Score IA"}</small>
+                        <small>{isUsLocale ? "Master Score" : "Score Mestre"}</small>
                         <strong>{item.score != null ? item.score.toFixed(1) : "n/a"}</strong>
                       </div>
                       <div>
@@ -6679,7 +7849,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       </div>
                     <div className="snbr-tool-reading-card">
                       <span>{isUsLocale ? "Liquidity / volume" : "Liquidez / volume"}</span>
-                        <strong>{formatLiquidityVolume(resolvedVolume, resolvedRvol)}</strong>
+                        <strong>{formatLiquidityVolume(resolvedVolume, resolvedRvol, appLocale)}</strong>
                     </div>
                       <div className="snbr-tool-reading-card">
                         <span>{isUsLocale ? "Context" : "Contexto"}</span>
@@ -6709,6 +7879,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         : portugueseNewsInsight(chartNews.traderTakeaway || chartNews.whyItMatters || chartNews.cardSummary, selectedTicker))
       : (isUsLocale ? `No ticker-specific news found right now for ${selectedTicker}.` : `Sem notícia específica encontrada agora para ${selectedTicker}.`);
     const showChartNewsBody = !sameUiText(chartNewsTitle, chartNewsText);
+    const chartToolToggles: Array<{ key: keyof ChartSettings; checked: boolean; label: string }> = [
+      { key: "show_markers", checked: showMarkers, label: isUsLocale ? "Buy/Sell" : "Compra/Venda" },
+      { key: "show_zones", checked: showZones, label: isUsLocale ? "Liquidity" : "Liquidez" },
+      { key: "show_price_line", checked: showPriceLine, label: isUsLocale ? "Price line" : "Linha preço" },
+      { key: "show_vwap", checked: showVwap, label: "VWAP" },
+      { key: "show_averages", checked: showAverages, label: isUsLocale ? "Averages" : "Médias" },
+      { key: "show_supertrend", checked: showSupertrend, label: "Supertrend" },
+      { key: "show_macd", checked: showMacd, label: "MACD" },
+      { key: "show_rsi", checked: showRsi, label: "RSI" },
+      { key: "show_volume", checked: showVolume, label: "Volume" },
+    ];
 
     return (
       <div id="panel-grafico" className="snbr-center-stack">
@@ -6719,29 +7900,37 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               <p>{isUsLocale ? `VWAP, buy/sell, liquidity and structural read for ${selectedTicker} in one screen.` : `VWAP, compra/venda, liquidez e leitura estrutural de ${selectedTicker} na mesma tela.`}</p>
             </div>
             <div className="snbr-chart-actions">
-              <label className="snbr-toggle">
-                <input
-                  checked={showMarkers}
-                  onChange={(event) => updateChartSetting("show_markers", event.target.checked)}
-                  type="checkbox"
-                />
-                <span>{isUsLocale ? "Buy/Sell Tool" : "Compra/Venda Ferramenta"}</span>
-              </label>
-              <label className="snbr-toggle">
-                <input
-                  checked={showZones}
-                  onChange={(event) => updateChartSetting("show_zones", event.target.checked)}
-                  type="checkbox"
-                />
-                <span>{isUsLocale ? "Liquidity Zones" : "Zonas de Liquidez"}</span>
-              </label>
+              {chartToolToggles.map((item) => (
+                <label key={item.key} className="snbr-toggle">
+                  <input
+                    checked={item.checked}
+                    onChange={(event) => updateChartSetting(item.key, event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>{item.label}</span>
+                </label>
+              ))}
               <button className="snbr-button secondary snbr-popout-button" onClick={() => openPopout("grafico")} type="button">
                 {isUsLocale ? "Detach" : "Liberar Tela"}
               </button>
             </div>
           </div>
 
-          <TickerChart chart={chartForDisplay} interval={chartInterval} showMarkers={showMarkers} showZones={showZones} locale={appLocale} />
+          <TickerChart
+            chart={chartForDisplay}
+            ticker={selectedTicker}
+            interval={chartInterval}
+            showMarkers={showMarkers}
+            showZones={showZones}
+            showPriceLine={showPriceLine}
+            showVwap={showVwap}
+            showAverages={showAverages}
+            showMacd={showMacd}
+            showRsi={showRsi}
+            showSupertrend={showSupertrend}
+            showVolume={showVolume}
+            locale={appLocale}
+          />
 
           <div className="snbr-timeframes">
             {TIMEFRAME_OPTIONS.map((timeframe) => (
@@ -6925,8 +8114,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             <span>{isUsLocale ? "Pricing rule" : "Regra comercial"}</span>
             <strong>
               {isUsLocale
-                ? "USA/international: $49/month or $500 upfront for 12 months."
-                : "Brasil: R$49/mês ou R$500 à vista por 12 meses."}
+                ? "Price, checkout and refund are handled only in Google Play."
+                : "Preço, checkout e reembolso ficam somente no Google Play."}
             </strong>
           </div>
           <div className="snbr-tool-reading-card">
@@ -7170,14 +8359,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
   function renderUpgradeOptions() {
     const isPremium = String(access?.plan || "").toLowerCase() === "premium";
-    const monthlyLabel = isUsLocale ? "$49/month" : "R$49,00 por mes";
-    const annualLabel = isUsLocale ? "$500 upfront" : "R$500,00 por ano";
+    const monthlyLabel = isUsLocale ? "Managed in Google Play" : "Gerenciado no Google Play";
+    const annualLabel = isUsLocale ? "Managed in Google Play" : "Gerenciado no Google Play";
     const subscriptionError = isUsLocale
-      ? "International USA subscription must be completed with an eligible non-Brazil international card."
-      : "Assinatura deve ser finalizada pelo app Google Play.";
-    const annualError = isUsLocale
-      ? "Annual USA subscription must be completed with an eligible non-Brazil international card."
-      : "Assinatura anual deve ser finalizada pelo app Google Play.";
+      ? "Subscription, price and refund are handled in Google Play."
+      : "Assinatura, preço e reembolso ficam no Google Play.";
+    const annualError = subscriptionError;
 
     return (
       <div className="snbr-upgrade-stack">
@@ -7186,7 +8373,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             <strong>{isUsLocale ? "Premium Monthly" : "Premium Mensal"}</strong>
             <span>{monthlyLabel}</span>
           </div>
-          <p>{isUsLocale ? "Unlocks web, app, Telegram, full AI tools, rankings and alerts for USA/international accounts." : "Libera app Google Play, webpage, Telegram, IAs completas, ranking e alertas."}</p>
+          <p>{isUsLocale ? "Unlocks web, app, Telegram, full AI tools, rankings and alerts. Price appears only in Google Play." : "Libera app Google Play, webpage, Telegram, IAs completas, ranking e alertas. Preço aparece somente no Google Play."}</p>
           <button className="snbr-button primary" onClick={() => setLoginError(subscriptionError)} type="button">
             {isPremium ? (isUsLocale ? "Active plan" : "Plano ativo") : (isUsLocale ? "Subscribe USA" : "Assinar pelo app")}
           </button>
@@ -7196,16 +8383,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             <strong>{isUsLocale ? "Premium Annual" : "Premium Anual"}</strong>
             <span>{annualLabel}</span>
           </div>
-          <p>{isUsLocale ? "One upfront USA payment. Keeps web, app and Telegram unlocked." : "Desconto a vista em relacao ao mensal. Mantem app, website e Telegram liberados."}</p>
+          <p>{isUsLocale ? "Keeps web, app and Telegram unlocked. Checkout stays inside Google Play." : "Mantém app, website e Telegram liberados. Checkout fica no Google Play."}</p>
           <button className="snbr-button primary" onClick={() => setLoginError(annualError)} type="button">
             {isPremium ? (isUsLocale ? "Active plan" : "Plano ativo") : (isUsLocale ? "Annual USA" : "Assinar anual")}
           </button>
         </div>
-        {isUsLocale ? (
-          <small className="snbr-legal-note">
-            International account: USA subscription. Use an international card issued outside Brazil; pricing is USD.
-          </small>
-        ) : null}
         <small className="snbr-legal-note">
           {isUsLocale
             ? "The first app access starts a 90-day trial. After it ends, the account moves to Free if Premium is not active."
@@ -7378,12 +8560,22 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   function renderToolsCard() {
     return (
       <div className="snbr-side-card">
-        <div className="snbr-section-head compact">
+        <div className="snbr-section-head compact snbr-tools-head">
           <div>
             <h3>{isUsLocale ? "Tools" : "Ferramentas"}</h3>
             <p>{isUsLocale ? "Account preferences, blocked and muted users." : "Preferencias da conta, bloqueados e silenciados."}</p>
           </div>
+          <button
+            className="snbr-section-head-action"
+            onClick={() => setToolsOpen((value) => !value)}
+            type="button"
+            aria-expanded={toolsOpen}
+          >
+            {toolsOpen ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}
+          </button>
         </div>
+        {toolsOpen ? (
+          <>
         <div className="snbr-settings-tabs" role="tablist" aria-label={isUsLocale ? "Settings tools" : "Ferramentas de configuracao"}>
           <button
             className={cx("snbr-settings-tab", settingsTab === "preferencias" && "active")}
@@ -7419,11 +8611,28 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               <div className="snbr-settings-section">
                 <strong>Display</strong>
                 <div className="snbr-settings-toggle-row">
-                  <span>Dark mode</span>
+                  <span>{isUsLocale ? "Dark mode" : "Modo escuro"}</span>
                   <button className={cx("snbr-switch", darkMode && "active")} onClick={() => setDarkMode((value) => !value)} type="button" aria-pressed={darkMode}>
                     <span />
                   </button>
                 </div>
+                <div className="snbr-settings-toggle-row">
+                  <span>{isUsLocale ? "AI Sound Alert" : "IA Alerta de Som"}</span>
+                  <button className={cx("snbr-switch", aiFindingSound && "active")} onClick={() => setAiFindingSound((value) => !value)} type="button" aria-pressed={aiFindingSound}>
+                    <span />
+                  </button>
+                </div>
+                <div className="snbr-settings-toggle-row">
+                  <span>{isUsLocale ? "Cancel subscription" : "Encerrar assinatura"}</span>
+                  <button className="snbr-switch" type="button" aria-pressed={false} disabled title={isUsLocale ? "Managed in Google Play." : "Gerenciado no Google Play."}>
+                    <span />
+                  </button>
+                </div>
+                <small>
+                  {isUsLocale
+                    ? "Subscription cancellation and refund are handled in Google Play. Refund may apply within 7 calendar days according to store/app policy."
+                    : "Cancelamento e reembolso ficam no Google Play. Reembolso pode valer em até 7 dias corridos conforme política da loja/app."}
+                </small>
               </div>
             </div>
           ) : null}
@@ -7445,6 +8654,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 "Silenciado",
               )
             : null}
+          </>
+        ) : null}
         </div>
     );
   }
@@ -7510,7 +8721,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           onRemoveTicker={() => handleRemoveFromActiveList()}
           watchCategory={watchCategory}
           onSetWatchCategory={setWatchCategory}
-          activeWatchCount={activeWatchSymbols.length}
+          activeWatchCount={activeWatchSymbols.filter((symbol) => !isRemovedFutureSymbol(symbol)).length}
           accessCard={renderAccessCard()}
           authCard={null}
           notificationCard={renderNotificationCard()}
@@ -7528,6 +8739,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           <div className="snbr-tab-list" ref={tabListRef}>
             {visibleTabs.map((tab) => {
               const meta = getTabMeta(tab, appLocale);
+              const isAiTab = Boolean(AI_TOOL_TAB_MAP[tab.id as keyof typeof AI_TOOL_TAB_MAP]);
+              const aiCount = aiToolFindingCounts[tab.id] ?? 0;
 
               return (
                 <div key={tab.id} className="snbr-symbol-tab-shell">
@@ -7542,6 +8755,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                     title={meta.label}
                   >
                     <span>{topTabText(tab.id, meta.short, appLocale)}</span>
+                    {isAiTab ? (
+                      <span className="snbr-tab-count-badge" aria-label={isUsLocale ? `${aiCount} findings` : `${aiCount} achados`}>
+                        {aiCount}
+                      </span>
+                    ) : null}
                   </button>
                 </div>
               );
@@ -7549,6 +8767,28 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           </div>
           <button className="snbr-tab-scroll" onClick={() => scrollTabs("right")} type="button" aria-label={isUsLocale ? "Move tabs right" : "Mover tabs para a direita"}>
             ▶
+          </button>
+          <button
+            className={cx("snbr-mode-toggle", advancedMode && "active", proModeLocked && "locked")}
+            onClick={() => {
+              if (proModeLocked) {
+                setAdvancedMode(false);
+                return;
+              }
+              setAdvancedMode((value) => !value);
+            }}
+            type="button"
+            aria-pressed={advancedMode}
+            aria-disabled={proModeLocked}
+            title={
+              proModeLocked
+                ? (isUsLocale ? "Pro Mode locked after trial unless Premium is active" : "Modo Pro bloqueado após o trial sem Premium ativo")
+                : advancedMode
+                  ? (isUsLocale ? "Show simple mode" : "Mostrar modo simples")
+                  : (isUsLocale ? "Open Pro details" : "Abrir detalhes Pro")
+            }
+          >
+            {proModeLocked ? (isUsLocale ? "🔒 Pro Mode" : "🔒 Modo Pro") : (isUsLocale ? "Pro Mode" : "Modo Pro")}
           </button>
           <div className="snbr-locale-switch" aria-label={isUsLocale ? "Language selector" : "Seletor de idioma"}>
             <button
@@ -7584,12 +8824,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             {darkMode ? "☀" : "☾"}
           </button>
         </nav>
-
-        {isUsLocale ? (
-          <div className="snbr-locale-notice" role="status">
-            International account: USA subscription. Premium is $49/month or $500 upfront for international cards outside Brazil.
-          </div>
-        ) : null}
 
         <section className="snbr-ticker-tape">
           <button className="snbr-tape-toggle" onClick={() => setTickerTapePaused((value) => !value)} type="button">
@@ -7657,48 +8891,74 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         <section className="snbr-main-column">
           {error ? <div className="snbr-empty">Erro: {error}</div> : null}
           {loading && token ? <div className="snbr-empty">Carregando contexto do usuario...</div> : null}
-          {guestCta && showSymbolHeader ? (
-            <div className="snbr-guest-note">
-              <strong>{isUsLocale ? "Guest mode active." : "Modo visitante ativo."}</strong>
-              <span>{isUsLocale ? "Login unlocks full interaction, chat, posting and protected product data." : "Login libera interacao completa, chat, publicacao e dados protegidos do produto."}</span>
-            </div>
-          ) : null}
           {showSymbolHeader ? (
-            <section className="snbr-workspace-guide" aria-label={isUsLocale ? "Workspace reading mode" : "Modo de leitura do workspace"}>
-              <div className="snbr-workspace-guide-head">
-                <div>
-                  <strong>{focusGuide.title}</strong>
-                  <p>{focusGuide.body}</p>
-                </div>
-                <div className="snbr-persona-switch" role="tablist" aria-label={isUsLocale ? "Workspace use profile" : "Perfil de uso do workspace"}>
-                  {VISIBLE_WORKSPACE_PERSONAS.map((personaKey) => (
-                    <button
-                      key={personaKey}
-                      className={cx("snbr-persona-chip", workspacePersona === personaKey && "active")}
-                      onClick={() => setWorkspacePersona(personaKey)}
-                      type="button"
-                      role="tab"
-                      aria-selected={workspacePersona === personaKey}
-                      title={(isUsLocale ? WORKSPACE_PERSONAS_EN : WORKSPACE_PERSONAS)[personaKey].subtitle}
-                    >
-                      {(isUsLocale ? WORKSPACE_PERSONAS_EN : WORKSPACE_PERSONAS)[personaKey].label}
-                    </button>
-                  ))}
-                </div>
+            <section className="snbr-decision-panel" aria-label={isUsLocale ? "Strategic Analysis Panel" : "Painel de Análise Estratégica"}>
+              <div className="snbr-decision-head">
+                <strong>{isUsLocale ? "Strategic Analysis Panel" : "Painel de Análise Estratégica"}</strong>
+                <span>{advancedMode ? (isUsLocale ? "Pro Mode" : "Modo Pro") : (isUsLocale ? "Simple" : "Simples")}</span>
               </div>
-              <div className="snbr-workspace-guide-grid">
-                <article className="snbr-workspace-guide-card">
-                  <span className="snbr-guide-kicker">{isUsLocale ? "Priority" : "Prioridade"}</span>
-                  <strong>{(isUsLocale ? WORKSPACE_PERSONAS_EN : WORKSPACE_PERSONAS)[workspacePersona].subtitle}</strong>
-                  <p>{focusGuide.emphasis}</p>
-                </article>
-                {focusGuide.cards.map((card) => (
-                  <article key={`${card.label}-${card.value}`} className="snbr-workspace-guide-card subtle">
-                    <span className="snbr-guide-kicker">{card.label}</span>
-                    <p>{card.value}</p>
+              <div className="snbr-decision-grid">
+                {essentialDecisionCards.map((card) => (
+                  <article key={`${card.label}-${card.value}`} className={cx("snbr-decision-card", card.tone)}>
+                    <span>{card.label}</span>
+                    <strong>{card.value}</strong>
                   </article>
                 ))}
               </div>
+              {advancedMode ? (
+              <article className={cx("snbr-decision-conclusion", strategicConclusion.tone, !strategicConclusionOpen && "collapsed")}>
+                <div className="snbr-conclusion-topline">
+                  <span>{isUsLocale ? "Conclusion" : "Conclusão"}</span>
+                  <small>{isUsLocale ? `AI Analysis Time ${strategicConclusion.stamp}` : `IA Análise Hora ${strategicConclusion.stamp}`}</small>
+                  <button
+                    aria-expanded={strategicConclusionOpen}
+                    onClick={() => setStrategicConclusionOpen((value) => !value)}
+                    type="button"
+                  >
+                    {strategicConclusionOpen ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}
+                  </button>
+                </div>
+                {strategicConclusionOpen ? (
+                  <>
+                    <div className="snbr-conclusion-copy">
+                      {strategicConclusionSections.length ? (
+                        <div className="snbr-conclusion-sections">
+                          {strategicConclusionSections.map((section) => (
+                            <section key={section.title}>
+                              <strong>{section.title}</strong>
+                              {section.body ? <p>{section.body}</p> : null}
+                              {section.items?.length ? (
+                                <ul>
+                                  {section.items.map((item) => (
+                                    <li key={item}>{item}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                            </section>
+                          ))}
+                        </div>
+                      ) : (
+                        <strong>{strategicConclusion.headline}</strong>
+                      )}
+                      <p className="snbr-conclusion-focus">
+                        <strong>{isUsLocale ? "Focus now:" : "Foco agora:"}</strong>{" "}
+                        {strategicConclusion.focus.replace(/^Focus now:\s*/i, "").replace(/^Foco agora:\s*/i, "")}
+                      </p>
+                    </div>
+                    <div className="snbr-conclusion-basis">
+                      <div className="snbr-conclusion-basis-head">
+                        <strong>{isUsLocale ? "Analysis basis" : "Base da análise"}</strong>
+                      </div>
+                      <ul>
+                        {strategicConclusion.basis.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </>
+                ) : null}
+              </article>
+              ) : null}
             </section>
           ) : null}
           {renderCenterPanel()}

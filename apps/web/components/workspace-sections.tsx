@@ -68,9 +68,11 @@ export type WorkspaceSearchResult = {
 export type WorkspaceNewsRow = {
   id: string;
   symbol: string;
+  headline: string;
   title: string;
   source: string;
   age: string;
+  publishedTime: string;
   sector: string;
   industry: string;
   labels: string[];
@@ -193,7 +195,8 @@ export function WorkspaceNewsPanel({
         </p>
         <div className="snbr-headline-list">
           {newsRows.map((item) => {
-            const detailLines = uniqueNewsLines(item.title, [
+            const detailLines = uniqueNewsLines(item.headline, [
+              item.title,
               item.cardSummary,
               item.traderTakeaway || "",
               item.whyItMatters || "",
@@ -209,10 +212,13 @@ export function WorkspaceNewsPanel({
             <article key={item.id} className={cx("snbr-headline-row", "snbr-news-row", !item.useful && "noise")}>
               <div className="snbr-news-copy">
                 <div className="snbr-news-headline">
-                  <strong>{item.title}</strong>
-                  <span className={cx("snbr-news-impact", impactTone)}>
-                    {item.impact} • {item.quality}
-                  </span>
+                  <strong>{item.headline}</strong>
+                  <div className="snbr-news-impact-stack">
+                    <span className={cx("snbr-news-impact", impactTone)}>
+                      {item.impact} • {item.quality}
+                    </span>
+                    <small>{item.publishedTime}</small>
+                  </div>
                 </div>
                 {detailLines.map((line) => (
                   <div key={`${item.id}-${line}`} className="snbr-news-why">{line}</div>
@@ -253,7 +259,7 @@ export function WorkspaceNewsPanel({
                   href={item.url}
                   rel="noreferrer"
                   target="_blank"
-                  aria-label={isEnglish ? `Open external news: ${item.title}` : `Abrir notícia externa: ${item.title}`}
+                  aria-label={isEnglish ? `Open external news: ${item.headline}` : `Abrir notícia externa: ${item.headline}`}
                 >
                   {isEnglish ? "Open" : "Abrir"}
                 </a>
@@ -317,16 +323,8 @@ export function WorkspaceEducationPanel({
         </div>
       </div>
       <div className="snbr-help-stack">
-        <div className="snbr-help-manual">
-          <img
-            className="snbr-help-manual-image"
-            src="/manual-rapido-stocknewsbr.svg"
-            alt={isEnglish ? "Quick StockNewsBR manual" : "Manual rapido StockNewsBR"}
-          />
-        </div>
-
         <article className="snbr-guide-card">
-          <h4>{isEnglish ? "📋 Quick StockNewsBR Manual" : "📋 Manual Rápido StockNewsBR"}</h4>
+          <h4>{isEnglish ? "🚀 Main Platform Modules" : "🚀 Principais Módulos da Plataforma"}</h4>
           <ul className="snbr-bullet-list">
             {helpManualItems.map((item) => (
               <li key={item}>{item}</li>

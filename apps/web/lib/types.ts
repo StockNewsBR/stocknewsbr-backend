@@ -83,6 +83,7 @@ export type PublicAiToolsPayload = {
   max_rows_per_tool: number;
   reset_hour: number;
   timezone: string;
+  source?: string;
   tools: Partial<WorkspaceAiTools>;
 };
 
@@ -104,6 +105,13 @@ export type WorkspaceLayout = {
   chart_settings?: {
     show_markers?: boolean;
     show_zones?: boolean;
+    show_price_line?: boolean;
+    show_vwap?: boolean;
+    show_averages?: boolean;
+    show_macd?: boolean;
+    show_rsi?: boolean;
+    show_supertrend?: boolean;
+    show_volume?: boolean;
   };
   updated_at?: number;
 };
@@ -220,6 +228,7 @@ export type ChartBar = {
   ema21?: number;
   supertrend?: number | null;
   supertrend_side?: "buy" | "sell" | "neutral" | string | null;
+  source?: string;
 };
 
 export type ChartMarker = {
@@ -265,7 +274,13 @@ export type ChartPayload = {
     markers?: number;
     bullish_markers?: number;
     bearish_markers?: number;
+    source?: string;
+    fallback?: boolean;
+    synthetic?: boolean;
+    interval?: string;
   };
+  fallback?: boolean;
+  synthetic?: boolean;
 };
 
 export type FeedPayload = {
@@ -292,6 +307,7 @@ export type NewsItem = {
   source_domain?: string | null;
   url?: string | null;
   published_at?: string | null;
+  detected_at?: string | null;
   sector?: string | null;
   industry?: string | null;
   labels?: string[];
@@ -410,6 +426,8 @@ export type QuotePayload = {
   change?: number;
   change_pct?: number;
   volume?: number;
+  average_volume?: number;
+  avg_volume?: number;
   high?: number;
   low?: number;
   source?: string;
@@ -425,6 +443,26 @@ export type PublicInsightPayload = {
   trend_bias?: string | null;
   signal?: string | null;
   summary?: Record<string, unknown>;
+};
+
+export type PublicMarketBundlePayload = {
+  symbol: string;
+  quote?: QuotePayload | null;
+  insight?: PublicInsightPayload | null;
+  chart?: ChartPayload | null;
+  news?: NewsPayload | null;
+  ai_tools?: PublicAiToolsPayload | null;
+  source?: string;
+};
+
+export type WorkspaceTickerBundlePayload = {
+  symbol: string;
+  chart?: ChartPayload | null;
+  feed?: FeedPayload | null;
+  news?: NewsPayload | null;
+  room?: ChatHistoryPayload | null;
+  quote?: QuotePayload | null;
+  source?: string;
 };
 
 export type UploadResponse = {

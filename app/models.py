@@ -278,3 +278,82 @@ class SubscriptionAuditLog(Base):
         "User",
         back_populates="subscription_events",
     )
+
+
+class SocialPost(Base):
+    __tablename__ = "social_posts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    ticker = Column(String, nullable=True, index=True)
+    text = Column(Text, nullable=False)
+    image_url = Column(String, nullable=True)
+    sentiment = Column(String, nullable=True, index=True)
+    display_name = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    avatar_url = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class SocialComment(Base):
+    __tablename__ = "social_comments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("social_posts.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    text = Column(Text, nullable=False)
+    image_url = Column(String, nullable=True)
+    display_name = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    avatar_url = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class SocialLike(Base):
+    __tablename__ = "social_likes"
+    __table_args__ = (
+        UniqueConstraint("post_id", "user_id", name="uq_social_like_post_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("social_posts.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class SocialRepost(Base):
+    __tablename__ = "social_reposts"
+    __table_args__ = (
+        UniqueConstraint("post_id", "user_id", name="uq_social_repost_post_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("social_posts.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    quote_text = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class SocialFollow(Base):
+    __tablename__ = "social_follows"
+    __table_args__ = (
+        UniqueConstraint("user_id", "target_user_id", name="uq_social_follow_user_target"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    target_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class SocialSentimentVote(Base):
+    __tablename__ = "social_sentiment_votes"
+    __table_args__ = (
+        UniqueConstraint("ticker", "user_id", name="uq_social_sentiment_vote_ticker_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticker = Column(String, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    sentiment = Column(String, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)

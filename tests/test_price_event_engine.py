@@ -40,6 +40,19 @@ class PriceEventEngineTests(unittest.TestCase):
 
         self.assertEqual(events, [])
 
+    def test_only_scans_ranked_symbols_when_ranked_rows_are_provided(self):
+        closes = [10.0] * 20 + [10.05, 10.08, 10.12, 10.18, 10.45, 10.70]
+        pool = {
+            "PETR4.SA": _make_frame("2026-04-13 13:00:00+00:00", closes),
+            "VALE3.SA": _make_frame("2026-04-13 13:00:00+00:00", closes),
+        }
+        ranked = [{"ticker": "PETR4", "score": 84, "trend": "Alta"}]
+
+        events = detect_price_events(pool, ranked)
+
+        self.assertTrue(events)
+        self.assertEqual(sorted({event["ticker"] for event in events}), ["PETR4"])
+
 
 if __name__ == "__main__":
     unittest.main()

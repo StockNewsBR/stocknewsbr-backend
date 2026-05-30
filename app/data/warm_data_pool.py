@@ -14,6 +14,7 @@ WARM_POOL_TTL = max(5, int(os.getenv("WARM_POOL_TTL", "30")))
 
 _pool: Dict[str, object] = {}
 _last_update = 0.0
+_last_empty_log = 0.0
 _lock = threading.RLock()
 
 
@@ -54,6 +55,7 @@ def _build_pool(data, tickers):
 def update_pool(force_refresh: bool = False):
     global _pool
     global _last_update
+    global _last_empty_log
 
     tickers = get_all_tickers()
 
@@ -70,7 +72,9 @@ def update_pool(force_refresh: bool = False):
     new_pool = _build_pool(data, tickers)
 
     if not new_pool:
-        logger.warning("Warm data pool refresh returned empty dataset")
+        if now - _last_empty_log >= WARM_POOL_TTL:
+            logger.warning("Warm data pool refresh returned empty dataset")
+            _last_empty_log = now
 
         with _lock:
             return dict(_pool)

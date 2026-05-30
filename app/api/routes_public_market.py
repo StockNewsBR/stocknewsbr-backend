@@ -2,9 +2,9 @@ import re
 
 from fastapi import APIRouter
 
+from app.services.public_ai_tools_service import build_public_ai_tools_payload
 from app.services.public_news_service import build_public_news_payload
 from app.services.quote_service import empty_quote_payload, get_cached_quote_payload, is_usable_quote_payload
-from app.services.ai_alert_history_service import get_ai_alert_history_snapshot
 
 
 router = APIRouter(prefix="/public", tags=["Public Market"])
@@ -81,9 +81,9 @@ def public_quote(symbol: str):
 
 @router.get("/market/news/{symbol}")
 def public_news(symbol: str, limit: int = 6):
-    return build_public_news_payload(_normalize_symbol(symbol), limit=limit, source="public")
+    return build_public_news_payload(_normalize_symbol(symbol), limit=limit, source="public", allow_fetch=False)
 
 
 @router.get("/market/ai-tools")
 def public_ai_tools():
-    return get_ai_alert_history_snapshot()
+    return build_public_ai_tools_payload()

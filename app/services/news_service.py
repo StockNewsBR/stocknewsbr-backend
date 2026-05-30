@@ -788,15 +788,29 @@ def _build_why_it_matters(ticker: str, labels: list[str], impact: str, sector: s
 
 def _build_trader_takeaway(
     ticker: str,
+    title: str,
+    summary: str,
     impact: str,
     labels: list[str],
     ambiguity_score: float,
     direct_match: bool,
 ) -> str:
+    text = _safe_lower(f"{title} {summary} {' '.join(labels)}")
+    label_set = {str(label).lower() for label in labels}
     if ambiguity_score >= 45:
         return _shorten(f"Para trader: trate a notícia de {ticker} como contexto, não como gatilho isolado, até o preço confirmar direção.", 190)
-    if "resultado" in labels or "guidance" in labels:
+    if "M&A" in labels or "m&a" in label_set or "merger" in text or "acquisition" in text or "fusão" in text or "aquis" in text:
+        return _shorten(f"Para trader: evento de fusões e aquisições em {ticker} pode gerar reprecificação; espere preço, spread e volume confirmarem.", 190)
+    if "dividend" in text or "dividendo" in text or "yield" in text:
+        return _shorten(f"Para trader: não compre {ticker} só pelo dividendo; valide caixa, tendência e reação de volume antes da entrada.", 190)
+    if "battery" in text or "bateria" in text or " ev" in text or "electric vehicle" in text or "veículo elétrico" in text:
+        return _shorten(f"Para trader: tema de EV/baterias muda expectativa em {ticker}; deixe a reação do preço confirmar o timing.", 190)
+    if "mover" in text or "destaque" in text:
+        return _shorten(f"Para trader: lista de destaques é filtro relativo; opere {ticker} só se força e volume confirmarem no gráfico.", 190)
+    if "resultado" in labels or "guidance" in labels or "earnings" in text:
         return _shorten(f"Para trader: monitore reação de preço e volume em {ticker} porque a leitura pode virar tendência intraday.", 190)
+    if "regulação" in labels or "regulation" in text or "regulatory" in text:
+        return _shorten(f"Para trader: notícia regulatória pode aumentar volatilidade em {ticker}; reduza tamanho até confirmar direção.", 190)
     if "macro" in labels and not direct_match:
         return _shorten(f"Para trader: leia primeiro o impacto no índice/setor e só depois a transmissão para {ticker}.", 190)
     if impact == "bullish":
@@ -940,6 +954,7 @@ def _normalize_raw_item(raw_item: dict[str, Any], ticker: str) -> dict[str, Any]
     url = _extract_url(raw_item)
     related_tickers = _extract_related_tickers(raw_item)
     published_at = _parse_published_at(raw_item)
+    detected_at = datetime.fromtimestamp(_now_ts(), tz=timezone.utc)
     sector, industry = _asset_sector(ticker, f"{title} {summary}")
     labels = _classify_labels(f"{title} {summary}")
     entities = _extract_entities(ticker, title, summary, related_tickers, labels)
@@ -974,6 +989,7 @@ def _normalize_raw_item(raw_item: dict[str, Any], ticker: str) -> dict[str, Any]
         "source_domain": _extract_domain(url),
         "url": url,
         "published_at": _to_iso(published_at),
+        "detected_at": _to_iso(published_at or detected_at),
         "sector": sector,
         "industry": industry,
         "labels": labels,
@@ -984,7 +1000,7 @@ def _normalize_raw_item(raw_item: dict[str, Any], ticker: str) -> dict[str, Any]
         "why_it_matters": _build_why_it_matters(ticker, labels, impact, sector),
         "editorial": _build_editorial_final(ticker, labels, impact, confidence, sector, ambiguity_score, 1, direct_match),
         "market_context": _safe_market_context(ticker, labels, sector, industry, direct_match, ambiguity_score),
-        "trader_takeaway": _build_trader_takeaway(ticker, impact, labels, ambiguity_score, direct_match),
+        "trader_takeaway": _build_trader_takeaway(ticker, title, summary, impact, labels, ambiguity_score, direct_match),
         "relevance_score": round(relevance_score, 2),
         "ranking_score": ranking_score,
         "confidence_score": round(confidence, 2),
@@ -1225,6 +1241,15 @@ def _cluster_news(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             canonical["source_count"],
             bool(canonical.get("direct_ticker_match")),
         )
+        canonical["trader_takeaway"] = _build_trader_takeaway(
+            str(canonical.get("ticker") or ""),
+            str(canonical.get("title") or ""),
+            str(canonical.get("summary") or ""),
+            str(canonical.get("impact") or "neutral"),
+            list(canonical.get("labels") or []),
+            float(canonical.get("ambiguity_score", 0.0) or 0.0),
+            bool(canonical.get("direct_ticker_match")),
+        )
         results.append(canonical)
 
     return results
@@ -1307,6 +1332,8 @@ def get_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
         attempted_candidates = _news_ticker_candidates(normalized_ticker)
         for candidate in attempted_candidates:
             raw_items = _fetch_yfinance_news(candidate)
+            if not raw_items:
+                raw_items = _fetch_yfinance_news(candidate)
             if raw_items:
                 fetched_from = candidate
                 if candidate != normalized_ticker:

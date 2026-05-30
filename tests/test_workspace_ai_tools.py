@@ -28,6 +28,7 @@ class WorkspaceAiToolsTests(unittest.TestCase):
         ]
         snapshot_ai_tools = {
             "heat_map": [],
+            "radar": [],
             "breakout_probability": [],
             "institutional_flow": [
                 {
@@ -137,16 +138,22 @@ class WorkspaceAiToolsTests(unittest.TestCase):
             return_value=[],
         ), patch.object(
             workspace_service,
+            "persist_ai_alert_history",
+            side_effect=lambda value: value,
+        ), patch.object(
+            workspace_service,
             "build_ai_tool_payload",
             side_effect=AssertionError("workspace should reuse ai_tools from snapshot"),
+            create=True,
         ):
             payload = workspace_service.get_workspace_data(user_id=7, channel="web")
 
         self.assertIn("ai_tools", payload)
         self.assertEqual(payload["ai_tools"], snapshot_ai_tools)
         self.assertEqual(payload["status"]["snapshot_signals"], 1)
+        self.assertIn("market_decision", payload)
 
-    def test_workspace_data_builds_ai_tool_payloads_when_snapshot_missing(self):
+    def test_workspace_data_uses_ai_history_when_snapshot_ai_tools_missing(self):
         snapshot_rows = [
             {
                 "ticker": "PETR4",
@@ -241,6 +248,53 @@ class WorkspaceAiToolsTests(unittest.TestCase):
             workspace_service,
             "list_room_messages",
             return_value=[],
+        ), patch.object(
+            workspace_service,
+            "get_ai_alert_history_snapshot",
+            return_value={
+                "tools": {
+                    "heat_map": [],
+                    "radar": [],
+                    "breakout_probability": [],
+                    "institutional_flow": [
+                        {
+                            "ticker": "PETR4",
+                            "tool": "institutional_flow",
+                            "score": 84.0,
+                            "signal": "BUY",
+                            "price": 37.5,
+                            "volume": 1250000,
+                            "data_quality": "priced",
+                        }
+                    ],
+                    "smart_money": [],
+                    "accumulation": [],
+                    "volatility_squeeze": [],
+                    "liquidity_sweep": [],
+                    "liquidity_map": [],
+                    "market_regime": [],
+                    "master_score": [
+                        {
+                            "ticker": "PETR4",
+                            "tool": "master_score",
+                            "score": 88.0,
+                            "signal": "BUY",
+                            "price": 37.5,
+                            "volume": 1250000,
+                            "data_quality": "priced",
+                        }
+                    ],
+                }
+            },
+        ), patch.object(
+            workspace_service,
+            "persist_ai_alert_history",
+            side_effect=lambda value: value,
+        ), patch.object(
+            workspace_service,
+            "build_ai_tool_payload",
+            side_effect=AssertionError("workspace should not rebuild AI tools in HTTP request"),
+            create=True,
         ):
             payload = workspace_service.get_workspace_data(user_id=7, channel="web")
 
@@ -256,30 +310,24 @@ class WorkspaceAiToolsTests(unittest.TestCase):
                 "liquidity_sweep",
                 "market_regime",
                 "master_score",
+                "radar",
                 "smart_money",
                 "volatility_squeeze",
             ],
         )
         self.assertTrue(payload["ai_tools"]["institutional_flow"])
         self.assertTrue(payload["ai_tools"]["master_score"])
-        self.assertTrue(payload["ai_tools"]["heat_map"])
-        self.assertTrue(payload["ai_tools"]["breakout_probability"])
-        self.assertTrue(payload["ai_tools"]["smart_money"])
-        self.assertTrue(payload["ai_tools"]["liquidity_sweep"])
-        self.assertTrue(payload["ai_tools"]["market_regime"])
+        self.assertIn("market_decision", payload)
+        self.assertFalse(payload["market_decision"].get("decision_ready"))
 
         flow_row = payload["ai_tools"]["institutional_flow"][0]
         master_row = payload["ai_tools"]["master_score"][0]
 
         self.assertEqual(flow_row["ticker"], "PETR4")
         self.assertEqual(flow_row["tool"], "institutional_flow")
-        self.assertIn("ai_comment", flow_row)
-        self.assertIn("trigger", flow_row)
-        self.assertIn("invalidation", flow_row)
 
         self.assertEqual(master_row["ticker"], "PETR4")
         self.assertEqual(master_row["tool"], "master_score")
-        self.assertIn("metrics", master_row)
 
 
 if __name__ == "__main__":

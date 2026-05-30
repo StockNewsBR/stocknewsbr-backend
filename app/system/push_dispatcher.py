@@ -6,7 +6,7 @@ from pathlib import Path
 
 from app.database import SessionLocal
 from app.models import User
-from app.services.push_service import list_push_tokens, send_push_notification
+from app.services.push_service import get_push_token_store, send_push_notification
 
 
 PUSH_DISPATCH_STATE_PATH = Path("data/push_dispatch_state.json")
@@ -70,11 +70,32 @@ def dispatch_signal_pushes(signals):
 
     now = int(time.time())
     state = _load_state()
+    token_store = get_push_token_store()
+    token_user_ids = []
+
+    for key, tokens in token_store.items():
+        if not tokens:
+            continue
+        try:
+            token_user_ids.append(int(key))
+        except Exception:
+            continue
+
+    token_user_ids = sorted(set(token_user_ids))
+
+    if not token_user_ids:
+        return {"sent": 0, "signals": len(candidates)}
+
     dispatched = 0
     db = SessionLocal()
 
     try:
-        users = db.query(User).filter(User.is_active == True, User.access_app == True).all()  # noqa: E712
+        users = (
+            db.query(User)
+            .filter(User.is_active == True, User.access_app == True)  # noqa: E712
+            .filter(User.id.in_(token_user_ids))
+            .all()
+        )
 
         for signal in candidates:
             ticker = str(signal.get("ticker") or signal.get("symbol"))
@@ -92,7 +113,8 @@ def dispatch_signal_pushes(signals):
             signal_sent = 0
 
             for user in users:
-                if not list_push_tokens(user.id):
+                tokens = token_store.get(str(user.id), [])
+                if not tokens:
                     continue
 
                 result = send_push_notification(
@@ -104,6 +126,7 @@ def dispatch_signal_pushes(signals):
                         "score": str(signal.get("score", "")),
                         "trend": str(signal.get("trend", "")),
                     },
+                    tokens=tokens,
                 )
                 signal_sent += int(result.get("sent", 0) or 0)
 

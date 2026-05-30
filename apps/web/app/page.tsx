@@ -1,11 +1,5 @@
-import { Suspense } from "react";
-
-import { WorkspaceShell } from "@/components/workspace-shell";
+import { redirect } from "next/navigation";
 
 export default function HomePage() {
-  return (
-    <Suspense fallback={null}>
-      <WorkspaceShell />
-    </Suspense>
-  );
+  redirect("/panel/F");
 }

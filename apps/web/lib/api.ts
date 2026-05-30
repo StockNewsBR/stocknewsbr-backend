@@ -7,12 +7,14 @@ import type {
   PollPayload,
   PublicAiToolsPayload,
   PublicBootstrap,
+  PublicMarketBundlePayload,
   QuotePayload,
   TelegramLinkSessionResponse,
   UploadResponse,
   UserAccess,
   WorkspaceData,
   WorkspaceLayout,
+  WorkspaceTickerBundlePayload,
 } from "./types";
 
 export function resolveApiBase() {
@@ -22,6 +24,11 @@ export function resolveApiBase() {
 function buildUrl(path: string) {
   return `${resolveApiBase()}${path.startsWith("/") ? path : `/${path}`}`;
 }
+
+type ApiRequestOptions = RequestInit & { token?: string; cacheTtlMs?: number };
+
+const GET_REQUEST_CACHE_LIMIT = 160;
+const getRequestCache = new Map<string, { expiresAt: number; promise: Promise<unknown>; lastValue?: unknown }>();
 
 function buildHeaders(token?: string, base?: HeadersInit) {
   return {
@@ -47,22 +54,75 @@ async function parseJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function request<T>(path: string, options?: RequestInit & { token?: string }) {
-  const headers = buildHeaders(options?.token, options?.headers);
-  const controller = options?.signal ? null : new AbortController();
+function pruneGetRequestCache() {
+  if (getRequestCache.size <= GET_REQUEST_CACHE_LIMIT) return;
+  const now = Date.now();
+  for (const [key, entry] of getRequestCache.entries()) {
+    if (entry.expiresAt <= now || getRequestCache.size > GET_REQUEST_CACHE_LIMIT) {
+      getRequestCache.delete(key);
+    }
+  }
+}
+
+async function request<T>(path: string, options?: ApiRequestOptions) {
+  const { token, cacheTtlMs, ...fetchOptions } = options || {};
+  const method = String(fetchOptions.method || "GET").toUpperCase();
+  const canUseClientCache = method === "GET" && !fetchOptions.signal && Number(cacheTtlMs || 0) > 0;
+  const cacheKey = canUseClientCache ? `${token ? "auth" : "public"}:${method}:${path}` : "";
+  const now = Date.now();
+
+  if (cacheKey) {
+    const cached = getRequestCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.promise as Promise<T>;
+    }
+  }
+
+  const headers = buildHeaders(token, fetchOptions.headers);
+  const controller = fetchOptions.signal ? null : new AbortController();
   const timeout = controller
     ? setTimeout(() => controller.abort(), 15000)
     : undefined;
 
-  try {
+  const previous = cacheKey ? getRequestCache.get(cacheKey) : undefined;
+  const promise = (async () => {
     const response = await fetch(buildUrl(path), {
       cache: "no-store",
-      ...options,
+      ...fetchOptions,
       headers,
-      signal: options?.signal || controller?.signal,
+      signal: fetchOptions.signal || controller?.signal,
     });
 
-    return parseJson<T>(response);
+    const payload = await parseJson<T>(response);
+    if (cacheKey) {
+      const current = getRequestCache.get(cacheKey);
+      if (current) current.lastValue = payload;
+    }
+    return payload;
+  })();
+
+  if (cacheKey) {
+    getRequestCache.set(cacheKey, {
+      expiresAt: now + Number(cacheTtlMs || 0),
+      promise,
+      lastValue: previous?.lastValue,
+    });
+    pruneGetRequestCache();
+  }
+
+  try {
+    return await promise;
+  } catch (error) {
+    if (cacheKey && previous?.lastValue !== undefined) {
+      getRequestCache.set(cacheKey, {
+        expiresAt: now + Math.max(1000, Math.floor(Number(cacheTtlMs || 0) / 2)),
+        promise: Promise.resolve(previous.lastValue),
+        lastValue: previous.lastValue,
+      });
+      return previous.lastValue as T;
+    }
+    if (cacheKey) getRequestCache.delete(cacheKey);
+    throw error;
   } finally {
     if (timeout) clearTimeout(timeout);
   }
@@ -131,7 +191,7 @@ export function requestTelegramLink(token: string, origin_channel = "web") {
 }
 
 export function getWorkspace(token: string) {
-  return request<WorkspaceData>("/web/workspace/data", { token });
+  return request<WorkspaceData>("/web/workspace/data", { token, cacheTtlMs: 15000 });
 }
 
 export function searchAssets(token: string, query: string) {
@@ -148,36 +208,50 @@ export function saveWorkspaceLayout(token: string, payload: WorkspaceLayout) {
 }
 
 export function getChart(token: string, ticker: string, interval = "1D") {
-  return request<ChartPayload>(`/web/chart/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}`, { token });
+  return request<ChartPayload>(`/web/chart/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}`, { token, cacheTtlMs: 12000 });
 }
 
 export function getPublicChart(ticker: string, interval = "1D") {
-  return request<ChartPayload>(`/public/market/chart/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}`);
+  return request<ChartPayload>(`/public/market/chart/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}`, { cacheTtlMs: 12000 });
 }
 
 export function getFeed(token: string, ticker: string) {
-  return request<FeedPayload>(`/ticker/${encodeURIComponent(ticker)}/feed?limit=500`, { token });
+  return request<FeedPayload>(`/ticker/${encodeURIComponent(ticker)}/feed?limit=500`, { token, cacheTtlMs: 15000 });
 }
 
 export function getNews(token: string | null | undefined, ticker: string) {
   const route = token ? `/news/${encodeURIComponent(ticker)}?limit=6` : `/public/market/news/${encodeURIComponent(ticker)}?limit=6`;
-  return request<NewsPayload>(route, token ? { token } : undefined);
+  return request<NewsPayload>(route, token ? { token, cacheTtlMs: 30000 } : { cacheTtlMs: 30000 });
 }
 
 export function getPublicQuote(ticker: string) {
-  return request<QuotePayload>(`/public/market/quote/${encodeURIComponent(ticker)}`);
+  return request<QuotePayload>(`/public/market/quote/${encodeURIComponent(ticker)}`, { cacheTtlMs: 5000 });
 }
 
 export function getPublicQuotes(symbols: string[]) {
   const params = encodeURIComponent(symbols.join(","));
-  return request<{ items: QuotePayload[]; count: number }>(`/public/market/quotes?symbols=${params}`);
+  return request<{ items: QuotePayload[]; count: number }>(`/public/market/quotes?symbols=${params}`, { cacheTtlMs: 8000 });
 }
 
 export function getPublicAiTools() {
-  return request<PublicAiToolsPayload>("/public/market/ai-tools");
+  return request<PublicAiToolsPayload>("/public/market/ai-tools", { cacheTtlMs: 15000 });
 }
 
-export async function getPublicQuotesChunked(symbols: string[], chunkSize = 16) {
+export function getPublicMarketBundle(ticker: string, interval = "1D") {
+  return request<PublicMarketBundlePayload>(
+    `/public/market/bundle/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}&limit=6`,
+    { cacheTtlMs: 10000 },
+  );
+}
+
+export function getWorkspaceTickerBundle(token: string, ticker: string, interval = "1D") {
+  return request<WorkspaceTickerBundlePayload>(
+    `/web/workspace/ticker/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}&limit=6`,
+    { token, cacheTtlMs: 10000 },
+  );
+}
+
+export async function getPublicQuotesChunked(symbols: string[], chunkSize = 32) {
   const uniqueSymbols = Array.from(new Set(symbols.filter(Boolean)));
   const chunks = Array.from({ length: Math.ceil(uniqueSymbols.length / chunkSize) }, (_, index) =>
     uniqueSymbols.slice(index * chunkSize, (index + 1) * chunkSize),
@@ -269,7 +343,7 @@ async function getPublicQuotesIndividually(symbols: string[], concurrency = 4) {
   return items;
 }
 
-export async function getPublicQuotesRobust(symbols: string[], chunkSize = 12, fallbackConcurrency = 0) {
+export async function getPublicQuotesRobust(symbols: string[], chunkSize = 32, fallbackConcurrency = 0) {
   const uniqueSymbols = Array.from(new Set(symbols.map(normalizeQuoteSymbol).filter(Boolean)));
   const bulk = await getPublicQuotesChunked(uniqueSymbols, chunkSize);
   const bySymbol = new Map<string, QuotePayload>();
@@ -304,7 +378,7 @@ export function getPublicInsight(ticker: string, interval = "1D") {
     trend_bias?: string | null;
     signal?: string | null;
     summary?: Record<string, unknown>;
-  }>(`/public/market/insight/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}`);
+  }>(`/public/market/insight/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}`, { cacheTtlMs: 12000 });
 }
 
 export function createPost(

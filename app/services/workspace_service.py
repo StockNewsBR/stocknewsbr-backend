@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from app.Frontend.layout import get_layout
-from app.ai.feature_hub import build_ai_tool_payload
 from app.cache.snapshot_cache import get_snapshot
+from app.services.ai_alert_history_service import get_ai_alert_history_snapshot, persist_ai_alert_history
 from app.services.help_center_service import get_help_center_blueprint
 from app.services.legal_service import get_public_bootstrap
 from app.services.media_service import get_media_status
@@ -45,6 +45,7 @@ def _safe_rows(value: Any) -> List[Dict[str, Any]]:
 def _empty_ai_outputs() -> Dict[str, List[Dict[str, Any]]]:
     return {
         "heat_map": [],
+        "radar": [],
         "breakout_probability": [],
         "institutional_flow": [],
         "smart_money": [],
@@ -68,6 +69,37 @@ def _coerce_ai_outputs(value: Any) -> Dict[str, List[Dict[str, Any]]]:
     return outputs
 
 
+def _positive_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number > 0:
+        return number
+    return None
+
+
+def _is_operational_ai_row(row: Dict[str, Any]) -> bool:
+    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+    quality = str(
+        row.get("data_quality")
+        or row.get("dataQuality")
+        or metrics.get("data_quality")
+        or metrics.get("dataQuality")
+        or ""
+    ).lower()
+    if "score_only" in quality or "missing" in quality or "empty" in quality:
+        return False
+    return (
+        _positive_number(row.get("price") or metrics.get("price")) is not None
+        and _positive_number(row.get("volume") or metrics.get("volume")) is not None
+    )
+
+
+def _has_operational_ai_outputs(outputs: Dict[str, List[Dict[str, Any]]]) -> bool:
+    return any(_is_operational_ai_row(row) for rows in outputs.values() for row in rows)
+
+
 def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict[str, Any]:
     bootstrap = get_public_bootstrap()
     metrics = get_metrics_snapshot()
@@ -79,13 +111,22 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
     ranking = ranking_rows[:12]
     featured_posts = _safe_rows(get_posts(limit=10))
     ai_outputs = _coerce_ai_outputs(snapshot.get("ai_tools"))
+    market_decision = snapshot.get("decision") if isinstance(snapshot, dict) else {}
 
-    if not any(ai_outputs.values()):
-        ai_outputs = build_ai_tool_payload(
-            top_signals=snapshot_signals,
-            ranking=ranking_rows,
-            limit=20,
-        )
+    if not _has_operational_ai_outputs(ai_outputs):
+        history_payload = get_ai_alert_history_snapshot()
+        ai_outputs = _coerce_ai_outputs(history_payload.get("tools") if isinstance(history_payload, dict) else {})
+
+    if not isinstance(market_decision, dict) or not market_decision:
+        market_decision = {
+            "trade_action": "NO_DECISION",
+            "trade_direction": "flat",
+            "decision_ready": False,
+            "data_quality": "score_only",
+            "reason": "Snapshot ainda sem decisao consolidada pronta.",
+        }
+
+    ai_outputs = persist_ai_alert_history(ai_outputs)
 
     help_center = get_help_center_blueprint()
     media_status = get_media_status()
@@ -160,4 +201,5 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
             ),
         },
         "ai_tools": ai_outputs,
+        "market_decision": market_decision if isinstance(market_decision, dict) else {},
     }

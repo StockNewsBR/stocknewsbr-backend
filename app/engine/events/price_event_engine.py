@@ -12,6 +12,7 @@ B3_OPEN = dtime(10, 0)
 B3_CLOSE = dtime(17, 55)
 FRAME_LOOKBACK = 96
 EVENT_SCAN_BARS = 18
+DEFAULT_MAX_EVENT_SYMBOLS = 80
 
 
 def _safe_float(value, default: float = 0.0) -> float:
@@ -204,15 +205,44 @@ def _scan_frame(symbol: str, frame: pd.DataFrame, ranked_row: dict | None = None
     return events[-6:]
 
 
-def detect_price_events(pool: Dict[str, object], ranked_rows: Iterable[dict] | None = None) -> List[dict]:
+def detect_price_events(
+    pool: Dict[str, object],
+    ranked_rows: Iterable[dict] | None = None,
+    max_symbols: int = DEFAULT_MAX_EVENT_SYMBOLS,
+) -> List[dict]:
     if not isinstance(pool, dict) or not pool:
         return []
 
     ranked_lookup = _build_ranked_lookup(ranked_rows)
     events: List[dict] = []
+    candidate_symbols: List[tuple[str, object, dict | None]] = []
+    pool_by_symbol = {
+        _canonical_symbol(symbol): (symbol, frame)
+        for symbol, frame in pool.items()
+        if _canonical_symbol(symbol)
+    }
 
-    for symbol, frame in pool.items():
-        ranked_row = ranked_lookup.get(_canonical_symbol(symbol))
+    if ranked_lookup:
+        for ranked_row in ranked_rows or []:
+            if not isinstance(ranked_row, dict):
+                continue
+
+            ticker = _canonical_symbol(ranked_row.get("ticker") or ranked_row.get("symbol"))
+
+            if not ticker:
+                continue
+
+            pool_entry = pool_by_symbol.get(ticker)
+            if pool_entry:
+                symbol, frame = pool_entry
+                candidate_symbols.append((symbol, frame, ranked_lookup.get(ticker)))
+    else:
+        candidate_symbols = [(symbol, frame, None) for symbol, frame in pool.items()]
+
+    if max_symbols > 0:
+        candidate_symbols = candidate_symbols[:max_symbols]
+
+    for symbol, frame, ranked_row in candidate_symbols:
         events.extend(_scan_frame(symbol, frame, ranked_row))
 
     return events

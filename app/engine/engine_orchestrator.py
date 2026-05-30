@@ -15,7 +15,7 @@ from app.engine.matrix.build_market_matrices import build_market_matrices
 from app.engine.matrix.feature_matrix_engine import feature_matrix_engine
 from app.engine.ranking.ranking_engine_v2 import build_ranking
 from app.system.observability_engine import record_cycle
-from app.system.system_metrics import record_worker_stage_duration
+from app.system.system_metrics import record_signal_quality_coverage, record_worker_stage_duration
 
 logger = logging.getLogger("stocknewsbr.engine.orchestrator")
 
@@ -236,7 +236,7 @@ def _enrich_row_with_market_data(row, frame):
     price = _frame_value(latest, "Close")
     volume = _frame_value(latest, "Volume")
 
-    if price is None or price <= 0 or volume is None or volume < 0:
+    if price is None or price <= 0 or volume is None or volume <= 0:
         item.setdefault("data_quality", "score_only")
         return item
 
@@ -347,6 +347,7 @@ def run_engine():
         record_worker_stage_duration("event_detection", time.perf_counter() - event_start, success=True)
         ranked = _attach_events(ranked, events)
         ranked = _enrich_ranked_with_market_data(ranked, pool)
+        _safe_run(record_signal_quality_coverage, ranked, source="signal_cache")
         _safe_run(update_signals, ranked)
 
         elapsed = time.perf_counter() - start

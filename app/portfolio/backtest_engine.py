@@ -37,7 +37,9 @@ def backtest_portfolio(tickers):
 
             progress=False,
 
-            threads=True
+            threads=False,
+
+            timeout=8
 
         )
 

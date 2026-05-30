@@ -111,10 +111,20 @@ def list_push_tokens(user_id: int):
     return list(_load_store().get(str(user_id), []))
 
 
-def send_push_notification(user_id: int, title: str, body: str, data: dict | None = None):
-    tokens = list_push_tokens(user_id)
+def get_push_token_store():
+    return _load_store()
 
-    if not tokens:
+
+def send_push_notification(
+    user_id: int,
+    title: str,
+    body: str,
+    data: dict | None = None,
+    tokens: list[dict] | None = None,
+):
+    resolved_tokens = list(tokens) if tokens is not None else list_push_tokens(user_id)
+
+    if not resolved_tokens:
         return {"sent": 0, "reason": "no_registered_tokens"}
 
     app = _get_firebase_app()
@@ -123,12 +133,12 @@ def send_push_notification(user_id: int, title: str, body: str, data: dict | Non
         return {
             "sent": 0,
             "reason": "firebase_not_configured",
-            "tokens": len(tokens),
+            "tokens": len(resolved_tokens),
         }
 
     sent = 0
 
-    for item in tokens:
+    for item in resolved_tokens:
         try:
             message = messaging.Message(
                 token=item["token"],
@@ -141,7 +151,7 @@ def send_push_notification(user_id: int, title: str, body: str, data: dict | Non
         except Exception:
             continue
 
-    return {"sent": sent, "tokens": len(tokens)}
+    return {"sent": sent, "tokens": len(resolved_tokens)}
 
 
 def get_push_status():

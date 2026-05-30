@@ -102,6 +102,23 @@ class NewsServiceTests(unittest.TestCase):
         self.assertIn("impacto_indireto", items[0]["ambiguity_flags"])
         self.assertTrue(items[0]["trader_takeaway"])
 
+    def test_build_symbol_news_adds_detection_time_when_provider_time_missing(self):
+        raw_items = [
+            {
+                "title": "Ford Motor confirms new EV plan",
+                "summary": "Ford updates its electric vehicle strategy.",
+                "publisher": "Yahoo Finance",
+                "link": "https://example.com/ford",
+                "relatedTickers": ["F"],
+            }
+        ]
+
+        items = build_symbol_news("F", raw_items, limit=6)
+
+        self.assertEqual(len(items), 1)
+        self.assertIsNone(items[0]["published_at"])
+        self.assertRegex(items[0]["detected_at"], r"^\d{4}-\d{2}-\d{2}T")
+
     def test_build_symbol_news_counts_multiple_sources_per_story(self):
         raw_items = [
             {

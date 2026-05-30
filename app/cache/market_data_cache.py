@@ -3,18 +3,30 @@ import threading
 import time
 from typing import Iterable, Optional, Tuple
 
-import yfinance as yf
-
 from app.config import SYMBOLS
+from app.system.system_metrics import current_provider_call_source, record_external_provider_call, record_worker_stage_duration
 
 logger = logging.getLogger("stocknewsbr.market_cache")
+_YFINANCE = None
 
 CACHE_TTL = 60
+PROVIDER_FAILURE_COOLDOWN_SECONDS = 180
 
 _cache_data = None
 _cache_key: Tuple[str, ...] = tuple()
 _last_update = 0.0
+_provider_cooldown_until = 0.0
+_last_provider_failure_log = 0.0
 _lock = threading.RLock()
+
+
+def _get_yfinance():
+    global _YFINANCE
+    if _YFINANCE is None:
+        import yfinance as yf_module
+
+        _YFINANCE = yf_module
+    return _YFINANCE
 
 
 def _normalize_tickers(tickers: Optional[Iterable[str]]) -> Tuple[str, ...]:
@@ -71,27 +83,78 @@ def _cache_satisfies(requested_key: Tuple[str, ...], now: float) -> bool:
     return set(requested_key).issubset(set(_cache_key))
 
 
+def _provider_in_cooldown(now: float) -> bool:
+    return now < _provider_cooldown_until
+
+
+def _mark_provider_cooldown(reason: str):
+    global _provider_cooldown_until
+    global _last_provider_failure_log
+
+    now = time.time()
+    _provider_cooldown_until = max(_provider_cooldown_until, now + PROVIDER_FAILURE_COOLDOWN_SECONDS)
+    if now - _last_provider_failure_log >= PROVIDER_FAILURE_COOLDOWN_SECONDS:
+        logger.warning(
+            "Market provider cooldown active for %ss after %s",
+            PROVIDER_FAILURE_COOLDOWN_SECONDS,
+            reason,
+        )
+        _last_provider_failure_log = now
+
+
 def fetch_market_data(tickers: Tuple[str, ...]):
+    start = time.perf_counter()
+    now = time.time()
+    if current_provider_call_source() == "http":
+        for ticker in tickers:
+            record_external_provider_call(
+                "yfinance",
+                "market_cache_download_blocked_http",
+                duration_seconds=0.0,
+                success=False,
+                symbol=ticker,
+                error="http_provider_blocked",
+            )
+        return None
+
+    if _provider_in_cooldown(now):
+        record_worker_stage_duration("market_download_cooldown", 0.0, success=False)
+        return None
+
     try:
+        yf = _get_yfinance()
         data = yf.download(
             tickers=list(tickers),
             period="1d",
             interval="5m",
             group_by="ticker",
-            threads=True,
+            threads=False,
             progress=False,
             auto_adjust=True,
             prepost=True,
+            timeout=8,
         )
 
         if data is None or len(data) == 0:
-            logger.warning("Market download returned empty")
+            duration = time.perf_counter() - start
+            for ticker in tickers:
+                record_external_provider_call("yfinance", "market_cache_download", duration_seconds=duration, success=False, symbol=ticker, error="empty_data")
+            record_worker_stage_duration("market_download", duration, success=False)
+            _mark_provider_cooldown("empty_data")
             return None
 
+        duration = time.perf_counter() - start
+        for ticker in tickers:
+            record_external_provider_call("yfinance", "market_cache_download", duration_seconds=duration, success=True, symbol=ticker)
+        record_worker_stage_duration("market_download", duration, success=True)
         return data
 
     except Exception as exc:
-        logger.error("Market download error: %s", exc)
+        duration = time.perf_counter() - start
+        for ticker in tickers:
+            record_external_provider_call("yfinance", "market_cache_download", duration_seconds=duration, success=False, symbol=ticker, error=str(exc))
+        record_worker_stage_duration("market_download", duration, success=False)
+        _mark_provider_cooldown(str(exc) or "exception")
         return None
 
 

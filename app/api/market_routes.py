@@ -5,12 +5,11 @@
 import logging
 import time
 
-import yfinance as yf
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.cache.market_data_cache import market_data_cache
 from app.cache.signal_cache import get_all_signals
 from app.dependencies import require_active_plan
+from app.services.quote_service import get_cached_quote_payload
 
 logger = logging.getLogger("stocknewsbr.market")
 
@@ -53,35 +52,6 @@ def _set_cached_quote(ticker, payload):
     QUOTE_CACHE[ticker] = (payload, time.time())
 
 
-def get_price_from_engine_cache(ticker):
-    try:
-        frame = market_data_cache.get(ticker=ticker)
-
-        if frame is None or frame.empty:
-            return None
-
-        return float(frame["Close"].iloc[-1])
-    except Exception as exc:
-        logger.warning("Engine cache price error %s: %s", ticker, exc)
-        return None
-
-
-def get_price_from_yahoo(ticker):
-    try:
-        history = yf.Ticker(ticker).history(
-            period="1d",
-            interval="1m",
-        )
-
-        if history is None or history.empty:
-            return None
-
-        return float(history["Close"].iloc[-1])
-    except Exception as exc:
-        logger.warning("Yahoo fallback error %s: %s", ticker, exc)
-        return None
-
-
 @router.get("/quote/{ticker}")
 def get_quote(
     ticker: str,
@@ -100,18 +70,20 @@ def get_quote(
             "plan": getattr(current_user, "plan", "unknown"),
         }
 
-    price = get_price_from_engine_cache(ticker)
-
-    if price is None:
-        price = get_price_from_yahoo(ticker)
-
-    if price is None:
+    quote = get_cached_quote_payload(ticker)
+    if not quote or quote.get("price") is None:
         raise HTTPException(status_code=404, detail="Ticker not found")
 
     payload = {
         "ticker": ticker,
-        "price": price,
+        "price": quote.get("price"),
+        "change": quote.get("change"),
+        "change_pct": quote.get("change_pct"),
+        "volume": quote.get("volume"),
+        "high": quote.get("high"),
+        "low": quote.get("low"),
         "currency": "BRL" if ticker.endswith(".SA") else "USD",
+        "source": quote.get("source"),
     }
 
     _set_cached_quote(ticker, payload)

@@ -15,9 +15,17 @@ type CandleRow = {
 
 type Props = {
   chart: ChartPayload | null;
+  ticker?: string;
   interval?: string;
   showMarkers?: boolean;
   showZones?: boolean;
+  showPriceLine?: boolean;
+  showVwap?: boolean;
+  showAverages?: boolean;
+  showMacd?: boolean;
+  showRsi?: boolean;
+  showSupertrend?: boolean;
+  showVolume?: boolean;
   locale?: "pt-BR" | "en-US";
 };
 
@@ -30,18 +38,19 @@ function normalizeNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function formatAxisTime(value: unknown, interval = "1D") {
+function formatAxisTime(value: unknown, interval = "1D", locale: "pt-BR" | "en-US" = "pt-BR") {
   const date = new Date(String(value || ""));
   if (Number.isNaN(date.getTime())) return "";
 
   const normalizedInterval = String(interval || "1D").toUpperCase();
+  const dateLocale = locale === "en-US" ? "en-US" : "pt-BR";
   if (normalizedInterval === "1D") {
-    return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    return date.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
   }
-  if (normalizedInterval === "1W" || normalizedInterval === "1M") {
-    return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  if (["1W", "1M", "3M", "6M", "YTD"].includes(normalizedInterval)) {
+    return date.toLocaleDateString(dateLocale, { day: "2-digit", month: "2-digit" });
   }
-  return date.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }).replace(".", "");
+  return date.toLocaleDateString(dateLocale, { month: "short", year: "2-digit" }).replace(".", "");
 }
 
 function formatTooltipTime(value: unknown, interval = "1D", locale: "pt-BR" | "en-US" = "pt-BR") {
@@ -76,22 +85,22 @@ function truncateText(value: unknown, maxLength = 74) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;
 }
 
-function markerActionLabel(marker: ChartMarker) {
+function markerActionLabel(marker: ChartMarker, locale: "pt-BR" | "en-US" = "pt-BR") {
   const explicit = String(marker.action_label || marker.label || "").trim();
   if (explicit) {
     const normalized = explicit.toUpperCase();
     if (normalized === "BUY") return "Buy Long";
-    if (normalized === "SELL") return "Close Long";
+    if (normalized === "SELL" || normalized === "CLOSE LONG") return locale === "en-US" ? "Close Long" : "Encerrar long";
     if (normalized === "SHORT") return "Sell Short";
-    if (normalized === "COVER") return "Close Short";
+    if (normalized === "COVER" || normalized === "CLOSE SHORT") return locale === "en-US" ? "Close Short" : "Encerrar short";
     return explicit;
   }
 
   const type = String(marker.type || "").toUpperCase();
   if (type === "BUY") return "Buy Long";
-  if (type === "SELL") return "Close Long";
+  if (type === "SELL") return locale === "en-US" ? "Close Long" : "Encerrar long";
   if (type === "SHORT") return "Sell Short";
-  if (type === "COVER") return "Close Short";
+  if (type === "COVER") return locale === "en-US" ? "Close Short" : "Encerrar short";
   return "Watch";
 }
 
@@ -128,6 +137,12 @@ function localizeChartText(value: unknown, locale: "pt-BR" | "en-US") {
     .replace(/SUPORTE/g, "SUPPORT");
 }
 
+function localizeInvalidation(value: unknown, locale: "pt-BR" | "en-US") {
+  const text = localizeChartText(value, locale);
+  if (/^(se|if)\s*:/i.test(text)) return text;
+  return `${locale === "en-US" ? "IF:" : "Se:"} ${text}`;
+}
+
 function markerOperationalNote(marker: ChartMarker, locale: "pt-BR" | "en-US" = "pt-BR") {
   const explicit = String(marker.operational_note || "").trim();
   if (explicit) return localizeChartText(explicit, locale);
@@ -158,8 +173,19 @@ function isOneDayInterval(interval: string) {
   return String(interval || "1D").toUpperCase() === "1D";
 }
 
+function displayIntervalLabel(interval: string, locale: "pt-BR" | "en-US" = "pt-BR") {
+  return isOneDayInterval(interval)
+    ? (locale === "en-US" ? "5 min" : "5 min")
+    : String(interval || "1D").toUpperCase();
+}
+
 function usesB3Session(symbol?: string | null) {
   return /^[A-Z]{4}\d{1,2}/i.test(String(symbol || ""));
+}
+
+function isB3MiniFutureTicker(symbol?: string | null) {
+  const compact = String(symbol || "").toUpperCase().replace(/\.SA$/, "");
+  return /^(WIN|WDO)[FGHJKMNQUVXZ]\d{2}$/.test(compact);
 }
 
 function isCryptoTicker(symbol?: string | null) {
@@ -339,6 +365,52 @@ function average(values: number[]) {
   return finite.reduce((total, value) => total + value, 0) / finite.length;
 }
 
+function buildVwap(candles: CandleRow[]) {
+  let cumulativePriceVolume = 0;
+  let cumulativeVolume = 0;
+  return candles.map((bar) => {
+    const typicalPrice = (bar.high + bar.low + bar.close) / 3;
+    const volume = Number.isFinite(bar.volume) && bar.volume > 0 ? bar.volume : 1;
+    cumulativePriceVolume += typicalPrice * volume;
+    cumulativeVolume += volume;
+    return cumulativePriceVolume / Math.max(cumulativeVolume, 1);
+  });
+}
+
+function buildEma(values: number[], period: number) {
+  if (!values.length) return [];
+  const multiplier = 2 / (period + 1);
+  return values.reduce<number[]>((rows, value, index) => {
+    rows.push(index === 0 ? value : (value - rows[index - 1]) * multiplier + rows[index - 1]);
+    return rows;
+  }, []);
+}
+
+function buildMacdHistogram(closes: number[]) {
+  const ema12 = buildEma(closes, 12);
+  const ema26 = buildEma(closes, 26);
+  const macd = closes.map((_, index) => (ema12[index] || 0) - (ema26[index] || 0));
+  const signal = buildEma(macd, 9);
+  return macd.map((value, index) => value - (signal[index] || 0));
+}
+
+function buildRsi(closes: number[], period = 14) {
+  return closes.map((_, index) => {
+    if (index === 0) return 50;
+    const start = Math.max(1, index - period + 1);
+    let gains = 0;
+    let losses = 0;
+    for (let cursor = start; cursor <= index; cursor += 1) {
+      const change = closes[cursor] - closes[cursor - 1];
+      if (change >= 0) gains += change;
+      else losses += Math.abs(change);
+    }
+    if (losses === 0) return gains > 0 ? 100 : 50;
+    const rs = gains / losses;
+    return 100 - 100 / (1 + rs);
+  });
+}
+
 function buildDerivedZones(candles: CandleRow[]): ChartZone[] {
   if (candles.length < 2) return [];
   const highs = candles.map((item) => item.high).filter((value) => Number.isFinite(value));
@@ -426,7 +498,21 @@ function buildDerivedMarkers(candles: CandleRow[]): ChartMarker[] {
   });
 }
 
-export function TickerChart({ chart, interval = "1D", showMarkers = true, showZones = true, locale = "pt-BR" }: Props) {
+export function TickerChart({
+  chart,
+  ticker,
+  interval = "1D",
+  showMarkers = true,
+  showZones = true,
+  showPriceLine = true,
+  showVwap = true,
+  showAverages = true,
+  showMacd = false,
+  showRsi = false,
+  showSupertrend = true,
+  showVolume = true,
+  locale = "pt-BR",
+}: Props) {
   const isEnglish = locale === "en-US";
   const [hoverPoint, setHoverPoint] = useState<{
     x: number;
@@ -473,7 +559,16 @@ export function TickerChart({ chart, interval = "1D", showMarkers = true, showZo
   }, [chart?.ticker, chart?.interval, interval, displaySeries.length]);
 
   if (!displaySeries.length) {
-    return <div className="snbr-empty">{isEnglish ? "Not enough historical series to draw the chart yet." : "Sem serie historica suficiente para desenhar o grafico ainda."}</div>;
+    const chartSummary = (chart?.summary || {}) as Record<string, unknown>;
+    const chartTicker = String(chartSummary.ticker || chart?.ticker || ticker || "");
+    const providerStatus = String(chartSummary.provider_status || (chart as any)?.provider_status || chartSummary.source || "").toLowerCase();
+    const isUnavailableB3Future = isB3MiniFutureTicker(chartTicker) && (!providerStatus || providerStatus === "empty_chart" || providerStatus === "b3_future_exact_chart_unavailable");
+    const message = isUnavailableB3Future
+      ? (isEnglish
+          ? "No reliable real B3 futures chart from the public provider. Synthetic/proxy candles were blocked to avoid a wrong chart."
+          : "Sem gráfico real confiável para este futuro B3 no provider público. Candles sintéticos/proxy foram bloqueados para evitar gráfico errado.")
+      : (isEnglish ? "Not enough historical series to draw the chart yet." : "Sem série histórica suficiente para desenhar o gráfico ainda.");
+    return <div className="snbr-empty">{message}</div>;
   }
 
   const minWindowSize = Math.min(displaySeries.length, 12);
@@ -514,10 +609,14 @@ export function TickerChart({ chart, interval = "1D", showMarkers = true, showZo
       sessionBoundary: Boolean(raw.sessionBoundary || (item as any).sessionBoundary),
     };
   });
+  const vwap = buildVwap(candleRows);
+  const macdHistogram = buildMacdHistogram(closes);
+  const rsiSeries = buildRsi(closes);
   const allValues = [
     ...closes,
     ...ema9,
     ...ema21,
+    ...vwap,
     ...supertrend.filter((value): value is number => value != null),
     ...candleRows.flatMap((item) => [item.open, item.high, item.low, item.close]),
   ].filter((value) => Number.isFinite(value));
@@ -546,6 +645,17 @@ export function TickerChart({ chart, interval = "1D", showMarkers = true, showZo
   const closePath = buildPath(closes);
   const ema9Path = buildPath(ema9);
   const ema21Path = buildPath(ema21);
+  const vwapPath = buildPath(vwap);
+  const indicatorTop = plotBottom - 58;
+  const indicatorHeight = 42;
+  const macdMax = Math.max(...macdHistogram.map((value) => Math.abs(value)).filter((value) => Number.isFinite(value)), 0.0001);
+  const macdZeroY = indicatorTop + indicatorHeight / 2;
+  const rsiPath = rsiSeries
+    .map((value, index) => {
+      const y = indicatorTop + ((100 - clamp(value, 0, 100)) / 100) * indicatorHeight;
+      return `${index === 0 ? "M" : "L"} ${toX(index)} ${y}`;
+    })
+    .join(" ");
   const supertrendSegments = supertrend.reduce<Array<{ side: string; path: string }>>((segments, value, index) => {
     if (value == null) return segments;
     const side = String(series[index]?.supertrend_side || "neutral");
@@ -576,10 +686,23 @@ export function TickerChart({ chart, interval = "1D", showMarkers = true, showZo
   const volumeBarWidth = clamp((plotWidth / Math.max(candleRows.length, 1)) * 0.54, 2, 6);
   const yTicks = pickTickIndexes(5, 5);
   const tradableCandleRows = candleRows.filter((item) => !item.sessionBoundary);
+  const isSyntheticFallbackChart = Boolean(chart?.fallback || chart?.synthetic || chart?.summary?.fallback || chart?.summary?.synthetic || chart?.summary?.source === "quote_visual_fallback");
   const zoneRows = showZones ? (chart?.zones?.length ? chart.zones : buildDerivedZones(tradableCandleRows)) : [];
-  const rawMarkerRows = showMarkers ? (chart?.markers?.length ? chart.markers : buildDerivedMarkers(tradableCandleRows)) : [];
+  const rawMarkerRows = showMarkers ? (chart?.markers?.length ? chart.markers : (isSyntheticFallbackChart ? [] : buildDerivedMarkers(tradableCandleRows))) : [];
   const markerRows = rawMarkerRows.filter((marker) => !marker.time || timeToIndex.has(String(marker.time || "")));
+  const activeToolCount = [
+    showMarkers,
+    showZones,
+    showPriceLine,
+    showVwap,
+    showAverages,
+    showMacd,
+    showRsi,
+    showSupertrend,
+    showVolume,
+  ].filter(Boolean).length;
   const currentTicker = chart?.summary?.ticker || chart?.ticker;
+  const chartIntervalLabel = displayIntervalLabel(interval, locale);
   const sessionProfile = isOneDayInterval(interval) ? getSessionProfile(currentTicker) : null;
   const extendedSessionSegments = isOneDayInterval(interval)
     ? buildExtendedSessionSegments(series, currentTicker)
@@ -599,7 +722,7 @@ export function TickerChart({ chart, interval = "1D", showMarkers = true, showZo
         const side = marker.side === "buy" || marker.side === "sell" ? marker.side : "neutral";
         const direction = side === "buy" ? -1 : side === "sell" ? 1 : -1;
         const stemEndY = clamp(y + direction * 28, paddingTop + 10, plotBottom - 10);
-        const label = markerActionLabel(marker);
+        const label = markerActionLabel(marker, locale);
         const labelLines = markerLabelLines(label);
         const operationalNote = markerOperationalNote(marker, locale);
         const fill = side === "buy" ? "#22c55e" : side === "sell" ? "#ff4d57" : "#f59e0b";
@@ -611,7 +734,7 @@ export function TickerChart({ chart, interval = "1D", showMarkers = true, showZo
           { label: isEnglish ? "Time" : "Horario", value: formatTooltipTime(marker.time || series[index]?.time, interval, locale) },
           { label: isEnglish ? "Reason" : "Motivo", value: markerReason(marker, locale) },
           { label: "Trigger", value: localizeChartText(marker.trigger || marker.confirmation || "Aguardar confirmacao de preco, volume e fluxo.", locale) },
-          { label: isEnglish ? "Invalidation" : "Invalidacao", value: localizeChartText(marker.invalidation || "Invalidar se a tese perder preco, VWAP/EMA21, volume ou regime.", locale) },
+          { label: isEnglish ? "Invalidation" : "Invalidacao", value: localizeInvalidation(marker.invalidation || "Invalidar se a tese perder preco, VWAP/EMA21, volume ou regime.", locale) },
           { label: isEnglish ? "Risk" : "Risco", value: localizeChartText(marker.risk || `Risco ${marker.risk_level || "medio"}: confirmar liquidez antes de operar.`, locale) },
         ];
         const tooltipTitle = tooltipRows.map((row) => `${row.label}: ${row.value}`).join("\n");
@@ -656,14 +779,15 @@ export function TickerChart({ chart, interval = "1D", showMarkers = true, showZo
         }}
         onMouseMove={(event) => {
           const rect = event.currentTarget.getBoundingClientRect();
-          const x = event.clientX - rect.left;
-          const y = event.clientY - rect.top;
+          const x = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * width;
+          const y = ((event.clientY - rect.top) / Math.max(rect.height, 1)) * height;
           const clampedX = clamp(x, paddingX, width - paddingX);
           const index = Math.max(0, Math.min(series.length - 1, Math.round(((clampedX - paddingX) / plotWidth) * Math.max(series.length - 1, 1))));
           const source = candleRows[index];
           if (!source) return;
+          const candleX = toX(index);
           setHoverPoint({
-            x: clampedX,
+            x: candleX,
             y: clamp(y, paddingTop, plotBottom),
             time: String(source.time || series[index]?.time || ""),
             close: source.close,
@@ -721,7 +845,7 @@ export function TickerChart({ chart, interval = "1D", showMarkers = true, showZo
         })}
 
         <text x={paddingX} y={22} fill="var(--snbr-chart-title, #4b5563)" fontSize="12" fontWeight="700">
-          {chart?.summary?.ticker || chart?.ticker || "Ticker"} · {interval}
+          {chart?.summary?.ticker || chart?.ticker || "Ticker"} · {chartIntervalLabel}
         </text>
         <text x={paddingX + 96} y={22} fill={latestIsUp ? "#059669" : "#dc2626"} fontSize="12" fontWeight="700">
           O {formatPrice(candleRows.at(-1)?.open, locale)} H {formatPrice(candleRows.at(-1)?.high, locale)} L {formatPrice(candleRows.at(-1)?.low, locale)} C {formatPrice(latestClose, locale)}
@@ -791,10 +915,44 @@ Volume: ${formatPrice(bar.volume, locale)}`}</title>
             </g>
           );
         })}
-        <path d={closePath} stroke="#f2b233" strokeWidth="2.4" fill="none" strokeLinecap="round" />
-        <path d={ema9Path} stroke="#22c55e" strokeWidth="2" fill="none" strokeLinecap="round" />
-        <path d={ema21Path} stroke="#38bdf8" strokeWidth="2" fill="none" strokeLinecap="round" />
-        {supertrendSegments.map((segment, index) => (
+        {showPriceLine ? <path d={closePath} stroke="#f2b233" strokeWidth="2.4" fill="none" strokeLinecap="round" /> : null}
+        {showVwap ? <path d={vwapPath} stroke="#a855f7" strokeWidth="1.8" fill="none" strokeDasharray="6 5" strokeLinecap="round" /> : null}
+        {showAverages ? <path d={ema9Path} stroke="#22c55e" strokeWidth="2" fill="none" strokeLinecap="round" /> : null}
+        {showAverages ? <path d={ema21Path} stroke="#38bdf8" strokeWidth="2" fill="none" strokeLinecap="round" /> : null}
+        {(showMacd || showRsi) ? (
+          <g pointerEvents="none">
+            <rect x={paddingX} y={indicatorTop} width={plotWidth} height={indicatorHeight} rx="8" fill="rgba(15,23,42,0.22)" />
+            {showMacd
+              ? macdHistogram.map((value, index) => {
+                  const x = toX(index);
+                  const barHeight = Math.max(1, (Math.abs(value) / macdMax) * (indicatorHeight / 2 - 3));
+                  const isPositive = value >= 0;
+                  return (
+                    <rect
+                      key={`macd-${series[index]?.time || index}`}
+                      x={x - volumeBarWidth / 2}
+                      y={isPositive ? macdZeroY - barHeight : macdZeroY}
+                      width={volumeBarWidth}
+                      height={barHeight}
+                      fill={isPositive ? "rgba(16,185,129,0.55)" : "rgba(239,68,68,0.55)"}
+                      rx="1"
+                    />
+                  );
+                })
+              : null}
+            {showRsi ? (
+              <>
+                <line x1={paddingX} x2={width - paddingX} y1={indicatorTop + indicatorHeight * 0.3} y2={indicatorTop + indicatorHeight * 0.3} stroke="rgba(250,204,21,0.35)" strokeDasharray="3 4" />
+                <line x1={paddingX} x2={width - paddingX} y1={indicatorTop + indicatorHeight * 0.7} y2={indicatorTop + indicatorHeight * 0.7} stroke="rgba(250,204,21,0.35)" strokeDasharray="3 4" />
+                <path d={rsiPath} stroke="#f97316" strokeWidth="1.7" fill="none" strokeLinecap="round" />
+              </>
+            ) : null}
+            <text x={paddingX + 6} y={indicatorTop + 12} fill="#cbd5e1" fontSize="9" fontWeight="800">
+              {[showMacd ? "MACD" : "", showRsi ? "RSI" : ""].filter(Boolean).join(" / ")}
+            </text>
+          </g>
+        ) : null}
+        {showSupertrend ? supertrendSegments.map((segment, index) => (
           <path
             key={`supertrend-${segment.side}-${index}`}
             d={segment.path}
@@ -803,7 +961,7 @@ Volume: ${formatPrice(bar.volume, locale)}`}</title>
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-        ))}
+        )) : null}
 
         <line
           x1={paddingX}
@@ -927,7 +1085,7 @@ Volume: ${formatPrice(bar.volume, locale)}`}</title>
           );
         })}
 
-        {candleRows.map((bar, index) => {
+        {showVolume ? candleRows.map((bar, index) => {
           if (bar.sessionBoundary) return null;
           const x = toX(index);
           const barHeight = Math.max(1, (bar.volume / maxVolume) * volumeHeight);
@@ -943,7 +1101,7 @@ Volume: ${formatPrice(bar.volume, locale)}`}</title>
               rx="1"
             />
           );
-        })}
+        }) : null}
 
         {xTicks.map((index) => {
           const x = toX(index);
@@ -951,7 +1109,7 @@ Volume: ${formatPrice(bar.volume, locale)}`}</title>
             <g key={`x-tick-${index}`}>
               <line x1={x} x2={x} y1={plotBottom + 5} y2={plotBottom + 10} stroke="var(--snbr-chart-grid, rgba(98,120,151,0.28))" />
               <text x={x} y={height - 16} textAnchor="middle" fill="var(--snbr-chart-axis, #6b7a90)" fontSize="10">
-                {formatAxisTime(series[index]?.time, interval)}
+                {formatAxisTime(series[index]?.time, interval, locale)}
               </text>
             </g>
           );
@@ -1067,9 +1225,8 @@ Volume: ${formatPrice(bar.volume, locale)}`}</title>
       <div className="snbr-chart-meta">
         <span className="snbr-chip">Ticker: {currentTicker}</span>
         <span className="snbr-chip">{isEnglish ? "Current close" : "Fechamento atual"}: {formatPrice(derivedClose, locale)}</span>
-        <span className="snbr-chip">{isEnglish ? "Chart bias" : "Viés do gráfico"}: {localizeChartText(derivedTrendBias || "n/a", locale)}</span>
-        <span className="snbr-chip">{isEnglish ? "Chart signals" : "Sinais no gráfico"}: {markerRows.length}</span>
-        <span className="snbr-chip">{isEnglish ? "Visible bars" : "Barras visíveis"}: {effectiveWindowStart + 1}-{Math.min(effectiveWindowEnd, displaySeries.length)} {isEnglish ? "of" : "de"} {displaySeries.length}</span>
+        <span className="snbr-chip">{isEnglish ? "Chart bias" : "Bias do gráfico"}: {localizeChartText(derivedTrendBias || "n/a", locale)}</span>
+        <span className="snbr-chip">{isEnglish ? "Active chart items" : "Itens ativos no gráfico"}: {activeToolCount}</span>
         {sessionProfile?.note ? <span className="snbr-chip">{isEnglish ? sessionProfile.note.replace("Sessão: EUA com pré/after-hours quando o provider entrega", "Session: US pre/after-hours when provider delivers").replace("Sessão: B3 regular; provider público inicia perto de 10:00", "Session: regular B3; public provider starts near 10:00") : sessionProfile.note}</span> : null}
       </div>
     </div>

@@ -39,10 +39,10 @@ WATCHLIST_US_GLOBAL: Tuple[str, ...] = (
 # 🇧🇷 BDR
 WATCHLIST_BDR: Tuple[str, ...] = (
     "AAPL34",
-    "AMZO34",
+    "AMZN34",
     "BABA34",
     "BERK34",
-    "M1TA34",
+    "META34",
     "MELI34",
     "MSFT34",
     "NFLX34",

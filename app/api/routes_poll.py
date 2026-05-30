@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies import require_any_channel_access
 from app.models import User
-from app.services.poll_service import get_poll_history, get_weekly_poll, vote_poll
+from app.services.poll_service import get_poll_history, get_poll_report, get_weekly_poll, vote_poll
 
 router = APIRouter(
     prefix="/poll",
@@ -20,6 +20,14 @@ def poll_history(symbol: str, limit: int = 8):
     return {
         "symbol": symbol.upper(),
         "history": get_poll_history(symbol, limit=limit),
+    }
+
+
+@router.get("/{symbol}/report")
+def poll_report(symbol: str):
+    return {
+        "symbol": symbol.upper(),
+        "report": get_poll_report(symbol),
     }
 
 

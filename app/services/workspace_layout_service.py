@@ -8,6 +8,25 @@ from app.Frontend.layout import get_layout
 
 LAYOUT_STORE_PATH = Path("data/workspace_layouts.json")
 _lock = threading.RLock()
+DEFAULT_CHART_SETTINGS = {
+    "show_markers": True,
+    "show_zones": True,
+    "show_price_line": True,
+    "show_vwap": True,
+    "show_averages": True,
+    "show_macd": False,
+    "show_rsi": False,
+    "show_supertrend": True,
+    "show_volume": True,
+}
+
+
+def _normalize_chart_settings(chart_settings):
+    source = chart_settings if isinstance(chart_settings, dict) else {}
+    return {
+        key: bool(source.get(key, default_value))
+        for key, default_value in DEFAULT_CHART_SETTINGS.items()
+    }
 
 
 def _default_layout():
@@ -15,10 +34,7 @@ def _default_layout():
         "tabs": [tab["id"] for tab in get_layout()["tabs"]],
         "pinned_ticker": "PETR4",
         "opened_popouts": [],
-        "chart_settings": {
-            "show_markers": True,
-            "show_zones": True,
-        },
+        "chart_settings": dict(DEFAULT_CHART_SETTINGS),
         "updated_at": int(time.time()),
     }
 
@@ -50,13 +66,7 @@ def get_user_workspace_layout(user_id: int):
     layout.setdefault("tabs", _default_layout()["tabs"])
     layout.setdefault("pinned_ticker", "PETR4")
     layout.setdefault("opened_popouts", [])
-    chart_settings = layout.get("chart_settings")
-    if not isinstance(chart_settings, dict):
-        chart_settings = {}
-    layout["chart_settings"] = {
-        "show_markers": bool(chart_settings.get("show_markers", True)),
-        "show_zones": bool(chart_settings.get("show_zones", True)),
-    }
+    layout["chart_settings"] = _normalize_chart_settings(layout.get("chart_settings"))
     layout.setdefault("updated_at", int(time.time()))
     return layout
 
@@ -94,10 +104,7 @@ def save_user_workspace_layout(user_id: int, layout: dict):
 
     chart_settings = payload.get("chart_settings")
     if isinstance(chart_settings, dict):
-        safe_layout["chart_settings"] = {
-            "show_markers": bool(chart_settings.get("show_markers", True)),
-            "show_zones": bool(chart_settings.get("show_zones", True)),
-        }
+        safe_layout["chart_settings"] = _normalize_chart_settings(chart_settings)
 
     safe_layout["updated_at"] = int(time.time())
 

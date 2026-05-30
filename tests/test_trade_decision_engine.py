@@ -20,6 +20,8 @@ class TradeDecisionEngineTests(unittest.TestCase):
             "market_regime_state": "bull_trend",
             "above_vwap": True,
             "rel_volume": 1.8,
+            "price": 37.5,
+            "volume": 1_200_000,
             "trend_strength": 68,
             "score": 88,
         }
@@ -49,6 +51,8 @@ class TradeDecisionEngineTests(unittest.TestCase):
             "above_vwap": False,
             "change_pct": -2.4,
             "rel_volume": 1.6,
+            "price": 62.1,
+            "volume": 1_100_000,
             "trend_strength": 18,
             "score": 22,
         }
@@ -70,6 +74,8 @@ class TradeDecisionEngineTests(unittest.TestCase):
             "smart_money_state": "retail_noise",
             "above_vwap": False,
             "rel_volume": 1.25,
+            "price": 34.2,
+            "volume": 900_000,
             "trend_strength": 62,
         }
 
@@ -171,9 +177,12 @@ class TradeDecisionEngineTests(unittest.TestCase):
 
         decision = evaluate_trade_coherence(row, "BUY", bullish=68, bearish=45)
 
-        self.assertEqual(decision["risk_level"], "medio")
+        self.assertEqual(decision["final_action"], "NO_DECISION")
+        self.assertFalse(decision["decision_ready"])
+        self.assertEqual(decision["risk_level"], "alto")
+        self.assertIn("volume_missing_or_zero", decision["blocked_reasons"])
         self.assertIn("volume real ausente no provider publico", decision["risk"])
-        self.assertIn("provider publico nao trouxe volume confiavel", decision["trigger"])
+        self.assertIn("Sem decisão operacional", decision["trigger"])
         self.assertNotIn("breakout_without_volume", decision["blocked_reasons"])
 
     def test_blocks_short_against_smart_money_and_bull_regime(self):
@@ -198,16 +207,82 @@ class TradeDecisionEngineTests(unittest.TestCase):
         self.assertNotEqual(decision["final_action"], "SHORT")
         self.assertIn("short_in_bulltrend", decision["blocked_reasons"])
 
+    def test_blocks_entry_when_range_regime_is_not_confirmed(self):
+        row = {
+            "ticker": "ITUB4",
+            "market_regime_state": "range",
+            "chart_regime_state": "range",
+            "institutional_flow_state": "monitoring",
+            "smart_money_state": "monitoring",
+            "above_vwap": True,
+            "price": 31.2,
+            "volume": 1_000_000,
+            "rel_volume": 1.2,
+            "trend_strength": 22,
+            "score": 72,
+        }
+
+        decision = evaluate_trade_coherence(row, "BUY", bullish=68, bearish=45)
+
+        self.assertNotEqual(decision["final_action"], "BUY")
+        self.assertFalse(decision["decision_ready"])
+        self.assertIn("range_without_confirmation", decision["blocked_reasons"])
+
     def test_summarize_trade_decision_uses_top_row(self):
         rows = [
-            {"ticker": "PETR4", "score": 88, "trade_confidence": 72, "trade_action": "BUY"},
-            {"ticker": "VALE3", "score": 79, "trade_confidence": 65, "trade_action": "SHORT"},
+            {"ticker": "PETR4", "score": 88, "price": 37.5, "volume": 1_200_000, "signal": "BUY", "trade_confidence": 72, "trade_action": "BUY"},
+            {"ticker": "VALE3", "score": 79, "price": 62.1, "volume": 1_100_000, "signal": "SHORT", "trade_confidence": 65, "trade_action": "SHORT"},
         ]
 
         decision = summarize_trade_decision(rows)
 
         self.assertEqual(decision["ticker"], "PETR4")
         self.assertEqual(decision["trade_action"], "BUY")
+        self.assertTrue(decision["decision_ready"])
+
+    def test_incomplete_market_data_blocks_operational_trade(self):
+        decision = resolve_trade_action(
+            {
+                "ticker": "PETR4",
+                "score": 88,
+                "institutional_flow_score": 86,
+                "institutional_flow_state": "institutional_buying",
+                "smart_money_score": 84,
+                "smart_money_state": "smart_money_active",
+                "market_regime_state": "bull_trend",
+                "above_vwap": True,
+                "rel_volume": 1.8,
+                "price": 0,
+                "volume": 0,
+                "data_quality": "score_only",
+            }
+        )
+
+        self.assertEqual(decision["trade_action"], "NO_DECISION")
+        self.assertFalse(decision["decision_ready"])
+        self.assertIn("score_only_sem_preco_real", decision["blocked_reasons"])
+        self.assertIn("price_missing_or_zero", decision["blocked_reasons"])
+        self.assertIn("volume_missing_or_zero", decision["blocked_reasons"])
+
+    def test_conflicting_buy_score_and_short_action_blocks_summary(self):
+        decision = summarize_trade_decision(
+            [
+                {
+                    "ticker": "PETR4",
+                    "score": 88,
+                    "price": 37.5,
+                    "volume": 1_200_000,
+                    "signal": "BUY",
+                    "trade_action": "SHORT",
+                    "trade_confidence": 91,
+                }
+            ]
+        )
+
+        self.assertEqual(decision["trade_action"], "NO_DECISION")
+        self.assertFalse(decision["decision_ready"])
+        self.assertTrue(decision["conflict_detected"])
+        self.assertIn("score_buy_vs_final_short", decision["blocked_reasons"])
 
     def test_summarize_trade_decision_without_rows_stays_neutral(self):
         decision = summarize_trade_decision([])

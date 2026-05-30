@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.dependencies import require_any_channel_access
-from app.market.market_data_loader import get_price_snapshot
+from app.services.quote_service import get_cached_quote_payload
 
 router = APIRouter(dependencies=[Depends(require_any_channel_access("app", "web"))])
 
@@ -9,7 +9,7 @@ def ticker(symbol: str):
 
     symbol = symbol.upper().strip()
 
-    data = get_price_snapshot(symbol)
+    data = get_cached_quote_payload(symbol)
 
     if not data:
         raise HTTPException(

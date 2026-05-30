@@ -2,8 +2,10 @@
 # STOCKNEWSBR ENGINE V36 (INSTITUTIONAL ENGINE)
 # =====================================================
 
-import numpy as np
 import logging
+from typing import Dict
+
+import numpy as np
 
 try:
     from numba import njit
@@ -173,11 +175,11 @@ def build_matrices(pool):
 # ENGINE RUNNER
 # =====================================================
 
-def run_engine():
+def run_engine(pool: Dict[str, object] | None = None):
 
     try:
-
-        pool = get_market_pool()
+        if pool is None:
+            pool = get_market_pool()
 
         if not pool:
             return []

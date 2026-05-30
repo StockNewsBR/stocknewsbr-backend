@@ -5,6 +5,7 @@
 import importlib
 import logging
 import os
+import sys
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -25,7 +26,12 @@ from app.database_schema import ensure_runtime_schema
 from app.dependencies import require_internal_token
 from app.services.media_service import ensure_media_root
 from app.services.referrals import validate_referrals
-from app.system.system_metrics import increment_http_errors, increment_http_requests
+from app.system.system_metrics import (
+    increment_http_errors,
+    increment_http_requests,
+    provider_call_context,
+    record_http_endpoint_latency,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,6 +47,8 @@ ROUTER_SPECS = [
     ("app.api.routes_snapshot", "router"),
     ("app.api.routes_signals", "router"),
     ("app.api.routes_public_meta", "router"),
+    ("app.api.routes_public_market", "router"),
+    ("app.api.routes_public_market_live", "router"),
     ("app.api.routes_internal", "router"),
     ("app.api.api_market_routes", "router"),
     ("app.api.market_routes", "router"),
@@ -59,6 +67,7 @@ ROUTER_SPECS = [
     ("app.api.routes_sentiment", "router"),
     ("app.api.routes_social", "router"),
     ("app.api.routes_chat", "router"),
+    ("app.api.routes_news", "router"),
     ("app.api.routes_app_workspace", "router"),
     ("app.api.stripe_webhook", "router"),
     ("app.api.routes_ticker", "router"),
@@ -91,6 +100,11 @@ def _env_flag(name: str, default: bool) -> bool:
         return default
 
     return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _default_start_background_workers() -> bool:
+    """Keep local API/web snappy; production can opt in explicitly."""
+    return os.getenv("ENV", "development").strip().lower() == "production"
 
 
 def _cors_origins():
@@ -180,13 +194,30 @@ async def lifespan(app: FastAPI):
     del app
 
     global WORKERS_STARTED
+    snapshot_worker_started = False
+    quote_warmup_started = False
 
     STOP_EVENT.clear()
+    logger.info(
+        "Runtime bootstrap | python_executable=%s | python_version=%s",
+        sys.executable,
+        sys.version.replace("\n", " "),
+    )
+    if sys.version_info[:2] != (3, 11):
+        logger.warning(
+            "Runtime version mismatch | expected=3.11.x | current=%s.%s",
+            sys.version_info.major,
+            sys.version_info.minor,
+        )
     _create_tables_if_needed()
 
     with WORKERS_LOCK:
         if not WORKERS_STARTED:
-            if _env_flag("START_ENGINE_WORKER", True):
+            default_background_workers = _default_start_background_workers()
+            engine_worker_enabled = _env_flag("START_ENGINE_WORKER", default_background_workers)
+            snapshot_worker_enabled = _env_flag("START_SNAPSHOT_WORKER", False)
+
+            if engine_worker_enabled:
                 from worker import start_worker
 
                 started = _start_thread("stocknewsbr-engine-worker", start_worker, STOP_EVENT)
@@ -196,16 +227,24 @@ async def lifespan(app: FastAPI):
                 started = _start_thread("stocknewsbr-referral-worker", referral_worker, STOP_EVENT)
                 logger.info("Referral worker thread started=%s", started)
 
-            if _env_flag("START_SNAPSHOT_WORKER", False):
+            if _env_flag("START_QUOTE_WARMUP", True):
+                from app.system.quote_warmup import start_quote_warmup
+
+                quote_warmup_started = bool(start_quote_warmup())
+                logger.info("Quote warmup bootstrap requested | started=%s", quote_warmup_started)
+
+            if snapshot_worker_enabled and not engine_worker_enabled:
                 from app.system.snapshot_worker import start_snapshot_worker
 
-                start_snapshot_worker()
-                logger.info("Snapshot worker bootstrap requested")
+                snapshot_worker_started = bool(start_snapshot_worker())
+                logger.info("Snapshot worker bootstrap requested | started=%s", snapshot_worker_started)
+            elif snapshot_worker_enabled and engine_worker_enabled:
+                logger.info("Snapshot worker bootstrap skipped because engine worker is the active snapshot writer")
 
-            if _env_flag("START_AI_WORKER", True):
+            if _env_flag("START_AI_WORKER", default_background_workers):
                 from app.system.ai_worker import start_ai_worker
 
-                started = _start_thread("stocknewsbr-ai-worker", start_ai_worker)
+                started = _start_thread("stocknewsbr-ai-worker", start_ai_worker, STOP_EVENT)
                 logger.info("AI worker thread started=%s", started)
 
             WORKERS_STARTED = True
@@ -214,6 +253,20 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         STOP_EVENT.set()
+        if snapshot_worker_started:
+            try:
+                from app.system.snapshot_worker import stop_snapshot_worker
+
+                stop_snapshot_worker()
+            except Exception:
+                logger.exception("Snapshot worker shutdown failed")
+        if quote_warmup_started:
+            try:
+                from app.system.quote_warmup import stop_quote_warmup
+
+                stop_quote_warmup()
+            except Exception:
+                logger.exception("Quote warmup shutdown failed")
 
         with WORKERS_LOCK:
             WORKERS_STARTED = False
@@ -245,9 +298,11 @@ async def add_process_time_header(request: Request, call_next):
     start = time.perf_counter()
     request_id = uuid4().hex
     increment_http_requests()
+    response = None
 
     try:
-        response = await call_next(request)
+        with provider_call_context("http"):
+            response = await call_next(request)
     except Exception:
         logger.exception("Unhandled request error on %s", request.url.path)
         increment_http_errors()
@@ -261,6 +316,8 @@ async def add_process_time_header(request: Request, call_next):
         )
         response.headers["X-Process-Time-Ms"] = f"{duration_ms:.2f}"
         response.headers["X-Request-Id"] = request_id
+        route = getattr(request.scope.get("route"), "path", None) or request.url.path
+        record_http_endpoint_latency(route, request.method, response.status_code, duration_ms / 1000)
         return response
 
     duration_ms = (time.perf_counter() - start) * 1000
@@ -269,6 +326,9 @@ async def add_process_time_header(request: Request, call_next):
 
     if response.status_code >= 500:
         increment_http_errors()
+
+    route = getattr(request.scope.get("route"), "path", None) or request.url.path
+    record_http_endpoint_latency(route, request.method, response.status_code, duration_ms / 1000)
 
     return response
 

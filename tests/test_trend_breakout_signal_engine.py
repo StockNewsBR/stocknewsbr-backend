@@ -212,6 +212,102 @@ class TrendBreakoutSignalEngineTests(unittest.TestCase):
         if payload["events"]:
             self.assertNotEqual(payload["events"][-1]["reason"], "protect_profit")
 
+    def test_short_exits_when_resistance_break_invalidates_trade(self):
+        rows = _make_rows(
+            "down",
+            start=100.0,
+            step=0.035,
+            base_volume=1200,
+            breakout_volume=3000,
+            breakout_body=0.28,
+            bars=62,
+            breakout_index=35,
+        )[:38]
+        close = rows[-1]["close"]
+        for jump in [0.8, 1.0, 1.2]:
+            close += jump
+            index = len(rows)
+            rows.append(
+                {
+                    "time": f"t{index:03d}",
+                    "open": round(close - jump * 0.65, 4),
+                    "high": round(close + jump * 0.2, 4),
+                    "low": round(close - jump * 0.75, 4),
+                    "close": round(close, 4),
+                    "volume": 3000.0,
+                }
+            )
+
+        payload = build_trend_breakout_payload("TSLA", rows, timeframe="5m")
+        cover_events = [event for event in payload["events"] if event["type"] == "COVER"]
+
+        self.assertTrue(cover_events)
+        self.assertEqual(cover_events[0]["reason"], "resistance_break")
+
+    def test_short_exits_on_structural_resistance_break_with_muted_volume(self):
+        rows = _make_rows(
+            "down",
+            start=100.0,
+            step=0.035,
+            base_volume=1200,
+            breakout_volume=3000,
+            breakout_body=0.28,
+            bars=62,
+            breakout_index=35,
+        )[:38]
+        close = rows[-1]["close"]
+        for jump in [0.55, 0.65, 0.75]:
+            close += jump
+            index = len(rows)
+            rows.append(
+                {
+                    "time": f"t{index:03d}",
+                    "open": round(close - jump * 0.55, 4),
+                    "high": round(close + jump * 0.16, 4),
+                    "low": round(close - jump * 0.65, 4),
+                    "close": round(close, 4),
+                    "volume": 650.0,
+                }
+            )
+
+        payload = build_trend_breakout_payload("TSLA", rows, timeframe="5m")
+        cover_events = [event for event in payload["events"] if event["type"] == "COVER"]
+
+        self.assertTrue(cover_events)
+        self.assertEqual(cover_events[0]["reason"], "resistance_break")
+
+    def test_long_exits_on_structural_support_break_with_muted_volume(self):
+        rows = _make_rows(
+            "up",
+            start=50.0,
+            step=0.035,
+            base_volume=1200,
+            breakout_volume=3000,
+            breakout_body=0.28,
+            bars=62,
+            breakout_index=35,
+        )[:38]
+        close = rows[-1]["close"]
+        for drop in [0.55, 0.65, 0.75]:
+            close -= drop
+            index = len(rows)
+            rows.append(
+                {
+                    "time": f"t{index:03d}",
+                    "open": round(close + drop * 0.55, 4),
+                    "high": round(close + drop * 0.65, 4),
+                    "low": round(close - drop * 0.16, 4),
+                    "close": round(close, 4),
+                    "volume": 650.0,
+                }
+            )
+
+        payload = build_trend_breakout_payload("PETR4", rows, timeframe="5m")
+        sell_events = [event for event in payload["events"] if event["type"] == "SELL"]
+
+        self.assertTrue(sell_events)
+        self.assertEqual(sell_events[0]["reason"], "support_break")
+
     def test_bearish_ai_context_blocks_long_entry(self):
         payload = build_trend_breakout_payload(
             "PETR4",
