@@ -131,7 +131,9 @@ try {
     assert(!text.includes(term), `USA nao deve mostrar texto PT no shell: ${term}`);
   }
 
-  await page.getByRole("button", { name: /Pro Mode|Modo Pro/i }).click();
+  if ((await page.getByRole("tab", { name: /Heat Map|Mapa de Calor/i }).count()) === 0) {
+    await page.getByRole("button", { name: /Pro Mode|Modo Pro/i }).click();
+  }
   await page.waitForTimeout(400);
   await page.getByRole("tab", { name: /Heat Map/i }).click();
   await page.waitForTimeout(700);
@@ -180,6 +182,10 @@ try {
   await page.waitForTimeout(900);
   text = await pageText(page);
   assert(text.includes("PETR4"), "troca de ticker via UI deve carregar PETR4");
+  if ((await page.getByRole("tab", { name: /Mapa de Calor|Heat Map/i }).count()) === 0) {
+    await page.getByRole("button", { name: /Modo Pro|Pro Mode/i }).click();
+    await page.waitForTimeout(700);
+  }
 
   const tabTexts = new Map();
   for (const tab of aiTabs) {

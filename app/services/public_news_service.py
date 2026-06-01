@@ -7,6 +7,7 @@ from app.services.news_service import (
     get_news_cached_report,
     get_symbol_news,
 )
+from app.system.news_warmup import request_news_warmup
 
 _SYMBOL_NEWS_ALIASES = {
     "F": ("ford", "ford motor", "ford motor company"),
@@ -147,6 +148,8 @@ def build_public_news_payload(symbol: str, limit: int = 6, source: str | None = 
     items = _dedupe_news_items(scoped_items, safe_limit)
     report = get_news_cached_report(ticker, items)
     cache = get_news_cache_info(ticker)
+    if not allow_fetch and not items:
+        request_news_warmup(ticker, safe_limit)
     state = _build_news_state(ticker, items, cache, report)
     payload = {
         "symbol": ticker,

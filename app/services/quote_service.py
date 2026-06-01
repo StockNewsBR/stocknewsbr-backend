@@ -87,6 +87,15 @@ def _payload_from_row(display_symbol: str, row: dict[str, Any], source: str) -> 
         return None
 
     status = classify_quote_payload(row)
+    timestamp = (
+        row.get("market_data_updated_at")
+        or row.get("quote_time")
+        or row.get("provider_timestamp")
+        or row.get("timestamp")
+        or row.get("updated_at")
+        or row.get("last_seen_at")
+        or row.get("created_at")
+    )
     return {
         "symbol": display_symbol,
         "price": row.get("price"),
@@ -106,6 +115,9 @@ def _payload_from_row(display_symbol: str, row: dict[str, Any], source: str) -> 
         "reference_proxy_for": row.get("reference_proxy_for"),
         "exact_contract": row.get("exact_contract"),
         "stale": status == "stale" or bool(row.get("stale")),
+        "market_data_updated_at": timestamp,
+        "quote_time": timestamp,
+        "provider_timestamp": timestamp,
     }
 
 

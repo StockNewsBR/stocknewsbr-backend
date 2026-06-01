@@ -23,10 +23,19 @@ WATCHLIST_B3: Tuple[str, ...] = (
 
 # 🌎 US GLOBAL (US Stocks)
 WATCHLIST_US_GLOBAL: Tuple[str, ...] = (
+    "F",
+    "AAL",
     "AAPL",
+    "AMD",
     "AMZN",
+    "BA",
+    "BAC",
+    "GOOGL",
+    "GS",
+    "INTC",
     "BABA",
     "BRK-B",
+    "JPM",
     "META",
     "MELI",
     "MSFT",
@@ -34,14 +43,19 @@ WATCHLIST_US_GLOBAL: Tuple[str, ...] = (
     "NVDA",
     "PFE",
     "PYPL",
+    "QCOM",
     "TSLA",
+    "TSM",
+    "XOM",
 )
 # 🇧🇷 BDR
 WATCHLIST_BDR: Tuple[str, ...] = (
     "AAPL34",
     "AMZN34",
+    "AMD34",
     "BABA34",
     "BERK34",
+    "INTC34",
     "META34",
     "MELI34",
     "MSFT34",
@@ -49,6 +63,7 @@ WATCHLIST_BDR: Tuple[str, ...] = (
     "NVDC34",
     "PFIZ34",
     "PYPL34",
+    "QCOM34",
     "TSLA34",
 )
 

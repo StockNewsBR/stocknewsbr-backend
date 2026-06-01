@@ -24,8 +24,9 @@ from app.system.system_metrics import (
 logger = logging.getLogger("stocknewsbr.market_data_loader")
 _YFINANCE = None
 _PRICE_CACHE_TTL_SECONDS = 15 * 60
-_CHART_CACHE_TTL_SECONDS = 300
+_CHART_CACHE_TTL_SECONDS = int(os.getenv("CHART_CACHE_TTL_SECONDS", "1800"))
 _PRICE_CACHE_FILE = Path("runtime/cache/market_quotes.json")
+_CHART_CACHE_FILE = Path("runtime/cache/market_charts.json")
 _PRICE_SNAPSHOT_CACHE = {}
 _CHART_DATA_CACHE = {}
 _SYMBOL_FAILURES = {}
@@ -33,6 +34,8 @@ _PRICE_SNAPSHOT_CACHE_LOCK = RLock()
 _PRICE_CACHE_LOADED = False
 _PRICE_CACHE_MTIME = 0.0
 _PRICE_CACHE_INCLUDE_STALE = False
+_CHART_CACHE_LOADED = False
+_CHART_CACHE_MTIME = 0.0
 _SYMBOL_FAILURE_COOLDOWN_SECONDS = 180
 _PERMANENT_PROVIDER_BLOCKLIST = {
     "BRFS3",
@@ -503,12 +506,76 @@ def _persist_price_cache():
         logger.warning("Failed to persist market quote cache: %s", exc)
 
 
+def _load_chart_cache_once():
+    global _CHART_CACHE_LOADED, _CHART_CACHE_MTIME
+    try:
+        if not _CHART_CACHE_FILE.exists():
+            return
+        file_mtime = _CHART_CACHE_FILE.stat().st_mtime
+        with _PRICE_SNAPSHOT_CACHE_LOCK:
+            if _CHART_CACHE_LOADED and file_mtime <= float(_CHART_CACHE_MTIME or 0):
+                return
+
+        payload = json.loads(_CHART_CACHE_FILE.read_text(encoding="utf-8"))
+        charts = payload.get("charts", payload) if isinstance(payload, dict) else {}
+        if not isinstance(charts, dict):
+            charts = {}
+
+        normalized = {}
+        for key, value in charts.items():
+            if not isinstance(key, str) or not isinstance(value, dict):
+                continue
+            rows = value.get("rows")
+            timestamp = value.get("timestamp")
+            if not isinstance(rows, list):
+                continue
+            try:
+                parsed_timestamp = float(timestamp or 0)
+            except (TypeError, ValueError):
+                parsed_timestamp = 0.0
+            normalized[key] = {
+                "timestamp": parsed_timestamp,
+                "rows": [dict(row) for row in rows if isinstance(row, dict)],
+            }
+
+        with _PRICE_SNAPSHOT_CACHE_LOCK:
+            _CHART_DATA_CACHE.clear()
+            _CHART_DATA_CACHE.update(normalized)
+            _CHART_CACHE_LOADED = True
+            _CHART_CACHE_MTIME = file_mtime
+    except Exception as exc:
+        logger.warning("Failed to load market chart cache: %s", exc)
+
+
+def _persist_chart_cache():
+    global _CHART_CACHE_MTIME
+    try:
+        _CHART_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with _PRICE_SNAPSHOT_CACHE_LOCK:
+            payload = {"charts": dict(_CHART_DATA_CACHE)}
+        tmp = _CHART_CACHE_FILE.with_name(
+            f"{_CHART_CACHE_FILE.stem}.{os.getpid()}.{get_ident()}.tmp"
+        )
+        tmp.write_text(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        os.replace(tmp, _CHART_CACHE_FILE)
+        try:
+            _CHART_CACHE_MTIME = _CHART_CACHE_FILE.stat().st_mtime
+        except Exception:
+            pass
+    except Exception as exc:
+        logger.warning("Failed to persist market chart cache: %s", exc)
+
+
 def _chart_cache_key(symbol: str, interval: str) -> str:
     return f"{_cache_key(symbol)}:{str(interval or '1D').upper()}"
 
 
 def get_cached_chart_data(symbol: str, interval: str = "1D"):
     start = time.perf_counter()
+    _load_chart_cache_once()
     with _PRICE_SNAPSHOT_CACHE_LOCK:
         cached = _CHART_DATA_CACHE.get(_chart_cache_key(symbol, interval))
     if not cached:
@@ -534,6 +601,7 @@ def _cache_chart_data(symbol: str, interval: str, rows: list):
             "timestamp": time.time(),
             "rows": [dict(row) for row in rows],
         }
+    _persist_chart_cache()
     return rows
 
 

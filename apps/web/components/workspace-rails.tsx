@@ -132,7 +132,7 @@ export function WorkspaceLeftRail({
             placeholder={isEnglish ? "Search asset, like F, AAPL, PETR4 or BTCUSD" : "Buscar ativo, como PETR4, F, AAPL ou BTCUSD"}
           />
           <p className="snbr-assistive-copy">
-            {isEnglish ? "Search opens the asset on screen. Add puts it in your active list. Nothing is added by itself." : "Buscar abre o ativo na tela. Adicionar coloca o ativo na sua lista ativa. Nada entra sozinho."}
+            {isEnglish ? "Search opens the asset on screen. Add puts it in your active list." : "Buscar abre o ativo na tela. Adicionar coloca o ativo na sua lista ativa."}
           </p>
           <div className="snbr-watch-actions">
             <button className="snbr-button primary" onClick={onApplyTicker} type="button" aria-label={isEnglish ? "Open asset on screen" : "Abrir ativo na tela"}>

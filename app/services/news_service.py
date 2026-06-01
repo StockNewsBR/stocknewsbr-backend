@@ -421,17 +421,42 @@ def _contains_any(text: str, keywords: set[str]) -> bool:
     return False
 
 
+def _nested_value(raw_item: dict[str, Any], *path: str) -> Any:
+    current: Any = raw_item
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
 def _parse_published_at(raw_item: dict[str, Any]) -> datetime | None:
-    for key in ("providerPublishTime", "published_at", "pubDate", "publishedAt"):
-        value = raw_item.get(key)
+    values = [
+        raw_item.get("providerPublishTime"),
+        raw_item.get("published_at"),
+        raw_item.get("pubDate"),
+        raw_item.get("publishedAt"),
+        raw_item.get("displayTime"),
+        _nested_value(raw_item, "content", "providerPublishTime"),
+        _nested_value(raw_item, "content", "pubDate"),
+        _nested_value(raw_item, "content", "publishedAt"),
+        _nested_value(raw_item, "content", "displayTime"),
+    ]
+    for value in values:
         if not value:
             continue
         try:
             if isinstance(value, (int, float)):
-                return datetime.fromtimestamp(float(value), tz=timezone.utc)
+                timestamp = float(value)
+                if timestamp > 1_000_000_000_000:
+                    timestamp = timestamp / 1000.0
+                return datetime.fromtimestamp(timestamp, tz=timezone.utc)
             if isinstance(value, str):
                 if value.isdigit():
-                    return datetime.fromtimestamp(float(value), tz=timezone.utc)
+                    timestamp = float(value)
+                    if timestamp > 1_000_000_000_000:
+                        timestamp = timestamp / 1000.0
+                    return datetime.fromtimestamp(timestamp, tz=timezone.utc)
                 parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
                 return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
         except Exception:
@@ -479,12 +504,36 @@ def _extract_source(raw_item: dict[str, Any]) -> str:
         value = raw_item.get(key)
         if isinstance(value, str) and value.strip():
             return _clean_whitespace(value)
+        if isinstance(value, dict):
+            nested = value.get("displayName") or value.get("name")
+            if isinstance(nested, str) and nested.strip():
+                return _clean_whitespace(nested)
+    for value in (
+        _nested_value(raw_item, "content", "provider", "displayName"),
+        _nested_value(raw_item, "content", "provider", "name"),
+        _nested_value(raw_item, "content", "publisher"),
+        _nested_value(raw_item, "content", "source"),
+    ):
+        if isinstance(value, str) and value.strip():
+            return _clean_whitespace(value)
     return "Yahoo Finance"
 
 
 def _extract_url(raw_item: dict[str, Any]) -> str | None:
-    for key in ("link", "url", "canonicalUrl"):
+    for key in ("link", "url", "canonicalUrl", "clickThroughUrl"):
         value = raw_item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            nested = value.get("url")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    for value in (
+        _nested_value(raw_item, "content", "canonicalUrl", "url"),
+        _nested_value(raw_item, "content", "clickThroughUrl", "url"),
+        _nested_value(raw_item, "content", "url"),
+        _nested_value(raw_item, "content", "link"),
+    ):
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
@@ -797,27 +846,75 @@ def _build_trader_takeaway(
 ) -> str:
     text = _safe_lower(f"{title} {summary} {' '.join(labels)}")
     label_set = {str(label).lower() for label in labels}
+    seed = sum(ord(char) for char in f"{ticker}|{title}|{summary}") % 3
+    def pick(options: list[str]) -> str:
+        return _shorten(options[seed % len(options)], 190)
+
     if ambiguity_score >= 45:
-        return _shorten(f"Para trader: trate a notícia de {ticker} como contexto, não como gatilho isolado, até o preço confirmar direção.", 190)
+        return pick([
+            f"Para trader: trate a notícia de {ticker} como contexto, não como gatilho isolado, até o preço confirmar direção.",
+            f"Para trader: leitura ambígua em {ticker}; espere reação de preço e volume antes de agir.",
+            f"Para trader: use a manchete como alerta em {ticker}, mas só opere com confirmação no gráfico.",
+        ])
     if "M&A" in labels or "m&a" in label_set or "merger" in text or "acquisition" in text or "fusão" in text or "aquis" in text:
-        return _shorten(f"Para trader: evento de fusões e aquisições em {ticker} pode gerar reprecificação; espere preço, spread e volume confirmarem.", 190)
+        return pick([
+            f"Para trader: evento de fusões e aquisições em {ticker} pode gerar reprecificação; espere preço, spread e volume confirmarem.",
+            f"Para trader: M&A pode criar prêmio em {ticker}, mas o timing depende de VWAP, volume e reação do mercado.",
+            f"Para trader: notícia corporativa em {ticker} só vira operação se houver fluxo real confirmando o lado.",
+        ])
     if "dividend" in text or "dividendo" in text or "yield" in text:
-        return _shorten(f"Para trader: não compre {ticker} só pelo dividendo; valide caixa, tendência e reação de volume antes da entrada.", 190)
+        return pick([
+            f"Para trader: não compre {ticker} só pelo dividendo; valide caixa, tendência e reação de volume antes da entrada.",
+            f"Para trader: yield em {ticker} é contexto de renda; entrada exige preço sustentando suporte e fluxo.",
+            f"Para trader: dividendo pode atrair comprador em {ticker}, mas volume fraco mantém a leitura só como alerta.",
+        ])
     if "battery" in text or "bateria" in text or " ev" in text or "electric vehicle" in text or "veículo elétrico" in text:
-        return _shorten(f"Para trader: tema de EV/baterias muda expectativa em {ticker}; deixe a reação do preço confirmar o timing.", 190)
+        return pick([
+            f"Para trader: tema de EV/baterias muda expectativa em {ticker}; deixe a reação do preço confirmar o timing.",
+            f"Para trader: notícia estratégica em {ticker} precisa virar fluxo comprador antes de justificar entrada.",
+            f"Para trader: EV pode mexer em margem e crescimento de {ticker}; opere só após rompimento ou defesa clara.",
+        ])
     if "mover" in text or "destaque" in text:
-        return _shorten(f"Para trader: lista de destaques é filtro relativo; opere {ticker} só se força e volume confirmarem no gráfico.", 190)
+        return pick([
+            f"Para trader: lista de destaques é filtro relativo; opere {ticker} só se força e volume confirmarem no gráfico.",
+            f"Para trader: destaque de mercado não é entrada; compare {ticker} com o setor e espere gatilho real.",
+            f"Para trader: use o mover como triagem em {ticker}; execução depende de tendência e liquidez.",
+        ])
     if "resultado" in labels or "guidance" in labels or "earnings" in text:
-        return _shorten(f"Para trader: monitore reação de preço e volume em {ticker} porque a leitura pode virar tendência intraday.", 190)
+        return pick([
+            f"Para trader: monitore reação de preço e volume em {ticker} porque a leitura pode virar tendência intraday.",
+            f"Para trader: resultado/guidance em {ticker} exige confirmação em margem, fluxo e direção do candle.",
+            f"Para trader: separe manchete de execução em {ticker}; o preço precisa validar a leitura.",
+        ])
     if "regulação" in labels or "regulation" in text or "regulatory" in text:
-        return _shorten(f"Para trader: notícia regulatória pode aumentar volatilidade em {ticker}; reduza tamanho até confirmar direção.", 190)
+        return pick([
+            f"Para trader: notícia regulatória pode aumentar volatilidade em {ticker}; reduza tamanho até confirmar direção.",
+            f"Para trader: regulação muda risco percebido em {ticker}; espere o mercado mostrar o lado dominante.",
+            f"Para trader: trate regulação em {ticker} como evento de risco; proteja tamanho e valide suporte/resistência.",
+        ])
     if "macro" in labels and not direct_match:
-        return _shorten(f"Para trader: leia primeiro o impacto no índice/setor e só depois a transmissão para {ticker}.", 190)
+        return pick([
+            f"Para trader: leia primeiro o impacto no índice/setor e só depois a transmissão para {ticker}.",
+            f"Para trader: macro afeta {ticker} por apetite a risco; só aja se o papel confirmar fluxo próprio.",
+            f"Para trader: contexto macro em {ticker} pede cautela; use preço e volume como filtro final.",
+        ])
     if impact == "bullish":
-        return _shorten(f"Para trader: priorize continuação compradora só se {ticker} sustentar fluxo e não devolver o rompimento.", 190)
+        return pick([
+            f"Para trader: priorize continuação compradora só se {ticker} sustentar fluxo e não devolver o rompimento.",
+            f"Para trader: viés positivo em {ticker} exige compradores defendendo VWAP e volume acompanhando.",
+            f"Para trader: a leitura favorece alta em {ticker}, mas entrada só com suporte defendido ou rompimento limpo.",
+        ])
     if impact == "bearish":
-        return _shorten(f"Para trader: priorize proteção ou venda só se {ticker} confirmar fraqueza e perder suporte com volume.", 190)
-    return _shorten(f"Para trader: use a manchete como leitura complementar e espere confirmação do mercado em {ticker}.", 190)
+        return pick([
+            f"Para trader: priorize proteção ou venda só se {ticker} confirmar fraqueza e perder suporte com volume.",
+            f"Para trader: viés negativo em {ticker} pede defesa; short só com rejeição ou perda de suporte.",
+            f"Para trader: evite compra impulsiva em {ticker}; aguarde preço recuperar estrutura antes de virar o lado.",
+        ])
+    return pick([
+        f"Para trader: use a manchete como leitura complementar e espere confirmação do mercado em {ticker}.",
+        f"Para trader: mantenha {ticker} em observação; a notícia precisa aparecer no fluxo antes de virar trade.",
+        f"Para trader: contexto novo em {ticker}; confirme no gráfico antes de comprar, vender ou encerrar.",
+    ])
 
 
 def _market_context(ticker: str, labels: list[str], sector: str, industry: str) -> str:
@@ -989,7 +1086,8 @@ def _normalize_raw_item(raw_item: dict[str, Any], ticker: str) -> dict[str, Any]
         "source_domain": _extract_domain(url),
         "url": url,
         "published_at": _to_iso(published_at),
-        "detected_at": _to_iso(published_at or detected_at),
+        "detected_at": _to_iso(detected_at),
+        "source_published_at": bool(published_at),
         "sector": sector,
         "industry": industry,
         "labels": labels,
@@ -1332,8 +1430,6 @@ def get_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
         attempted_candidates = _news_ticker_candidates(normalized_ticker)
         for candidate in attempted_candidates:
             raw_items = _fetch_yfinance_news(candidate)
-            if not raw_items:
-                raw_items = _fetch_yfinance_news(candidate)
             if raw_items:
                 fetched_from = candidate
                 if candidate != normalized_ticker:

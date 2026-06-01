@@ -18,6 +18,7 @@ from app.services.ai_alert_history_service import AI_TOOL_KEYS, persist_ai_alert
 from app.services.legal_service import get_public_bootstrap
 from app.services.poll_service import generate_weekly_polls_for_top_symbols
 from app.system.ai_tab_audit import run_ai_tab_audit
+from app.system.news_warmup import warm_news_once
 from app.system.system_metrics import get_metrics_snapshot, provider_call_context, record_worker_stage_duration
 
 logger = logging.getLogger("stocknewsbr.ai_worker")
@@ -371,6 +372,13 @@ def _refresh_ai_tools_for_cycle(
     }
 
 
+def _prewarm_public_news() -> None:
+    try:
+        warm_news_once()
+    except Exception as exc:
+        logger.warning("AI worker news prewarm failed: %s", exc)
+
+
 def run_ai_worker_cycle() -> Dict[str, Any]:
     report: Dict[str, Any] = {
         "worker": "ai_worker",
@@ -389,6 +397,7 @@ def run_ai_worker_cycle() -> Dict[str, Any]:
     signals = get_all_signals()
     signal_info = get_signal_info()
     snapshot_info = get_snapshot_info()
+    _prewarm_public_news()
     metrics = get_metrics_snapshot()
     import_health = _import_health()
     self_heal = _snapshot_self_heal(signals, snapshot_info)

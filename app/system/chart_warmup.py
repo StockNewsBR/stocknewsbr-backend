@@ -1,0 +1,166 @@
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import time
+from pathlib import Path
+from threading import RLock
+from typing import Iterable
+
+from app.market.market_data_loader import get_cached_chart_data, get_chart_data
+from app.system.system_metrics import provider_call_context, record_worker_stage_duration
+from app.watchlists.watchlist_default import (
+    WATCHLIST_B3,
+    WATCHLIST_BDR,
+    WATCHLIST_CRYPTO,
+    WATCHLIST_US_GLOBAL,
+)
+
+logger = logging.getLogger("stocknewsbr.chart_warmup")
+
+REQUEST_PATH = Path(os.getenv("CHART_WARMUP_REQUEST_FILE", "runtime/cache/chart_warmup_requests.json"))
+DEFAULT_INTERVALS = tuple(
+    item.strip().upper()
+    for item in os.getenv("CHART_PREWARM_INTERVALS", "1D,1W,1M,3M,6M,YTD,1Y,ALL").split(",")
+    if item.strip()
+)
+_REQUEST_LOCK = RLock()
+_B3_MINI_FUTURE_RE = re.compile(r"^(WIN|WDO)[FGHJKMNQUVXZ]\d{2}$")
+
+
+def _normalize_symbol(value: object) -> str:
+    return str(value or "").upper().strip().replace(".SA", "")
+
+
+def _normalize_interval(value: object) -> str:
+    normalized = str(value or "1D").upper().strip()
+    return "ALL" if normalized == "ALL" else normalized
+
+
+def _is_blocked_chart_symbol(symbol: str) -> bool:
+    compact = _normalize_symbol(symbol)
+    return bool(_B3_MINI_FUTURE_RE.match(compact))
+
+
+def _read_requests() -> dict[str, dict]:
+    try:
+        if not REQUEST_PATH.exists():
+            return {}
+        payload = json.loads(REQUEST_PATH.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return {}
+        requests = payload.get("requests", payload)
+        return requests if isinstance(requests, dict) else {}
+    except Exception:
+        logger.exception("Failed to read chart warmup requests")
+        return {}
+
+
+def _write_requests(requests: dict[str, dict]) -> None:
+    try:
+        REQUEST_PATH.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = REQUEST_PATH.with_suffix(".tmp")
+        temp_path.write_text(json.dumps({"requests": requests}, ensure_ascii=False), encoding="utf-8")
+        temp_path.replace(REQUEST_PATH)
+    except Exception:
+        logger.exception("Failed to write chart warmup requests")
+
+
+def request_chart_warmup(symbol: str, interval: str = "1D") -> None:
+    ticker = _normalize_symbol(symbol)
+    chart_interval = _normalize_interval(interval)
+    if not ticker or _is_blocked_chart_symbol(ticker):
+        return
+
+    key = f"{ticker}:{chart_interval}"
+    now = time.time()
+    with _REQUEST_LOCK:
+        requests = _read_requests()
+        current = dict(requests.get(key) or {})
+        current.update(
+            {
+                "symbol": ticker,
+                "interval": chart_interval,
+                "requested_at": now,
+                "count": int(current.get("count") or 0) + 1,
+            }
+        )
+        requests[key] = current
+        _write_requests(requests)
+
+
+def _default_symbols(limit: int) -> list[str]:
+    symbols: list[str] = []
+    for group in (WATCHLIST_B3, WATCHLIST_BDR, WATCHLIST_US_GLOBAL, WATCHLIST_CRYPTO):
+        for symbol in group:
+            normalized = _normalize_symbol(symbol)
+            if normalized and normalized not in symbols:
+                symbols.append(normalized)
+            if len(symbols) >= limit:
+                return symbols
+    return symbols
+
+
+def _requested_pairs() -> list[tuple[str, str]]:
+    with _REQUEST_LOCK:
+        requests = _read_requests()
+    rows = []
+    for item in requests.values():
+        symbol = _normalize_symbol(item.get("symbol"))
+        interval = _normalize_interval(item.get("interval"))
+        if not symbol or _is_blocked_chart_symbol(symbol):
+            continue
+        rows.append((float(item.get("requested_at") or 0.0), int(item.get("count") or 0), symbol, interval))
+    rows.sort(key=lambda row: (row[0], row[1]), reverse=True)
+    return [(symbol, interval) for _, _, symbol, interval in rows]
+
+
+def _drop_warmed_requests(pairs: Iterable[tuple[str, str]]) -> None:
+    pair_keys = {f"{_normalize_symbol(symbol)}:{_normalize_interval(interval)}" for symbol, interval in pairs}
+    if not pair_keys:
+        return
+    with _REQUEST_LOCK:
+        requests = _read_requests()
+        next_requests = {key: value for key, value in requests.items() if key not in pair_keys}
+        if len(next_requests) != len(requests):
+            _write_requests(next_requests)
+
+
+def warm_charts_once(limit: int = 24, max_calls: int = 12, intervals: Iterable[str] | None = None) -> dict[str, int]:
+    requested_pairs = _requested_pairs()
+    configured_intervals = tuple(_normalize_interval(item) for item in (intervals or DEFAULT_INTERVALS)) or ("1D",)
+    pairs: list[tuple[str, str]] = []
+
+    for pair in requested_pairs:
+        if pair not in pairs:
+            pairs.append(pair)
+
+    for symbol in _default_symbols(limit):
+        for interval in configured_intervals:
+            pair = (symbol, interval)
+            if pair not in pairs:
+                pairs.append(pair)
+
+    warmed: list[tuple[str, str]] = []
+    attempted = 0
+    skipped = 0
+    start = time.perf_counter()
+
+    with provider_call_context("worker"):
+        for symbol, interval in pairs:
+            if attempted >= max_calls:
+                break
+            if get_cached_chart_data(symbol, interval):
+                skipped += 1
+                warmed.append((symbol, interval))
+                continue
+            attempted += 1
+            rows = get_chart_data(symbol, interval)
+            if rows:
+                warmed.append((symbol, interval))
+
+    _drop_warmed_requests(warmed)
+    record_worker_stage_duration("chart_warmup", time.perf_counter() - start, success=True)
+    return {"requested": len(requested_pairs), "attempted": attempted, "warmed": len(warmed), "skipped": skipped}

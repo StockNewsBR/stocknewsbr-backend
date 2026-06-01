@@ -88,20 +88,21 @@ function truncateText(value: unknown, maxLength = 74) {
 function markerActionLabel(marker: ChartMarker, locale: "pt-BR" | "en-US" = "pt-BR") {
   const explicit = String(marker.action_label || marker.label || "").trim();
   if (explicit) {
-    const normalized = explicit.toUpperCase();
-    if (normalized === "BUY") return "Buy Long";
+    const normalized = explicit.toUpperCase().replace(/\s+/g, " ");
+    if (normalized === "BUY" || normalized === "BUY LONG") return locale === "en-US" ? "Buy Long" : "Comprar";
     if (normalized === "SELL" || normalized === "CLOSE LONG") return locale === "en-US" ? "Close Long" : "Encerrar long";
-    if (normalized === "SHORT") return "Sell Short";
+    if (normalized === "SHORT" || normalized === "SELL SHORT") return locale === "en-US" ? "Sell Short" : "Short";
     if (normalized === "COVER" || normalized === "CLOSE SHORT") return locale === "en-US" ? "Close Short" : "Encerrar short";
-    return explicit;
+    if (normalized === "WATCH") return locale === "en-US" ? "Watch" : "Aguardar";
+    return localizeChartText(explicit, locale);
   }
 
   const type = String(marker.type || "").toUpperCase();
-  if (type === "BUY") return "Buy Long";
+  if (type === "BUY") return locale === "en-US" ? "Buy Long" : "Comprar";
   if (type === "SELL") return locale === "en-US" ? "Close Long" : "Encerrar long";
-  if (type === "SHORT") return "Sell Short";
+  if (type === "SHORT") return locale === "en-US" ? "Sell Short" : "Short";
   if (type === "COVER") return locale === "en-US" ? "Close Short" : "Encerrar short";
-  return "Watch";
+  return locale === "en-US" ? "Watch" : "Aguardar";
 }
 
 function localizeChartText(value: unknown, locale: "pt-BR" | "en-US") {
@@ -139,8 +140,7 @@ function localizeChartText(value: unknown, locale: "pt-BR" | "en-US") {
 
 function localizeInvalidation(value: unknown, locale: "pt-BR" | "en-US") {
   const text = localizeChartText(value, locale);
-  if (/^(se|if)\s*:/i.test(text)) return text;
-  return `${locale === "en-US" ? "IF:" : "Se:"} ${text}`;
+  return text.replace(/^(se|if)\s*:\s*/i, "").trim();
 }
 
 function markerOperationalNote(marker: ChartMarker, locale: "pt-BR" | "en-US" = "pt-BR") {
@@ -550,6 +550,14 @@ export function TickerChart({
     : { series: baseSeries, ohlc: rawOhlc };
   const displaySeries = sessionPadded.series;
   const ohlc = sessionPadded.ohlc;
+  const isSyntheticFallbackChart = Boolean(
+    chart?.fallback ||
+      chart?.synthetic ||
+      chart?.summary?.fallback ||
+      chart?.summary?.synthetic ||
+      chart?.summary?.source === "quote_visual_fallback" ||
+      chart?.summary?.source === "quote_cache_fallback",
+  );
 
   useEffect(() => {
     setWindowStart(0);
@@ -569,6 +577,16 @@ export function TickerChart({
           : "Sem gráfico real confiável para este futuro B3 no provider público. Candles sintéticos/proxy foram bloqueados para evitar gráfico errado.")
       : (isEnglish ? "Not enough historical series to draw the chart yet." : "Sem série histórica suficiente para desenhar o gráfico ainda.");
     return <div className="snbr-empty">{message}</div>;
+  }
+
+  if (isSyntheticFallbackChart) {
+    return (
+      <div className="snbr-empty">
+        {isEnglish
+          ? "No real provider chart is available in cache for this range. Synthetic candles were blocked to avoid a wrong chart."
+          : "Sem gráfico real do provider em cache para este período. Candles sintéticos foram bloqueados para evitar gráfico errado."}
+      </div>
+    );
   }
 
   const minWindowSize = Math.min(displaySeries.length, 12);
@@ -686,7 +704,6 @@ export function TickerChart({
   const volumeBarWidth = clamp((plotWidth / Math.max(candleRows.length, 1)) * 0.54, 2, 6);
   const yTicks = pickTickIndexes(5, 5);
   const tradableCandleRows = candleRows.filter((item) => !item.sessionBoundary);
-  const isSyntheticFallbackChart = Boolean(chart?.fallback || chart?.synthetic || chart?.summary?.fallback || chart?.summary?.synthetic || chart?.summary?.source === "quote_visual_fallback");
   const zoneRows = showZones ? (chart?.zones?.length ? chart.zones : buildDerivedZones(tradableCandleRows)) : [];
   const rawMarkerRows = showMarkers ? (chart?.markers?.length ? chart.markers : (isSyntheticFallbackChart ? [] : buildDerivedMarkers(tradableCandleRows))) : [];
   const markerRows = rawMarkerRows.filter((marker) => !marker.time || timeToIndex.has(String(marker.time || "")));
@@ -734,7 +751,7 @@ export function TickerChart({
           { label: isEnglish ? "Time" : "Horario", value: formatTooltipTime(marker.time || series[index]?.time, interval, locale) },
           { label: isEnglish ? "Reason" : "Motivo", value: markerReason(marker, locale) },
           { label: "Trigger", value: localizeChartText(marker.trigger || marker.confirmation || "Aguardar confirmacao de preco, volume e fluxo.", locale) },
-          { label: isEnglish ? "Invalidation" : "Invalidacao", value: localizeInvalidation(marker.invalidation || "Invalidar se a tese perder preco, VWAP/EMA21, volume ou regime.", locale) },
+          { label: isEnglish ? "Invalidation If" : "Invalidação Se", value: localizeInvalidation(marker.invalidation || "Invalidar se a tese perder preco, VWAP/EMA21, volume ou regime.", locale) },
           { label: isEnglish ? "Risk" : "Risco", value: localizeChartText(marker.risk || `Risco ${marker.risk_level || "medio"}: confirmar liquidez antes de operar.`, locale) },
         ];
         const tooltipTitle = tooltipRows.map((row) => `${row.label}: ${row.value}`).join("\n");

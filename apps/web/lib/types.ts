@@ -50,6 +50,9 @@ export type AiToolRow = {
   trigger?: string;
   invalidation?: string;
   market_data_updated_at?: string | number | null;
+  published_at?: string | number | null;
+  news_published_at?: string | number | null;
+  provider_publish_time?: string | number | null;
   last_bar_at?: string | number | null;
   bar_time?: string | number | null;
   time?: string | number | null;
@@ -433,6 +436,9 @@ export type QuotePayload = {
   source?: string;
   quote_status?: "valid" | "partial" | "empty" | "stale" | string;
   stale?: boolean;
+  market_data_updated_at?: string | number | null;
+  quote_time?: string | number | null;
+  provider_timestamp?: string | number | null;
 };
 
 export type PublicInsightPayload = {

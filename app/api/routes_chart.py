@@ -8,6 +8,7 @@ from app.engine.signal_engine import build_chart_signal_payload
 from app.market.market_data_loader import get_cached_chart_data
 from app.models import User
 from app.services.chart_overlay_service import build_chart_overlays
+from app.system.chart_warmup import request_chart_warmup
 from app.system.system_metrics import record_cache_access
 
 
@@ -36,6 +37,7 @@ def chart(
         data = _load_chart_data_fast(ticker, interval)
 
         if not data:
+            request_chart_warmup(ticker, interval)
             return {
                 "symbol": ticker,
                 "ticker": ticker,

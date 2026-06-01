@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+from app.services import news_service
 from app.services.news_service import (
     build_news_intelligence_report,
     build_news_quality_report,
@@ -13,6 +14,9 @@ from app.services.news_service import (
 
 
 class NewsServiceTests(unittest.TestCase):
+    def setUp(self):
+        news_service._NEWS_CACHE.clear()
+
     def test_build_symbol_news_dedupes_and_labels_useful_items(self):
         raw_items = [
             {
@@ -117,7 +121,28 @@ class NewsServiceTests(unittest.TestCase):
 
         self.assertEqual(len(items), 1)
         self.assertIsNone(items[0]["published_at"])
+        self.assertFalse(items[0]["source_published_at"])
         self.assertRegex(items[0]["detected_at"], r"^\d{4}-\d{2}-\d{2}T")
+
+    def test_build_symbol_news_keeps_source_publication_time_separate_from_detection_time(self):
+        raw_items = [
+            {
+                "title": "AAPL raises guidance after strong iPhone demand",
+                "summary": "The company improved the outlook after stronger demand.",
+                "publisher": "Reuters",
+                "link": "https://example.com/aapl-source-time",
+                "providerPublishTime": 1_743_210_000,
+                "relatedTickers": ["AAPL"],
+            },
+        ]
+
+        with patch("app.services.news_service._now_ts", return_value=1_743_300_000):
+            items = build_symbol_news("AAPL", raw_items, limit=6)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["published_at"], "2025-03-29T01:00:00+00:00")
+        self.assertEqual(items[0]["detected_at"], "2025-03-30T02:00:00+00:00")
+        self.assertTrue(items[0]["source_published_at"])
 
     def test_build_symbol_news_counts_multiple_sources_per_story(self):
         raw_items = [

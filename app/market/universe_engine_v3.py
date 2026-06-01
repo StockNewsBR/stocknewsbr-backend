@@ -25,10 +25,14 @@ B3_UNIVERSE = [
     "VBBR3",
     "EQTL3",
     "ELET6",
+    "MGLU3",
     "UGPA3",
     "TOTS3",
     "MULT3",
     "CSAN3",
+    "AMER3",
+    "VIIA3",
+    "CPFE3",
     "KLBN11",
     "CMIG4",
     "SANB11",
@@ -39,6 +43,9 @@ B3_UNIVERSE = [
 
 US_UNIVERSE = [
     "AAPL",
+    "AAL",
+    "BA",
+    "BAC",
     "MSFT",
     "NVDA",
     "AMZN",
@@ -55,6 +62,10 @@ US_UNIVERSE = [
     "CRM",
     "ORCL",
     "QCOM",
+    "TSM",
+    "JPM",
+    "GS",
+    "XOM",
     "BABA",
     "PDD",
     "ADBE",
@@ -81,6 +92,9 @@ BDR_UNIVERSE = [
     "M1TA34",
     "GOGL34",
     "NFLX34",
+    "INTC34",
+    "AMD34",
+    "QCOM34",
 ]
 
 ETF_UNIVERSE = [

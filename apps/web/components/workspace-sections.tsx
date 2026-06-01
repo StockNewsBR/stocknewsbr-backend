@@ -179,6 +179,11 @@ export function WorkspaceNewsPanel({
   discussionStateText,
 }: NewsPanelProps) {
   const isEnglish = locale === "en-US";
+  const normalizedNewsState = normalizeText(newsStateText || "");
+  const localizedNewsStateText =
+    isEnglish && normalizedNewsState.includes("sem noticia") && normalizedNewsState.includes("reaproveitada")
+      ? `No real news for ${selectedTicker} right now; no other ticker news was reused.`
+      : newsStateText;
   return (
     <section id="panel-news" className="snbr-two-column">
       <div className="snbr-plain-panel">
@@ -191,7 +196,7 @@ export function WorkspaceNewsPanel({
         <p className="snbr-assistive-copy" aria-live="polite">
           {newsRows.length
             ? `${newsRows.length} ${isEnglish ? `useful news items prepared for ${selectedTicker}.` : `notícias úteis preparadas para ${selectedTicker}.`}`
-            : newsStateText || (isEnglish ? `No relevant news available for ${selectedTicker} right now.` : `Sem notícias relevantes disponíveis para ${selectedTicker} agora.`)}
+            : localizedNewsStateText || (isEnglish ? `No relevant news available for ${selectedTicker} right now.` : `Sem notícias relevantes disponíveis para ${selectedTicker} agora.`)}
         </p>
         <div className="snbr-headline-list">
           {newsRows.map((item) => {
@@ -272,7 +277,7 @@ export function WorkspaceNewsPanel({
           {!newsRows.length ? (
             <div className="snbr-empty-thread">
               <strong>{isEnglish ? "No real news available right now." : "Sem notícias reais disponíveis agora."}</strong>
-              <p>{newsStateText || (isEnglish ? "As soon as the ticker feed brings a useful headline, it appears here with a trader-ready read." : "Assim que o feed do ticker trouxer uma manchete útil, ela aparece aqui com leitura pronta para trader.")}</p>
+              <p>{localizedNewsStateText || (isEnglish ? "As soon as the ticker feed brings a useful headline, it appears here with a trader-ready read." : "Assim que o feed do ticker trouxer uma manchete útil, ela aparece aqui com leitura pronta para trader.")}</p>
             </div>
           ) : null}
         </div>

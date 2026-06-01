@@ -1387,6 +1387,11 @@ a {
   font-size: 12px;
   font-weight: 800;
   color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  line-height: 1;
+  padding: 8px 10px;
 }
 
 .snbr-settings-toggle-row,
@@ -1447,6 +1452,18 @@ a {
   right: 0;
   flex: 0 0 auto;
   margin-left: 0;
+}
+
+.snbr-search-block .snbr-button {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.snbr-search-block .snbr-button:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #ffffff;
 }
 
 .snbr-settings-detail-row {
@@ -1806,7 +1823,7 @@ a {
 .snbr-decision-conclusion.collapsed {
   grid-template-columns: 1fr;
   gap: 0;
-  min-height: 44px;
+  min-height: 58px;
   padding: 10px 14px;
 }
 
@@ -1885,13 +1902,22 @@ a {
 
 .snbr-conclusion-copy p {
   margin: 0;
-  color: var(--muted);
-  font-size: 13px;
+  color: var(--text);
+  font-size: 13.5px;
   line-height: 1.45;
 }
 
 .snbr-conclusion-copy p.snbr-conclusion-focus {
   color: var(--text);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.snbr-conclusion-preview {
+  margin-top: 8px;
+}
+
+.snbr-conclusion-preview strong {
   font-size: 14px;
   line-height: 1.35;
 }
@@ -1928,7 +1954,7 @@ a {
 
 .snbr-conclusion-sections li {
   color: var(--text);
-  font-size: 13px;
+  font-size: 13.5px;
   line-height: 1.35;
 }
 
@@ -1944,8 +1970,8 @@ a {
   position: relative;
   padding-left: 13px;
   color: var(--text);
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: 13.5px;
+  line-height: 1.45;
 }
 
 .snbr-conclusion-basis li::before {
@@ -2010,6 +2036,22 @@ a {
   align-items: center;
 }
 
+.snbr-tool-actions {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.snbr-tool-sound-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .snbr-tool-head p + p {
   margin-top: 8px;
 }
@@ -2049,9 +2091,22 @@ a {
   gap: 8px;
 }
 
+.snbr-asset-box-stats > div {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+
 .snbr-asset-box-stats small,
 .snbr-asset-box-trend {
   color: var(--muted);
+}
+
+.snbr-asset-box-stats strong {
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .snbr-tool-reading-grid {
@@ -2074,6 +2129,18 @@ a {
   font-size: 12px;
 }
 
+.snbr-tool-read-line {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.snbr-tool-read-line.labeled strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 900;
+}
+
 .snbr-tool-metric-list {
   display: grid;
   gap: 8px;
@@ -2092,6 +2159,8 @@ a {
 
 .snbr-tool-metric-list strong {
   color: var(--text);
+  font-size: 14px;
+  font-weight: 900;
 }
 
 @media (max-width: 1180px) {
@@ -2382,10 +2451,55 @@ a {
   color: #ffffff;
 }
 
-.snbr-sentiment-glyph {
-  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
-  line-height: 1;
+.snbr-market-icon {
+  width: auto;
+  min-width: 18px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 16px;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.snbr-sentiment-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.snbr-sentiment-chip.bullish {
+  color: #0b6b34;
+  border-color: rgba(22, 163, 74, 0.46);
+  background: rgba(22, 163, 74, 0.14);
+}
+
+.snbr-sentiment-chip.bearish {
+  color: #b42318;
+  border-color: rgba(220, 38, 38, 0.42);
+  background: rgba(220, 38, 38, 0.14);
+}
+
+.snbr-sentiment-chip.active.bullish {
+  color: #ffffff;
+  border-color: rgba(22, 163, 74, 0.48);
+  background: linear-gradient(135deg, #16a34a, #22c55e);
+}
+
+.snbr-sentiment-chip.active.bearish {
+  color: #ffffff;
+  border-color: rgba(220, 38, 38, 0.4);
+  background: linear-gradient(135deg, #ef4444, #dc2626);
 }
 
 .snbr-sentiment-pill.active.bullish {

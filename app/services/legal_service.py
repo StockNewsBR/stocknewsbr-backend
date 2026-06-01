@@ -22,10 +22,11 @@ DISCLOSURE_TEXT = (
 
 SUBSCRIPTION_TERMS_TEXT = (
     "O acesso a plataforma e pessoal, individual e intransferivel. O lancamento "
-    "principal acontece no app Google Play. A assinatura Premium ativa libera o "
-    "ecossistema da marca, incluindo app Android, website profissional e canal "
-    "oficial do Telegram. A versao Apple ficara preparada para a proxima etapa "
-    "de lancamento."
+    "principal acontece no app Google Play. Preco, pagamentos, mudanca de planos, "
+    "cancelamentos e reembolsos ficam no Google Play. A assinatura Trial ou Premium "
+    "libera o ecossistema da marca, incluindo app Android, website profissional com "
+    "login e senha e canal oficial do Telegram. A versao Apple ficara preparada para "
+    "a proxima etapa de lancamento."
 )
 
 GOOGLE_PLAY_DESCRIPTION = (
@@ -41,8 +42,8 @@ EDUCATION_DESCRIPTION = (
 )
 
 PRICING = {
-    "trial_days": 30,
-    "trial_policy": "Trial inicial de 30 dias. Depois de 30 dias do lancamento, novos trials passam para 14 dias e migram automaticamente para Basico ao vencer.",
+    "trial_days": 90,
+    "trial_policy": "Trial inicial de 90 dias. Ao vencer, a conta migra automaticamente para Basico se nao houver Premium ativo.",
     "refund_window_days": 7,
     "refund_policy": "Cancelamento com reembolso em ate 7 dias para contas Brasil e internacionais. Apos 7 dias nao ha reembolso.",
     "free_plan": {

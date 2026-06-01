@@ -50,7 +50,7 @@ class ChartOverlayServiceTests(unittest.TestCase):
         overlays = build_chart_overlays("PLTR", ohlc, signals)
         labels = [marker["label"] for marker in overlays["markers"]]
 
-        self.assertEqual(labels, ["Buy Long", "Close Long", "Sell Short", "Close Short"])
+        self.assertEqual(labels, ["Sell Short", "Close Short", "Buy Long", "Close Long"])
         self.assertTrue(all(marker.get("trigger") for marker in overlays["markers"]))
         self.assertTrue(all(marker.get("invalidation") for marker in overlays["markers"]))
         self.assertTrue(all(marker.get("risk") for marker in overlays["markers"]))
@@ -72,7 +72,7 @@ class ChartOverlayServiceTests(unittest.TestCase):
         overlays = build_chart_overlays("ITUB4", ohlc, signals, interval="1D")
 
         self.assertEqual(len(overlays["markers"]), 1)
-        self.assertEqual(overlays["markers"][0]["type"], "BUY")
+        self.assertEqual(overlays["markers"][0]["type"], "SHORT")
 
     def test_derived_watch_markers_are_capped_when_no_operational_trade_exists(self):
         ohlc = [

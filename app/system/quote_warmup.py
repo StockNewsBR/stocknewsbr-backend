@@ -26,6 +26,8 @@ DEFAULT_CHART_WARMUP_INTERVALS = [
 _thread: threading.Thread | None = None
 _stop_event = threading.Event()
 _lock = threading.RLock()
+_request_last_at: dict[str, float] = {}
+_request_running: set[str] = set()
 
 _PUBLIC_QUOTE_PRIORITY = [
     "PETR4",
@@ -46,12 +48,25 @@ _PUBLIC_QUOTE_PRIORITY = [
     "GOOGL",
     "GOOG",
     "F",
+    "AAL",
+    "BA",
+    "AMD",
+    "BAC",
+    "GS",
+    "INTC",
+    "JPM",
+    "QCOM",
+    "TSM",
+    "XOM",
     "A",
     "AAPL34",
+    "AMD34",
+    "INTC34",
     "MSFT34",
     "GOGL34",
     "AMZN34",
     "NVDC34",
+    "QCOM34",
     "TSLA34",
     "META34",
     "NFLX34",
@@ -65,6 +80,9 @@ _PUBLIC_QUOTE_PRIORITY = [
 
 _PUBLIC_CHART_PRIORITY = [
     "F",
+    "AAL",
+    "AMD",
+    "INTC",
     "AAPL",
     "MSFT",
     "NVDA",
@@ -196,6 +214,47 @@ def warm_quotes_once(
     success = failed_chunks == 0 or bool(resolved)
     record_worker_stage_duration("quote_warmup", time.perf_counter() - start, success=success)
     return {"requested": len(target_symbols), "resolved": len(resolved), "failed_chunks": failed_chunks}
+
+
+def request_quote_warmup(
+    symbols: Iterable[str] | str,
+    *,
+    chunk_size: int = DEFAULT_QUOTE_WARMUP_CHUNK_SIZE,
+) -> None:
+    target_symbols = _dedupe([symbols] if isinstance(symbols, str) else symbols)
+    if not target_symbols:
+        return
+
+    key = ",".join(target_symbols[:32])
+    now = time.time()
+    with _lock:
+        last_at = float(_request_last_at.get(key) or 0.0)
+        if key in _request_running or now - last_at < 20.0:
+            return
+        _request_last_at[key] = now
+        _request_running.add(key)
+
+    threading.Thread(
+        target=_warm_requested_quotes,
+        args=(target_symbols, key, chunk_size),
+        name=f"stocknewsbr-quote-request-{target_symbols[0]}",
+        daemon=True,
+    ).start()
+
+
+def _warm_requested_quotes(symbols: list[str], key: str, chunk_size: int) -> None:
+    start = time.perf_counter()
+    success = False
+    try:
+        with provider_call_context("quote_request_warmup"):
+            stats = warm_quotes_once(symbols=symbols, limit=None, chunk_size=chunk_size)
+        success = int(stats.get("resolved") or 0) > 0
+    except Exception:
+        logger.exception("Requested quote warmup failed | symbols=%s", symbols)
+    finally:
+        with _lock:
+            _request_running.discard(key)
+        record_worker_stage_duration("quote_request_warmup", time.perf_counter() - start, success=success)
 
 
 def _quote_warmup_loop(interval_seconds: int, limit: int, chunk_size: int):

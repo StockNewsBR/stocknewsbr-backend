@@ -23,6 +23,46 @@ logger = logging.getLogger("stocknewsbr.engine.v36")
 EPS = 1e-9
 
 
+def _safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _int_if_whole(value):
+    numeric = _safe_float(value, 0.0)
+    return int(numeric) if numeric.is_integer() else numeric
+
+
+def _market_fields_from_matrices(price_row, volume_row):
+    price = _safe_float(price_row[-1], 0.0) if len(price_row) else 0.0
+    prev_close = _safe_float(price_row[-2], price) if len(price_row) >= 2 else price
+    volume = _safe_float(volume_row[-1], 0.0) if len(volume_row) else 0.0
+    volume_window = volume_row[-20:] if len(volume_row) >= 20 else volume_row
+    price_window = price_row[-20:] if len(price_row) >= 20 else price_row
+    avg_volume = _safe_float(np.mean(volume_window), 0.0) if len(volume_window) else 0.0
+    volume_sum = _safe_float(np.sum(volume_window), 0.0) if len(volume_window) else 0.0
+    rel_volume = (volume / avg_volume) if avg_volume > 0 else 0.0
+    change_pct = ((price - prev_close) / prev_close * 100.0) if prev_close > 0 else 0.0
+    vwap = _safe_float(np.sum(price_window * volume_window) / volume_sum, price) if volume_sum > 0 and len(price_window) == len(volume_window) else price
+    data_quality = "priced" if price > 0 and volume > 0 else "score_only"
+
+    return {
+        "price": round(price, 6),
+        "close": round(price, 6),
+        "prev_close": round(prev_close, 6),
+        "volume": _int_if_whole(volume),
+        "avg_volume": int(avg_volume) if avg_volume > 0 else 0,
+        "rel_volume": round(rel_volume, 4),
+        "vwap": round(vwap, 6),
+        "change_pct": round(change_pct, 4),
+        "data_quality": data_quality,
+        "price_source": "engine_v36_matrix",
+        "volume_source": "engine_v36_matrix",
+    }
+
+
 # =====================================================
 # NUMBA CORE COMPUTE
 # =====================================================
@@ -206,16 +246,19 @@ def run_engine(pool: Dict[str, object] | None = None):
         results = []
 
         for i in top_idx:
+            market_fields = _market_fields_from_matrices(price_matrix[i], volume_matrix[i])
 
             results.append({
 
                 "ticker": tickers[i],
+                "symbol": tickers[i],
                 "score": float(scores[i]),
                 "momentum": float(momentum[i]),
                 "trend": float(trend[i]),
                 "volatility": float(volatility[i]),
                 "smart_money": bool(smart_money[i]),
-                "breakout": bool(breakout[i])
+                "breakout": bool(breakout[i]),
+                **market_fields,
 
             })
 

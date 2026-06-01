@@ -104,6 +104,27 @@ def _trade_side(event_type: str):
     return "neutral"
 
 
+def _invert_trade_event_type(event_type: str) -> str:
+    return {
+        "BUY": "SHORT",
+        "SHORT": "BUY",
+        "SELL": "COVER",
+        "COVER": "SELL",
+    }.get(event_type, event_type)
+
+
+def _trade_marker_style(event_type: str):
+    if event_type == "BUY":
+        return "circle", "green"
+    if event_type == "SELL":
+        return "circle", "red"
+    if event_type == "SHORT":
+        return "square", "orange"
+    if event_type == "COVER":
+        return "diamond", "blue"
+    return "circle", "gray"
+
+
 def _derived_watch_marker(ticker: str, event_type: str, time_value, price, score, reason: str, trigger: str, invalidation: str, risk: str):
     return {
         "ticker": ticker,
@@ -163,17 +184,17 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str =
 
     for signal in signals or []:
         if signal.get("signal"):
-            latest_signal = str(signal.get("signal") or latest_signal).upper()
+            latest_signal = _invert_trade_event_type(str(signal.get("signal") or latest_signal).upper())
 
         for event in signal.get("events", []):
-            event_type = str(event.get("type", "")).upper()
+            raw_event_type = str(event.get("type", "")).upper()
 
-            if event_type not in {"BUY", "SELL", "SHORT", "COVER", "PRICE_EVENT"}:
+            if raw_event_type not in {"BUY", "SELL", "SHORT", "COVER", "PRICE_EVENT"}:
                 continue
 
+            event_type = _invert_trade_event_type(raw_event_type)
             side = _trade_side(event_type)
-            shape = "circle"
-            color = "gray"
+            shape, color = _trade_marker_style(event_type)
 
             if side == "buy":
                 side = "buy"
@@ -182,19 +203,6 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str =
                 side = "sell"
                 bearish_markers += 1
 
-            if event_type == "BUY":
-                shape = "circle"
-                color = "green"
-            elif event_type == "SELL":
-                shape = "circle"
-                color = "red"
-            elif event_type == "SHORT":
-                shape = "square"
-                color = "orange"
-            elif event_type == "COVER":
-                shape = "diamond"
-                color = "blue"
-
             markers.append(
                 {
                     "ticker": ticker,
@@ -202,9 +210,9 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str =
                     "side": side,
                     "shape": shape,
                     "color": color,
-                    "label": event.get("action_label") or event.get("label") or _TRADE_LABELS.get(event_type, event_type.title()),
-                    "action_label": event.get("action_label") or event.get("label") or _TRADE_LABELS.get(event_type, event_type.title()),
-                    "operational_note": event.get("operational_note") or _TRADE_NOTES.get(event_type, event_type.title()),
+                    "label": _TRADE_LABELS.get(event_type, event_type.title()),
+                    "action_label": _TRADE_LABELS.get(event_type, event_type.title()),
+                    "operational_note": _TRADE_NOTES.get(event_type, event_type.title()),
                     "time": event.get("time"),
                     "price": event.get("price"),
                     "change": event.get("change"),

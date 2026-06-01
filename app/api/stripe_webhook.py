@@ -1,7 +1,6 @@
 import json
 import os
 
-import stripe
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
@@ -18,8 +17,18 @@ from app.services.referrals import referral_leaderboard, referral_summary, valid
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+_STRIPE = None
+
+
+def _get_stripe():
+    global _STRIPE
+    if _STRIPE is None:
+        import stripe as stripe_module
+
+        stripe_module.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+        _STRIPE = stripe_module
+    return _STRIPE
 
 
 @router.get("/pricing")
@@ -78,7 +87,7 @@ async def stripe_webhook(request: Request):
 
     try:
         if WEBHOOK_SECRET and signature:
-            event = stripe.Webhook.construct_event(payload, signature, WEBHOOK_SECRET)
+            event = _get_stripe().Webhook.construct_event(payload, signature, WEBHOOK_SECRET)
         else:
             event = json.loads(payload.decode("utf-8"))
     except Exception as exc:

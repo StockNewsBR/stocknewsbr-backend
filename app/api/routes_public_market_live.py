@@ -16,6 +16,8 @@ from app.services.public_market_data_service import (
 )
 from app.services.public_news_service import build_public_news_payload
 from app.services.quote_service import classify_quote_payload, is_usable_quote_payload
+from app.system.chart_warmup import request_chart_warmup
+from app.system.quote_warmup import request_quote_warmup
 from app.system.system_metrics import record_cache_access
 
 
@@ -349,6 +351,13 @@ def public_quotes(symbols: str = Query(default="")):
             for key, payload in stale_payloads.items():
                 if not _has_usable_quote_payload(cached_payloads.get(key)):
                     cached_payloads[key] = payload
+            unresolved = [
+                symbol
+                for symbol in still_missing
+                if not any(_has_usable_quote_payload(cached_payloads.get(alias)) for alias in _symbol_aliases(symbol))
+            ]
+            if unresolved:
+                request_quote_warmup(unresolved)
 
     for symbol in limited_tickers:
         record_cache_access(
@@ -432,6 +441,7 @@ def public_market_chart(
         return _empty_chart_payload(response_symbol, chart_interval, "blocked_symbol")
     ohlc = _load_chart_data_fast(ticker, chart_interval)
     if not ohlc:
+        request_chart_warmup(ticker, chart_interval)
         reason = "b3_future_exact_chart_unavailable" if _is_b3_mini_future_symbol(ticker) else "empty_chart"
         return _empty_chart_payload(response_symbol, chart_interval, reason)
 
@@ -470,6 +480,8 @@ def public_market_bundle(
     cached_payloads = cached_price_payloads(_symbol_aliases(ticker), allow_stale=True)
     quote = _resolve_cached_quote(cached_payloads, ticker)
     record_cache_access("quote", _has_usable_quote_payload(quote), "public_bundle")
+    if not _has_usable_quote_payload(quote):
+        request_quote_warmup([ticker])
 
     return {
         "symbol": response_symbol,
@@ -477,7 +489,7 @@ def public_market_bundle(
         "insight": public_market_insight(ticker, interval=chart_interval),
         "chart": public_market_chart(ticker, interval=chart_interval, range_value=None),
         "news": build_public_news_payload(response_symbol, limit=safe_limit, source="public_bundle", allow_fetch=False),
-        "ai_tools": build_public_ai_tools_payload(),
+        "ai_tools": build_public_ai_tools_payload([ticker, response_symbol]),
         "source": "cache_snapshot_bundle",
     }
 

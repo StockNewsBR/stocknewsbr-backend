@@ -141,7 +141,7 @@ export default function AuthGateScreen() {
         </View>
         <Divider />
         <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
-          Assinatura, preco e reembolso ficam no Google Play. Depois da janela de refund, o acesso segue ate o fim do periodo pago.
+          Preco, pagamentos, mudanca de planos, cancelamento e reembolso ficam somente no Google Play. Quem assina pelo app recebe acesso ao website com login e senha e tambem ao Telegram. Apple Store em breve.
         </Text>
       </Card>
 

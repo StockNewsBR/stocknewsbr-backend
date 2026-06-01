@@ -10,6 +10,7 @@ from app.engine.signal_engine import build_chart_signal_payload
 from app.market.market_data_loader import get_cached_chart_data
 from app.cache.signal_cache import signal_cache
 from app.services.chart_overlay_service import build_chart_overlays
+from app.system.chart_warmup import request_chart_warmup
 from app.system.system_metrics import record_cache_access
 
 router = APIRouter(
@@ -39,6 +40,7 @@ def get_chart(ticker: str, interval: str = "1D"):
         record_cache_access("chart", bool(ohlc), "web_chart")
 
         if not ohlc:
+            request_chart_warmup(ticker, interval)
             return {}
 
 

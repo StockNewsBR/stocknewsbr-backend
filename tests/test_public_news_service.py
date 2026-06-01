@@ -71,6 +71,21 @@ class PublicNewsServiceTests(unittest.TestCase):
         self.assertEqual(payload["state"]["provider_error"], "timeout")
         self.assertIn("timeout", payload["message"])
 
+    def test_cache_only_payload_requests_background_warmup_when_empty(self):
+        with patch.object(public_news_service, "get_cached_symbol_news", return_value=[]), patch.object(
+            public_news_service,
+            "get_news_cached_report",
+            return_value={"status": "empty"},
+        ), patch.object(
+            public_news_service,
+            "get_news_cache_info",
+            return_value={"status": "cold", "provider_status": "not_checked", "provider": "yfinance"},
+        ), patch.object(public_news_service, "request_news_warmup") as warmup:
+            payload = public_news_service.build_public_news_payload("F", limit=6, allow_fetch=False)
+
+        self.assertEqual(payload["count"], 0)
+        warmup.assert_called_once_with("F", 6)
+
     def test_dedupes_repeated_ticker_news_cards(self):
         fetched_items = [
             {"id": "1", "ticker": "BBDC4", "title": "Resultado e regulacao em BBDC4", "url": "https://example.com/a?utm=1"},
