@@ -114,6 +114,7 @@ def _quote_feature_row(symbol: str, quote: dict[str, Any]) -> dict[str, Any] | N
     rel_volume = rel_volume or 1.0
     score = _clamp(50.0 + change_pct * 8.0 + (rel_volume - 1.0) * 8.0, 5.0, 95.0)
     rsi = _clamp(50.0 + change_pct * 4.0, 20.0, 80.0)
+    quote_timestamp = quote.get("market_data_updated_at") or quote.get("quote_time") or quote.get("provider_timestamp")
 
     return {
         "ticker": symbol,
@@ -138,9 +139,11 @@ def _quote_feature_row(symbol: str, quote: dict[str, Any]) -> dict[str, Any] | N
         "source_score": score,
         "data_quality": "priced",
         "quote_status": quote.get("quote_status") or "valid",
-        "market_data_updated_at": quote.get("market_data_updated_at") or quote.get("quote_time") or quote.get("provider_timestamp"),
-        "quote_time": quote.get("quote_time") or quote.get("market_data_updated_at") or quote.get("provider_timestamp"),
-        "provider_timestamp": quote.get("provider_timestamp") or quote.get("market_data_updated_at") or quote.get("quote_time"),
+        "market_data_updated_at": quote_timestamp,
+        "quote_time": quote.get("quote_time") or quote_timestamp,
+        "provider_timestamp": quote.get("provider_timestamp") or quote_timestamp,
+        "detected_at": quote_timestamp,
+        "deal_detected_at": quote_timestamp,
     }
 
 
@@ -175,6 +178,8 @@ def _derive_tools_from_cached_quotes(extra_symbols: list[Any] | None = None) -> 
                 row.setdefault("market_data_updated_at", feature.get("market_data_updated_at"))
                 row.setdefault("quote_time", feature.get("quote_time"))
                 row.setdefault("provider_timestamp", feature.get("provider_timestamp"))
+                row.setdefault("detected_at", feature.get("detected_at") or feature.get("market_data_updated_at"))
+                row.setdefault("deal_detected_at", feature.get("deal_detected_at") or feature.get("detected_at") or feature.get("market_data_updated_at"))
             metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
             metrics.setdefault("data_quality", "priced")
             row["metrics"] = metrics

@@ -79,19 +79,19 @@ def _supertrend(highs: List[float], lows: List[float], closes: List[float], peri
 
 
 _TRADE_LABELS = {
-    "BUY": "Buy Long",
-    "SELL": "Close Long",
-    "SHORT": "Sell Short",
-    "COVER": "Close Short",
+    "BUY": "Buy",
+    "SELL": "Partial Sell",
+    "SHORT": "Short",
+    "COVER": "Cover Short",
     "PRICE_EVENT": "Evento",
 }
 
 
 _TRADE_NOTES = {
-    "BUY": "Entrada long",
-    "SELL": "Saida long",
+    "BUY": "Entrada compra",
+    "SELL": "Venda parcial",
     "SHORT": "Entrada short",
-    "COVER": "Saida short",
+    "COVER": "Encerrar short",
     "PRICE_EVENT": "Evento de preco",
 }
 
@@ -102,15 +102,6 @@ def _trade_side(event_type: str):
     if event_type in {"SELL", "SHORT"}:
         return "sell"
     return "neutral"
-
-
-def _invert_trade_event_type(event_type: str) -> str:
-    return {
-        "BUY": "SHORT",
-        "SHORT": "BUY",
-        "SELL": "COVER",
-        "COVER": "SELL",
-    }.get(event_type, event_type)
 
 
 def _trade_marker_style(event_type: str):
@@ -151,12 +142,39 @@ def _derived_watch_marker(ticker: str, event_type: str, time_value, price, score
     }
 
 
+def _derived_trade_marker(ticker: str, event_type: str, time_value, price, reason: str, trigger: str, invalidation: str, risk: str):
+    side = _trade_side(event_type)
+    shape, color = _trade_marker_style(event_type)
+    return {
+        "ticker": ticker,
+        "type": event_type,
+        "side": side,
+        "shape": shape,
+        "color": color,
+        "label": _TRADE_LABELS.get(event_type, event_type.title()),
+        "action_label": _TRADE_LABELS.get(event_type, event_type.title()),
+        "operational_note": _TRADE_NOTES.get(event_type, event_type.title()),
+        "time": time_value,
+        "price": price,
+        "reason": reason,
+        "reason_text": "Sinal derivado do rompimento estrutural do gráfico com confirmação mínima de preço e volume.",
+        "trigger": trigger,
+        "confirmation": trigger,
+        "invalidation": invalidation,
+        "risk": risk,
+        "risk_level": "medio",
+        "coherence_status": "derived_breakout",
+        "derived": True,
+    }
+
+
 def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str = "1D"):
     ticker = (ticker or "").upper().strip()
     normalized_interval = str(interval or "1D").upper().strip()
     close_prices = [float(row.get("close", 0) or 0) for row in ohlc]
     high_prices = [float(row.get("high", 0) or 0) for row in ohlc]
     low_prices = [float(row.get("low", 0) or 0) for row in ohlc]
+    volume_values = [float(row.get("volume", 0) or 0) for row in ohlc]
 
     ema9 = _ema(close_prices, 9)
     ema21 = _ema(close_prices, 21)
@@ -184,7 +202,7 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str =
 
     for signal in signals or []:
         if signal.get("signal"):
-            latest_signal = _invert_trade_event_type(str(signal.get("signal") or latest_signal).upper())
+            latest_signal = str(signal.get("signal") or latest_signal).upper()
 
         for event in signal.get("events", []):
             raw_event_type = str(event.get("type", "")).upper()
@@ -192,7 +210,7 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str =
             if raw_event_type not in {"BUY", "SELL", "SHORT", "COVER", "PRICE_EVENT"}:
                 continue
 
-            event_type = _invert_trade_event_type(raw_event_type)
+            event_type = raw_event_type
             side = _trade_side(event_type)
             shape, color = _trade_marker_style(event_type)
 
@@ -235,139 +253,60 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str =
     allow_derived_markers = operational_marker_count == 0
     derived_marker_limit = 3 if normalized_interval == "1D" else 4
 
-    cross_min_bars = 10 if normalized_interval == "1D" else 24
-    cross_spacing = max(3, len(series) // 24) if normalized_interval == "1D" else max(8, len(series) // 18)
-    if allow_derived_markers and len(markers) < derived_marker_limit and len(series) >= cross_min_bars:
-        last_side = None
-        min_spacing = cross_spacing
-        existing_times = {str(marker.get("time") or "") for marker in markers}
-        last_marker_index = -min_spacing
-
-        for index in range(1, len(series)):
-            if index - last_marker_index < min_spacing:
+    if allow_derived_markers and len(series) >= 12:
+        average_volume = max(sum(volume_values) / max(len(volume_values), 1), 1.0)
+        last_marker_index = -8
+        for index in range(8, len(series)):
+            if index - last_marker_index < 8:
                 continue
-
-            previous_fast = ema9[index - 1] if index - 1 < len(ema9) else None
-            previous_slow = ema21[index - 1] if index - 1 < len(ema21) else None
-            current_fast = ema9[index] if index < len(ema9) else None
-            current_slow = ema21[index] if index < len(ema21) else None
-
-            if previous_fast is None or previous_slow is None or current_fast is None or current_slow is None:
+            previous_highs = high_prices[max(0, index - 8) : index]
+            previous_lows = low_prices[max(0, index - 8) : index]
+            if not previous_highs or not previous_lows:
                 continue
+            close = close_prices[index]
+            open_price = float(ohlc[index].get("open", close) or close)
+            resistance = max(previous_highs)
+            support = min(previous_lows)
+            band = max(resistance - support, abs(close) * 0.001, 0.0001)
+            buffer = max(band * 0.02, abs(close) * 0.0006)
+            relative_volume = volume_values[index] / average_volume if average_volume > 0 else 1.0
+            marker_time = series[index].get("time")
 
-            side = None
-            event_type = None
-            if previous_fast <= previous_slow and current_fast > current_slow and last_side != "buy":
-                side = "buy"
-                event_type = "BUY"
-            elif previous_fast >= previous_slow and current_fast < current_slow and last_side != "sell":
-                side = "sell"
-                event_type = "SELL"
-
-            if not side or not event_type:
-                continue
-            if str(series[index].get("time") or "") in existing_times:
-                continue
-
-            markers.append(
-                _derived_watch_marker(
-                    ticker,
-                    event_type,
-                    series[index].get("time"),
-                    close_prices[index],
-                    round(abs(ema9[index] - ema21[index]) / max(close_prices[index], 0.01) * 1000, 1),
-                    "ema9_ema21_cross",
-                    "Cruzamento de medias detectado; operar apenas se regime, volume e fluxo confirmarem o mesmo lado.",
-                    "Ignorar se o cruzamento falhar, perder a media curta ou aparecer conflito de liquidez/fluxo.",
-                    "Risco medio: cruzamento em mercado lateral gera falso sinal com frequencia.",
+            if close > resistance + buffer and close >= open_price and relative_volume >= 0.75:
+                markers.append(
+                    _derived_trade_marker(
+                        ticker,
+                        "BUY",
+                        marker_time,
+                        low_prices[index],
+                        "resistance_breakout",
+                        "Comprar somente se a vela de 5 minutos fechar acima da resistencia com volume e sem devolucao imediata.",
+                        "Invalidar se voltar para baixo da resistencia rompida ou perder VWAP/EMA21.",
+                        "Risco medio: rompimento derivado exige confirmacao de fluxo antes de aumentar tamanho.",
+                    )
                 )
-            )
-            latest_signal = "WATCH"
-            last_side = side
-            last_marker_index = index
-            existing_times.add(str(series[index].get("time") or ""))
+                latest_signal = "BUY"
+                bullish_markers += 1
+                last_marker_index = index
+            elif close < support - buffer and close <= open_price and relative_volume >= 0.75:
+                markers.append(
+                    _derived_trade_marker(
+                        ticker,
+                        "SHORT",
+                        marker_time,
+                        high_prices[index],
+                        "support_breakdown",
+                        "Abrir short somente se a vela de 5 minutos fechar abaixo do suporte com volume e continuidade vendedora.",
+                        "Invalidar se recuperar o suporte perdido ou voltar acima da VWAP/EMA21.",
+                        "Risco medio: perda de suporte derivada exige confirmacao de fluxo antes de aumentar tamanho.",
+                    )
+                )
+                latest_signal = "SHORT"
+                bearish_markers += 1
+                last_marker_index = index
+
             if len(markers) >= derived_marker_limit:
                 break
-
-        markers = markers[-8:]
-
-    pivot_min_bars = 12 if normalized_interval == "1D" else 30
-    pivot_spacing = max(4, len(series) // 10) if normalized_interval == "1D" else max(8, len(series) // 12)
-    pivot_window = 2 if normalized_interval == "1D" else 3
-    if allow_derived_markers and len(markers) < derived_marker_limit and len(series) >= pivot_min_bars:
-        existing_times = {str(marker.get("time") or "") for marker in markers}
-        min_spacing = pivot_spacing
-        last_marker_index = -min_spacing
-        window = pivot_window
-
-        for index in range(window, len(series) - window):
-            if index - last_marker_index < min_spacing:
-                continue
-            marker_time = str(series[index].get("time") or "")
-            if marker_time in existing_times:
-                continue
-
-            neighborhood_lows = low_prices[index - window : index + window + 1]
-            neighborhood_highs = high_prices[index - window : index + window + 1]
-            is_swing_low = low_prices[index] <= min(neighborhood_lows)
-            is_swing_high = high_prices[index] >= max(neighborhood_highs)
-
-            if not is_swing_low and not is_swing_high:
-                continue
-
-            side = "buy" if is_swing_low else "sell"
-            event_type = "BUY" if is_swing_low else "SELL"
-
-            marker_price = low_prices[index] if side == "buy" else high_prices[index]
-            markers.append(
-                _derived_watch_marker(
-                    ticker,
-                    event_type,
-                    series[index].get("time"),
-                    marker_price,
-                    round(abs(close_prices[index] - ema21[index]) / max(close_prices[index], 0.01) * 1000, 1),
-                    "swing_pivot",
-                    "Pivo tecnico detectado; aguardar reacao com volume e alinhamento com tendencia/regime.",
-                    "Ignorar se o pivo romper sem defesa ou se o fluxo institucional apontar lado contrario.",
-                    "Risco medio: pivo derivado pode falhar em mercado lateral ou sem liquidez.",
-                )
-            )
-            latest_signal = "WATCH"
-            last_marker_index = index
-            existing_times.add(marker_time)
-            if len(markers) >= derived_marker_limit:
-                break
-
-        markers = markers[-8:]
-
-    existing_times = {str(marker.get("time") or "") for marker in markers}
-    if allow_derived_markers and len(markers) < derived_marker_limit:
-        for index in range(1, len(series)):
-            previous_side = supertrend_side[index - 1] if index - 1 < len(supertrend_side) else "neutral"
-            current_side = supertrend_side[index] if index < len(supertrend_side) else "neutral"
-            if current_side == previous_side or current_side not in {"buy", "sell"}:
-                continue
-            marker_time = str(series[index].get("time") or "")
-            if marker_time in existing_times:
-                continue
-            if len(markers) >= derived_marker_limit:
-                break
-            event_type = "BUY" if current_side == "buy" else "SELL"
-            markers.append(
-                _derived_watch_marker(
-                    ticker,
-                    event_type,
-                    series[index].get("time"),
-                    close_prices[index],
-                    round(abs(close_prices[index] - (supertrend[index] or close_prices[index])), 2),
-                    "supertrend_flip",
-                    "Virada de supertrend detectada; aguardar volume e ausencia de conflito de regime.",
-                    "Ignorar se o preco voltar contra a linha do supertrend ou se smart money/regime divergirem.",
-                    "Risco medio: flip tecnico derivado exige confirmacao de fluxo antes de virar trade.",
-                )
-            )
-            latest_signal = "WATCH"
-            existing_times.add(marker_time)
 
     markers = sorted(
         markers,

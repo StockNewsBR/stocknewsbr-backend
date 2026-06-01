@@ -139,6 +139,9 @@ def get_cached_quote_payload(symbol: str) -> dict[str, Any] | None:
     if last_good_row:
         payload = _payload_from_row(display_symbol, last_good_row, "last_good_snapshot")
         if payload:
+            payload["source"] = "stale_last_good_snapshot"
+            payload["quote_status"] = "stale"
+            payload["stale"] = True
             record_cache_access("quote", True, "last_good_snapshot")
             return payload
 

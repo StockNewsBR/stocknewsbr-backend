@@ -129,7 +129,7 @@ def _safe_float(value, default: float = 0.0) -> float:
 
 
 def _has_usable_quote_payload(payload) -> bool:
-    return is_usable_quote_payload(payload)
+    return is_usable_quote_payload(payload, allow_stale=False)
 
 
 def _is_quote_fallback_chart(ohlc) -> bool:
@@ -216,11 +216,6 @@ def _resolve_quote_for_chart(symbol: str):
         return None
 
     cached_payloads = cached_price_payloads(aliases)
-    if not any(_has_usable_quote_payload(cached_payloads.get(alias)) for alias in aliases):
-        stale_payloads = cached_price_payloads(aliases, allow_stale=True)
-        for alias, payload in stale_payloads.items():
-            if not _has_usable_quote_payload(cached_payloads.get(alias)):
-                cached_payloads[alias] = payload
 
     for alias in aliases:
         payload = cached_payloads.get(alias)
@@ -344,20 +339,7 @@ def public_quotes(symbols: str = Query(default="")):
             if not any(_has_usable_quote_payload(cached_payloads.get(alias)) for alias in _symbol_aliases(symbol))
         ]
         if still_missing:
-            stale_keys = _dedupe_public_symbols(
-                alias for symbol in still_missing for alias in _symbol_aliases(symbol)
-            )
-            stale_payloads = cached_price_payloads(stale_keys, allow_stale=True)
-            for key, payload in stale_payloads.items():
-                if not _has_usable_quote_payload(cached_payloads.get(key)):
-                    cached_payloads[key] = payload
-            unresolved = [
-                symbol
-                for symbol in still_missing
-                if not any(_has_usable_quote_payload(cached_payloads.get(alias)) for alias in _symbol_aliases(symbol))
-            ]
-            if unresolved:
-                request_quote_warmup(unresolved)
+            request_quote_warmup(still_missing)
 
     for symbol in limited_tickers:
         record_cache_access(
@@ -477,11 +459,11 @@ def public_market_bundle(
     safe_limit = max(1, min(int(limit or 6), 20))
     ticker = _normalize_public_symbol(symbol)
     response_symbol = _response_symbol(ticker)
-    cached_payloads = cached_price_payloads(_symbol_aliases(ticker), allow_stale=True)
+    cached_payloads = cached_price_payloads(_symbol_aliases(ticker))
     quote = _resolve_cached_quote(cached_payloads, ticker)
-    record_cache_access("quote", _has_usable_quote_payload(quote), "public_bundle")
     if not _has_usable_quote_payload(quote):
         request_quote_warmup([ticker])
+    record_cache_access("quote", _has_usable_quote_payload(quote), "public_bundle")
 
     return {
         "symbol": response_symbol,
@@ -519,6 +501,11 @@ def _load_chart_data_fast(ticker: str, interval: str):
     rows = load_public_chart_rows(_symbol_aliases(ticker), interval)
     if rows:
         return rows
+    if not _is_b3_mini_future_symbol(ticker):
+        fallback_rows = _build_quote_fallback_chart(ticker, interval)
+        if fallback_rows:
+            record_cache_access("chart_quote_fallback", True, "public_market_live")
+            return fallback_rows
     cache_key = "chart_exact_miss_b3_future" if _is_b3_mini_future_symbol(ticker) else "chart_exact_miss"
     record_cache_access(cache_key, False, "public_market_live")
     return []

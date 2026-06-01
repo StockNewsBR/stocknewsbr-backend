@@ -85,23 +85,29 @@ function truncateText(value: unknown, maxLength = 74) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;
 }
 
+function cleanMarkerText(value: unknown) {
+  return String(value || "")
+    .replace(/\s*[+-]\s*\d+(?:[.,]\d+)?\s*$/g, "")
+    .trim();
+}
+
 function markerActionLabel(marker: ChartMarker, locale: "pt-BR" | "en-US" = "pt-BR") {
-  const explicit = String(marker.action_label || marker.label || "").trim();
+  const explicit = cleanMarkerText(marker.action_label || marker.label || "");
   if (explicit) {
     const normalized = explicit.toUpperCase().replace(/\s+/g, " ");
-    if (normalized === "BUY" || normalized === "BUY LONG") return locale === "en-US" ? "Buy Long" : "Comprar";
-    if (normalized === "SELL" || normalized === "CLOSE LONG") return locale === "en-US" ? "Close Long" : "Encerrar long";
-    if (normalized === "SHORT" || normalized === "SELL SHORT") return locale === "en-US" ? "Sell Short" : "Short";
-    if (normalized === "COVER" || normalized === "CLOSE SHORT") return locale === "en-US" ? "Close Short" : "Encerrar short";
+    if (normalized === "BUY" || normalized === "BUY LONG") return locale === "en-US" ? "Buy" : "Compra";
+    if (normalized === "SELL" || normalized === "CLOSE LONG" || normalized === "PARTIAL SELL" || normalized === "VENDA PARCIAL") return locale === "en-US" ? "Partial Sell" : "Venda parcial";
+    if (normalized === "SHORT" || normalized === "SELL SHORT") return locale === "en-US" ? "Short" : "Short";
+    if (normalized === "COVER" || normalized === "CLOSE SHORT" || normalized === "COVER SHORT" || normalized === "ENCERRAR SHORT") return locale === "en-US" ? "Cover Short" : "Encerrar short";
     if (normalized === "WATCH") return locale === "en-US" ? "Watch" : "Aguardar";
     return localizeChartText(explicit, locale);
   }
 
   const type = String(marker.type || "").toUpperCase();
-  if (type === "BUY") return locale === "en-US" ? "Buy Long" : "Comprar";
-  if (type === "SELL") return locale === "en-US" ? "Close Long" : "Encerrar long";
-  if (type === "SHORT") return locale === "en-US" ? "Sell Short" : "Short";
-  if (type === "COVER") return locale === "en-US" ? "Close Short" : "Encerrar short";
+  if (type === "BUY") return locale === "en-US" ? "Buy" : "Compra";
+  if (type === "SELL") return locale === "en-US" ? "Partial Sell" : "Venda parcial";
+  if (type === "SHORT") return locale === "en-US" ? "Short" : "Short";
+  if (type === "COVER") return locale === "en-US" ? "Cover Short" : "Encerrar short";
   return locale === "en-US" ? "Watch" : "Aguardar";
 }
 
@@ -109,6 +115,9 @@ function localizeChartText(value: unknown, locale: "pt-BR" | "en-US") {
   const text = String(value || "").trim();
   if (locale !== "en-US" || !text) return text;
   return text
+    .replace(/Entrada compra/gi, "Buy entry")
+    .replace(/Venda parcial/gi, "Partial sell")
+    .replace(/Encerrar short/gi, "Cover short")
     .replace(/Entrada long/gi, "Long entry")
     .replace(/Saida long|Saída long/gi, "Long exit")
     .replace(/Entrada short/gi, "Short entry")
@@ -144,14 +153,20 @@ function localizeInvalidation(value: unknown, locale: "pt-BR" | "en-US") {
 }
 
 function markerOperationalNote(marker: ChartMarker, locale: "pt-BR" | "en-US" = "pt-BR") {
-  const explicit = String(marker.operational_note || "").trim();
-  if (explicit) return localizeChartText(explicit, locale);
+  const explicit = cleanMarkerText(marker.operational_note || "");
+  if (explicit) {
+    const normalized = explicit.toUpperCase().replace(/\s+/g, " ");
+    if (normalized === "PARTIAL SELL") return locale === "en-US" ? "Partial sell" : "Venda parcial";
+    if (normalized === "COVER SHORT") return locale === "en-US" ? "Cover short" : "Encerrar short";
+    if (normalized === "BUY ENTRY") return locale === "en-US" ? "Buy entry" : "Entrada compra";
+    return localizeChartText(explicit, locale);
+  }
 
   const type = String(marker.type || "").toUpperCase();
-  if (type === "BUY") return locale === "en-US" ? "Long entry" : "Entrada long";
-  if (type === "SELL") return locale === "en-US" ? "Long exit" : "Saida long";
+  if (type === "BUY") return locale === "en-US" ? "Buy entry" : "Entrada compra";
+  if (type === "SELL") return locale === "en-US" ? "Partial sell" : "Venda parcial";
   if (type === "SHORT") return locale === "en-US" ? "Short entry" : "Entrada short";
-  if (type === "COVER") return locale === "en-US" ? "Short exit" : "Saida short";
+  if (type === "COVER") return locale === "en-US" ? "Cover short" : "Encerrar short";
   return marker.derived ? (locale === "en-US" ? "Wait for confirmation" : "Aguardar confirmacao") : (locale === "en-US" ? "Watch" : "Observar");
 }
 
@@ -164,8 +179,9 @@ function markerReason(marker: ChartMarker, locale: "pt-BR" | "en-US" = "pt-BR") 
 }
 
 function markerLabelLines(label: string) {
-  const parts = label.trim().split(/\s+/).filter(Boolean);
-  if (parts.length <= 1) return [label];
+  const cleanLabel = cleanMarkerText(label);
+  const parts = cleanLabel.split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return [cleanLabel || label];
   return [parts.slice(0, -1).join(" "), parts.at(-1) || ""];
 }
 
@@ -321,7 +337,6 @@ function padOneDaySession(series: any[], ohlc: any[], ticker?: string | null) {
 
   const isB3 = usesB3Session(ticker);
   const sessionStart = atSessionTime(firstTime, isB3 ? 10 : 4, isB3 ? 0 : 0);
-  const sessionEnd = atSessionTime(firstTime, isB3 ? 18 : 20, 0);
   const paddedSeries = [...series];
   const paddedOhlc = ohlc.length ? [...ohlc] : series.map((item) => ({
     time: item.time,
@@ -336,12 +351,6 @@ function padOneDaySession(series: any[], ohlc: any[], ticker?: string | null) {
     const boundary = buildSessionBoundary(sessionStart, paddedSeries[0], paddedOhlc[0]);
     paddedSeries.unshift(boundary.series);
     paddedOhlc.unshift(boundary.ohlc);
-  }
-
-  if (lastTime.getTime() < sessionEnd.getTime() - 60_000) {
-    const boundary = buildSessionBoundary(sessionEnd, paddedSeries[paddedSeries.length - 1], paddedOhlc[paddedOhlc.length - 1]);
-    paddedSeries.push(boundary.series);
-    paddedOhlc.push(boundary.ohlc);
   }
 
   return { series: paddedSeries, ohlc: paddedOhlc };
@@ -428,74 +437,63 @@ function buildDerivedMarkers(candles: CandleRow[]): ChartMarker[] {
 
   const avgVolume = Math.max(average(candles.map((item) => item.volume)), 1);
   const markers: ChartMarker[] = [];
-
-  for (let index = 2; index < candles.length - 2; index += 1) {
+  const lastSignalIndex: Partial<Record<"BUY" | "SHORT", number>> = {};
+  const pushBreakoutMarker = (index: number, type: "BUY" | "SHORT", price: number, reason: string) => {
+    const previousIndex = lastSignalIndex[type];
+    if (previousIndex != null && index - previousIndex < 8) return;
     const bar = candles[index];
-    const previous = candles[index - 1];
-    const next = candles[index + 1];
-    const prevTwo = candles[index - 2];
-    const nextTwo = candles[index + 2];
-    const range = Math.max(bar.high - bar.low, Math.abs(bar.close) * 0.001, 0.0001);
-    const body = bar.close - bar.open;
-    const relativeVolume = bar.volume / avgVolume;
-    const swingLow = bar.low <= previous.low && bar.low <= next.low && bar.low <= prevTwo.low && bar.low <= nextTwo.low;
-    const swingHigh = bar.high >= previous.high && bar.high >= next.high && bar.high >= prevTwo.high && bar.high >= nextTwo.high;
-    const bullishReversal = swingLow && body > 0 && next.close >= bar.close;
-    const bearishReversal = swingHigh && body < 0 && next.close <= bar.close;
-
-    if (!bullishReversal && !bearishReversal) continue;
-
-    const side: "buy" | "sell" = bullishReversal ? "buy" : "sell";
     markers.push({
       time: String(bar.time || ""),
-      price: side === "buy" ? bar.low + range * 0.18 : bar.high - range * 0.18,
-      side: "neutral",
-      type: "WATCH",
-      label: "Watch",
-      action_label: "Watch",
-      operational_note: "Aguardar confirmacao",
-      score: clamp(Math.round((Math.abs(body) / range) * 8 + relativeVolume * 2), 1, 14),
-      reason: side === "buy" ? "swing_low_watch" : "swing_high_watch",
-      reason_text: "Pivo tecnico derivado; nao e entrada operacional sem confirmacao.",
-      trigger: "Confirmar com volume, VWAP/EMA21 e fluxo institucional no mesmo lado.",
-      invalidation: "Ignorar se romper o pivo sem defesa ou se o regime/fluxo apontar contra.",
-      risk: "Risco medio: pivo derivado pode virar falso sinal em mercado lateral.",
+      price,
+      side: type === "BUY" ? "buy" : "sell",
+      type,
+      operational_note: type === "BUY" ? "Entrada compra" : "Entrada short",
+      reason,
+      reason_text:
+        type === "BUY"
+          ? "Rompimento de resistência com preço sustentando acima da faixa."
+          : "Perda de suporte com preço sustentando abaixo da faixa.",
+      trigger:
+        type === "BUY"
+          ? "Comprar só se a vela de 5 minutos fechar acima da resistência com volume."
+          : "Abrir short só se a vela de 5 minutos fechar abaixo do suporte com volume.",
+      invalidation:
+        type === "BUY"
+          ? "Invalidar se voltar para baixo da resistência rompida."
+          : "Invalidar se recuperar o suporte perdido.",
+      risk: "Risco médio: sinal derivado precisa de confirmação de volume e fluxo.",
       risk_level: "medio",
-      coherence_status: "derived_watch",
+      coherence_status: "derived_breakout",
       derived: true,
     });
+    lastSignalIndex[type] = index;
+  };
 
-    if (markers.length >= 16) break;
+  for (let index = 8; index < candles.length; index += 1) {
+    const bar = candles[index];
+    const previousWindow = candles.slice(Math.max(0, index - 8), index);
+    const highs = previousWindow.map((item) => item.high).filter((value) => Number.isFinite(value));
+    const lows = previousWindow.map((item) => item.low).filter((value) => Number.isFinite(value));
+    if (!highs.length || !lows.length) continue;
+
+    const resistance = Math.max(...highs);
+    const support = Math.min(...lows);
+    const range = Math.max(resistance - support, Math.abs(bar.close) * 0.001, 0.0001);
+    const buffer = Math.max(range * 0.025, Math.abs(bar.close) * 0.0008);
+    const relativeVolume = bar.volume / avgVolume;
+    const bullishBreakout = bar.close > resistance + buffer && bar.close > bar.open && relativeVolume >= 0.8;
+    const bearishBreakdown = bar.close < support - buffer && bar.close < bar.open && relativeVolume >= 0.8;
+
+    if (bullishBreakout) {
+      pushBreakoutMarker(index, "BUY", bar.low, "resistance_breakout");
+    } else if (bearishBreakdown) {
+      pushBreakoutMarker(index, "SHORT", bar.high, "support_breakdown");
+    }
+
+    if (markers.length >= 10) break;
   }
 
-  if (markers.length >= 3) return markers;
-
-  const fallbackIndexes = [0.18, 0.36, 0.56, 0.74, 0.9]
-    .map((ratio) => Math.min(candles.length - 2, Math.max(1, Math.round((candles.length - 1) * ratio))))
-    .filter((index, position, indexes) => indexes.indexOf(index) === position);
-
-  return fallbackIndexes.map((index, markerIndex) => {
-    const bar = candles[index];
-    const side: "buy" | "sell" = markerIndex % 2 === 0 ? "buy" : "sell";
-    return {
-      time: String(bar.time || ""),
-      price: side === "buy" ? bar.low : bar.high,
-      side: "neutral",
-      type: "WATCH",
-      label: "Watch",
-      action_label: "Watch",
-      operational_note: "Aguardar confirmacao",
-      score: markerIndex + 5,
-      reason: "fallback_watch",
-      reason_text: "Marcador tecnico de cobertura visual; faltou sinal institucional confirmado.",
-      trigger: "Aguardar preco, volume e regime confirmarem antes de operar.",
-      invalidation: "Nao usar como trade se faltar preco real, volume ou leitura de fluxo.",
-      risk: "Risco medio: fallback visual existe para orientar observacao, nao para executar ordem.",
-      risk_level: "medio",
-      coherence_status: "derived_watch",
-      derived: true,
-    };
-  });
+  return markers;
 }
 
 export function TickerChart({
@@ -550,15 +548,6 @@ export function TickerChart({
     : { series: baseSeries, ohlc: rawOhlc };
   const displaySeries = sessionPadded.series;
   const ohlc = sessionPadded.ohlc;
-  const isSyntheticFallbackChart = Boolean(
-    chart?.fallback ||
-      chart?.synthetic ||
-      chart?.summary?.fallback ||
-      chart?.summary?.synthetic ||
-      chart?.summary?.source === "quote_visual_fallback" ||
-      chart?.summary?.source === "quote_cache_fallback",
-  );
-
   useEffect(() => {
     setWindowStart(0);
     setWindowSize(null);
@@ -577,16 +566,6 @@ export function TickerChart({
           : "Sem gráfico real confiável para este futuro B3 no provider público. Candles sintéticos/proxy foram bloqueados para evitar gráfico errado.")
       : (isEnglish ? "Not enough historical series to draw the chart yet." : "Sem série histórica suficiente para desenhar o gráfico ainda.");
     return <div className="snbr-empty">{message}</div>;
-  }
-
-  if (isSyntheticFallbackChart) {
-    return (
-      <div className="snbr-empty">
-        {isEnglish
-          ? "No real provider chart is available in cache for this range. Synthetic candles were blocked to avoid a wrong chart."
-          : "Sem gráfico real do provider em cache para este período. Candles sintéticos foram bloqueados para evitar gráfico errado."}
-      </div>
-    );
   }
 
   const minWindowSize = Math.min(displaySeries.length, 12);
@@ -690,6 +669,10 @@ export function TickerChart({
   const timeToIndex = new Map(series.map((item, index) => [String(item.time || ""), index]));
   const candleWidth = clamp((plotWidth / Math.max(series.length, 1)) * 0.58, 3, 9);
   const xTicks = pickTickIndexes(series.length, 8);
+  const displayXTicks = xTicks.filter((index) => {
+    if (index === series.length - 1 && isOneDayInterval(interval)) return false;
+    return !(index === series.length - 1 && (series[index] as any)?.sessionBoundary);
+  });
   const verticalGridTicks = pickTickIndexes(series.length, 13);
   const latestClose = closes[closes.length - 1] ?? 0;
   const latestOpen = candleRows[candleRows.length - 1]?.open ?? latestClose;
@@ -705,7 +688,7 @@ export function TickerChart({
   const yTicks = pickTickIndexes(5, 5);
   const tradableCandleRows = candleRows.filter((item) => !item.sessionBoundary);
   const zoneRows = showZones ? (chart?.zones?.length ? chart.zones : buildDerivedZones(tradableCandleRows)) : [];
-  const rawMarkerRows = showMarkers ? (chart?.markers?.length ? chart.markers : (isSyntheticFallbackChart ? [] : buildDerivedMarkers(tradableCandleRows))) : [];
+  const rawMarkerRows = showMarkers ? (chart?.markers?.length ? chart.markers : buildDerivedMarkers(tradableCandleRows)) : [];
   const markerRows = rawMarkerRows.filter((marker) => !marker.time || timeToIndex.has(String(marker.time || "")));
   const activeToolCount = [
     showMarkers,
@@ -1013,7 +996,6 @@ Volume: ${formatPrice(bar.volume, locale)}`}</title>
           const badgeHeight = marker.labelLines.length > 1 ? 41 : 31;
           const badgeX = clamp(marker.x - badgeWidth / 2, paddingX, width - paddingX - badgeWidth);
           const badgeY = marker.side === "sell" ? marker.stemEndY + 8 : marker.stemEndY - badgeHeight - 8;
-          const scoreText = marker.score != null && Math.round(marker.score) > 0 ? `+${Math.round(marker.score)}` : "";
           return (
           <g
             key={marker.key}
@@ -1086,18 +1068,6 @@ Volume: ${formatPrice(bar.volume, locale)}`}</title>
                 </tspan>
               ))}
             </text>
-            {scoreText ? (
-              <text
-                x={badgeX + badgeWidth / 2}
-                y={badgeY + badgeHeight - 7}
-                textAnchor="middle"
-                fill="#ffffff"
-                fontSize="8"
-                fontWeight="800"
-              >
-                {scoreText}
-              </text>
-            ) : null}
           </g>
           );
         })}
@@ -1120,7 +1090,7 @@ Volume: ${formatPrice(bar.volume, locale)}`}</title>
           );
         }) : null}
 
-        {xTicks.map((index) => {
+        {displayXTicks.map((index) => {
           const x = toX(index);
           return (
             <g key={`x-tick-${index}`}>

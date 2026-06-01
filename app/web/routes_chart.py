@@ -10,6 +10,7 @@ from app.engine.signal_engine import build_chart_signal_payload
 from app.market.market_data_loader import get_cached_chart_data
 from app.cache.signal_cache import signal_cache
 from app.services.chart_overlay_service import build_chart_overlays
+from app.api.routes_public_market_live import _load_chart_data_fast as load_chart_data_cache_first
 from app.system.chart_warmup import request_chart_warmup
 from app.system.system_metrics import record_cache_access
 
@@ -36,7 +37,7 @@ def get_chart(ticker: str, interval: str = "1D"):
     try:
 
         ticker = ticker.upper()
-        ohlc = get_cached_chart_data(ticker, interval=interval) or []
+        ohlc = get_cached_chart_data(ticker, interval=interval) or load_chart_data_cache_first(ticker, interval) or []
         record_cache_access("chart", bool(ohlc), "web_chart")
 
         if not ohlc:

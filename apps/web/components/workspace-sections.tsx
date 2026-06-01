@@ -101,6 +101,10 @@ export type WorkspaceHelpSection = {
   label?: string;
   title: string;
   body: string[];
+  rows?: Array<{
+    item: string;
+    explanation: string;
+  }>;
 };
 
 type SearchPanelProps = {
@@ -345,6 +349,26 @@ export function WorkspaceEducationPanel({
                 <p key={line}>{line}</p>
               ))}
             </div>
+            {section.rows?.length ? (
+              <div className="snbr-help-table-wrap">
+                <table className="snbr-help-table">
+                  <thead>
+                    <tr>
+                      <th>{isEnglish ? "Item" : "Item"}</th>
+                      <th>{isEnglish ? "Easy explanation" : "Explicação Fácil"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {section.rows.map((row) => (
+                      <tr key={row.item}>
+                        <td>{row.item}</td>
+                        <td>{row.explanation}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
           </article>
         ))}
 

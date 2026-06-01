@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 import threading
@@ -10,6 +11,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from app.system.system_metrics import record_cache_access, record_cache_lookup, record_external_provider_call, record_worker_stage_duration
@@ -25,6 +27,8 @@ _NEWS_MAX_CLUSTER_CANDIDATES = 12
 _NEWS_CACHE: dict[str, dict[str, Any]] = {}
 _NEWS_PROVIDER_STATUS: dict[str, dict[str, Any]] = {}
 _REQUEST_LOCKS: dict[str, threading.Lock] = {}
+_NEWS_CACHE_FILE = Path("runtime/cache/news_cache.json")
+_NEWS_CACHE_LOADED = False
 
 
 def _get_yfinance():
@@ -36,6 +40,58 @@ def _get_yfinance():
             yf_module = False
         _YFINANCE = yf_module
     return _YFINANCE or None
+
+
+def _load_news_cache_once() -> None:
+    global _NEWS_CACHE_LOADED
+    if _NEWS_CACHE_LOADED:
+        return
+    with _CACHE_LOCK:
+        if _NEWS_CACHE_LOADED:
+            return
+        try:
+            payload = json.loads(_NEWS_CACHE_FILE.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            _NEWS_CACHE_LOADED = True
+            return
+        except Exception as exc:
+            logger.warning("News cache load failed: %s", exc)
+            _NEWS_CACHE_LOADED = True
+            return
+
+        cached = payload.get("news_cache") if isinstance(payload, dict) else None
+        if isinstance(cached, dict):
+            for key, value in cached.items():
+                if isinstance(value, dict) and isinstance(value.get("items"), list):
+                    _NEWS_CACHE[str(key).upper()] = value
+
+        provider_status = payload.get("provider_status") if isinstance(payload, dict) else None
+        if isinstance(provider_status, dict):
+            for key, value in provider_status.items():
+                if isinstance(value, dict):
+                    _NEWS_PROVIDER_STATUS[str(key).upper()] = value
+
+        _NEWS_CACHE_LOADED = True
+
+
+def _persist_news_cache_locked() -> None:
+    try:
+        _NEWS_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp_file = _NEWS_CACHE_FILE.with_suffix(".tmp")
+        tmp_file.write_text(
+            json.dumps(
+                {
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                    "news_cache": _NEWS_CACHE,
+                    "provider_status": _NEWS_PROVIDER_STATUS,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        tmp_file.replace(_NEWS_CACHE_FILE)
+    except Exception as exc:
+        logger.debug("News cache persist failed: %s", exc)
 
 
 def _remember_news_provider_status(
@@ -1407,6 +1463,7 @@ def build_symbol_news(ticker: str, raw_items: list[dict[str, Any]], limit: int =
 
 
 def get_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
+    _load_news_cache_once()
     normalized_ticker = _normalize_ticker(ticker)
     if not normalized_ticker:
         return []
@@ -1457,6 +1514,7 @@ def get_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
                     cached["provider_status"] = provider_meta.get("status")
                     cached["provider_error"] = provider_meta.get("error")
                     cached["attempted_candidates"] = attempted_candidates
+                    _persist_news_cache_locked()
                     return list(cached.get("items", []))[:limit]
             cache_status = "empty"
 
@@ -1476,11 +1534,13 @@ def get_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
                 "attempted_candidates": attempted_candidates,
                 "report": intelligence_report,
             }
+            _persist_news_cache_locked()
 
         return list(items)
 
 
 def get_cached_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
+    _load_news_cache_once()
     start = time.perf_counter()
     normalized_ticker = _normalize_ticker(ticker)
     if not normalized_ticker:
@@ -1507,6 +1567,7 @@ def get_cached_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
 
 
 def get_news_cached_report(ticker: str, items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    _load_news_cache_once()
     normalized_ticker = _normalize_ticker(ticker)
     with _CACHE_LOCK:
         cached = _NEWS_CACHE.get(normalized_ticker)
@@ -1653,6 +1714,7 @@ def _get_request_lock(ticker: str) -> threading.Lock:
 
 
 def get_news_cache_info(ticker: str) -> dict[str, Any]:
+    _load_news_cache_once()
     normalized_ticker = _normalize_ticker(ticker)
     now = _now_ts()
     provider_meta = _latest_news_provider_status(normalized_ticker)

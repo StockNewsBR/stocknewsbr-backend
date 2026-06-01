@@ -26,6 +26,6 @@ export default async function PanelPage({
   const { slug } = await params;
   const normalizedSlug = String(slug || "").trim();
   const focusedTab = PANEL_TAB_IDS.has(normalizedSlug) ? normalizedSlug : undefined;
-  const initialTicker = focusedTab ? undefined : normalizedSlug;
+  const initialTicker = focusedTab ? undefined : (normalizedSlug === "F" ? "PETR4" : normalizedSlug);
   return <WorkspaceShell focusedTab={focusedTab} initialTicker={initialTicker} />;
 }

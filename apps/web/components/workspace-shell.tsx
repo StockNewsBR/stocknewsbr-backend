@@ -24,6 +24,7 @@ import {
   getBootstrap,
   getChatHistory,
   getFeed,
+  getNews,
   getPublicMarketBundle,
   getPublicQuotesRobust,
   getPoll,
@@ -219,7 +220,7 @@ const TAB_META: Record<string, { label: string; short: string }> = {
   "market-regime": { label: "📊 Regime de Mercado", short: "Regime" },
   "master-score": { label: "⭐ Score Mestre", short: "Score Mestre" },
   referrals: { label: "🤝 Indicações", short: "Indicações" },
-  education: { label: "🎓 Ajuda Educacional para o Trader", short: "Ajuda" },
+  education: { label: "🎓 Ajuda ao Trader", short: "Ajuda ao Trader" },
 };
 
 const TAB_META_EN: Record<string, { label: string; short: string }> = {
@@ -308,7 +309,7 @@ const TOP_TAB_TEXT: Record<string, string> = {
   "market-regime": "Regime",
   "master-score": "Score Mestre",
   referrals: "Indicações",
-  education: "Ajuda",
+  education: "Ajuda ao Trader",
 };
 
 const TOP_TAB_TEXT_EN: Record<string, string> = {
@@ -381,7 +382,7 @@ const FALLBACK_TABS: WorkspaceTab[] = [
   { id: "liquidity-map", title: "Mapa de Liquidez" },
   { id: "market-regime", title: "Regime de Mercado" },
   { id: "referrals", title: "Indicações" },
-  { id: "education", title: "Ajuda Educacional para o Trader" },
+  { id: "education", title: "Ajuda ao Trader" },
 ];
 
 const CATEGORY_ORDER = ["B3", "BDR", "Crypto", "USA"] as const;
@@ -400,13 +401,7 @@ const APP_LOCALE_STORAGE_KEY = "snbr-app-locale";
 const AI_ALERT_HISTORY_STORAGE_KEY = "snbr-ai-alert-history-v6";
 const AI_TOOL_SOUND_STORAGE_KEY = "stocknewsbr.ai_tool_sound.v1";
 const AI_DEAL_SOUND_URL = "/sounds/ka-ching.mp3";
-const MAINTENANCE_NOTICES = [
-  {
-    id: "maintenance-window",
-    titulo: "Manutenção programada",
-    corpo: "O site entrará em manutenção em 30/04/2026 às 23:00. Website, app e Telegram podem oscilar por alguns minutos.",
-  },
-];
+const MAINTENANCE_NOTICES: Array<{ id: string; titulo: string; corpo: string }> = [];
 const B3_SYMBOL_PATTERN = /^[A-Z]{4}(?:3|4|5|6|11)$/;
 const BDR_SYMBOL_PATTERN = /^[A-Z]{4,5}34$/;
 const USA_SYMBOL_PATTERN = /^[A-Z]{1,5}$/;
@@ -590,17 +585,18 @@ const EDUCATIONAL_HELP_SECTIONS = [
     ],
   },
   {
-    title: "🏛 Sobre a empresa",
+    title: "🏛 Sobre a Empresa",
     body: [
-      "StockNewsBR é a plataforma inteligente que transforma dados em oportunidades. Com tecnologia de IA e cálculos financeiros quânticos, oferece análises exclusivas para traders da B3, BDRs, ações dos EUA e criptoativos.",
-      "Nosso objetivo é entregar insights rápidos, decisões mais seguras e aumentar seu potencial de lucro com melhor tomada de decisão.",
+      "StockNewsBR é a plataforma inteligente que transforma dados em oportunidades de investimento.",
+      "Com tecnologia de Inteligência Artificial, métodos de finanças quânticas e estratégias institucionais inspiradas nos terminais de Hedge Funds norte-americanos, oferecemos análises exclusivas para traders da B3, BDRs, ações dos Estados Unidos e criptoativos.",
+      "Nosso compromisso é fornecer insights rápidos, precisos e sofisticados, apoiando decisões estratégicas e fortalecendo sua atuação no mercado financeiro.",
     ],
   },
   {
     title: "🖥️ Plataforma Web Trader Desk",
     body: [
       "Inspirada nos terminais de Hedge Funds dos EUA.",
-      "• Suporte a múltiplos monitores.",
+      "• Suporte a múltiplos monitores. Basta clicar em \"Liberar Tela\" em cada aba.",
       "• Velocidade e análise avançada.",
       "• Interface simples e prática para operação diária.",
       "Exemplo de uso: Monitor 1 → Heat Map; Monitor 2 → Radar; Monitor 3 → Breakout.",
@@ -618,11 +614,12 @@ const EDUCATIONAL_HELP_SECTIONS = [
   {
     title: "🎯 Por que escolher StockNewsBR?",
     body: [
-      "Clareza: informações complexas traduzidas em sinais simples.",
-      "Velocidade: análise em tempo real para não perder oportunidades.",
-      "Confiança: ferramentas de IA, cálculos financeiros quânticos e estratégias institucionais inspiradas nos terminais de Hedge Funds dos EUA.",
-      "Educação: explicações práticas para aplicar nas suas trades.",
-      "StockNewsBR: inteligência para melhor tomada de decisão.",
+      "Clareza: transformamos informações complexas em sinais simples e objetivos.",
+      "Velocidade: análises em tempo real para aproveitar cada oportunidade.",
+      "Confiança: tecnologia de IA, cálculos de finanças quânticas e estratégias institucionais inspiradas nos Hedge Funds dos EUA.",
+      "Educação: explicações e glossários práticos que você aplica diretamente nas suas operações.",
+      "Inteligência: suporte estratégico para decisões mais seguras e rentáveis.",
+      "StockNewsBR: Inteligência de Mercado com estrutura institucional e IA's, gerando ao trader uma tomada de decisão superior. Boas Trades !!! $$$$$",
     ],
   },
 ];
@@ -636,17 +633,18 @@ const EDUCATIONAL_HELP_SECTIONS_EN = [
     ],
   },
   {
-    title: "🏛 About the company",
+    title: "🏛 About the Company",
     body: [
-      "StockNewsBR is an intelligent platform that turns data into opportunities. With AI technology and quantum financial calculations, it provides exclusive analysis for B3, BDR, US stock and crypto traders.",
-      "The goal is to deliver fast insights, safer decisions and better decision-making potential.",
+      "StockNewsBR is an intelligent platform that turns data into investment opportunities.",
+      "With Artificial Intelligence, quantum finance methods and institutional strategies inspired by North American hedge fund terminals, we provide exclusive analysis for B3, BDR, United States stocks and crypto traders.",
+      "Our commitment is to deliver fast, precise and sophisticated insights, supporting strategic decisions and strengthening your performance in the financial market.",
     ],
   },
   {
     title: "🖥️ Web Trader Desk",
     body: [
       "Inspired by US hedge fund terminals.",
-      "• Multi-monitor support.",
+      "• Multi-monitor support. Just click \"Detach\" in each tab.",
       "• Speed and advanced analysis.",
       "• Simple, practical interface for daily trading.",
       "Example: Monitor 1 → Heat Map; Monitor 2 → Radar; Monitor 3 → Breakout.",
@@ -664,11 +662,12 @@ const EDUCATIONAL_HELP_SECTIONS_EN = [
   {
     title: "🎯 Why choose StockNewsBR?",
     body: [
-      "Clarity: complex information translated into simple signals.",
-      "Speed: real-time analysis so opportunities are not missed.",
-      "Confidence: AI tools, quantum financial calculations and institutional strategies inspired by US hedge fund terminals.",
-      "Education: practical explanations to apply in your trades.",
-      "StockNewsBR: intelligence for better decision-making.",
+      "Clarity: we turn complex information into simple, objective signals.",
+      "Speed: real-time analysis to capture every opportunity.",
+      "Confidence: AI, quantum finance methods and institutional strategies inspired by US hedge funds.",
+      "Education: practical explanations and glossaries you can apply directly in your operations.",
+      "Intelligence: strategic support for safer and more profitable decisions.",
+      "StockNewsBR: market intelligence with institutional structure and AI, giving traders superior decision-making.",
     ],
   },
 ];
@@ -676,8 +675,8 @@ const EDUCATIONAL_HELP_SECTIONS_EN = [
 const INSTITUTIONAL_SECTIONS = [
   {
     id: "institucional-sobre",
-    label: "1️⃣ Sobre a empresa",
-    title: "🏛 Sobre a empresa",
+    label: "1️⃣ Sobre a Empresa",
+    title: "🏛 Sobre a Empresa",
     body: [
       "StockNewsBR é a plataforma inteligente que transforma dados em oportunidades. Com tecnologia de IA e cálculos financeiros quânticos, oferece análises exclusivas para traders da B3, BDRs, ações dos EUA e criptoativos.",
       "Nosso objetivo é entregar insights rápidos, decisões mais seguras e aumentar seu potencial de lucro com melhor tomada de decisão.",
@@ -703,8 +702,57 @@ const INSTITUTIONAL_SECTIONS = [
     ],
   },
   {
+    id: "institucional-glossario-painel",
+    label: "4️⃣ Glosário: Painel de Análise Estratégica",
+    title: "📘 Glosário: Painel de Análise Estratégica",
+    body: ["Resumo rápido dos blocos que formam a leitura estratégica do ativo."],
+    rows: [
+      { item: "Score Mestre", explanation: "Pontuação geral do ativo; resume a força da oportunidade." },
+      { item: "Direção Provável", explanation: "Caminho mais provável do preço no curto prazo." },
+      { item: "Trade Sugerido", explanation: "Ação operacional indicada pela leitura: compra, short ou aguardar." },
+      { item: "Regime", explanation: "Contexto do mercado: alta, baixa ou lateral." },
+      { item: "Fluxo Institucional", explanation: "Leitura de entrada ou saída dos grandes players." },
+      { item: "Liquidez Alvo", explanation: "Zona de suporte ou resistência mais relevante." },
+      { item: "Risco", explanation: "Nível de perigo da operação: baixo, médio ou alto." },
+      { item: "Conclusão", explanation: "Resumo final da IA para apoiar a tomada de decisão." },
+      { item: "Base da Análise", explanation: "Números e fatores usados para sustentar a leitura." },
+      { item: "Foco Agora", explanation: "Ação prática imediata recomendada ao trader." },
+    ],
+  },
+  {
+    id: "institucional-glossario-grafico",
+    label: "5️⃣ Glosário: Gráfico do Ativo",
+    title: "📗 Glosário: Gráfico do Ativo",
+    body: ["Resumo rápido dos indicadores e elementos que aparecem no gráfico do ativo."],
+    rows: [
+      { item: "Candlestick (vela)", explanation: "Mostra abertura, máxima, mínima e fechamento do preço em cada período." },
+      { item: "VWAP", explanation: "Preço médio ponderado pelo volume; indica referência justa do ativo." },
+      { item: "Médias Móveis", explanation: "Linhas que suavizam o preço e mostram tendência." },
+      { item: "Supertrend", explanation: "Indicador que mostra direção e possíveis pontos de compra ou venda." },
+      { item: "MACD", explanation: "Mede a força da tendência e possíveis mudanças de direção." },
+      { item: "RSI", explanation: "Mostra se o ativo está sobrecomprado ou sobrevendido." },
+      { item: "Volume", explanation: "Quantidade negociada; confirma a força do movimento." },
+      { item: "Suporte", explanation: "Preço onde compradores costumam segurar quedas." },
+      { item: "Resistência", explanation: "Preço onde vendedores costumam segurar altas." },
+      { item: "Aguardar", explanation: "Sinal para não operar ainda; esperar confirmação." },
+    ],
+  },
+  {
+    id: "institucional-glossario-modos",
+    label: "6️⃣ Glosário: Modos de Uso da Plataforma",
+    title: "⚙️ Glosário: Modos de Uso da Plataforma",
+    body: ["Resumo dos modos de acesso e do que cada um libera na experiência da plataforma."],
+    rows: [
+      { item: "Modo Básico", explanation: "Versão simples da plataforma, com leitura essencial e menos painéis abertos." },
+      { item: "Modo Pro", explanation: "Versão completa, com acesso aos painéis avançados, análises extras e recursos profissionais." },
+      { item: "Abrir", explanation: "Expande uma seção para mostrar o conteúdo completo." },
+      { item: "Fechar", explanation: "Recolhe uma seção para deixar a tela mais limpa e rápida." },
+      { item: "Ajuda ao Trader", explanation: "Área com explicações práticas para entender a leitura da plataforma." },
+    ],
+  },
+  {
     id: "institucional-aviso-legal",
-    label: "4️⃣ Aviso legal",
+    label: "7️⃣ Aviso legal",
     title: "⚠️ Aviso legal",
     body: [
       "As ferramentas do StockNewsBR são apoio analítico e educacional. Elas não constituem recomendação individual de compra, venda ou manutenção de ativos.",
@@ -713,7 +761,7 @@ const INSTITUTIONAL_SECTIONS = [
   },
   {
     id: "institucional-termos",
-    label: "5️⃣ Termos de uso",
+    label: "8️⃣ Termos de uso",
     title: "📄 Termos de uso",
     body: [
       "O acesso ao produto depende do plano contratado e do respeito às regras da comunidade, incluindo uso responsável do feed social, polls e ferramentas de IA.",
@@ -722,7 +770,7 @@ const INSTITUTIONAL_SECTIONS = [
   },
   {
     id: "institucional-privacidade",
-    label: "6️⃣ Política de privacidade",
+    label: "9️⃣ Política de privacidade",
     title: "🔐 Política de privacidade",
     body: [
       "Dados básicos de conta, autenticação, perfil e preferências são usados para operar o acesso ao app, website, Telegram e recursos da comunidade.",
@@ -731,7 +779,7 @@ const INSTITUTIONAL_SECTIONS = [
   },
   {
     id: "institucional-cookies",
-    label: "7️⃣ Política de cookies",
+    label: "🔟 Política de cookies",
     title: "🍪 Política de cookies",
     body: [
       "A versão web utiliza cookies e armazenamento local para manter sessão, preferências de layout, ticker selecionado e continuidade da experiência do trader.",
@@ -740,7 +788,7 @@ const INSTITUTIONAL_SECTIONS = [
   },
   {
     id: "institucional-contato",
-    label: "8️⃣ Contato / empresa",
+    label: "1️⃣1️⃣ Contato / empresa",
     title: "📬 Contato / empresa",
     body: [
       "Canal institucional principal: https://www.stocknewsbr.com",
@@ -749,7 +797,7 @@ const INSTITUTIONAL_SECTIONS = [
   },
   {
     id: "institucional-redes",
-    label: "9️⃣ Redes sociais",
+    label: "1️⃣2️⃣ Redes sociais",
     title: "🌐 Redes sociais",
     body: [
       "As redes sociais oficiais e o Telegram da StockNewsBR servem para distribuição de alertas, novidades do produto e comunicação institucional.",
@@ -758,7 +806,7 @@ const INSTITUTIONAL_SECTIONS = [
   },
   {
     id: "institucional-ajuda-trader",
-    label: "🔟 Ajuda Educacional para o Trader",
+    label: "1️⃣3️⃣ Ajuda Educacional para o Trader",
     title: "🎓 Ajuda Educacional para o Trader",
     body: [
       "Esta seção reúne o manual rápido, explicações de cada IA e a forma correta de ler os sinais no app, web e Trader Desk.",
@@ -797,8 +845,57 @@ const INSTITUTIONAL_SECTIONS_EN = [
     ],
   },
   {
+    id: "institucional-glossario-painel",
+    label: "4️⃣ Glossary: Strategic Analysis Panel",
+    title: "📘 Glossary: Strategic Analysis Panel",
+    body: ["Quick overview of the blocks that make up the asset's strategic read."],
+    rows: [
+      { item: "Master Score", explanation: "Overall asset score; summarizes how strong the opportunity is." },
+      { item: "Likely Direction", explanation: "Most likely short-term price path." },
+      { item: "Suggested Trade", explanation: "Operational action indicated by the read: buy, short or wait." },
+      { item: "Regime", explanation: "Market context: uptrend, downtrend or range." },
+      { item: "Institutional Flow", explanation: "Read of large-player inflow or outflow." },
+      { item: "Liquidity Target", explanation: "Most relevant support or resistance zone." },
+      { item: "Risk", explanation: "Trade danger level: low, medium or high." },
+      { item: "Conclusion", explanation: "Final AI summary to support the decision." },
+      { item: "Analysis Basis", explanation: "Numbers and factors used to support the read." },
+      { item: "Focus Now", explanation: "Immediate practical action for the trader." },
+    ],
+  },
+  {
+    id: "institucional-glossario-grafico",
+    label: "5️⃣ Glossary: Asset Chart",
+    title: "📗 Glossary: Asset Chart",
+    body: ["Quick overview of the indicators and elements shown on the asset chart."],
+    rows: [
+      { item: "Candlestick (candle)", explanation: "Shows open, high, low and close for each period." },
+      { item: "VWAP", explanation: "Volume-weighted average price; a fair-value reference for the asset." },
+      { item: "Moving Averages", explanation: "Lines that smooth price and show trend." },
+      { item: "Supertrend", explanation: "Indicator that shows direction and possible buy or sell points." },
+      { item: "MACD", explanation: "Measures trend strength and possible direction changes." },
+      { item: "RSI", explanation: "Shows whether the asset is overbought or oversold." },
+      { item: "Volume", explanation: "Traded quantity; confirms move strength." },
+      { item: "Support", explanation: "Price where buyers usually hold drops." },
+      { item: "Resistance", explanation: "Price where sellers usually hold rallies." },
+      { item: "Wait", explanation: "Signal to avoid trading yet; wait for confirmation." },
+    ],
+  },
+  {
+    id: "institucional-glossario-modos",
+    label: "6️⃣ Platform Usage Modes Glossary",
+    title: "⚙️ Platform Usage Modes Glossary",
+    body: ["Quick summary of the access modes and what each one unlocks in the platform experience."],
+    rows: [
+      { item: "Basic Mode", explanation: "Simplified platform version with essential reading and fewer panels open." },
+      { item: "Pro Mode", explanation: "Full version with advanced panels, extra analysis and professional features." },
+      { item: "Open", explanation: "Expands a section to show the full content." },
+      { item: "Close", explanation: "Collapses a section to keep the screen cleaner and faster." },
+      { item: "Trader Help", explanation: "Area with practical explanations to understand the platform read." },
+    ],
+  },
+  {
     id: "institucional-aviso-legal",
-    label: "4️⃣ Legal notice",
+    label: "7️⃣ Legal notice",
     title: "⚠️ Legal notice",
     body: [
       "StockNewsBR tools are analytical and educational support. They are not individualized recommendations to buy, sell, hold or short any asset.",
@@ -807,7 +904,7 @@ const INSTITUTIONAL_SECTIONS_EN = [
   },
   {
     id: "institucional-termos",
-    label: "5️⃣ Terms of use",
+    label: "8️⃣ Terms of use",
     title: "📄 Terms of use",
     body: [
       "Product access depends on the contracted plan and compliance with community rules, including responsible use of social feed, polls and AI tools.",
@@ -816,7 +913,7 @@ const INSTITUTIONAL_SECTIONS_EN = [
   },
   {
     id: "institucional-privacidade",
-    label: "6️⃣ Privacy policy",
+    label: "9️⃣ Privacy policy",
     title: "🔐 Privacy policy",
     body: [
       "Basic account, authentication, profile and preference data are used to operate app, website, Telegram and community access.",
@@ -825,7 +922,7 @@ const INSTITUTIONAL_SECTIONS_EN = [
   },
   {
     id: "institucional-cookies",
-    label: "7️⃣ Cookie policy",
+    label: "🔟 Cookie policy",
     title: "🍪 Cookie policy",
     body: [
       "The web version uses cookies and local storage to keep session, layout preferences, selected ticker and workspace continuity.",
@@ -834,7 +931,7 @@ const INSTITUTIONAL_SECTIONS_EN = [
   },
   {
     id: "institucional-contato",
-    label: "8️⃣ Contact / company",
+    label: "1️⃣1️⃣ Contact / company",
     title: "📬 Contact / company",
     body: [
       "Main institutional channel: https://www.stocknewsbr.com",
@@ -843,7 +940,7 @@ const INSTITUTIONAL_SECTIONS_EN = [
   },
   {
     id: "institucional-redes",
-    label: "9️⃣ Social channels",
+    label: "1️⃣2️⃣ Social channels",
     title: "🌐 Social channels",
     body: [
       "Official social channels and Telegram distribute alerts, product news and institutional communication.",
@@ -852,7 +949,7 @@ const INSTITUTIONAL_SECTIONS_EN = [
   },
   {
     id: "institucional-ajuda-trader",
-    label: "🔟 Trader Educational Help",
+    label: "1️⃣3️⃣ Trader Educational Help",
     title: "🎓 Trader Educational Help",
     body: [
       "This section gathers the quick manual, explanations for each AI and the right way to read signals across app, web and Trader Desk.",
@@ -1230,25 +1327,46 @@ function formatNewsClock(value?: string | null, locale: AppLocale = "pt-BR") {
   if (!value) return missing;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return missing;
-  const timeZone = "America/Sao_Paulo";
-  const sameSourceDay = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(parsed) === new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
   return new Intl.DateTimeFormat(locale, {
-    day: sameSourceDay ? undefined : "2-digit",
-    month: sameSourceDay ? undefined : "2-digit",
+    day: "2-digit",
+    month: "2-digit",
     timeZone: "America/Sao_Paulo",
     hour: "2-digit",
     minute: "2-digit",
   }).format(parsed);
+}
+
+function normalizeSourceTimestamp(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const millis = value > 10_000_000_000 ? value : value * 1000;
+    const parsed = new Date(millis);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  const text = String(value).trim();
+  if (!text) return null;
+  const numeric = Number(text);
+  if (Number.isFinite(numeric) && /^\d+(\.\d+)?$/.test(text)) {
+    return normalizeSourceTimestamp(numeric);
+  }
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function newsSourceTimestamp(item: NewsItem): string | null {
+  const raw = item as any;
+  return (
+    normalizeSourceTimestamp(raw.published_at) ||
+    normalizeSourceTimestamp(raw.provider_publish_time) ||
+    normalizeSourceTimestamp(raw.providerPublishTime) ||
+    normalizeSourceTimestamp(raw.pubDate) ||
+    normalizeSourceTimestamp(raw.publishedAt) ||
+    normalizeSourceTimestamp(raw.displayTime) ||
+    normalizeSourceTimestamp(raw.content?.providerPublishTime) ||
+    normalizeSourceTimestamp(raw.content?.pubDate) ||
+    normalizeSourceTimestamp(raw.content?.publishedAt) ||
+    normalizeSourceTimestamp(raw.content?.displayTime)
+  );
 }
 
 function expandPortugueseMarketTerms(value?: string | null) {
@@ -1628,6 +1746,10 @@ function normalizeAlertEpoch(value?: unknown) {
 
 function resolveAiAlertTimestamp(row: AiToolRow, fallbackIso?: unknown) {
   return (
+    normalizeAlertTimestamp((row as any).deal_detected_at) ||
+    normalizeAlertTimestamp((row as any).found_at) ||
+    normalizeAlertTimestamp((row as any).first_seen_at) ||
+    normalizeAlertTimestamp(row.detected_at) ||
     normalizeAlertTimestamp(row.market_data_updated_at) ||
     normalizeAlertTimestamp(row.last_bar_at) ||
     normalizeAlertTimestamp(row.bar_time) ||
@@ -1635,7 +1757,6 @@ function resolveAiAlertTimestamp(row: AiToolRow, fallbackIso?: unknown) {
     normalizeAlertTimestamp(row.timestamp) ||
     normalizeAlertTimestamp(row.quote_time) ||
     normalizeAlertTimestamp(row.provider_timestamp) ||
-    normalizeAlertTimestamp(row.detected_at) ||
     normalizeAlertTimestamp(row.updated_at) ||
     normalizeAlertTimestamp(row.last_seen_at) ||
     normalizeAlertTimestamp(row.created_at) ||
@@ -1645,17 +1766,16 @@ function resolveAiAlertTimestamp(row: AiToolRow, fallbackIso?: unknown) {
 
 function resolveAiFindingTimestamp(row: AiToolRow) {
   return (
-    normalizeAlertTimestamp(row.published_at) ||
-    normalizeAlertTimestamp(row.news_published_at) ||
-    normalizeAlertTimestamp(row.provider_publish_time) ||
+    normalizeAlertTimestamp((row as any).deal_detected_at) ||
+    normalizeAlertTimestamp((row as any).found_at) ||
+    normalizeAlertTimestamp((row as any).first_seen_at) ||
+    normalizeAlertTimestamp(row.detected_at) ||
     normalizeAlertTimestamp(row.market_data_updated_at) ||
     normalizeAlertTimestamp(row.quote_time) ||
     normalizeAlertTimestamp(row.provider_timestamp) ||
     normalizeAlertTimestamp(row.last_bar_at) ||
     normalizeAlertTimestamp(row.bar_time) ||
     normalizeAlertTimestamp(row.time) ||
-    normalizeAlertTimestamp(row.timestamp) ||
-    normalizeAlertTimestamp(row.detected_at) ||
     normalizeAlertTimestamp(row.timestamp) ||
     normalizeAlertTimestamp(row.created_at) ||
     normalizeAlertTimestamp(row.updated_at) ||
@@ -1957,7 +2077,17 @@ function quoteHasMarketValue(quote?: QuotePayload | null) {
   if (!quote) return false;
   const source = String((quote as any).source || "").toLowerCase();
   const status = String((quote as any).quote_status || "").toLowerCase();
-  if (source === "empty" || status === "empty" || status === "partial") return false;
+  if (
+    source === "empty" ||
+    source.includes("stale") ||
+    source.includes("last_good") ||
+    status === "empty" ||
+    status === "partial" ||
+    status === "stale" ||
+    (quote as any).stale === true
+  ) {
+    return false;
+  }
   const price = Number(quote.price);
   return Number.isFinite(price) && price > 0;
 }
@@ -2301,6 +2431,13 @@ function normalizeUiText(value?: string | null) {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+function sentenceCaseFirst(value?: string | null, locale: AppLocale = "pt-BR") {
+  const text = String(value || "").trim();
+  const firstLetterIndex = text.search(/[A-Za-zÀ-ÖØ-öø-ÿ]/);
+  if (firstLetterIndex < 0) return text;
+  return `${text.slice(0, firstLetterIndex)}${text[firstLetterIndex].toLocaleUpperCase(locale)}${text.slice(firstLetterIndex + 1)}`;
 }
 
 function sameUiText(left?: string | null, right?: string | null) {
@@ -3129,12 +3266,11 @@ function decisionDirectionLabel(tone: DecisionTone, locale: AppLocale) {
   return locale === "en-US" ? "Range" : "Lateral";
 }
 
-function decisionTradeLabel(tone: DecisionTone, score: number | null, hasCoreData: boolean, conflict: boolean, locale: AppLocale) {
+function decisionTradeLabel(tone: DecisionTone, hasCoreData: boolean, locale: AppLocale) {
   if (tone === "exit") return locale === "en-US" ? "Close position" : "Encerrar posição";
-  if (!hasCoreData || conflict) return locale === "en-US" ? "Wait" : "Aguardar";
-  const strongEnough = score == null || score >= 6;
-  if (tone === "bullish" && strongEnough) return locale === "en-US" ? "Buy/Long" : "Comprar";
-  if (tone === "bearish" && strongEnough) return locale === "en-US" ? "Sell/Short" : "Vender/Short";
+  if (!hasCoreData) return locale === "en-US" ? "Wait" : "Aguardar";
+  if (tone === "bullish") return locale === "en-US" ? "Buy/Long" : "Compra";
+  if (tone === "bearish") return locale === "en-US" ? "Sell/Short" : "Short / Comprar vendido";
   return locale === "en-US" ? "Wait" : "Aguardar";
 }
 
@@ -3187,13 +3323,36 @@ function resolveLiquidityTarget(chart: ChartPayload | null, price: number | null
   return `${label || (locale === "en-US" ? "Level" : "Nível")}: ${formatLocalePrice(preferred.price, locale)}`;
 }
 
-function resolveRiskCard(score: number | null, hasCoreData: boolean, conflict: boolean, locale: AppLocale, rsi?: number | string | null): EssentialDecisionCard {
+function resolveRiskCard(
+  score: number | null,
+  hasCoreData: boolean,
+  conflict: boolean,
+  locale: AppLocale,
+  rsi?: number | string | null,
+  fallbackScore?: number | null,
+): EssentialDecisionCard {
   const label = locale === "en-US" ? "Risk" : "Risco";
   const rsiNumber = firstValidRsiNumber(rsi);
   const extremeRsi = rsiNumber != null && (rsiNumber >= 70 || rsiNumber <= 30);
-  if (!hasCoreData || conflict || score == null) return { label, value: locale === "en-US" ? "High" : "Alto", tone: "bearish" };
-  if (score >= 7 && !extremeRsi) return { label, value: locale === "en-US" ? "Low" : "Baixo", tone: "bullish" };
-  return { label, value: locale === "en-US" ? "Medium" : "Médio", tone: "watch" };
+  const effectiveScore = score ?? fallbackScore;
+  if (conflict || effectiveScore == null) return { label, value: locale === "en-US" ? "High" : "Alto", tone: "bearish" };
+  if (!hasCoreData) {
+    if (effectiveScore >= 7 && !extremeRsi) return { label, value: locale === "en-US" ? "Medium" : "Médio", tone: "watch" };
+    if (effectiveScore >= 5.5) return { label, value: locale === "en-US" ? "Medium" : "Médio", tone: "watch" };
+    return { label, value: locale === "en-US" ? "High" : "Alto", tone: "bearish" };
+  }
+  if (effectiveScore >= 7 && !extremeRsi) return { label, value: locale === "en-US" ? "Low" : "Baixo", tone: "bullish" };
+  if (effectiveScore >= 5.5) return { label, value: locale === "en-US" ? "Medium" : "Médio", tone: "watch" };
+  return { label, value: locale === "en-US" ? "High" : "Alto", tone: "bearish" };
+}
+
+type StrategicRiskLevel = "low" | "medium" | "high";
+
+function strategicRiskLevelFromText(value?: string | null): StrategicRiskLevel {
+  const normalized = normalizeUiText(value || "");
+  if (/\b(high|alto|alta|elevado|elevada|forte)\b/.test(normalized)) return "high";
+  if (/\b(low|baixo|baixa|reduzido|reduzida)\b/.test(normalized)) return "low";
+  return "medium";
 }
 
 function buildStrategicConclusion(input: {
@@ -3220,6 +3379,7 @@ function buildStrategicConclusion(input: {
   const flowTone = decisionToneFromText(input.flow);
   const directionTone = decisionToneFromText(input.direction, input.trade);
   const riskTone = decisionToneFromText(input.risk);
+  const riskLevel = strategicRiskLevelFromText(input.risk);
   const weakScore = score == null || score < 5.5;
   const strongScore = score != null && score >= 7;
   const moderateScore = score != null && score >= 5.5 && score < 7;
@@ -3257,13 +3417,16 @@ function buildStrategicConclusion(input: {
       : score < 7
         ? (isEnglish ? `Moderate conviction: Score ${score.toFixed(1)}` : `Convicção moderada: Score ${score.toFixed(1)}`)
         : (isEnglish ? `Strong conviction: Score ${score.toFixed(1)}` : `Convicção forte: Score ${score.toFixed(1)}`);
+  const riskBasis = input.risk
+    ? (isEnglish ? `Risk: ${input.risk}` : `Risco: ${input.risk}`)
+    : (isEnglish ? "Risk: no read" : "Risco: sem leitura");
   const regimeBasis = input.regime
     ? (isEnglish ? `Main trend (BIAS): ${input.regime}` : `Tendência principal (BIAS): ${input.regime}`)
     : (isEnglish ? "Main trend (BIAS): no clear read" : "Tendência principal (BIAS): sem leitura clara");
   const flowBasis = input.flow
     ? (isEnglish ? `Institutional flow: ${input.flow}` : `Fluxo institucional: ${input.flow}`)
     : (isEnglish ? "Institutional flow without read" : "Fluxo institucional sem leitura");
-  const basis = [regimeBasis, scoreBasis, flowBasis, volumeBasis, rvolBasis, rsiBasis];
+  const basis = [regimeBasis, scoreBasis, riskBasis, flowBasis, volumeBasis, rvolBasis, rsiBasis];
   const stamp = new Date(input.minuteTick * 60_000).toLocaleTimeString(isEnglish ? "en-US" : "pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
@@ -3271,14 +3434,18 @@ function buildStrategicConclusion(input: {
   const normalizedDirection = normalizeUiText(input.direction);
   const normalizedTrade = normalizeUiText(input.trade);
   const normalizedRegime = normalizeUiText(input.regime);
-  const bearishContext =
+  const sellPressure =
     directionTone === "bearish" ||
-    regimeTone === "bearish" ||
     normalizedDirection.includes("baixa") ||
     normalizedDirection.includes("short") ||
     normalizedTrade.includes("short") ||
     normalizedTrade.includes("venda") ||
-    normalizedRegime.includes("baixa");
+    flowTone === "bearish";
+  const regimePressure = regimeTone === "bearish" || normalizedRegime.includes("baixa");
+  const bearishContext =
+    sellPressure ||
+    (regimePressure && !strongScore) ||
+    (regimePressure && riskLevel === "high" && flowTone !== "bullish");
   const protectiveContext =
     directionTone === "exit" ||
     normalizedDirection.includes("saida") ||
@@ -3290,39 +3457,39 @@ function buildStrategicConclusion(input: {
       if (hasVolume) {
         return isEnglish
           ? "Focus now: treat price and volume as context, but wait for real chart, liquidity and flow confirmation before execution."
-          : "Foco agora: usar preço e volume como contexto, mas aguardar gráfico real, liquidez e fluxo confirmarem antes da execução.";
+        : "Foco Agora: usar preço e volume como contexto, mas aguardar gráfico real, liquidez e fluxo confirmarem antes da execução.";
       }
       return isEnglish
         ? "Focus now: do not execute operational trades until real price and volume are confirmed."
-        : "Foco agora: não executar operação até preço e volume reais ficarem confirmados.";
+        : "Foco Agora: não executar operação até preço e volume reais ficarem confirmados.";
     }
     if (bearishContext || protectiveContext) {
       if (strongScore) {
         return isEnglish
           ? "Focus now: prioritize capital protection and only use short-side setups with chart confirmation."
-          : "Foco agora: preservar capital e considerar venda/short apenas com confirmação no gráfico.";
+          : "Foco Agora: preservar capital e considerar venda/short apenas com confirmação no gráfico.";
       }
       return isEnglish
         ? "Focus now: avoid long exposure while downside arguments remain stronger."
-        : "Foco agora: evitar exposição comprada enquanto os argumentos de baixa forem mais fortes.";
+        : "Foco Agora: evitar exposição comprada enquanto os argumentos de baixa forem mais fortes.";
     }
-    if (regimeTone === "bullish" && strongScore && flowTone !== "bearish") {
+    if (regimeTone === "bullish" && strongScore) {
       return resolvedRvol != null && resolvedRvol >= 1.2
         ? (isEnglish
             ? "Focus now: look for a clean pullback or breakout with volume confirmation."
-            : "Foco agora: buscar pullback defendido ou rompimento limpo com confirmação de volume.")
+            : "Foco Agora: buscar pullback defendido ou rompimento limpo com confirmação de volume.")
         : (isEnglish
             ? "Focus now: wait for volume to confirm before increasing long exposure."
-            : "Foco agora: aguardar o volume confirmar antes de aumentar exposição comprada.");
+            : "Foco Agora: aguardar o volume confirmar antes de aumentar exposição comprada.");
     }
     if (weakScore) {
       return isEnglish
         ? "Focus now: monitor only; conviction is too low to force a trade."
-        : "Foco agora: apenas monitorar; a convicção está baixa para forçar operação.";
+        : "Foco Agora: apenas monitorar; a convicção está baixa para forçar operação.";
     }
     return isEnglish
       ? "Focus now: wait for price, liquidity and flow to align before acting."
-      : "Foco agora: aguardar preço, liquidez e fluxo alinharem antes de agir.";
+      : "Foco Agora: aguardar preço, liquidez e fluxo alinharem antes de agir.";
   })();
 
   if (!input.hasCoreData || !hasVolume || score == null) {
@@ -3438,7 +3605,7 @@ function buildStrategicConclusion(input: {
     };
   }
 
-  if (strongScore && (directionTone === "bullish" || regimeTone === "bullish") && flowTone !== "bearish" && riskTone !== "bearish") {
+  if (strongScore && (directionTone === "bullish" || regimeTone === "bullish")) {
     return {
       headline: isEnglish
         ? "The read favors continuation or buying, but the entry still needs chart confirmation."
@@ -3450,7 +3617,7 @@ function buildStrategicConclusion(input: {
     };
   }
 
-  if (strongScore && (directionTone === "bearish" || regimeTone === "bearish") && flowTone !== "bullish") {
+  if (strongScore && riskLevel !== "low" && regimeTone === "bearish" && flowTone !== "bullish") {
     return {
       headline: isEnglish
         ? "Current Scenario"
@@ -3537,6 +3704,7 @@ function strategicSectionsForRender(conclusion: StrategicConclusion, locale: App
   const assetLabel = normalizeSymbol(symbol) || (isEnglish ? "the asset" : "o ativo");
   const basisText = conclusion.basis.join(" | ");
   const scoreLine = conclusion.basis.find((item) => /score|convic/i.test(item)) || "";
+  const riskLine = conclusion.basis.find((item) => /risk|risco/i.test(item)) || "";
   const regimeLine = conclusion.basis.find((item) => /bias|trend|tend[eê]ncia|regime/i.test(item)) || "";
   const flowLine = conclusion.basis.find((item) => /flow|fluxo/i.test(item)) || "";
   const rvolLine = conclusion.basis.find((item) => /rvol|volume relativo/i.test(item)) || "";
@@ -3544,15 +3712,15 @@ function strategicSectionsForRender(conclusion: StrategicConclusion, locale: App
   const scoreValue = Number(scoreLine.match(/(\d+(?:[.,]\d+)?)/)?.[1]?.replace(",", "."));
   const rvolValue = Number(rvolLine.match(/(\d+(?:[.,]\d+)?)/)?.[1]?.replace(",", "."));
   const rsiValue = Number(rsiLine.match(/(\d+(?:[.,]\d+)?)/)?.[1]?.replace(",", "."));
-  const lowConviction = /low conviction|pouca convic/i.test(basisText);
-  const strongConviction = /strong conviction|convic[cç][aã]o forte/i.test(basisText);
+  const riskLevel = strategicRiskLevelFromText(riskLine);
+  const lowConviction = /low conviction|pouca convic/i.test(basisText) || (Number.isFinite(scoreValue) && scoreValue < 5.5);
+  const strongConviction = /strong conviction|convic[cç][aã]o forte/i.test(basisText) || (Number.isFinite(scoreValue) && scoreValue >= 7);
   const noFlow = /no read|sem leitura/i.test(flowLine);
   const buyerFlow = /buyer|comprador|buying/i.test(flowLine);
   const sellerFlow = /seller|vendedor|selling/i.test(flowLine);
   const regimeBull = /alta|uptrend|strong uptrend/i.test(regimeLine);
   const regimeBear = /baixa|downtrend|strong downtrend/i.test(regimeLine);
-  const regimeRange = /lateral|range|neutral|neutro|monitor/i.test(regimeLine) && !regimeBull && !regimeBear;
-  const hasVolumeBoost = /above normal|acima do volume normal|maior interesse institucional/i.test(rvolLine);
+  const hasVolumeBoost = /above normal|acima do volume normal|maior interesse institucional/i.test(rvolLine) || (Number.isFinite(rvolValue) && rvolValue >= 1.2);
   const weakVolume = /below normal|abaixo do volume normal|convic/i.test(rvolLine) || (Number.isFinite(rvolValue) && rvolValue < 0.8);
   const overbought = Number.isFinite(rsiValue) && rsiValue >= 70;
   const oversold = Number.isFinite(rsiValue) && rsiValue <= 30;
@@ -3560,14 +3728,29 @@ function strategicSectionsForRender(conclusion: StrategicConclusion, locale: App
   const rsiBearish = Number.isFinite(rsiValue) && rsiValue < 40;
   const scoreText = Number.isFinite(scoreValue) ? scoreValue.toFixed(1) : (isEnglish ? "n/a" : "sem leitura");
   const rvolText = Number.isFinite(rvolValue) ? rvolValue.toFixed(2) : (isEnglish ? "no read" : "sem leitura");
-  const focusText = conclusion.focus
-    .replace(/^Focus now:\s*/i, "")
-    .replace(/^Foco agora:\s*/i, "")
-    .trim();
-  const sourceSections = Array.isArray((conclusion as any).sections)
-    ? ((conclusion as any).sections || [])
-    : [];
-  const [sourceScenario, sourceDirective, sourceBetween, sourceInterpretation] = sourceSections;
+  const focusText = sentenceCaseFirst(
+    conclusion.focus
+      .replace(/^Focus now:\s*/i, "")
+      .replace(/^Foco agora:\s*/i, "")
+      .trim(),
+    locale,
+  );
+  const incompleteRead =
+    /incomplete|incompleta|sem leitura confirmada|no confirmed reading|n\/a|indispon/i.test(`${conclusion.headline} ${basisText}`) ||
+    !Number.isFinite(scoreValue);
+  const bullishSetup =
+    !incompleteRead &&
+    (conclusion.tone === "bullish" ||
+      (strongConviction && riskLevel === "low" && !sellerFlow) ||
+      (regimeBull && buyerFlow && !sellerFlow));
+  const bearishSetup =
+    !bullishSetup &&
+    !incompleteRead &&
+    (conclusion.tone === "bearish" ||
+      conclusion.tone === "exit" ||
+      sellerFlow ||
+      (regimeBear && (riskLevel !== "low" || lowConviction)) ||
+      (rsiBearish && lowConviction));
   const standardTitles = isEnglish
     ? {
         scenario: "Current Scenario",
@@ -3583,146 +3766,341 @@ function strategicSectionsForRender(conclusion: StrategicConclusion, locale: App
         interpretation: "Interpretação",
         focus: "Foco Agora",
       };
-  const fallbackDirective = (() => {
+
+  const scenarioBody = (() => {
     if (isEnglish) {
-      if (conclusion.tone === "bullish") {
+      if (incompleteRead) {
+        return `${assetLabel}: the operational read is incomplete. Treat the panel as context and do not execute until price, volume, Master Score and chart structure are confirmed.`;
+      }
+      if (bullishSetup) {
+        if (riskLevel === "low") return `${assetLabel}: low-risk constructive read. The buy side has priority, but execution still needs a clean 5-minute candle, volume and flow confirmation.`;
+        if (riskLevel === "medium") return `${assetLabel}: constructive but not free risk. The buy thesis exists, yet size must be reduced until confirmation improves.`;
+        return `${assetLabel}: upside signs exist, but risk is high. Do not chase; wait for stronger confirmation before any long exposure.`;
+      }
+      if (bearishSetup) {
+        if (riskLevel === "low") return `${assetLabel}: downside pressure is present, but risk is low enough to require precision rather than panic. Shorts need a clear trigger and tight invalidation.`;
+        if (riskLevel === "medium") return `${assetLabel}: medium-risk defensive read. Sellers have more evidence now, but entry needs price and volume confirmation.`;
+        return `${assetLabel}: high-risk defensive read. Preserve capital and avoid new exposure until the next 5-minute structure confirms direction.`;
+      }
+      if (riskLevel === "low") return `${assetLabel}: neutral read with low risk. Wait for the market to choose a side; do not turn the low-risk label into an automatic trade.`;
+      if (riskLevel === "medium") return `${assetLabel}: neutral read with medium risk. The correct stance is patience, smaller size and confirmation.`;
+      return `${assetLabel}: neutral read with high risk. No operational side has enough quality for aggressive execution.`;
+    }
+
+    if (incompleteRead) {
+      return `${assetLabel}: a leitura operacional está incompleta. Use o painel como contexto e não execute até preço, volume, Score Mestre e estrutura do gráfico ficarem confirmados.`;
+    }
+    if (bullishSetup) {
+      if (riskLevel === "low") return `${assetLabel}: leitura construtiva com risco baixo. A compra tem prioridade, mas a execução ainda precisa de vela de 5 minutos limpa, volume e fluxo confirmando.`;
+      if (riskLevel === "medium") return `${assetLabel}: leitura construtiva, porém com risco médio. A tese de compra existe, mas o tamanho deve ser reduzido até a confirmação melhorar.`;
+      return `${assetLabel}: existem sinais de alta, mas o risco está alto. Não perseguir preço; aguardar confirmação mais forte antes de exposição comprada.`;
+    }
+    if (bearishSetup) {
+      if (riskLevel === "low") return `${assetLabel}: há pressão de baixa, mas o risco baixo pede precisão, não pânico. Short precisa de gatilho claro e invalidação curta.`;
+      if (riskLevel === "medium") return `${assetLabel}: leitura defensiva com risco médio. Vendedores têm mais evidência agora, mas a entrada precisa de confirmação de preço e volume.`;
+      return `${assetLabel}: leitura defensiva com risco alto. Preservar capital e evitar nova exposição até a próxima estrutura de 5 minutos confirmar direção.`;
+    }
+    if (riskLevel === "low") return `${assetLabel}: leitura neutra com risco baixo. Espere o mercado escolher o lado; não transforme risco baixo em entrada automática.`;
+    if (riskLevel === "medium") return `${assetLabel}: leitura neutra com risco médio. A postura correta é paciência, tamanho menor e confirmação.`;
+    return `${assetLabel}: leitura neutra com risco alto. Nenhum lado operacional tem qualidade suficiente para execução agressiva.`;
+  })();
+
+  const directiveItems = (() => {
+    if (isEnglish) {
+      if (bullishSetup) {
+        if (riskLevel === "low") {
+          return [
+            `Use Score ${scoreText} as a strength filter, but buy only after the 5-minute trigger confirms.`,
+            hasVolumeBoost ? `Keep RVOL near ${rvolText} during the entry candle.` : "Require volume to improve before adding size.",
+            "Place invalidation below support/VWAP or the failed breakout level.",
+            overbought ? "RSI is stretched; prefer pullback entries, not chasing." : "Prefer defended pullbacks or clean breakouts.",
+          ];
+        }
+        if (riskLevel === "medium") {
+          return [
+            "Reduce size until price, volume and flow align.",
+            `Score ${scoreText} is useful, but not enough for aggressive execution.`,
+            noFlow ? "Wait for institutional flow to confirm buyers." : "Use flow as the final confirmation.",
+            "Avoid entering in the middle of the range.",
+          ];
+        }
         return [
-          strongConviction ? `Use the ${scoreText} Master Score as a strength filter, not as an automatic entry.` : "Keep size controlled until conviction improves.",
-          hasVolumeBoost ? `Require RVOL near ${rvolText} to remain strong during the trigger.` : "Do not increase size until volume confirms the move.",
-          buyerFlow ? "Buyer flow supports the thesis; protect the trade if flow fades." : "Wait for institutional flow to confirm buyers before acting.",
-          overbought ? "RSI is stretched; avoid chasing the top of the move." : "Prefer pullbacks defended above key support or VWAP.",
+          "Preserve capital even if the setup looks constructive.",
+          "Do not open a full-size long while risk is high.",
+          "Wait for a new 5-minute candle with volume and flow confirmation.",
+          "Cancel the long plan if support/VWAP fails.",
         ];
       }
-      if (conclusion.tone === "bearish" || conclusion.tone === "exit") {
+      if (bearishSetup) {
+        if (riskLevel === "low") {
+          return [
+            "Plan short-side execution only with a clear trigger and tight invalidation.",
+            `Respect Score ${scoreText}, but do not sell late into support.`,
+            hasVolumeBoost ? `Use RVOL ${rvolText} as confirmation that the move matters.` : "Require volume before trusting the downside move.",
+            oversold ? "RSI is oversold; wait for a fresh rejection before selling." : "Prefer resistance rejection, VWAP loss or support failure.",
+          ];
+        }
+        if (riskLevel === "medium") {
+          return [
+            "Preserve capital and operate smaller size.",
+            "Short only after support/VWAP loss or seller pressure confirms.",
+            "Do not fight a sudden buyer-flow reversal.",
+            "Avoid long exposure until structure improves.",
+          ];
+        }
         return [
-          "Preserve capital before seeking a new entry.",
-          strongConviction ? `Respect the ${scoreText} bearish/protective read until price invalidates it.` : "Operate smaller size because conviction is not fully aligned.",
-          hasVolumeBoost ? `RVOL near ${rvolText} makes the move more relevant; avoid fighting it.` : "Require volume confirmation before short-side aggression.",
-          oversold ? "RSI is oversold; avoid selling late without a fresh trigger." : "Wait for resistance rejection, VWAP loss or support failure.",
+          "Do not force a new position; high risk requires patience.",
+          "Protect open trades and reduce exposure.",
+          "Wait for the next 5-minute candle to confirm direction.",
+          "Avoid leverage and late entries.",
+        ];
+      }
+      if (riskLevel === "low") {
+        return [
+          `Score ${scoreText} allows monitoring with less defensive pressure, but confirmation is still mandatory.`,
+          noFlow ? "Wait for institutional flow to choose a side." : "Let flow confirm the side.",
+          weakVolume ? "Low RVOL keeps position size small." : "Use volume only if price confirms direction.",
+          "Avoid entering before breakout or support defense.",
+        ];
+      }
+      if (riskLevel === "medium") {
+        return [
+          "Keep position size reduced.",
+          "Wait for price and volume confirmation before entering.",
+          "Do not chase the first candle after a range move.",
+          rsiBullish ? "RSI leans bullish, but still needs price confirmation." : rsiBearish ? "RSI leans bearish, but still needs support loss." : "RSI is neutral; do not force direction.",
         ];
       }
       return [
-        lowConviction ? `Score ${scoreText} is low; use this as monitoring, not execution.` : `Score ${scoreText} is moderate; wait for a stronger edge.`,
-        noFlow ? "Institutional flow has no confirmed read yet." : "Use flow as the deciding confirmation.",
-        weakVolume ? "RVOL is weak; reduce size and wait." : "Volume is acceptable only if price confirms direction.",
-        rsiBullish ? "RSI leans bullish, but it cannot decide alone." : rsiBearish ? "RSI leans bearish, but it still needs price confirmation." : "RSI is neutral; do not force direction.",
+        "Preserve capital first.",
+        "No new trade until real confirmation appears.",
+        "Reduce exposure and wait for a cleaner 5-minute structure.",
+        "Avoid aggressive entries while risk remains high.",
       ];
     }
 
-    if (conclusion.tone === "bullish") {
+    if (bullishSetup) {
+      if (riskLevel === "low") {
+        return [
+          `Usar o Score ${scoreText} como filtro de força, mas comprar só após gatilho confirmado na vela de 5 minutos.`,
+          hasVolumeBoost ? `Manter RVOL perto de ${rvolText} durante a vela de entrada.` : "Exigir melhora de volume antes de aumentar tamanho.",
+          "Invalidação abaixo do suporte/VWAP ou do rompimento que falhar.",
+          overbought ? "RSI está esticado; preferir pullback, não perseguição." : "Preferir pullback defendido ou rompimento limpo.",
+        ];
+      }
+      if (riskLevel === "medium") {
+        return [
+          "Reduzir tamanho até preço, volume e fluxo alinharem.",
+          `Score ${scoreText} ajuda, mas não autoriza execução agressiva sozinho.`,
+          noFlow ? "Aguardar fluxo institucional confirmar compradores." : "Usar fluxo como confirmação final.",
+          "Evitar entrada no meio da faixa.",
+        ];
+      }
       return [
-        strongConviction ? `Usar o Score ${scoreText} como filtro de força, não como entrada automática.` : "Manter tamanho controlado até a convicção aumentar.",
-        hasVolumeBoost ? `Exigir RVOL perto de ${rvolText} sustentando o gatilho.` : "Não aumentar posição enquanto o volume não confirmar.",
-        buyerFlow ? "Fluxo comprador apoia a tese; proteger se o fluxo perder força." : "Aguardar fluxo institucional confirmar compradores antes de agir.",
-        overbought ? "RSI está esticado; evitar perseguir o topo do movimento." : "Preferir pullbacks defendidos acima de suporte/VWAP.",
+        "Preservar capital mesmo com sinais construtivos.",
+        "Não abrir compra cheia enquanto o risco estiver alto.",
+        "Aguardar nova vela de 5 minutos com volume e fluxo confirmando.",
+        "Cancelar plano comprado se perder suporte/VWAP.",
       ];
     }
-    if (conclusion.tone === "bearish" || conclusion.tone === "exit") {
+    if (bearishSetup) {
+      if (riskLevel === "low") {
+        return [
+          "Planejar venda/short apenas com gatilho claro e invalidação curta.",
+          `Respeitar o Score ${scoreText}, mas não vender atrasado em cima do suporte.`,
+          hasVolumeBoost ? `Usar RVOL ${rvolText} como confirmação de que o movimento importa.` : "Exigir volume antes de confiar na queda.",
+          oversold ? "RSI está em sobrevenda; aguardar nova rejeição antes de vender." : "Preferir rejeição em resistência, perda de VWAP ou rompimento de suporte.",
+        ];
+      }
+      if (riskLevel === "medium") {
+        return [
+          "Preservar capital e operar menor.",
+          "Short somente após perda de suporte/VWAP ou pressão vendedora confirmada.",
+          "Não brigar contra reversão repentina de fluxo comprador.",
+          "Evitar exposição comprada até a estrutura melhorar.",
+        ];
+      }
       return [
-        "Preservar capital antes de buscar nova entrada.",
-        strongConviction ? `Respeitar a leitura defensiva/vendedora do Score ${scoreText} até o preço invalidar.` : "Operar menor porque a convicção ainda não está totalmente alinhada.",
-        hasVolumeBoost ? `RVOL perto de ${rvolText} torna o movimento mais relevante; evite brigar contra ele.` : "Exigir confirmação de volume antes de agressão vendida.",
-        oversold ? "RSI está em sobrevenda; evitar vender atrasado sem novo gatilho." : "Aguardar rejeição em resistência, perda de VWAP ou rompimento de suporte.",
+        "Não forçar nova posição; risco alto exige paciência.",
+        "Proteger operações abertas e reduzir exposição.",
+        "Aguardar a próxima vela de 5 minutos confirmar direção.",
+        "Evitar alavancagem e entradas atrasadas.",
+      ];
+    }
+    if (riskLevel === "low") {
+      return [
+        `Score ${scoreText} permite monitorar com menor pressão defensiva, mas confirmação continua obrigatória.`,
+        noFlow ? "Aguardar fluxo institucional escolher um lado." : "Deixar o fluxo confirmar o lado.",
+        weakVolume ? "RVOL baixo mantém tamanho pequeno." : "Usar volume apenas se o preço confirmar direção.",
+        "Evitar entrada antes de rompimento ou defesa clara de suporte.",
+      ];
+    }
+    if (riskLevel === "medium") {
+      return [
+        "Manter tamanho reduzido.",
+        "Aguardar confirmação de preço e volume antes de entrar.",
+        "Não perseguir a primeira vela depois de lateralização.",
+        rsiBullish ? "RSI inclina para alta, mas ainda precisa de preço confirmando." : rsiBearish ? "RSI inclina para baixa, mas ainda precisa de perda de suporte." : "RSI está neutro; não force direção.",
       ];
     }
     return [
-      lowConviction ? `Score ${scoreText} está baixo; usar como monitoramento, não como execução.` : `Score ${scoreText} é moderado; aguarde vantagem mais clara.`,
-      noFlow ? "Fluxo institucional ainda não tem leitura confirmada." : "Use fluxo como confirmação decisiva.",
-      weakVolume ? "RVOL está fraco; reduza tamanho e espere." : "Volume só ajuda se o preço confirmar direção.",
-      rsiBullish ? "RSI inclina para alta, mas não decide sozinho." : rsiBearish ? "RSI inclina para baixa, mas precisa de preço confirmando." : "RSI está neutro; não force direção.",
+      "Preservar capital primeiro.",
+      "Sem nova operação até aparecer confirmação real.",
+      "Reduzir exposição e esperar estrutura de 5 minutos mais limpa.",
+      "Evitar entradas agressivas enquanto o risco permanecer alto.",
     ];
   })();
-  const fallbackBetween = (() => {
+
+  const betweenItems = (() => {
     if (isEnglish) {
-      if (conclusion.tone === "bullish") {
+      if (incompleteRead) {
         return [
-          regimeBull ? "The buy side has the structural advantage while the uptrend holds." : "The buy side needs the chart to prove the trend is turning.",
-          sellerFlow ? "Selling flow is the main risk against buying now." : "The sell side gains strength only if support/VWAP fails.",
-          weakVolume ? "Low RVOL reduces conviction; confirmation matters more than the headline score." : "Volume supports a more relevant move if price confirms.",
+          "Buy is blocked until real price, volume and Master Score are confirmed.",
+          "Sell/short is also blocked; incomplete data cannot create an operational edge.",
+          "Waiting is the only valid decision until the real snapshot updates.",
         ];
       }
-      if (conclusion.tone === "bearish" || conclusion.tone === "exit") {
+      if (bullishSetup) {
+        if (riskLevel === "low") return [
+          "Buy has the stronger argument if price holds support/VWAP.",
+          "Sell only becomes attractive if the breakout fails or support is lost.",
+          buyerFlow ? "Buyer flow supports the long thesis." : "Buyer flow still needs to confirm before sizing up.",
+        ];
+        if (riskLevel === "medium") return [
+          "Buy has a thesis, but not enough freedom for aggressive size.",
+          "Sell gains weight if support/VWAP fails with volume.",
+          "The next confirmed 5-minute candle decides the side.",
+        ];
         return [
-          "The sell side has stronger arguments than the buy side right now.",
-          buyerFlow ? "Buying flow is the main invalidation risk for shorts." : "Buyers still need flow confirmation before the long side becomes valid.",
-          regimeBear ? "The main BIAS favors defense/short-side setups." : "The structure is not bullish enough to justify aggressive long exposure.",
+          "Buy has signals, but risk blocks aggressive execution.",
+          "Sell can appear quickly if the structure fails.",
+          "Waiting is stronger than choosing a side too early.",
+        ];
+      }
+      if (bearishSetup) {
+        if (riskLevel === "low") return [
+          "Sell has more evidence, but needs a precise trigger.",
+          "Buy becomes valid only after buyer flow or resistance reclaim.",
+          "Risk is low, so invalidation must be short and objective.",
+        ];
+        if (riskLevel === "medium") return [
+          "Sell has more arguments than buy, but confirmation is mandatory.",
+          "Buy is only a reaction trade if sellers lose control.",
+          "Resistance and flow decide whether the short is worth taking.",
+        ];
+        return [
+          "Neither side deserves aggressive execution under high risk.",
+          "Selling late can be as dangerous as buying against the trend.",
+          "Wait for liquidity and flow to stop conflicting.",
         ];
       }
       return [
-        `Buy needs breakout, buyer flow or support defense because Score ${scoreText} is not enough alone.`,
-        `Sell needs support loss, seller flow or resistance rejection; RVOL ${rvolText} decides whether the move matters.`,
-        "Without confirmation, waiting is the strongest decision.",
+        `Buy needs breakout or buyer flow because Score ${scoreText} is not enough alone.`,
+        `Sell needs support loss or seller pressure; RVOL ${rvolText} shows whether the move matters.`,
+        riskLevel === "high" ? "High risk makes waiting the dominant decision." : "Without confirmation, waiting is the strongest decision.",
       ];
     }
-    if (conclusion.tone === "bullish") {
+
+    if (incompleteRead) {
       return [
-        regimeBull ? "A compra tem vantagem estrutural enquanto a tendência de alta sustentar." : "A compra precisa provar virada no gráfico.",
-        sellerFlow ? "Fluxo vendedor é o principal risco contra compra agora." : "A venda ganha força se perder suporte ou VWAP.",
-        weakVolume ? "RVOL baixo reduz convicção; confirmação vale mais que o score." : "Volume apoia movimento mais relevante se o preço confirmar.",
+        "Compra fica bloqueada até preço, volume e Score Mestre reais confirmarem.",
+        "Venda/short também fica bloqueada; dado incompleto não gera vantagem operacional.",
+        "Aguardar é a única decisão válida até o snapshot real atualizar.",
       ];
     }
-    if (conclusion.tone === "bearish" || conclusion.tone === "exit") {
+    if (bullishSetup) {
+      if (riskLevel === "low") return [
+        "A compra tem argumento mais forte se o preço sustentar suporte/VWAP.",
+        "A venda só fica atraente se o rompimento falhar ou perder suporte.",
+        buyerFlow ? "Fluxo comprador apoia a tese comprada." : "Fluxo comprador ainda precisa confirmar antes de aumentar tamanho.",
+      ];
+      if (riskLevel === "medium") return [
+        "A compra tem tese, mas ainda não tem liberdade para tamanho agressivo.",
+        "A venda ganha peso se perder suporte/VWAP com volume.",
+        "A próxima vela de 5 minutos confirmada decide o lado.",
+      ];
       return [
-        "A venda apresenta mais argumentos do que a compra agora.",
-        buyerFlow ? "Fluxo comprador é o principal risco de invalidação do short." : "Compradores ainda precisam confirmar fluxo antes do lado comprado ficar válido.",
-        regimeBear ? "O BIAS principal favorece defesa ou operações vendidas." : "A estrutura não está forte o bastante para compra agressiva.",
+        "A compra tem sinais, mas o risco bloqueia execução agressiva.",
+        "A venda pode aparecer rápido se a estrutura falhar.",
+        "Aguardar é melhor do que escolher lado cedo demais.",
+      ];
+    }
+    if (bearishSetup) {
+      if (riskLevel === "low") return [
+        "A venda tem mais evidência, mas precisa de gatilho preciso.",
+        "A compra só fica válida com fluxo comprador ou retomada de resistência.",
+        "Risco baixo exige invalidação curta e objetiva.",
+      ];
+      if (riskLevel === "medium") return [
+        "A venda tem mais argumentos do que a compra, mas confirmação é obrigatória.",
+        "Compra é apenas reação se vendedores perderem controle.",
+        "Resistência e fluxo decidem se o short vale o risco.",
+      ];
+      return [
+        "Nenhum lado merece execução agressiva com risco alto.",
+        "Vender atrasado pode ser tão perigoso quanto comprar contra a tendência.",
+        "Aguardar liquidez e fluxo pararem de conflitar.",
       ];
     }
     return [
       `A compra precisa de rompimento ou fluxo comprador porque Score ${scoreText} sozinho não basta.`,
       `A venda precisa de perda de suporte ou pressão vendedora; RVOL ${rvolText} mostra se o movimento tem relevância.`,
-      "Sem confirmação, aguardar é a melhor decisão.",
+      riskLevel === "high" ? "Risco alto torna aguardar a decisão dominante." : "Sem confirmação, aguardar é a melhor decisão.",
     ];
   })();
-  const fallbackInterpretation = (() => {
+
+  const interpretationBody = (() => {
     if (isEnglish) {
-      if (conclusion.tone === "bullish") {
-        return overbought
-          ? `Upside remains favored, but RSI at ${rsiValue.toFixed(1)} is stretched; the professional action is to wait for a cleaner entry instead of chasing.`
-          : `Upside probability is better than downside only while price holds structure, RVOL stays near ${rvolText} and flow does not turn against the trade.`;
+      if (incompleteRead) return "There is not enough real data for an operational decision. The professional choice is to wait until price, volume and score are confirmed.";
+      if (bullishSetup) {
+        if (riskLevel === "low") return `Low risk plus Score ${scoreText} favors a controlled long plan, but only if the chart confirms. ${overbought ? "RSI is stretched, so wait for a pullback." : "The probability of upside is better while structure holds."}`;
+        if (riskLevel === "medium") return `The long thesis is possible, but medium risk requires smaller size and confirmation from ${hasVolumeBoost ? `RVOL ${rvolText}` : "volume"} and flow.`;
+        return "Upside exists, but high risk makes the setup unsuitable for aggressive execution right now.";
       }
-      if (conclusion.tone === "bearish" || conclusion.tone === "exit") {
-        return oversold
-          ? `There is no certainty of a drop and RSI at ${rsiValue.toFixed(1)} is stretched lower, so shorts need a clean trigger; buying still needs proof.`
-          : `There is no certainty of a drop, but the current setup gives the sell/short side more evidence while Score stays ${scoreText} and flow remains ${noFlow ? "unconfirmed" : sellerFlow ? "seller-driven" : "not buyer-confirmed"}.`;
+      if (bearishSetup) {
+        if (riskLevel === "low") return `The sell/short side has evidence, but low risk means the setup should be executed with precision, not emotion. ${oversold ? "RSI is already stretched lower, so avoid selling late." : "A clean trigger is still required."}`;
+        if (riskLevel === "medium") return `Medium risk means the bearish read is tradable only after confirmation. Until then, the right action is defensive patience.`;
+        return "High risk means capital preservation comes first. Do not force buy or short until the next confirmed structure appears.";
       }
-      return regimeRange
-        ? `The asset is in a more neutral/range context, so the best decision is to wait for a clean edge and watch ${rsiLine || "RSI"}.`
-        : `The setup still lacks enough alignment for a professional operational decision; flow and RVOL ${rvolText} must improve first.`;
+      if (riskLevel === "low") return "The read is neutral with controlled risk; the trader should wait for a clean trigger instead of guessing direction.";
+      if (riskLevel === "medium") return "The read is mixed; medium risk demands confirmation and smaller sizing before any execution.";
+      return "The read is mixed and risk is high; the correct professional action is to stand aside.";
     }
-    if (conclusion.tone === "bullish") {
-      return overbought
-        ? `A alta segue favorecida, mas o RSI em ${rsiValue.toFixed(1)} está esticado; a leitura profissional é esperar entrada mais limpa em vez de perseguir.`
-        : `A probabilidade de alta é melhor apenas enquanto o preço sustentar estrutura, o RVOL ficar perto de ${rvolText} e o fluxo não virar contra a operação.`;
+
+    if (incompleteRead) return "Não há dados reais suficientes para decisão operacional. A escolha profissional é aguardar até preço, volume e score ficarem confirmados.";
+    if (bullishSetup) {
+      if (riskLevel === "low") return `Risco baixo com Score ${scoreText} favorece um plano comprador controlado, mas só se o gráfico confirmar. ${overbought ? "RSI está esticado; aguarde pullback." : "A probabilidade de alta é melhor enquanto a estrutura sustentar."}`;
+      if (riskLevel === "medium") return `A tese comprada existe, mas risco médio exige tamanho menor e confirmação de ${hasVolumeBoost ? `RVOL ${rvolText}` : "volume"} e fluxo.`;
+      return "Existe leitura de alta, mas risco alto torna o setup inadequado para execução agressiva agora.";
     }
-    if (conclusion.tone === "bearish" || conclusion.tone === "exit") {
-      return oversold
-        ? `Não há certeza de queda e o RSI em ${rsiValue.toFixed(1)} está esticado para baixo; short precisa de gatilho limpo, enquanto compra ainda precisa provar reação.`
-        : `Não há certeza de queda, mas o setup atual dá mais evidência para venda/short enquanto o Score ficar ${scoreText} e o fluxo seguir ${noFlow ? "sem leitura confirmada" : sellerFlow ? "vendedor" : "sem confirmação compradora"}.`;
+    if (bearishSetup) {
+      if (riskLevel === "low") return `Venda/short tem evidência, mas risco baixo exige execução precisa, não emocional. ${oversold ? "RSI já está esticado para baixo; evite vender atrasado." : "Ainda precisa de gatilho limpo."}`;
+      if (riskLevel === "medium") return "Risco médio significa que a leitura de baixa só vira trade após confirmação. Até lá, a postura correta é paciência defensiva.";
+      return "Risco alto coloca preservação de capital em primeiro lugar. Não force compra nem short até aparecer nova estrutura confirmada.";
     }
-    return regimeRange
-      ? `O ativo está mais lateral/neutro, então a melhor decisão é esperar uma vantagem limpa e acompanhar ${rsiLine || "RSI"}.`
-      : `O setup ainda não tem alinhamento suficiente para decisão operacional profissional; fluxo e RVOL ${rvolText} precisam melhorar primeiro.`;
+    if (riskLevel === "low") return "A leitura é neutra com risco controlado; o trader deve esperar gatilho limpo em vez de adivinhar direção.";
+    if (riskLevel === "medium") return "A leitura está mista; risco médio exige confirmação e tamanho menor antes de qualquer execução.";
+    return "A leitura está mista e o risco está alto; a decisão profissional é ficar de fora.";
   })();
-  const scenarioBody = sourceScenario?.body || conclusion.headline;
-  const directiveItems = sourceDirective?.items?.length ? sourceDirective.items : fallbackDirective;
-  const betweenItems = sourceBetween?.items?.length ? sourceBetween.items : fallbackBetween;
-  const interpretationBody = sourceInterpretation?.body || fallbackInterpretation;
+
+  const focusBody = (() => {
+    if (focusText) return focusText;
+    if (isEnglish) {
+      if (riskLevel === "low") return bullishSetup ? "Wait for the 5-minute trigger, then execute with defined invalidation." : "Wait for a clean trigger; low risk is not a license to enter early.";
+      if (riskLevel === "medium") return "Trade smaller and only after price, volume and flow confirm.";
+      return "Protect capital and wait for risk to drop before acting.";
+    }
+    if (riskLevel === "low") return bullishSetup ? "Aguardar gatilho de 5 minutos e executar com invalidação definida." : "Aguardar gatilho limpo; risco baixo não autoriza entrada antecipada.";
+    if (riskLevel === "medium") return "Operar menor e só depois de preço, volume e fluxo confirmarem.";
+    return "Proteger capital e aguardar o risco cair antes de agir.";
+  })();
 
   return [
-    {
-      title: standardTitles.scenario,
-      body:
-        sourceScenario?.body ||
-        `${assetLabel}: ${conclusion.headline}`,
-    },
+    { title: standardTitles.scenario, body: scenarioBody },
     { title: standardTitles.directive, items: directiveItems },
     { title: standardTitles.between, items: betweenItems },
     { title: standardTitles.interpretation, body: interpretationBody },
-    {
-      title: standardTitles.focus,
-      body: focusText || (isEnglish ? "Focus now: wait for price, liquidity and flow to align before acting." : "Foco Agora: aguardar preço, liquidez e fluxo alinharem antes de agir."),
-    },
+    { title: standardTitles.focus, body: focusBody },
   ];
 }
 
@@ -4311,6 +4689,13 @@ function humanizeMachineLabel(value?: string | null, locale: AppLocale = "pt-BR"
     "oportunidade forte": "Oportunidade forte",
     "oportunidade moderada": "Oportunidade moderada",
     "oportunidade fraca": "Oportunidade fraca",
+    "weak setup": "Setup Fraco",
+    "neutral setup": "Setup Neutro",
+    "moderate setup": "Setup Neutro",
+    "good setup": "Setup Bom",
+    "strong setup": "Setup Bom",
+    "excellent setup": "Setup Ótimo",
+    "great setup": "Setup Ótimo",
   };
   const labelsEn: Record<string, string> = {
     monitoring: "Watching",
@@ -4344,6 +4729,13 @@ function humanizeMachineLabel(value?: string | null, locale: AppLocale = "pt-BR"
     "oportunidade forte": "Strong opportunity",
     "oportunidade moderada": "Moderate opportunity",
     "oportunidade fraca": "Weak opportunity",
+    "weak setup": "Weak Setup",
+    "neutral setup": "Neutral Setup",
+    "moderate setup": "Moderate Setup",
+    "good setup": "Good Setup",
+    "strong setup": "Strong Setup",
+    "excellent setup": "Excellent Setup",
+    "great setup": "Excellent Setup",
     forte: "Strong",
     moderada: "Moderate",
     fraca: "Weak",
@@ -4955,7 +5347,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("preferencias");
   const [accountPanel, setAccountPanel] = useState<AccountPanel>("perfil");
   const [notificationOpen, setNotificationOpen] = useState(false);
-  const [toolsOpen, setToolsOpen] = useState(true);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [strategicConclusionOpen, setStrategicConclusionOpen] = useState(true);
   const [strategicAnalysisMinute, setStrategicAnalysisMinute] = useState(() => currentFiveMinuteBucket());
   const [selectedInstitutionalSectionId, setSelectedInstitutionalSectionId] = useState<string | null>(null);
@@ -5442,6 +5834,33 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     focusedTab,
     strategicAnalysisMinute,
   ]);
+
+  useEffect(() => {
+    const newsTabOpen = (focusedTab || activeTab) === "news";
+    const newsReady = sameSymbol(news?.symbol, deferredTicker) && Number(news?.count ?? news?.items?.length ?? 0) > 0;
+    if (!newsTabOpen || newsReady) return;
+
+    let cancelled = false;
+    const refreshNews = () => {
+      getNews(token, deferredTicker, Date.now())
+        .then((payload) => {
+          if (cancelled || !sameSymbol(payload?.symbol, deferredTicker)) return;
+          setNews((current) => {
+            const currentCount = Number(current?.count ?? current?.items?.length ?? 0);
+            const nextCount = Number(payload?.count ?? payload?.items?.length ?? 0);
+            if (sameSymbol(current?.symbol, deferredTicker) && currentCount > 0 && nextCount <= 0) return current;
+            return payload;
+          });
+        })
+        .catch(() => undefined);
+    };
+
+    const timers = [0, 2400, 6500, 12000, 22000].map((delay) => window.setTimeout(refreshNews, delay));
+    return () => {
+      cancelled = true;
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [token, deferredTicker, activeTab, focusedTab, news?.symbol, news?.count, news?.items?.length, strategicAnalysisMinute]);
 
   useEffect(() => {
     if (token) return;
@@ -6573,17 +6992,28 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   ]);
   const chartForDisplay = useMemo(() => {
     const hasLiveSeries = Boolean(activeChart?.ohlc?.length || activeChart?.series?.length);
-    if (!hasLiveSeries || !activeChart) return null;
-    return activeChart;
+    if (hasLiveSeries && activeChart) return activeChart;
+    return buildQuoteFallbackChart(
+      selectedTicker,
+      chartInterval,
+      displayQuote,
+      derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || currentRanking?.trend || null,
+    );
   }, [
     activeChart,
+    chartInterval,
+    currentRanking?.trend,
+    derivedPublicInsight?.signal,
+    derivedPublicInsight?.trend_bias,
+    displayQuote,
+    selectedTicker,
   ]);
   const chartMovement = useMemo(
-    () => deriveChartMovement(activeChart || chartForDisplay),
+    () => deriveChartMovement(chartForDisplay || activeChart),
     [activeChart, chartForDisplay],
   );
   const chartVolume = useMemo(
-    () => deriveChartVolume(activeChart || chartForDisplay),
+    () => deriveChartVolume(chartForDisplay || activeChart),
     [activeChart, chartForDisplay],
   );
   const effectiveAiScore = useMemo(
@@ -6659,9 +7089,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         selectedTicker,
       );
       return matchedNews.map((item, index) => {
-        const publishedAtSource = item.published_at || null;
-        const publishedAt = publishedAtSource ? Date.parse(publishedAtSource) : Number.NaN;
-        const publishedAtIso = Number.isFinite(publishedAt) ? publishedAtSource : null;
+        const publishedAtIso = newsSourceTimestamp(item);
         const publishedTime = formatNewsClock(publishedAtIso, appLocale);
         const age = publishedTime;
         const labels = Array.isArray(item.labels) ? item.labels.filter(Boolean) : [];
@@ -7451,7 +7879,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const conflict = structuralConflict || scoreConflict;
     const tradeTone = conflict ? "watch" : directionTone === "exit" ? "exit" : directionTone;
     const scoreCardTone: DecisionTone = scoreValue == null ? "neutral" : scoreValue >= 7 ? "bullish" : scoreValue <= 5.5 ? "bearish" : "watch";
-    const riskCard = resolveRiskCard(scoreValue, hasCoreData, conflict, appLocale, currentRanking?.rsi ?? derivedPublicInsight?.rsi);
+    const riskCard = resolveRiskCard(scoreValue, hasCoreData, conflict, appLocale, currentRanking?.rsi ?? derivedPublicInsight?.rsi, rawScoreValue);
     const regimeValue = humanizeMachineLabel(decisionChart?.summary?.trend_bias || trendText || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || "", appLocale);
     return [
       {
@@ -7466,7 +7894,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       },
       {
         label: isUsLocale ? "Suggested Trade" : "Trade sugerido",
-        value: decisionTradeLabel(directionTone, scoreValue, hasCoreData, conflict, appLocale),
+        value: decisionTradeLabel(directionTone, hasCoreData, appLocale),
         tone: tradeTone,
       },
       {
@@ -8485,7 +8913,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                             })}
                           </div>
                         <div className="snbr-tool-reading-card">
-                          <span>Trigger</span>
+                          <span>{isUsLocale ? "Trigger" : "Gatilho"}</span>
                           <strong>{triggerText}</strong>
                         </div>
                         <div className="snbr-tool-reading-card">
@@ -8515,7 +8943,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                               <div className="snbr-tool-metric-list">
                                 {metricEntries.map(([key, value]) => (
                                   <p key={`${item.ticker}-${key}`}>
-                                    <small>{formatToolMetricLabel(key, appLocale)}</small>
+                                    <small>{formatToolMetricLabel(key, appLocale)}:</small>
                                     <strong>{formatToolMetricValue(value, appLocale)}</strong>
                                   </p>
                                 ))}
@@ -8910,10 +9338,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         </div>
 
         <div className="snbr-tool-reading-grid">
-          <div className="snbr-tool-reading-card">
-            <span>{isUsLocale ? "Pricing rule" : "Regra comercial"}</span>
-            <strong>{renderCommercialPricingNote(appLocale)}</strong>
-          </div>
           <div className="snbr-tool-reading-card">
             <span>{isUsLocale ? "Reward rule" : "Regra de prêmio"}</span>
             <strong>
@@ -9345,8 +9769,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         </button>
         {notificationOpen ? (
           <div className="snbr-settings-detail-row">
-            <span>{isUsLocale ? "Scheduled maintenance" : (notice?.titulo || "Sem aviso no momento.")}</span>
-            <small>{isUsLocale ? "Operational notices will appear here for website, app and Telegram." : (notice?.corpo || "Nenhum comunicado operacional agora.")}</small>
+            <span>{notice ? (isUsLocale ? "Scheduled maintenance" : notice.titulo) : (isUsLocale ? "No notice right now." : "Sem aviso no momento.")}</span>
+            <small>{notice ? notice.corpo : (isUsLocale ? "Operational notices will appear here for website, app and Telegram." : "Nenhum comunicado operacional agora.")}</small>
           </div>
         ) : null}
       </div>
@@ -9690,69 +10114,89 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             <section className="snbr-decision-panel" aria-label={isUsLocale ? "Strategic Analysis Panel" : "Painel de Análise Estratégica"}>
               <div className="snbr-decision-head">
                 <strong>{isUsLocale ? "Strategic Analysis Panel" : "Painel de Análise Estratégica"}</strong>
-                <span>{advancedMode ? (isUsLocale ? "Pro Mode" : "Modo Pro") : (isUsLocale ? "Simple" : "Simples")}</span>
-              </div>
-              <div className="snbr-decision-grid">
-                {essentialDecisionCards.map((card) => (
-                  <article key={`${card.label}-${card.value}`} className={cx("snbr-decision-card", card.tone)}>
-                    <span>{card.label}</span>
-                    <strong>{card.value}</strong>
-                  </article>
-                ))}
-              </div>
-              <article className={cx("snbr-decision-conclusion", strategicConclusion.tone, !strategicConclusionExpanded && "collapsed")}>
-                <div className="snbr-conclusion-topline">
-                  <span>{isUsLocale ? "Conclusion" : "Conclusão"}</span>
-                  <small>{isUsLocale ? `AI Analysis Time ${strategicConclusion.stamp}` : `IA Análise Hora ${strategicConclusion.stamp}`}</small>
-                  <button
-                    aria-expanded={strategicConclusionExpanded}
-                    disabled={!strategicConclusionExpanded && proModeLocked}
-                    onClick={toggleStrategicConclusion}
-                    type="button"
-                  >
-                    {strategicConclusionExpanded ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}
-                  </button>
+                <div className="snbr-decision-mode-actions">
+                  <strong className="snbr-decision-mode-label">
+                    {advancedMode ? (isUsLocale ? "Pro Mode" : "Modo Pro") : (isUsLocale ? "Basic Mode" : "Modo Básico")}
+                  </strong>
+                  {!advancedMode ? (
+                    <button
+                      aria-label={isUsLocale ? "Open strategic analysis panel" : "Abrir painel de análise estratégica"}
+                      className="snbr-section-head-action"
+                      onClick={() => {
+                        if (!proModeLocked) setAdvancedMode(true);
+                      }}
+                      type="button"
+                    >
+                      {isUsLocale ? "Open" : "Abrir"}
+                    </button>
+                  ) : null}
                 </div>
-                {strategicConclusionExpanded ? (
-                  <>
-                    <div className="snbr-conclusion-copy">
-                      {strategicConclusionSections.length ? (
-                        <div className="snbr-conclusion-sections">
-                          {strategicConclusionSections.map((section) => (
-                            <section key={section.title}>
-                              <strong>{section.title}</strong>
-                              {section.body ? <p>{section.body}</p> : null}
-                              {section.items?.length ? (
-                                <ul>
-                                  {section.items.map((item: string) => (
-                                    <li key={item}>{item}</li>
-                                  ))}
-                                </ul>
-                              ) : null}
-                            </section>
-                          ))}
-                        </div>
-                      ) : (
-                        <strong>{strategicConclusion.headline}</strong>
-                      )}
-                    </div>
-                    <div className="snbr-conclusion-basis">
-                      <div className="snbr-conclusion-basis-head">
-                        <strong>{isUsLocale ? "Analysis basis" : "Base da análise"}</strong>
-                      </div>
-                      <ul>
-                        {strategicConclusion.basis.map((item) => (
-                          <li key={item}>{item}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </>
-                ) : (
-                  <div className="snbr-conclusion-copy snbr-conclusion-preview">
-                    <strong>{strategicConclusionPreview}</strong>
+              </div>
+              {advancedMode ? (
+                <>
+                  <div className="snbr-decision-grid">
+                    {essentialDecisionCards.map((card) => (
+                      <article key={`${card.label}-${card.value}`} className={cx("snbr-decision-card", card.tone)}>
+                        <span>{card.label}</span>
+                        <strong>{card.value}</strong>
+                      </article>
+                    ))}
                   </div>
-                )}
-              </article>
+                  <article className={cx("snbr-decision-conclusion", strategicConclusion.tone, !strategicConclusionExpanded && "collapsed")}>
+                    <div className="snbr-conclusion-topline">
+                      <span>{isUsLocale ? "Conclusion" : "Conclusão"}</span>
+                      <small>{isUsLocale ? `AI Analysis Time ${strategicConclusion.stamp}` : `IA Análise Hora ${strategicConclusion.stamp}`}</small>
+                      <button
+                        aria-expanded={strategicConclusionExpanded}
+                        disabled={!strategicConclusionExpanded && proModeLocked}
+                        onClick={toggleStrategicConclusion}
+                        type="button"
+                      >
+                        {strategicConclusionExpanded ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}
+                      </button>
+                    </div>
+                    {strategicConclusionExpanded ? (
+                      <>
+                        <div className="snbr-conclusion-copy">
+                          {strategicConclusionSections.length ? (
+                            <div className="snbr-conclusion-sections">
+                              {strategicConclusionSections.map((section) => (
+                                <section key={section.title}>
+                                  <strong>{section.title}</strong>
+                                  {section.body ? <p>{section.body}</p> : null}
+                                  {section.items?.length ? (
+                                    <ul>
+                                      {section.items.map((item: string) => (
+                                        <li key={item}>{item}</li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
+                                </section>
+                              ))}
+                            </div>
+                          ) : (
+                            <strong>{strategicConclusion.headline}</strong>
+                          )}
+                        </div>
+                        <div className="snbr-conclusion-basis">
+                          <div className="snbr-conclusion-basis-head">
+                            <strong>{isUsLocale ? "Analysis basis" : "Base da análise"}</strong>
+                          </div>
+                          <ul>
+                            {strategicConclusion.basis.map((item) => (
+                              <li key={item}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="snbr-conclusion-copy snbr-conclusion-preview">
+                        <strong>{strategicConclusionPreview}</strong>
+                      </div>
+                    )}
+                  </article>
+                </>
+              ) : null}
             </section>
           ) : null}
           {renderCenterPanel()}

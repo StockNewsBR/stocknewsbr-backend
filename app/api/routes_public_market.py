@@ -63,7 +63,7 @@ def _response_symbol(symbol: str) -> str:
 
 
 def _has_quote_value(payload: dict | None) -> bool:
-    return is_usable_quote_payload(payload)
+    return is_usable_quote_payload(payload, allow_stale=False)
 
 
 @router.get("/market/quote/{symbol}")
@@ -83,7 +83,7 @@ def public_quote(symbol: str):
 
 @router.get("/market/news/{symbol}")
 def public_news(symbol: str, limit: int = 6):
-    return build_public_news_payload(_normalize_symbol(symbol), limit=limit, source="public", allow_fetch=False)
+    return build_public_news_payload(_normalize_symbol(symbol), limit=limit, source="public", allow_fetch=True)
 
 
 @router.get("/market/ai-tools")

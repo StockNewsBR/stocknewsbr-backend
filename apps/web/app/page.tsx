@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function HomePage() {
-  redirect("/panel/F");
+  redirect("/panel/PETR4");
 }

@@ -219,9 +219,12 @@ export function getFeed(token: string, ticker: string) {
   return request<FeedPayload>(`/ticker/${encodeURIComponent(ticker)}/feed?limit=500`, { token, cacheTtlMs: 15000 });
 }
 
-export function getNews(token: string | null | undefined, ticker: string) {
-  const route = token ? `/news/${encodeURIComponent(ticker)}?limit=6` : `/public/market/news/${encodeURIComponent(ticker)}?limit=6`;
-  return request<NewsPayload>(route, token ? { token, cacheTtlMs: 30000 } : { cacheTtlMs: 30000 });
+export function getNews(token: string | null | undefined, ticker: string, refreshKey?: number | string) {
+  const refresh = refreshKey == null ? "" : `&refresh=${encodeURIComponent(String(refreshKey))}`;
+  const route = token
+    ? `/news/${encodeURIComponent(ticker)}?limit=6${refresh}`
+    : `/public/market/news/${encodeURIComponent(ticker)}?limit=6${refresh}`;
+  return request<NewsPayload>(route, token ? { token, cacheTtlMs: refreshKey == null ? 30000 : 0 } : { cacheTtlMs: refreshKey == null ? 30000 : 0 });
 }
 
 export function getPublicQuote(ticker: string) {
@@ -269,7 +272,17 @@ function hasMarketQuoteValue(quote?: QuotePayload | null): quote is QuotePayload
   if (!quote) return false;
   const source = String((quote as any).source || "").toLowerCase();
   const status = String((quote as any).quote_status || "").toLowerCase();
-  if (source === "empty" || status === "empty" || status === "partial") return false;
+  if (
+    source === "empty" ||
+    source.includes("stale") ||
+    source.includes("last_good") ||
+    status === "empty" ||
+    status === "partial" ||
+    status === "stale" ||
+    (quote as any).stale === true
+  ) {
+    return false;
+  }
   const price = Number(quote.price);
   return Number.isFinite(price) && price > 0;
 }

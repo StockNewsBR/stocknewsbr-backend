@@ -15,4 +15,4 @@ def symbol_news(
     current_user: User = Depends(require_any_channel_access("app", "web")),
 ):
     del current_user
-    return build_public_news_payload(symbol, limit=limit, allow_fetch=False)
+    return build_public_news_payload(symbol, limit=limit, allow_fetch=True)

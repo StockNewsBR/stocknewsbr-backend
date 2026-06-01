@@ -8,6 +8,7 @@ from app.engine.signal_engine import build_chart_signal_payload
 from app.market.market_data_loader import get_cached_chart_data
 from app.models import User
 from app.services.chart_overlay_service import build_chart_overlays
+from app.api.routes_public_market_live import _load_chart_data_fast as load_chart_data_cache_first
 from app.system.chart_warmup import request_chart_warmup
 from app.system.system_metrics import record_cache_access
 
@@ -21,7 +22,7 @@ def _normalize_chart_ticker(value: str) -> str:
 
 
 def _load_chart_data_fast(ticker: str, interval: str):
-    cached = get_cached_chart_data(ticker, interval)
+    cached = get_cached_chart_data(ticker, interval) or load_chart_data_cache_first(ticker, interval)
     record_cache_access("chart", bool(cached), "app_chart")
     return cached or []
 

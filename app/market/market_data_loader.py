@@ -23,7 +23,7 @@ from app.system.system_metrics import (
 
 logger = logging.getLogger("stocknewsbr.market_data_loader")
 _YFINANCE = None
-_PRICE_CACHE_TTL_SECONDS = 15 * 60
+_PRICE_CACHE_TTL_SECONDS = max(30, int(os.getenv("PRICE_CACHE_TTL_SECONDS", "120")))
 _CHART_CACHE_TTL_SECONDS = int(os.getenv("CHART_CACHE_TTL_SECONDS", "1800"))
 _PRICE_CACHE_FILE = Path("runtime/cache/market_quotes.json")
 _CHART_CACHE_FILE = Path("runtime/cache/market_charts.json")
