@@ -172,6 +172,8 @@ def _derive_tools_from_cached_quotes(extra_symbols: list[Any] | None = None) -> 
     tools = build_ai_tool_payload(rows, rows, limit=AI_ALERT_MAX_ROWS_PER_TOOL) if rows else _empty_tools()
     for tool, tool_rows in tools.items():
         for row in tool_rows:
+            row.setdefault("source", "quote_cache_derived")
+            row.setdefault("ai_source", "quote_cache_derived")
             row.setdefault("data_quality", "priced")
             feature = next((item for item in rows if item.get("ticker") == row.get("ticker") or item.get("symbol") == row.get("ticker")), None)
             if feature:

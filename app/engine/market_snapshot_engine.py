@@ -21,17 +21,49 @@ logger = logging.getLogger("stocknewsbr.snapshot_engine")
 AI_INPUT_LIMIT = 80
 AI_OUTPUT_LIMIT = 20
 LAST_GOOD_SIGNAL_LIMIT = 200
+SNAPSHOT_SCHEMA_VERSION = "market-ai-snapshot-v1"
+MARKET_SNAPSHOT_INTERVAL_SECONDS = 30
+AI_SNAPSHOT_INTERVAL_SECONDS = 300
 _FEATURE_SEED_FIELDS = {
     "price",
     "volume",
+    "avg_volume",
+    "rel_volume",
+    "vwap",
     "rsi",
+    "macd",
+    "macd_signal",
+    "macd_histogram",
     "adx",
     "atr_pct",
     "bb_width",
     "kc_width",
     "momentum",
     "change_pct",
+    "data_quality",
     "market_data_updated_at",
+    "last_bar_at",
+}
+_ACTIONABLE_SIGNALS = {"BUY", "SELL", "SHORT", "COVER"}
+_BULLISH_ACTIONS = {"BUY", "COVER"}
+_BEARISH_ACTIONS = {"SELL", "SHORT"}
+_BLOCKED_DATA_QUALITIES = {
+    "score_only",
+    "score only",
+    "missing",
+    "empty",
+    "stale",
+    "no_price",
+    "no-price",
+    "no price",
+    "provider_failed",
+    "provider-failed",
+    "provider failed",
+    "failed",
+    "error",
+    "timeout",
+    "unavailable",
+    "invalid",
 }
 
 
@@ -76,6 +108,54 @@ def _has_positive_value(row, *keys: str) -> bool:
     return False
 
 
+def _snapshot_signal_value(row) -> str:
+    return str(row.get("trade_action") or row.get("signal") or row.get("action") or "").upper().strip()
+
+
+def _has_blocking_reasons(row) -> bool:
+    reasons = row.get("blocked_reasons") or row.get("warnings") or []
+    if isinstance(reasons, str):
+        return bool(reasons.strip())
+    if isinstance(reasons, (list, tuple, set)):
+        return any(str(reason).strip() for reason in reasons)
+    return bool(reasons)
+
+
+def _is_actionable_snapshot_row(row) -> bool:
+    if not isinstance(row, dict):
+        return False
+
+    if _snapshot_signal_value(row) not in _ACTIONABLE_SIGNALS:
+        return False
+
+    if row.get("decision_ready") is False:
+        return False
+
+    if row.get("stale") is True or row.get("is_stale") is True:
+        return False
+
+    if str(row.get("data_quality") or "").lower().strip() in _BLOCKED_DATA_QUALITIES:
+        return False
+
+    for status_key in ("quote_status", "status", "provider_status", "market_data_status"):
+        if str(row.get(status_key) or "").lower().strip() in _BLOCKED_DATA_QUALITIES:
+            return False
+
+    if row.get("provider_failed") is True or row.get("provider_error") is True:
+        return False
+
+    if _has_blocking_reasons(row):
+        return False
+
+    if not _has_positive_value(row, "price", "close", "last_price"):
+        return False
+
+    if not _has_positive_value(row, "volume", "last_volume"):
+        return False
+
+    return True
+
+
 def _apply_data_quality(row):
     item = dict(row)
     if _has_positive_value(item, "price", "close", "last_price") and _has_positive_value(item, "volume", "last_volume"):
@@ -95,6 +175,31 @@ def _latest_or_default(series, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _macd_snapshot(close):
+    try:
+        if close is None or len(close) < 26:
+            return 0.0, 0.0, 0.0
+        ema12 = close.ewm(span=12, adjust=False).mean()
+        ema26 = close.ewm(span=26, adjust=False).mean()
+        macd_series = ema12 - ema26
+        signal_series = macd_series.ewm(span=9, adjust=False).mean()
+        macd_value = _latest_or_default(macd_series, 0.0)
+        signal_value = _latest_or_default(signal_series, 0.0)
+        return macd_value, signal_value, macd_value - signal_value
+    except Exception:
+        return 0.0, 0.0, 0.0
+
+
+def _has_canonical_snapshot_fields(row) -> bool:
+    if not isinstance(row, dict):
+        return False
+    if not _has_positive_value(row, "price", "close", "last_price"):
+        return False
+    if not _has_positive_value(row, "volume", "last_volume"):
+        return False
+    return _FEATURE_SEED_FIELDS.issubset(row.keys())
 
 
 def _build_feature_seed(ticker: str, frame, signal_row):
@@ -135,6 +240,7 @@ def _build_feature_seed(ticker: str, frame, signal_row):
         avg_volume = float(volume.tail(20).mean()) if len(volume) >= 20 else float(volume.mean())
         rel_volume = (last_volume / avg_volume) if avg_volume > 0 else 0.0
         change_pct = ((price - prev_close) / prev_close * 100.0) if prev_close else 0.0
+        macd_value, macd_signal_value, macd_histogram = _macd_snapshot(close)
 
         typical_price = (high.tail(20) + low.tail(20) + close.tail(20)) / 3.0
         typical_volume = volume.tail(20)
@@ -187,6 +293,9 @@ def _build_feature_seed(ticker: str, frame, signal_row):
                 "rel_volume": round(rel_volume, 4),
                 "vwap": round(vwap, 6),
                 "rsi": round(rsi, 4),
+                "macd": round(macd_value, 6),
+                "macd_signal": round(macd_signal_value, 6),
+                "macd_histogram": round(macd_histogram, 6),
                 "adx": round(adx_proxy, 4),
                 "atr_pct": round(atr_pct, 4),
                 "bb_width": round(bb_width, 6),
@@ -211,21 +320,22 @@ def _enrich_signal_rows(signals):
     if not rows:
         return []
 
-    if all(_has_positive_value(row, "price", "close", "last_price") and _has_positive_value(row, "volume", "last_volume") for row in rows):
+    if all(_has_canonical_snapshot_fields(row) for row in rows):
         return [_apply_data_quality(row) for row in rows]
-
-    if all(_FEATURE_SEED_FIELDS.issubset(row.keys()) for row in rows):
-        return rows
 
     pool = get_market_pool()
 
     if not pool:
-        return rows
+        return [_apply_data_quality(row) for row in rows]
 
     enriched = []
     pool_keys = {str(key).upper().strip(): value for key, value in pool.items()}
 
     for row in rows:
+        if _has_canonical_snapshot_fields(row):
+            enriched.append(_apply_data_quality(row))
+            continue
+
         ticker = str(row.get("ticker") or row.get("symbol") or "").upper().strip()
         frame = pool_keys.get(ticker)
 
@@ -233,7 +343,7 @@ def _enrich_signal_rows(signals):
             frame = pool_keys.get(_normalize_pool_key(ticker))
 
         if frame is None:
-            enriched.append(dict(row))
+            enriched.append(_apply_data_quality(row))
             continue
 
         enriched.append(_build_feature_seed(ticker or _normalize_pool_key(ticker), frame, row))
@@ -242,7 +352,7 @@ def _enrich_signal_rows(signals):
 
 
 def build_snapshot_payload(signals, source: str = "engine", stale: bool = False):
-    normalized = []
+    base_rows = []
 
     for row in signals or []:
         if not isinstance(row, dict):
@@ -256,15 +366,56 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             item["symbol"] = ticker
 
         item["score"] = _safe_score(item)
-        item = _apply_data_quality(item)
-        normalized.append(item)
+        base_rows.append(item)
+
+    enriched_rows = _enrich_signal_rows(base_rows)
+    normalized = []
+
+    for row in enriched_rows:
+        item = dict(row)
+        ticker = item.get("ticker") or item.get("symbol")
+
+        if ticker:
+            item["ticker"] = ticker
+            item["symbol"] = ticker
+
+        item["score"] = _safe_score(item)
+        normalized.append(_apply_data_quality(item))
 
     normalized.sort(key=_safe_score, reverse=True)
     record_signal_quality_coverage(normalized, source=f"snapshot:{source}")
 
-    bullish = len([row for row in normalized if row["score"] >= 70])
-    bearish = len([row for row in normalized if row["score"] <= 30])
-    ai_input_rows = _enrich_signal_rows(normalized[:AI_INPUT_LIMIT])
+    actionable_rows = [row for row in normalized if _is_actionable_snapshot_row(row)]
+    bullish = len([row for row in actionable_rows if _snapshot_signal_value(row) in _BULLISH_ACTIONS])
+    bearish = len([row for row in actionable_rows if _snapshot_signal_value(row) in _BEARISH_ACTIONS])
+    generated_at = datetime.now(timezone.utc).isoformat()
+    priced_rows = [row for row in normalized if _has_positive_value(row, "price", "close", "last_price")]
+    score_only_rows = [
+        row
+        for row in normalized
+        if str(row.get("data_quality") or "").lower().strip() in _BLOCKED_DATA_QUALITIES
+    ]
+    stale_rows = [
+        row
+        for row in normalized
+        if row.get("stale") is True
+        or row.get("is_stale") is True
+        or str(row.get("data_quality") or "").lower().strip() == "stale"
+    ]
+    data_status = {
+        "schema_version": SNAPSHOT_SCHEMA_VERSION,
+        "source": source,
+        "generated_at": generated_at,
+        "stale": bool(stale),
+        "market_snapshot_interval_seconds": MARKET_SNAPSHOT_INTERVAL_SECONDS,
+        "ai_snapshot_interval_seconds": AI_SNAPSHOT_INTERVAL_SECONDS,
+        "total_signals": len(normalized),
+        "priced": len(priced_rows),
+        "score_only": len(score_only_rows),
+        "stale_rows": len(stale_rows),
+        "actionable": len(actionable_rows),
+    }
+    ai_input_rows = normalized[:AI_INPUT_LIMIT]
 
     try:
         ai_tools = build_ai_tool_payload(
@@ -287,15 +438,29 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
     )
 
     return {
+        "schema_version": SNAPSHOT_SCHEMA_VERSION,
         "signals": normalized[:200],
         "leaders": normalized[:20],
+        "symbol_snapshots": {
+            str(row.get("symbol") or row.get("ticker") or "").upper(): row
+            for row in normalized[:200]
+            if row.get("symbol") or row.get("ticker")
+        },
         "ai_tools": ai_tools,
         "decision": decision,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": generated_at,
+        "market_snapshot_interval_seconds": MARKET_SNAPSHOT_INTERVAL_SECONDS,
+        "ai_snapshot_interval_seconds": AI_SNAPSHOT_INTERVAL_SECONDS,
+        "data_status": data_status,
         "source": source,
         "stale": bool(stale),
         "stats": {
             "total_signals": len(normalized),
+            "candidates": len(normalized),
+            "priced": len(priced_rows),
+            "score_only": len(score_only_rows),
+            "stale_rows": len(stale_rows),
+            "actionable": len(actionable_rows),
             "bullish": bullish,
             "bearish": bearish,
         },

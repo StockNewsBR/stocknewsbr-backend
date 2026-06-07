@@ -20,7 +20,18 @@ from app.watchlists.watchlist_default import (
 
 logger = logging.getLogger("stocknewsbr.chart_warmup")
 
-REQUEST_PATH = Path(os.getenv("CHART_WARMUP_REQUEST_FILE", "runtime/cache/chart_warmup_requests.json"))
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _project_runtime_path(env_name: str, default_relative: str) -> Path:
+    configured = os.getenv(env_name)
+    if configured:
+        configured_path = Path(configured)
+        return configured_path if configured_path.is_absolute() else _PROJECT_ROOT / configured_path
+    return _PROJECT_ROOT / default_relative
+
+
+REQUEST_PATH = _project_runtime_path("CHART_WARMUP_REQUEST_FILE", "runtime/cache/chart_warmup_requests.json")
 DEFAULT_INTERVALS = tuple(
     item.strip().upper()
     for item in os.getenv("CHART_PREWARM_INTERVALS", "1D,1W,1M,3M,6M,YTD,1Y,ALL").split(",")

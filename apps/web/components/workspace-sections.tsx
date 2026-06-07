@@ -319,9 +319,17 @@ export function WorkspaceEducationPanel({
   activeInstitutionalSectionId,
 }: EducationPanelProps) {
   const isEnglish = locale === "en-US";
-  const visibleInstitutionalSections = activeInstitutionalSectionId
+  const glossarySections = institutionalSections.filter((section) => {
+    const label = `${section.label || ""} ${section.title || ""}`.toLowerCase();
+    return label.includes("glosário") || label.includes("glossary");
+  });
+  const activeInstitutionalSections = activeInstitutionalSectionId
     ? institutionalSections.filter((section) => section.id === activeInstitutionalSectionId)
     : [];
+  const visibleInstitutionalSections = [
+    ...activeInstitutionalSections,
+    ...glossarySections.filter((section) => !activeInstitutionalSections.some((active) => active.id === section.id)),
+  ];
 
   return (
     <section id="panel-education" className="snbr-plain-panel">
@@ -372,7 +380,7 @@ export function WorkspaceEducationPanel({
           </article>
         ))}
 
-        {!visibleInstitutionalSections.length ? (
+        {!activeInstitutionalSectionId && !visibleInstitutionalSections.length ? (
           <article className="snbr-guide-card snbr-help-section">
             <h4>{isEnglish ? "Choose an institutional section" : "Escolha uma seção institucional"}</h4>
             <div className="snbr-help-body">

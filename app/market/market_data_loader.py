@@ -23,14 +23,27 @@ from app.system.system_metrics import (
 
 logger = logging.getLogger("stocknewsbr.market_data_loader")
 _YFINANCE = None
-_PRICE_CACHE_TTL_SECONDS = max(30, int(os.getenv("PRICE_CACHE_TTL_SECONDS", "120")))
+_PRICE_CACHE_TTL_SECONDS = max(60, int(os.getenv("PRICE_CACHE_TTL_SECONDS", "300")))
 _CHART_CACHE_TTL_SECONDS = int(os.getenv("CHART_CACHE_TTL_SECONDS", "1800"))
-_PRICE_CACHE_FILE = Path("runtime/cache/market_quotes.json")
-_CHART_CACHE_FILE = Path("runtime/cache/market_charts.json")
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _project_runtime_path(env_name: str, default_relative: str) -> Path:
+    configured = os.getenv(env_name)
+    if configured:
+        configured_path = Path(configured)
+        return configured_path if configured_path.is_absolute() else _PROJECT_ROOT / configured_path
+    return _PROJECT_ROOT / default_relative
+
+
+_PRICE_CACHE_FILE = _project_runtime_path("MARKET_QUOTES_CACHE_FILE", "runtime/cache/market_quotes.json")
+_CHART_CACHE_FILE = _project_runtime_path("MARKET_CHARTS_CACHE_FILE", "runtime/cache/market_charts.json")
 _PRICE_SNAPSHOT_CACHE = {}
 _CHART_DATA_CACHE = {}
 _SYMBOL_FAILURES = {}
 _PRICE_SNAPSHOT_CACHE_LOCK = RLock()
+_PRICE_CACHE_PERSIST_LOCK = RLock()
+_CHART_CACHE_PERSIST_LOCK = RLock()
 _PRICE_CACHE_LOADED = False
 _PRICE_CACHE_MTIME = 0.0
 _PRICE_CACHE_INCLUDE_STALE = False
@@ -435,7 +448,7 @@ def _should_log_symbol_failure(symbol: str, provider: str = "yfinance") -> bool:
         return True
 
 
-def _load_price_cache_once(include_stale: bool = False):
+def _load_price_cache_once(include_stale: bool = False, force: bool = False):
     global _PRICE_CACHE_LOADED, _PRICE_CACHE_MTIME, _PRICE_CACHE_INCLUDE_STALE
 
     try:
@@ -445,10 +458,15 @@ def _load_price_cache_once(include_stale: bool = False):
 
     with _PRICE_SNAPSHOT_CACHE_LOCK:
         cache_has_required_freshness = not include_stale or _PRICE_CACHE_INCLUDE_STALE
-        if _PRICE_CACHE_LOADED and file_mtime <= float(_PRICE_CACHE_MTIME or 0) and cache_has_required_freshness:
+        if (
+            not force
+            and _PRICE_CACHE_LOADED
+            and file_mtime <= float(_PRICE_CACHE_MTIME or 0)
+            and cache_has_required_freshness
+        ):
             return
 
-        if file_mtime > float(_PRICE_CACHE_MTIME or 0) or (include_stale and not _PRICE_CACHE_INCLUDE_STALE):
+        if force or file_mtime > float(_PRICE_CACHE_MTIME or 0) or (include_stale and not _PRICE_CACHE_INCLUDE_STALE):
             _PRICE_SNAPSHOT_CACHE.clear()
             _PRICE_CACHE_MTIME = file_mtime
 
@@ -482,38 +500,46 @@ def _persist_price_cache():
     global _PRICE_CACHE_MTIME
     try:
         _PRICE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with _PRICE_SNAPSHOT_CACHE_LOCK:
-            payload = {
-                key: value
-                for key, value in _PRICE_SNAPSHOT_CACHE.items()
-                if isinstance(value, dict)
-                and isinstance(value.get("payload"), dict)
-                and _has_real_price_payload(value["payload"])
-            }
-        tmp = _PRICE_CACHE_FILE.with_name(
-            f"{_PRICE_CACHE_FILE.stem}.{os.getpid()}.{get_ident()}.tmp"
-        )
-        tmp.write_text(
-            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-            encoding="utf-8",
-        )
-        os.replace(tmp, _PRICE_CACHE_FILE)
-        try:
-            _PRICE_CACHE_MTIME = _PRICE_CACHE_FILE.stat().st_mtime
-        except Exception:
-            pass
+        with _PRICE_CACHE_PERSIST_LOCK:
+            with _PRICE_SNAPSHOT_CACHE_LOCK:
+                payload = {
+                    key: value
+                    for key, value in _PRICE_SNAPSHOT_CACHE.items()
+                    if isinstance(value, dict)
+                    and isinstance(value.get("payload"), dict)
+                    and _has_real_price_payload(value["payload"])
+                }
+            tmp = _PRICE_CACHE_FILE.with_name(
+                f"{_PRICE_CACHE_FILE.stem}.{os.getpid()}.{get_ident()}.tmp"
+            )
+            tmp.write_text(
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            for attempt in range(3):
+                try:
+                    os.replace(tmp, _PRICE_CACHE_FILE)
+                    break
+                except PermissionError:
+                    if attempt >= 2:
+                        raise
+                    time.sleep(0.05 * (attempt + 1))
+            try:
+                _PRICE_CACHE_MTIME = _PRICE_CACHE_FILE.stat().st_mtime
+            except Exception:
+                pass
     except Exception as exc:
         logger.warning("Failed to persist market quote cache: %s", exc)
 
 
-def _load_chart_cache_once():
+def _load_chart_cache_once(force: bool = False):
     global _CHART_CACHE_LOADED, _CHART_CACHE_MTIME
     try:
         if not _CHART_CACHE_FILE.exists():
             return
         file_mtime = _CHART_CACHE_FILE.stat().st_mtime
         with _PRICE_SNAPSHOT_CACHE_LOCK:
-            if _CHART_CACHE_LOADED and file_mtime <= float(_CHART_CACHE_MTIME or 0):
+            if not force and _CHART_CACHE_LOADED and file_mtime <= float(_CHART_CACHE_MTIME or 0):
                 return
 
         payload = json.loads(_CHART_CACHE_FILE.read_text(encoding="utf-8"))
@@ -551,20 +577,28 @@ def _persist_chart_cache():
     global _CHART_CACHE_MTIME
     try:
         _CHART_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with _PRICE_SNAPSHOT_CACHE_LOCK:
-            payload = {"charts": dict(_CHART_DATA_CACHE)}
-        tmp = _CHART_CACHE_FILE.with_name(
-            f"{_CHART_CACHE_FILE.stem}.{os.getpid()}.{get_ident()}.tmp"
-        )
-        tmp.write_text(
-            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-            encoding="utf-8",
-        )
-        os.replace(tmp, _CHART_CACHE_FILE)
-        try:
-            _CHART_CACHE_MTIME = _CHART_CACHE_FILE.stat().st_mtime
-        except Exception:
-            pass
+        with _CHART_CACHE_PERSIST_LOCK:
+            with _PRICE_SNAPSHOT_CACHE_LOCK:
+                payload = {"charts": dict(_CHART_DATA_CACHE)}
+            tmp = _CHART_CACHE_FILE.with_name(
+                f"{_CHART_CACHE_FILE.stem}.{os.getpid()}.{get_ident()}.tmp"
+            )
+            tmp.write_text(
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            for attempt in range(3):
+                try:
+                    os.replace(tmp, _CHART_CACHE_FILE)
+                    break
+                except PermissionError:
+                    if attempt >= 2:
+                        raise
+                    time.sleep(0.05 * (attempt + 1))
+            try:
+                _CHART_CACHE_MTIME = _CHART_CACHE_FILE.stat().st_mtime
+            except Exception:
+                pass
     except Exception as exc:
         logger.warning("Failed to persist market chart cache: %s", exc)
 
@@ -573,17 +607,26 @@ def _chart_cache_key(symbol: str, interval: str) -> str:
     return f"{_cache_key(symbol)}:{str(interval or '1D').upper()}"
 
 
-def get_cached_chart_data(symbol: str, interval: str = "1D"):
+def get_cached_chart_data(symbol: str, interval: str = "1D", allow_stale: bool = False):
     start = time.perf_counter()
     _load_chart_cache_once()
     with _PRICE_SNAPSHOT_CACHE_LOCK:
         cached = _CHART_DATA_CACHE.get(_chart_cache_key(symbol, interval))
+    if not cached:
+        _load_chart_cache_once(force=True)
+        with _PRICE_SNAPSHOT_CACHE_LOCK:
+            cached = _CHART_DATA_CACHE.get(_chart_cache_key(symbol, interval))
     if not cached:
         record_cache_lookup("chart", time.perf_counter() - start, len(_CHART_DATA_CACHE))
         return None
 
     age = time.time() - float(cached.get("timestamp") or 0)
     if age > _CHART_CACHE_TTL_SECONDS:
+        _load_chart_cache_once(force=True)
+        with _PRICE_SNAPSHOT_CACHE_LOCK:
+            cached = _CHART_DATA_CACHE.get(_chart_cache_key(symbol, interval))
+        age = time.time() - float((cached or {}).get("timestamp") or 0)
+    if not cached or (age > _CHART_CACHE_TTL_SECONDS and not allow_stale):
         record_cache_lookup("chart", time.perf_counter() - start, len(_CHART_DATA_CACHE))
         return None
 
@@ -627,6 +670,10 @@ def _get_cached_price_payload(symbol: str, allow_stale: bool = False):
     _load_price_cache_once(include_stale=allow_stale)
     with _PRICE_SNAPSHOT_CACHE_LOCK:
         cached = _PRICE_SNAPSHOT_CACHE.get(_cache_key(symbol))
+    if not cached:
+        _load_price_cache_once(include_stale=allow_stale, force=True)
+        with _PRICE_SNAPSHOT_CACHE_LOCK:
+            cached = _PRICE_SNAPSHOT_CACHE.get(_cache_key(symbol))
     if not cached:
         return None
 
@@ -779,7 +826,9 @@ def get_chart_data(symbol: str, interval: str = "1D"):
 
     if not _network_provider_allowed():
         _record_blocked_http_provider(symbol, "chart")
-        return cached or []
+        if cached:
+            return cached
+        return get_cached_chart_data(symbol, interval, allow_stale=True) or []
 
     interval_map = {
         "1D": [("1d", "5m"), ("5d", "30m")],
@@ -1098,7 +1147,7 @@ def get_price_snapshot(symbol: str):
     return _get_cached_price_payload(symbol)
 
 
-def get_price_snapshots(symbols: List[str]):
+def get_price_snapshots(symbols: List[str], *, force_refresh: bool = False):
     _load_price_cache_once()
     if not symbols:
         return {}
@@ -1122,7 +1171,7 @@ def get_price_snapshots(symbols: List[str]):
     payloads = {}
     cache_changed = False
 
-    cached_payloads = get_cached_price_snapshots(unique_symbols)
+    cached_payloads = {} if force_refresh else get_cached_price_snapshots(unique_symbols)
     missing_symbols = []
     for symbol in unique_symbols:
         cached = cached_payloads.get(symbol)
@@ -1209,12 +1258,14 @@ def get_cached_price_snapshots(symbols: List[str], allow_stale: bool = False):
     start = time.perf_counter()
     _load_price_cache_once(include_stale=allow_stale)
     payloads = {}
+    requested_keys = []
     with _PRICE_SNAPSHOT_CACHE_LOCK:
         now = time.time()
         for symbol in symbols or []:
             key = _cache_key(symbol)
             if not key:
                 continue
+            requested_keys.append((symbol, key))
             cached = _PRICE_SNAPSHOT_CACHE.get(key)
             if not cached:
                 continue
@@ -1233,5 +1284,31 @@ def get_cached_price_snapshots(symbols: List[str], allow_stale: bool = False):
                 payload["source"] = payload.get("source") or "market_cache"
             payload["cache_age_seconds"] = round(age, 2)
             payloads[key] = payload
+    missing_keys = [key for _, key in requested_keys if key not in payloads]
+    if missing_keys:
+        _load_price_cache_once(include_stale=allow_stale, force=True)
+        with _PRICE_SNAPSHOT_CACHE_LOCK:
+            now = time.time()
+            for symbol, key in requested_keys:
+                if key in payloads:
+                    continue
+                cached = _PRICE_SNAPSHOT_CACHE.get(key)
+                if not cached:
+                    continue
+                age = now - float(cached.get("timestamp") or 0)
+                if age > _PRICE_CACHE_TTL_SECONDS and not allow_stale:
+                    continue
+                payload = dict(cached.get("payload") or {})
+                if not _has_real_price_payload(payload):
+                    continue
+                if not _payload_matches_requested_symbol(symbol, payload):
+                    continue
+                if age > _PRICE_CACHE_TTL_SECONDS:
+                    payload["source"] = payload.get("source") or "stale_market_cache"
+                    payload["stale"] = True
+                else:
+                    payload["source"] = payload.get("source") or "market_cache"
+                payload["cache_age_seconds"] = round(age, 2)
+                payloads[key] = payload
     record_cache_lookup("quote", time.perf_counter() - start, len(_PRICE_SNAPSHOT_CACHE))
     return payloads

@@ -81,6 +81,19 @@ def market_timestamp(row: Dict[str, Any]) -> Any:
     return None
 
 
+def deal_timestamp(row: Dict[str, Any]) -> Any:
+    for key in (
+        "found_at",
+        "first_seen_at",
+        "deal_detected_at",
+        "signal_detected_at",
+    ):
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    return market_timestamp(row)
+
+
 def get_symbol(row: Dict[str, Any]) -> str:
     return (
         row.get("ticker")
@@ -242,10 +255,27 @@ def build_payload(
 ) -> Dict[str, Any]:
     score = round(clamp(score), 1)
     metric_payload = dict(metrics or {})
-    for metric_key in ("data_quality", "source_score", "source_score_rank"):
+    for metric_key in (
+        "data_quality",
+        "source_score",
+        "source_score_rank",
+        "avg_volume",
+        "rel_volume",
+        "vwap",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "macd_histogram",
+    ):
         if row.get(metric_key) not in (None, ""):
             metric_payload.setdefault(metric_key, row.get(metric_key))
-    timestamp = coerce_iso(market_timestamp(row))
+    market_time = coerce_iso(market_timestamp(row))
+    detected_time = coerce_iso(deal_timestamp(row), fallback=market_time)
+    price = safe_float(row.get("price"))
+    volume = safe_float(row.get("volume"))
+    data_quality = str(row.get("data_quality") or row.get("quote_status") or "").strip().lower()
+    if not data_quality:
+        data_quality = "priced" if price > 0 and volume > 0 else "score_only"
     reason_text = reason or _reason_from_metrics(tool, state, score, metric_payload)
     return {
         "ticker": row.get("ticker", "UNKNOWN"),
@@ -255,14 +285,22 @@ def build_payload(
         "signal": signal_from_score(score),
         "state": state,
         "confidence": confidence_from_inputs(row),
-        "price": round(safe_float(row.get("price")), 4),
+        "price": round(price, 4),
         "change_pct": round(safe_float(row.get("change_pct")), 2),
-        "volume": safe_int(row.get("volume")),
+        "volume": safe_int(volume),
+        "avg_volume": safe_int(row.get("avg_volume", row.get("average_volume"))),
         "rel_volume": round(safe_float(row.get("rel_volume")), 2),
         "vwap": round(safe_float(row.get("vwap")), 4),
         "rsi": round(safe_float(row.get("rsi", 50.0)), 2),
+        "macd": round(safe_float(row.get("macd")), 4),
+        "macd_signal": round(safe_float(row.get("macd_signal")), 4),
+        "macd_histogram": round(safe_float(row.get("macd_histogram")), 4),
         "adx": round(safe_float(row.get("adx", 15.0)), 2),
         "atr_pct": round(safe_float(row.get("atr_pct", 1.0)), 2),
+        "data_quality": data_quality,
+        "quote_status": row.get("quote_status") or data_quality,
+        "market_data_updated_at": market_time,
+        "last_bar_at": coerce_iso(row.get("last_bar_at"), fallback=market_time),
         "metrics": metric_payload,
         "ai_comment": ai_comment,
         "trigger": trigger,
@@ -270,9 +308,12 @@ def build_payload(
         "invalidacao": invalidation,
         "reason": reason_text,
         "news_context": news_context or _news_context(row),
-        "detected_at": timestamp,
-        "updated_at": timestamp,
-        "last_seen_at": timestamp,
+        "found_at": detected_time,
+        "first_seen_at": detected_time,
+        "deal_detected_at": detected_time,
+        "detected_at": detected_time,
+        "updated_at": market_time,
+        "last_seen_at": market_time,
     }
 
 

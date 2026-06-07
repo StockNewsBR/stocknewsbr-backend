@@ -361,13 +361,23 @@ def build_asset_features(row: Dict[str, Any]) -> Dict[str, Any]:
 
     feature_confidence = safe_int(clamp((confidence_inputs / 9.0) * 100.0, 5.0, 100.0))
 
+    price = safe_float(price_features.get("price"))
+    volume = safe_float(volume_features.get("volume"))
+    source_quality = str(base.get("data_quality") or base.get("quote_status") or "").strip().lower()
+    if source_quality in {"priced", "real", "ok", "fresh", "confirmed"} and price > 0 and volume > 0:
+        data_quality = "priced"
+    elif source_quality and source_quality not in {"priced", "real", "ok", "fresh", "confirmed"}:
+        data_quality = source_quality
+    else:
+        data_quality = "priced" if price > 0 and volume > 0 else "score_only"
+
     return {
         **base,
         **price_features,
         **volume_features,
         **indicator_features,
         **setup_features,
-        "data_quality": "priced" if price_features.get("price", 0) > 0 else "score_only",
+        "data_quality": data_quality,
         "feature_confidence": feature_confidence,
     }
 

@@ -1,6 +1,7 @@
 import math
 import re
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query
 
@@ -128,8 +129,72 @@ def _safe_float(value, default: float = 0.0) -> float:
     return parsed
 
 
-def _has_usable_quote_payload(payload) -> bool:
-    return is_usable_quote_payload(payload, allow_stale=False)
+def _has_usable_quote_payload(payload, allow_stale: bool = False) -> bool:
+    return is_usable_quote_payload(payload, allow_stale=allow_stale)
+
+
+def _parse_payload_timestamp(value) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            timestamp = float(value)
+            if timestamp > 10_000_000_000:
+                timestamp /= 1000.0
+            return timestamp if math.isfinite(timestamp) and timestamp > 0 else None
+        text = str(value).strip()
+        if not text:
+            return None
+        if re.fullmatch(r"\d+(\.\d+)?", text):
+            timestamp = float(text)
+            if timestamp > 10_000_000_000:
+                timestamp /= 1000.0
+            return timestamp if math.isfinite(timestamp) and timestamp > 0 else None
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except Exception:
+        return None
+
+
+def _quote_age_seconds(payload) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+    explicit_age = _safe_float(payload.get("cache_age_seconds"), default=-1.0)
+    if explicit_age >= 0:
+        return explicit_age
+    for key in (
+        "market_data_updated_at",
+        "quote_time",
+        "provider_timestamp",
+        "timestamp",
+        "updated_at",
+        "last_seen_at",
+        "created_at",
+    ):
+        parsed = _parse_payload_timestamp(payload.get(key))
+        if parsed:
+            return max(0.0, datetime.now(timezone.utc).timestamp() - parsed)
+    return None
+
+
+def _quote_needs_background_refresh(payload) -> bool:
+    if not isinstance(payload, dict):
+        return True
+    price = _safe_float(payload.get("price"))
+    if price <= 0:
+        return True
+    source = str(payload.get("source") or "").lower()
+    status = str(payload.get("quote_status") or "").lower()
+    if payload.get("stale") is True:
+        return True
+    if status in {"empty", "stale", "stale_chart", "reference"}:
+        return True
+    if "stale" in source or "fallback" in source or source == "empty":
+        return True
+    age = _quote_age_seconds(payload)
+    return bool(age is not None and age > 180)
 
 
 def _is_quote_fallback_chart(ohlc) -> bool:
@@ -184,16 +249,28 @@ def _fallback_score(closes, rsi):
     return round(max(1.0, min(10.0, base)), 1)
 
 
-def _resolve_cached_quote(cached_payloads, symbol: str):
+def _resolve_cached_quote(cached_payloads, symbol: str, chart_quote_cache: dict | None = None):
     for alias in _symbol_aliases(symbol):
         candidate = cached_payloads.get(alias)
         if not isinstance(candidate, dict):
             continue
-        if _has_usable_quote_payload(candidate):
+        if _has_usable_quote_payload(candidate, allow_stale=False) and not _quote_needs_background_refresh(candidate):
             payload = {**candidate, "symbol": _response_symbol(symbol)}
             if payload.get("source") is None:
                 payload = {**payload, "source": "market_cache"}
             payload["quote_status"] = classify_quote_payload(payload)
+            return payload
+
+    for alias in _symbol_aliases(symbol):
+        candidate = cached_payloads.get(alias)
+        if not isinstance(candidate, dict):
+            continue
+        if _has_usable_quote_payload(candidate, allow_stale=True):
+            payload = {**candidate, "symbol": _response_symbol(symbol)}
+            if payload.get("source") is None:
+                payload = {**payload, "source": "market_cache_stale"}
+            payload["quote_status"] = classify_quote_payload(payload)
+            payload["stale"] = True
             return payload
 
     return {
@@ -210,12 +287,64 @@ def _resolve_cached_quote(cached_payloads, symbol: str):
     }
 
 
+def _quote_from_chart_cache(symbol: str, chart_quote_cache: dict | None = None):
+    cache_key = _response_symbol(symbol)
+    if chart_quote_cache is not None and cache_key in chart_quote_cache:
+        return chart_quote_cache[cache_key]
+
+    rows = load_public_chart_rows(_symbol_aliases(symbol), "1D", scope="quote_chart_fallback")
+    if not rows:
+        if chart_quote_cache is not None:
+            chart_quote_cache[cache_key] = None
+        return None
+
+    valid_rows = []
+    for row in rows:
+        close = _safe_float((row or {}).get("close"))
+        if close > 0:
+            valid_rows.append(row)
+    if not valid_rows:
+        if chart_quote_cache is not None:
+            chart_quote_cache[cache_key] = None
+        return None
+
+    latest = valid_rows[-1]
+    previous = valid_rows[-2] if len(valid_rows) > 1 else valid_rows[0]
+    price = _safe_float(latest.get("close"))
+    previous_close = _safe_float(previous.get("close"))
+    change = price - previous_close if previous_close > 0 else 0.0
+    change_pct = (change / previous_close * 100.0) if previous_close > 0 else 0.0
+    volumes = [_safe_float(row.get("volume")) for row in valid_rows]
+    volume = sum(value for value in volumes if value > 0)
+    highs = [_safe_float(row.get("high")) for row in valid_rows]
+    lows = [_safe_float(row.get("low")) for row in valid_rows]
+    positive_highs = [value for value in highs if value > 0]
+    positive_lows = [value for value in lows if value > 0]
+    payload = {
+        "symbol": _response_symbol(symbol),
+        "price": round(price, 4),
+        "change": round(change, 4),
+        "change_pct": round(change_pct, 4),
+        "volume": round(volume, 2) if volume > 0 else None,
+        "high": round(max(positive_highs), 4) if positive_highs else round(price, 4),
+        "low": round(min(positive_lows), 4) if positive_lows else round(price, 4),
+        "market_data_updated_at": latest.get("time"),
+        "provider_timestamp": latest.get("time"),
+        "source": "chart_cache_fallback",
+        "quote_status": "stale_chart",
+        "stale": True,
+    }
+    if chart_quote_cache is not None:
+        chart_quote_cache[cache_key] = payload
+    return payload
+
+
 def _resolve_quote_for_chart(symbol: str):
     aliases = _symbol_aliases(symbol)
     if not aliases:
         return None
 
-    cached_payloads = cached_price_payloads(aliases)
+    cached_payloads = cached_price_payloads(aliases, allow_stale=True)
 
     for alias in aliases:
         payload = cached_payloads.get(alias)
@@ -251,6 +380,28 @@ def _interval_shape(interval: str) -> tuple[int, timedelta]:
     return 156, timedelta(days=7)
 
 
+def _fallback_chart_end(interval: str) -> datetime:
+    normalized = str(interval or "1D").upper().strip()
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    if normalized != "1D":
+        return now
+
+    sao_paulo = ZoneInfo("America/Sao_Paulo")
+    local_now = now.astimezone(sao_paulo)
+    session_close = local_now.replace(hour=17, minute=55, second=0, microsecond=0)
+    session_open = local_now.replace(hour=10, minute=0, second=0, microsecond=0)
+    if local_now < session_open:
+        session_close = session_close - timedelta(days=1)
+        while session_close.weekday() >= 5:
+            session_close = session_close - timedelta(days=1)
+    elif local_now <= session_close:
+        minute = (local_now.minute // 5) * 5
+        session_close = local_now.replace(minute=minute, second=0, microsecond=0)
+    while session_close.weekday() >= 5:
+        session_close = session_close - timedelta(days=1)
+    return session_close.astimezone(timezone.utc)
+
+
 def _normalize_chart_interval(interval: str | None = "1D", range_value: str | None = None) -> str:
     raw_range = range_value if isinstance(range_value, str) else None
     raw_interval = interval if isinstance(interval, str) else None
@@ -280,7 +431,7 @@ def _build_quote_fallback_chart(symbol: str, interval: str):
     high_quote = _safe_float(quote.get("high"))
     low_quote = _safe_float(quote.get("low"))
     amplitude = max(abs(price - previous), price * 0.003)
-    now = datetime.now(timezone.utc).replace(microsecond=0)
+    now = _fallback_chart_end(interval)
     rows = []
     last_close = previous
 
@@ -326,29 +477,26 @@ def public_quotes(symbols: str = Query(default="")):
     cache_keys = _dedupe_public_symbols(
         alias for symbol in limited_tickers for alias in _symbol_aliases(symbol)
     )
-    cached_payloads = cached_price_payloads(cache_keys)
-    missing_tickers = [
-        symbol
+    cached_payloads = cached_price_payloads(cache_keys, allow_stale=True)
+    chart_quote_cache: dict = {}
+    items = [
+        _resolve_cached_quote(cached_payloads, symbol, chart_quote_cache=chart_quote_cache)
         for symbol in limited_tickers
-        if not any(_has_usable_quote_payload(cached_payloads.get(alias)) for alias in _symbol_aliases(symbol))
     ]
-    if missing_tickers:
-        still_missing = [
-            symbol
-            for symbol in missing_tickers
-            if not any(_has_usable_quote_payload(cached_payloads.get(alias)) for alias in _symbol_aliases(symbol))
-        ]
-        if still_missing:
-            request_quote_warmup(still_missing)
+    refresh_tickers = []
+    for symbol, resolved in zip(limited_tickers, items):
+        if _quote_needs_background_refresh(resolved):
+            refresh_tickers.append(symbol)
+    if refresh_tickers:
+        request_quote_warmup(_dedupe_public_symbols(refresh_tickers))
 
-    for symbol in limited_tickers:
+    for symbol, resolved in zip(limited_tickers, items):
         record_cache_access(
             "quote",
-            any(_has_usable_quote_payload(cached_payloads.get(alias)) for alias in _symbol_aliases(symbol)),
+            bool(isinstance(resolved, dict) and resolved.get("source") != "empty"),
             "public_quotes",
         )
 
-    items = [_resolve_cached_quote(cached_payloads, symbol) for symbol in limited_tickers]
     return {"items": items, "count": len(items)}
 
 
@@ -428,6 +576,8 @@ def public_market_chart(
         return _empty_chart_payload(response_symbol, chart_interval, reason)
 
     is_quote_fallback = _is_quote_fallback_chart(ohlc)
+    if is_quote_fallback:
+        request_chart_warmup(ticker, chart_interval)
     signals = []
     chart_signal = {} if is_quote_fallback else (build_chart_signal_payload(ticker, ohlc, interval=chart_interval) or {})
     if chart_signal:
@@ -459,9 +609,9 @@ def public_market_bundle(
     safe_limit = max(1, min(int(limit or 6), 20))
     ticker = _normalize_public_symbol(symbol)
     response_symbol = _response_symbol(ticker)
-    cached_payloads = cached_price_payloads(_symbol_aliases(ticker))
+    cached_payloads = cached_price_payloads(_symbol_aliases(ticker), allow_stale=True)
     quote = _resolve_cached_quote(cached_payloads, ticker)
-    if not _has_usable_quote_payload(quote):
+    if _quote_needs_background_refresh(quote):
         request_quote_warmup([ticker])
     record_cache_access("quote", _has_usable_quote_payload(quote), "public_bundle")
 
@@ -501,11 +651,6 @@ def _load_chart_data_fast(ticker: str, interval: str):
     rows = load_public_chart_rows(_symbol_aliases(ticker), interval)
     if rows:
         return rows
-    if not _is_b3_mini_future_symbol(ticker):
-        fallback_rows = _build_quote_fallback_chart(ticker, interval)
-        if fallback_rows:
-            record_cache_access("chart_quote_fallback", True, "public_market_live")
-            return fallback_rows
     cache_key = "chart_exact_miss_b3_future" if _is_b3_mini_future_symbol(ticker) else "chart_exact_miss"
     record_cache_access(cache_key, False, "public_market_live")
     return []

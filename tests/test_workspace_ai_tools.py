@@ -329,6 +329,229 @@ class WorkspaceAiToolsTests(unittest.TestCase):
         self.assertEqual(master_row["ticker"], "PETR4")
         self.assertEqual(master_row["tool"], "master_score")
 
+    def test_workspace_data_does_not_restore_non_operational_ai_history(self):
+        bootstrap = {
+            "brand": "StockNewsBR",
+            "pricing": {"trial_days": 90, "premium_monthly": {"price_brl": 49}},
+            "launch_roadmap": {"current": "web", "next": "app"},
+            "ai_modules": ["IA Master Score"],
+            "social_features": {"feed": True},
+        }
+        metrics = {
+            "engine_cycles": 10,
+            "signals_generated": 5,
+            "assets_scanned": 80,
+            "cache_age": 3,
+            "http_requests": 100,
+            "ws_connections": 2,
+            "chat_messages": 8,
+        }
+
+        with patch.object(workspace_service, "get_public_bootstrap", return_value=bootstrap), patch.object(
+            workspace_service,
+            "get_metrics_snapshot",
+            return_value=metrics,
+        ), patch.object(
+            workspace_service,
+            "get_snapshot",
+            return_value={"signals": [], "ai_tools": workspace_service._empty_ai_outputs()},
+        ), patch.object(
+            workspace_service,
+            "get_ranking",
+            return_value=[],
+        ), patch.object(
+            workspace_service,
+            "get_posts",
+            return_value=[],
+        ), patch.object(
+            workspace_service,
+            "get_help_center_blueprint",
+            return_value={"guides": []},
+        ), patch.object(
+            workspace_service,
+            "get_media_status",
+            return_value={},
+        ), patch.object(
+            workspace_service,
+            "get_push_status",
+            return_value={},
+        ), patch.object(
+            workspace_service,
+            "get_user_workspace_layout",
+            return_value={"tabs": ["home"], "pinned_ticker": "PETR4", "opened_popouts": []},
+        ), patch.object(
+            workspace_service,
+            "get_layout",
+            return_value={"tabs": [{"id": "home", "title": "Home"}]},
+        ), patch.object(
+            workspace_service,
+            "list_room_messages",
+            return_value=[],
+        ), patch.object(
+            workspace_service,
+            "get_ai_alert_history_snapshot",
+            return_value={
+                "tools": {
+                    "heat_map": [],
+                    "radar": [],
+                    "breakout_probability": [],
+                    "institutional_flow": [],
+                    "smart_money": [],
+                    "accumulation": [],
+                    "volatility_squeeze": [],
+                    "liquidity_sweep": [],
+                    "liquidity_map": [],
+                    "market_regime": [],
+                    "master_score": [
+                        {
+                            "ticker": "PETR4",
+                            "tool": "master_score",
+                            "score": 91.0,
+                            "signal": "BUY",
+                            "price": 0,
+                            "volume": 0,
+                            "data_quality": "score_only",
+                            "decision_ready": False,
+                        }
+                    ],
+                }
+            },
+        ), patch.object(
+            workspace_service,
+            "persist_ai_alert_history",
+            side_effect=lambda value: value,
+        ):
+            payload = workspace_service.get_workspace_data(user_id=7, channel="web")
+
+        self.assertFalse(payload["ai_tools"]["master_score"])
+
+    def test_workspace_cards_and_ranking_prefer_snapshot_rows(self):
+        snapshot_rows = [
+            {
+                "ticker": "PETR4",
+                "symbol": "PETR4",
+                "score": 88.0,
+                "price": 37.5,
+                "change_pct": 1.6,
+                "volume": 1_250_000,
+                "avg_volume": 800_000,
+                "rel_volume": 1.56,
+                "vwap": 37.2,
+                "rsi": 58.0,
+                "macd": 0.12,
+                "data_quality": "priced",
+            }
+        ]
+        stale_ranking = [
+            {
+                "symbol": "PETR4",
+                "score": 12.0,
+                "price": 1.11,
+                "change_pct": -9.0,
+                "volume": 1,
+                "rsi": 1.0,
+            }
+        ]
+        snapshot_ai_tools = {
+            "heat_map": [],
+            "radar": [],
+            "breakout_probability": [],
+            "institutional_flow": [],
+            "smart_money": [],
+            "accumulation": [],
+            "volatility_squeeze": [],
+            "liquidity_sweep": [],
+            "liquidity_map": [],
+            "market_regime": [],
+            "master_score": [
+                {
+                    "ticker": "PETR4",
+                    "tool": "master_score",
+                    "score": 88.0,
+                    "signal": "BUY",
+                    "price": 37.5,
+                    "volume": 1_250_000,
+                    "rsi": 58.0,
+                    "data_quality": "priced",
+                }
+            ],
+        }
+
+        bootstrap = {
+            "brand": "StockNewsBR",
+            "pricing": {"trial_days": 90, "premium_monthly": {"price_brl": 49}},
+            "launch_roadmap": {"current": "web", "next": "app"},
+            "ai_modules": ["IA Master Score"],
+            "social_features": {"feed": True},
+        }
+
+        metrics = {
+            "engine_cycles": 10,
+            "signals_generated": 5,
+            "assets_scanned": 80,
+            "cache_age": 3,
+            "http_requests": 100,
+            "ws_connections": 2,
+            "chat_messages": 8,
+        }
+
+        with patch.object(workspace_service, "get_public_bootstrap", return_value=bootstrap), patch.object(
+            workspace_service,
+            "get_metrics_snapshot",
+            return_value=metrics,
+        ), patch.object(
+            workspace_service,
+            "get_snapshot",
+            return_value={"signals": snapshot_rows, "ai_tools": snapshot_ai_tools},
+        ), patch.object(
+            workspace_service,
+            "get_ranking",
+            return_value=stale_ranking,
+        ), patch.object(
+            workspace_service,
+            "get_posts",
+            return_value=[],
+        ), patch.object(
+            workspace_service,
+            "get_help_center_blueprint",
+            return_value={"guides": []},
+        ), patch.object(
+            workspace_service,
+            "get_media_status",
+            return_value={},
+        ), patch.object(
+            workspace_service,
+            "get_push_status",
+            return_value={},
+        ), patch.object(
+            workspace_service,
+            "get_user_workspace_layout",
+            return_value={"tabs": ["home"], "pinned_ticker": "PETR4", "opened_popouts": []},
+        ), patch.object(
+            workspace_service,
+            "get_layout",
+            return_value={"tabs": [{"id": "home", "title": "Home"}]},
+        ), patch.object(
+            workspace_service,
+            "list_room_messages",
+            return_value=[],
+        ), patch.object(
+            workspace_service,
+            "persist_ai_alert_history",
+            side_effect=lambda value: value,
+        ), patch.object(
+            workspace_service,
+            "build_ai_tool_payload",
+            side_effect=AssertionError("workspace should not rebuild AI tools in HTTP request"),
+            create=True,
+        ):
+            payload = workspace_service.get_workspace_data(user_id=7, channel="web")
+
+        self.assertEqual(payload["top_signals"][0]["price"], 37.5)
+        self.assertEqual(payload["ranking"][0]["price"], 37.5)
+        self.assertEqual(payload["ranking"][0]["rsi"], 58.0)
+        self.assertNotEqual(payload["ranking"][0]["price"], 1.11)
+
 
 if __name__ == "__main__":
     unittest.main()

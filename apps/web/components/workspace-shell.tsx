@@ -398,7 +398,7 @@ const DEFAULT_CHART_SETTINGS: ChartSettings = {
   show_volume: true,
 };
 const APP_LOCALE_STORAGE_KEY = "snbr-app-locale";
-const AI_ALERT_HISTORY_STORAGE_KEY = "snbr-ai-alert-history-v6";
+const AI_ALERT_HISTORY_STORAGE_KEY = "snbr-ai-alert-history-v7";
 const AI_TOOL_SOUND_STORAGE_KEY = "stocknewsbr.ai_tool_sound.v1";
 const AI_DEAL_SOUND_URL = "/sounds/ka-ching.mp3";
 const MAINTENANCE_NOTICES: Array<{ id: string; titulo: string; corpo: string }> = [];
@@ -1211,9 +1211,31 @@ function sameChartRequest(chart: any, ticker: string, interval: string) {
   return String(chart?.interval || chart?.summary?.interval || "1D").toUpperCase() === String(interval || "1D").toUpperCase();
 }
 
-function chartFallbackShape(interval: string) {
+function chartFallbackEndMs(interval: string) {
   const normalizedInterval = String(interval || "1D").toUpperCase();
   const now = Date.now();
+  if (normalizedInterval !== "1D") return now;
+
+  const local = new Date(now);
+  const end = new Date(local);
+  end.setHours(17, 55, 0, 0);
+  const open = new Date(local);
+  open.setHours(10, 0, 0, 0);
+  if (local < open) {
+    end.setDate(end.getDate() - 1);
+  } else if (local <= end) {
+    end.setTime(local.getTime());
+    end.setMinutes(Math.floor(end.getMinutes() / 5) * 5, 0, 0);
+  }
+  while (end.getDay() === 0 || end.getDay() === 6) {
+    end.setDate(end.getDate() - 1);
+  }
+  return end.getTime();
+}
+
+function chartFallbackShape(interval: string) {
+  const normalizedInterval = String(interval || "1D").toUpperCase();
+  const now = chartFallbackEndMs(normalizedInterval);
   if (normalizedInterval === "1D") {
     return { count: 78, stepMs: 5 * 60 * 1000, startMs: now - 77 * 5 * 60 * 1000 };
   }
@@ -1592,6 +1614,64 @@ function clampHeadline(value: string, maxLength = 130) {
   return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 3)}...` : cleaned;
 }
 
+function isGenericNewsHeadline(value?: string | null, symbol?: string | null) {
+  const normalized = normalizeUiText(value);
+  const ticker = normalizeSymbol(String(symbol || ""));
+  if (!normalized || !ticker) return false;
+  return (
+    normalized === normalizeUiText(`Manchete internacional sobre ${ticker}`) ||
+    normalized === normalizeUiText(`Noticia internacional sobre ${ticker}`) ||
+    normalized === normalizeUiText(`Notícia internacional sobre ${ticker}`) ||
+    normalized === normalizeUiText(`Relevant news for ${ticker}`) ||
+    normalized === normalizeUiText(`News for ${ticker}`)
+  );
+}
+
+function headlineFromNewsUrl(value?: string | null) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    const slug = (url.pathname.split("/").filter(Boolean).pop() || "")
+      .replace(/\.html?$/i, "")
+      .replace(/-\d{7,}$/g, "")
+      .trim();
+    if (!slug || slug.length < 8) return "";
+    return clampHeadline(
+      slug
+        .split("-")
+        .filter(Boolean)
+        .map((part, index) => {
+          const lower = part.toLowerCase();
+          if (["ai", "ev", "evs", "ceo", "ceos", "ipo", "etf", "usa"].includes(lower)) return lower.toUpperCase();
+          if (["as", "and", "or", "the", "a", "an", "to", "with", "on", "in", "of", "for"].includes(lower) && index > 0) return lower;
+          return `${lower.charAt(0).toUpperCase()}${lower.slice(1)}`;
+        })
+        .join(" "),
+      150,
+    );
+  } catch {
+    return "";
+  }
+}
+
+function bestRawNewsHeadline(item: NewsItem, symbol: string) {
+  const title = String(item.title || "").trim();
+  if (title && !isGenericNewsHeadline(title, symbol)) return title;
+  const fromUrl = headlineFromNewsUrl(item.url);
+  if (fromUrl) return fromUrl;
+  const candidate = [
+    item.editorial,
+    item.why_it_matters,
+    item.impact_reason,
+    item.market_context,
+    item.trader_takeaway,
+    item.card_summary,
+    item.summary,
+  ].find((value) => String(value || "").trim() && !isGenericNewsHeadline(String(value), symbol));
+  return String(candidate || title || "").trim();
+}
+
 function translateEnglishNewsHeadlineToPt(value?: string | null, symbol?: string | null) {
   const title = String(value || "").trim();
   if (!title) return "";
@@ -1676,7 +1756,7 @@ function translateEnglishNewsHeadlineToPt(value?: string | null, symbol?: string
     .replace(/\band\b/gi, "e");
 
   if (cleaned !== normalized) return clampHeadline(cleaned);
-  return `Manchete internacional sobre ${ticker}`;
+  return clampHeadline(normalized);
 }
 
 function getSaoPauloParts(date = new Date()) {
@@ -1746,10 +1826,10 @@ function normalizeAlertEpoch(value?: unknown) {
 
 function resolveAiAlertTimestamp(row: AiToolRow, fallbackIso?: unknown) {
   return (
-    normalizeAlertTimestamp((row as any).deal_detected_at) ||
     normalizeAlertTimestamp((row as any).found_at) ||
     normalizeAlertTimestamp((row as any).first_seen_at) ||
     normalizeAlertTimestamp(row.detected_at) ||
+    normalizeAlertTimestamp((row as any).deal_detected_at) ||
     normalizeAlertTimestamp(row.market_data_updated_at) ||
     normalizeAlertTimestamp(row.last_bar_at) ||
     normalizeAlertTimestamp(row.bar_time) ||
@@ -1766,10 +1846,10 @@ function resolveAiAlertTimestamp(row: AiToolRow, fallbackIso?: unknown) {
 
 function resolveAiFindingTimestamp(row: AiToolRow) {
   return (
-    normalizeAlertTimestamp((row as any).deal_detected_at) ||
     normalizeAlertTimestamp((row as any).found_at) ||
     normalizeAlertTimestamp((row as any).first_seen_at) ||
     normalizeAlertTimestamp(row.detected_at) ||
+    normalizeAlertTimestamp((row as any).deal_detected_at) ||
     normalizeAlertTimestamp(row.market_data_updated_at) ||
     normalizeAlertTimestamp(row.quote_time) ||
     normalizeAlertTimestamp(row.provider_timestamp) ||
@@ -1777,9 +1857,7 @@ function resolveAiFindingTimestamp(row: AiToolRow) {
     normalizeAlertTimestamp(row.bar_time) ||
     normalizeAlertTimestamp(row.time) ||
     normalizeAlertTimestamp(row.timestamp) ||
-    normalizeAlertTimestamp(row.created_at) ||
-    normalizeAlertTimestamp(row.updated_at) ||
-    normalizeAlertTimestamp(row.last_seen_at)
+    normalizeAlertTimestamp(row.created_at)
   );
 }
 
@@ -1828,15 +1906,34 @@ function isNewerAiAlert(next: AiToolRow, current?: AiToolRow | null) {
 }
 
 function withAlertTimestamp(row: AiToolRow, fallbackIso?: string): AiToolRow {
-  const detectedAt = resolveAiFindingTimestamp(row) || normalizeAlertTimestamp(fallbackIso) || undefined;
+  const detectedAt =
+    normalizeAlertTimestamp((row as any).found_at) ||
+    normalizeAlertTimestamp((row as any).first_seen_at) ||
+    normalizeAlertTimestamp(row.detected_at) ||
+    normalizeAlertTimestamp((row as any).deal_detected_at) ||
+    normalizeAlertTimestamp(row.market_data_updated_at) ||
+    normalizeAlertTimestamp(row.quote_time) ||
+    normalizeAlertTimestamp(row.provider_timestamp) ||
+    normalizeAlertTimestamp(row.last_bar_at) ||
+    normalizeAlertTimestamp(row.bar_time) ||
+    normalizeAlertTimestamp(row.time) ||
+    normalizeAlertTimestamp(row.timestamp) ||
+    normalizeAlertTimestamp(row.created_at) ||
+    undefined;
   const lastSeenAt =
     normalizeAlertTimestamp(row.last_seen_at) ||
     normalizeAlertTimestamp(row.updated_at) ||
+    normalizeAlertTimestamp(fallbackIso) ||
     detectedAt;
 
   return {
     ...row,
-    ...(detectedAt ? { updated_at: normalizeAlertTimestamp(row.updated_at) || detectedAt, detected_at: normalizeAlertTimestamp(row.detected_at) || detectedAt } : {}),
+    ...(detectedAt ? {
+      found_at: normalizeAlertTimestamp((row as any).found_at) || detectedAt,
+      first_seen_at: normalizeAlertTimestamp((row as any).first_seen_at) || detectedAt,
+      detected_at: normalizeAlertTimestamp(row.detected_at) || detectedAt,
+      updated_at: normalizeAlertTimestamp(row.updated_at) || lastSeenAt || detectedAt,
+    } : {}),
     ...(lastSeenAt ? { last_seen_at: lastSeenAt } : {}),
   };
 }
@@ -2079,12 +2176,11 @@ function quoteHasMarketValue(quote?: QuotePayload | null) {
   const status = String((quote as any).quote_status || "").toLowerCase();
   if (
     source === "empty" ||
-    source.includes("stale") ||
-    source.includes("last_good") ||
     status === "empty" ||
     status === "partial" ||
-    status === "stale" ||
-    (quote as any).stale === true
+    source.includes("no_price") ||
+    source.includes("no-price") ||
+    source.includes("empty")
   ) {
     return false;
   }
@@ -2342,6 +2438,137 @@ function firstPositiveFiniteNumber(...values: Array<unknown>) {
   return null;
 }
 
+type CanonicalSnapshotRow = Partial<RankingRow & SignalRow & AiToolRow> & Record<string, unknown>;
+
+function snapshotNumber(row: CanonicalSnapshotRow | null | undefined, ...keys: string[]) {
+  if (!row) return null;
+  return firstFiniteNumber(...keys.map((key) => row[key]));
+}
+
+function snapshotPositiveNumber(row: CanonicalSnapshotRow | null | undefined, ...keys: string[]) {
+  if (!row) return null;
+  for (const key of keys) {
+    const numeric = firstFiniteNumber(row[key]);
+    if (numeric != null && numeric > 0) return numeric;
+  }
+  return null;
+}
+
+function snapshotText(row: CanonicalSnapshotRow | null | undefined, ...keys: string[]) {
+  if (!row) return "";
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function snapshotTimestamp(row: CanonicalSnapshotRow | null | undefined) {
+  if (!row) return null;
+  return (
+    row.timestamp ||
+    row.generated_at ||
+    row.last_updated ||
+    row.updated_at ||
+    row.detected_at ||
+    row.found_at ||
+    row.created_at ||
+    row.last_bar_at ||
+    null
+  ) as string | number | null;
+}
+
+function snapshotHasCoreData(row: CanonicalSnapshotRow | null | undefined) {
+  if (!row) return false;
+  const dataQuality = normalizeUiText(
+    [
+      row.data_quality,
+      row.quote_status,
+      (row as any).status,
+      (row as any).provider_status,
+      (row as any).market_data_status,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+  const badQuality =
+    dataQuality.includes("score_only") ||
+    dataQuality.includes("score only") ||
+    dataQuality.includes("missing") ||
+    dataQuality.includes("empty") ||
+    dataQuality.includes("stale") ||
+    dataQuality.includes("no_price") ||
+    dataQuality.includes("no price") ||
+    dataQuality.includes("sem preco") ||
+    dataQuality.includes("sem preço") ||
+    dataQuality.includes("provider_failed") ||
+    dataQuality.includes("provider failed") ||
+    dataQuality.includes("failed") ||
+    dataQuality.includes("error") ||
+    dataQuality.includes("timeout") ||
+    dataQuality.includes("unavailable") ||
+    dataQuality.includes("invalid");
+  if (badQuality || (row as any).stale === true || (row as any).is_stale === true) return false;
+  if ((row as any).provider_failed === true || (row as any).provider_error) return false;
+  return (
+    !badQuality &&
+    snapshotPositiveNumber(row, "price", "close", "last_price") != null &&
+    snapshotPositiveNumber(row, "volume", "last_volume") != null
+  );
+}
+
+function snapshotQuoteFromRow(symbol: string, row: CanonicalSnapshotRow | null | undefined): QuotePayload | null {
+  const price = snapshotPositiveNumber(row, "price", "close", "last_price");
+  if (price == null) return null;
+
+  const volume = snapshotPositiveNumber(row, "volume", "last_volume");
+  const averageVolume = snapshotPositiveNumber(row, "avg_volume", "average_volume", "averageVolume");
+  const timestamp = snapshotTimestamp(row);
+
+  return {
+    symbol,
+    price,
+    change: snapshotNumber(row, "change", "change_abs", "price_change"),
+    change_pct: snapshotNumber(row, "change_pct", "changePct", "variation", "variation_pct"),
+    volume,
+    average_volume: averageVolume,
+    avg_volume: averageVolume,
+    rel_volume: snapshotPositiveNumber(row, "rel_volume", "rvol", "relative_volume"),
+    vwap: snapshotPositiveNumber(row, "vwap"),
+    rsi: firstValidRsiNumber(row?.rsi),
+    macd: snapshotNumber(row, "macd"),
+    macd_signal: snapshotNumber(row, "macd_signal"),
+    macd_histogram: snapshotNumber(row, "macd_histogram", "macd_hist"),
+    source: "market_snapshot",
+    quote_status: snapshotHasCoreData(row) ? "valid" : "partial",
+    updated_at: timestamp,
+    last_updated: timestamp,
+  } as QuotePayload;
+}
+
+function snapshotInsightFromRow(symbol: string, row: CanonicalSnapshotRow | null | undefined): PublicInsightPayload | null {
+  if (!row) return null;
+  const score = usableScore(
+    firstFiniteNumber(row.score),
+    firstFiniteNumber(row.master_score),
+    firstFiniteNumber(row.composite_score),
+    firstFiniteNumber(row.final_score),
+  );
+  const rsi = firstValidRsiNumber(row.rsi);
+  const relVolume = snapshotPositiveNumber(row, "rel_volume", "rvol", "relative_volume");
+  const trend = snapshotText(row, "trend", "trend_bias", "bias", "state", "regime", "direction");
+  const signal = snapshotText(row, "trade_action", "signal", "action", "side");
+  if (score == null && rsi == null && relVolume == null && !trend && !signal) return null;
+  return {
+    symbol,
+    score,
+    rsi,
+    rel_volume: relVolume,
+    trend_bias: trend || null,
+    signal: signal || null,
+  };
+}
+
 function firstNonZeroFiniteNumber(...values: Array<unknown>) {
   for (const value of values) {
     const numeric = Number(value);
@@ -2408,6 +2635,47 @@ function isOperationalAiFinding(row?: Partial<AiToolRow> | null) {
   const quality = aiToolDataQuality(row);
   if (quality === "score_only" || quality === "missing") return false;
   return price != null && price > 0 && volume != null && volume > 0;
+}
+
+type AiDealRule = {
+  high?: number;
+  low?: number;
+  states?: string[];
+};
+
+const AI_DEAL_RULES: Record<string, AiDealRule> = {
+  heat_map: { high: 65, low: 35, states: ["strong_buying", "strong_selling"] },
+  radar: { high: 58, states: ["momentum_ignition", "fast_move"] },
+  breakout_probability: { high: 55, states: ["ready_to_break", "building_pressure"] },
+  volatility_squeeze: { high: 55, low: 25, states: ["squeeze_ready", "compression", "already_expanded"] },
+  institutional_flow: { high: 55, low: 25, states: ["institutional_buying", "institutional_interest", "distribution_risk"] },
+  smart_money: { high: 50, states: ["smart_money_active", "smart_money_interest"] },
+  accumulation: { high: 55, low: 25, states: ["accumulation", "early_accumulation", "distribution_or_weak"] },
+  liquidity_sweep: { high: 48, states: ["liquidity_sweep_detected", "sweep_watch"] },
+  liquidity_map: { high: 55, low: 25, states: ["liquidity_hotspot", "liquidity_zone", "thin_liquidity"] },
+  market_regime: { high: 60, states: ["bull_trend", "bear_trend", "high_volatility"] },
+  master_score: { high: 70, states: ["high_conviction", "tradable"] },
+};
+
+function isAiDealFinding(row?: Partial<AiToolRow> | null) {
+  if (!isOperationalAiFinding(row)) return false;
+  const rawRow = (row || {}) as any;
+  const tool = String(rawRow.tool || "").trim();
+  const state = String(rawRow.state || rawRow.signal || "").trim().toLowerCase();
+  const signal = String(rawRow.signal || rawRow.trade_action || "").trim().toUpperCase();
+  const score = firstFiniteNumber(rawRow.score ?? rawRow.metrics?.score ?? rawRow.metrics?.composite_score);
+  const rule = AI_DEAL_RULES[tool] || { high: 60 };
+
+  if (tool === "master_score") {
+    if (rawRow.decision_ready === false || rawRow.conflict_detected === true) return false;
+    if (["BUY", "SELL", "SHORT", "COVER"].includes(signal)) return true;
+  }
+
+  if (rule.states?.some((term) => state.includes(term))) return true;
+  if (score == null) return false;
+  if (rule.high != null && score >= rule.high) return true;
+  if (rule.low != null && score <= rule.low) return true;
+  return false;
 }
 
 function looksPortuguese(text?: string | null) {
@@ -2969,7 +3237,7 @@ function dedupeNewsForTicker(items: NewsItem[], symbol: string) {
 }
 
 function portugueseNewsTitle(item: NewsItem, symbol: string) {
-  const title = String(item.title || "").trim();
+  const title = bestRawNewsHeadline(item, symbol);
   const translatedTitle = translateEnglishNewsHeadlineToPt(title, symbol);
   if (translatedTitle) return translatedTitle;
 
@@ -3010,7 +3278,7 @@ function portugueseNewsBody(item: NewsItem, symbol: string) {
 function displayNewsTitle(item: NewsItem, symbol: string, locale: AppLocale) {
   if (locale !== "en-US") return portugueseNewsTitle(item, symbol);
 
-  const title = String(item.title || "").trim();
+  const title = bestRawNewsHeadline(item, symbol);
   if (title && !looksPortuguese(title)) return title.length > 130 ? `${title.slice(0, 127)}...` : title;
 
   const candidate = [
@@ -3025,6 +3293,8 @@ function displayNewsTitle(item: NewsItem, symbol: string, locale: AppLocale) {
 
   const translated = localizeUiText(candidate || title, locale, symbol);
   if (translated && !looksPortuguese(translated)) return translated.length > 130 ? `${translated.slice(0, 127)}...` : translated;
+  const fromUrl = headlineFromNewsUrl(item.url);
+  if (fromUrl) return fromUrl;
   return `Relevant news for ${symbol}`;
 }
 
@@ -3090,108 +3360,10 @@ function describeVolumeContext(volumeLabel: string, changePct?: number | null, v
   return "volume ainda sem leitura confiável; não transforme ausência de dado em sinal.";
 }
 
-function chartActionLabel(marker?: ChartPayload["markers"][number] | null, locale: AppLocale = "pt-BR") {
-  const explicit = String(marker?.action_label || marker?.label || "").trim();
-  const type = String(marker?.type || explicit || "").toUpperCase();
-  const normalizedExplicit = explicit.toUpperCase();
-  if (normalizedExplicit === "BUY" || normalizedExplicit === "BUY LONG") return locale === "en-US" ? "Buy Long" : "Comprar";
-  if (normalizedExplicit === "SELL" || normalizedExplicit === "CLOSE LONG") return locale === "en-US" ? "Close Long" : "Encerrar long";
-  if (normalizedExplicit === "SHORT" || normalizedExplicit === "SELL SHORT") return locale === "en-US" ? "Sell Short" : "Short";
-  if (normalizedExplicit === "COVER" || normalizedExplicit === "CLOSE SHORT") return locale === "en-US" ? "Close Short" : "Encerrar short";
-  if (explicit) return explicit;
-  if (type === "BUY") return locale === "en-US" ? "Buy Long" : "Comprar";
-  if (type === "SELL") return locale === "en-US" ? "Close Long" : "Encerrar long";
-  if (type === "SHORT") return locale === "en-US" ? "Sell Short" : "Short";
-  if (type === "COVER") return locale === "en-US" ? "Close Short" : "Encerrar short";
-  return locale === "en-US" ? "Watch" : "Aguardar";
-}
-
-function chartDirectionText(label: string, locale: AppLocale = "pt-BR") {
-  const normalized = label.toLowerCase();
-  if (locale === "en-US") {
-    if (normalized.includes("buy long")) return "Open long only after trigger confirmation; do not buy into resistance.";
-    if (normalized.includes("close long")) return "Close long or avoid a new buy until price recovers structure.";
-    if (normalized.includes("sell short")) return "Open short only after support/VWAP loss with selling volume.";
-    if (normalized.includes("close short")) return "Close short if VWAP/EMA21 recovers or institutional buying appears.";
-    return "Watch; no operational order until confirmation is complete.";
-  }
-  if (normalized.includes("buy long") || normalized.includes("comprar")) return "Comprar apenas se o trigger confirmar; não comprar resistência sem rompimento.";
-  if (normalized.includes("close long") || normalized.includes("encerrar long")) return "Encerrar long ou evitar nova compra até o preço recuperar estrutura.";
-  if (normalized.includes("sell short") || normalized.includes("short")) return "Abrir short apenas com perda de suporte/VWAP e volume vendedor.";
-  if (normalized.includes("close short") || normalized.includes("encerrar short")) return "Encerrar short se houver recuperação de VWAP/EMA21 ou compra institucional.";
-  return "Observar; sem ordem operacional enquanto faltar confirmação.";
-}
-
 function cleanEnglishDecisionText(value: string | undefined | null, fallback: string, symbol: string) {
   const localized = localizeUiText(value || "", "en-US", symbol);
   const dirty = /\b(sem|se|quando|confirmacao|preco|suporte|resistencia|baixo|baixa|medio|alto|alta|compra|comprada|comprador|venda|vendida|vendedor|posicao|posição|recebeu|classificada|neutra|fraca|forte|composicao|fragilidades|pontos positivos|filtros|principais|alinhados|ordem operacional|tecnico|virada|ausencia|conflito de|divergirem|antes de|recuperar)\b/i.test(localized);
   return localized && !dirty ? localized : fallback;
-}
-
-function latestChartMarker(chart?: ChartPayload | null) {
-  const markers = Array.isArray(chart?.markers) ? chart?.markers || [] : [];
-  return markers.length ? markers[markers.length - 1] : null;
-}
-
-function buildChartDecisionCards(
-  chart: ChartPayload | null,
-  symbol: string,
-  price?: number | null,
-  locale: AppLocale = "pt-BR",
-) {
-  const isEnglish = locale === "en-US";
-  const rows = chart?.ohlc?.length ? chart.ohlc : chart?.series || [];
-  const marker = latestChartMarker(chart);
-  const actionLabel = chartActionLabel(marker, locale);
-  const trend = chart?.summary?.trend_bias || "sem regime";
-  const latestSignal = chart?.summary?.latest_signal || marker?.type || "WATCH";
-  const missing: string[] = [];
-  if (!rows.length) missing.push("serie OHLC do provider");
-  if (price == null) missing.push("preco real confirmado");
-  if (!marker) missing.push("marcador operacional confirmado");
-
-  if (missing.length) {
-    return [
-      { label: isEnglish ? "Current Read" : "Leitura atual", value: isEnglish ? `${symbol}: missing ${missing.map((item) => localizeUiText(item, locale, symbol)).join(", ")}.` : `${symbol}: faltando ${missing.join(", ")}.` },
-      { label: isEnglish ? "Operational Direction" : "Direcao operacional", value: isEnglish ? "Wait; the screen must not turn missing data into a trade." : "Aguardar; a tela nao deve transformar dado ausente em trade." },
-      { label: isEnglish ? "Required Confirmation" : "Confirmacao necessaria", value: isEnglish ? "Confirmed price, valid candle, volume and regime/flow on the same side." : "Preco real, candle valido, volume e regime/fluxo no mesmo lado." },
-      { label: isEnglish ? "Invalidation If" : "Invalidação Se", value: isEnglish ? "Any read without real price/volume stays as observation." : "Qualquer leitura sem preco/volume real fica em observacao." },
-      { label: isEnglish ? "Risk" : "Risco", value: isEnglish ? "High if trading with incomplete data; keep it as watch." : "Alto se operar sem dado completo; manter como watch." },
-    ];
-  }
-
-  const triggerFallback = `Confirm ${actionLabel} only with candle, volume, VWAP/EMA21 and flow aligned.`;
-  const invalidationFallback = `Invalidate if price loses structure, volume or the regime that supported ${actionLabel}.`;
-  const riskLevel = localizeUiText(marker?.risk_level || "medium", "en-US", symbol);
-  const riskFallback = `Risk ${riskLevel}: size the trade carefully and avoid range noise.`;
-
-  return [
-    {
-      label: isEnglish ? "Current Read" : "Leitura atual",
-      value: isEnglish
-        ? `${symbol}: ${localizeUiText(trend, locale, symbol)}; latest signal ${actionLabel} (${localizeUiText(latestSignal, locale, symbol)}).`
-        : `${symbol}: ${trend}; ultimo sinal ${actionLabel} (${latestSignal}).`,
-    },
-    { label: isEnglish ? "Operational Direction" : "Direcao operacional", value: chartDirectionText(actionLabel, locale) },
-    {
-      label: isEnglish ? "Required Confirmation" : "Confirmacao necessaria",
-      value: isEnglish
-        ? cleanEnglishDecisionText(String(marker?.trigger || marker?.confirmation || ""), triggerFallback, symbol)
-        : String(marker?.trigger || marker?.confirmation || "Confirmar candle, volume, VWAP/EMA21 e fluxo antes de agir."),
-    },
-    {
-      label: isEnglish ? "Invalidation If" : "Invalidação Se",
-      value: isEnglish
-        ? cleanEnglishDecisionText(String(marker?.invalidation || ""), invalidationFallback, symbol)
-        : String(marker?.invalidation || "Invalidar se perder estrutura, volume ou regime que sustentou o sinal."),
-    },
-    {
-      label: isEnglish ? "Risk" : "Risco",
-      value: isEnglish
-        ? cleanEnglishDecisionText(String(marker?.risk || ""), riskFallback, symbol)
-        : String(marker?.risk || `Risco ${marker?.risk_level || "medio"}; controle tamanho e evite lateralizacao.`),
-    },
-  ];
 }
 
 type DecisionTone = "bullish" | "bearish" | "neutral" | "watch" | "exit";
@@ -3200,6 +3372,8 @@ type EssentialDecisionCard = {
   label: string;
   value: string;
   tone: DecisionTone;
+  meta?: string;
+  meter?: number | null;
 };
 
 type StrategicConclusion = {
@@ -3213,6 +3387,22 @@ type StrategicConclusion = {
     body?: string;
     items?: string[];
   }>;
+};
+
+type OperationalDecisionLevel = {
+  label: string;
+  value: string;
+};
+
+type OperationalDecision = {
+  action: string;
+  tone: DecisionTone;
+  confidence: number | null;
+  confidenceLabel: string;
+  bias: string;
+  risk: string;
+  reasons: string[];
+  levels: OperationalDecisionLevel[];
 };
 
 function currentFiveMinuteBucket() {
@@ -3272,6 +3462,157 @@ function decisionTradeLabel(tone: DecisionTone, hasCoreData: boolean, locale: Ap
   if (tone === "bullish") return locale === "en-US" ? "Buy/Long" : "Compra";
   if (tone === "bearish") return locale === "en-US" ? "Sell/Short" : "Short / Comprar vendido";
   return locale === "en-US" ? "Wait" : "Aguardar";
+}
+
+function scoreConvictionLabel(score: number | null, locale: AppLocale) {
+  if (score == null || !Number.isFinite(score)) return locale === "en-US" ? "No confirmed score" : "Sem score confirmado";
+  if (score >= 8) return locale === "en-US" ? "Strong conviction" : "Convicção forte";
+  if (score >= 6) return locale === "en-US" ? "Moderate conviction" : "Convicção moderada";
+  if (score >= 4.5) return locale === "en-US" ? "Low conviction" : "Convicção baixa";
+  return locale === "en-US" ? "Weak conviction" : "Convicção fraca";
+}
+
+function numericScoreFromDecisionCard(card?: EssentialDecisionCard | null) {
+  if (!card?.value) return null;
+  const match = String(card.value).match(/(\d+(?:[.,]\d+)?)/);
+  if (!match) return null;
+  const score = Number(match[1].replace(",", "."));
+  return Number.isFinite(score) ? score : null;
+}
+
+function extractLevelFromLiquidityText(value?: string | null) {
+  const match = String(value || "").match(/(-?\d+(?:[.,]\d+)?)/);
+  return match ? parsePriceNumber(match[1]) : null;
+}
+
+function resolveOperationalZones(chart: ChartPayload | null, fallbackLevel: number | null) {
+  const zones = Array.isArray(chart?.zones) ? chart?.zones || [] : [];
+  const support = zones.find((zone) => /suporte|support/i.test(String(zone.label || "")))?.price;
+  const resistance = zones.find((zone) => /resist[eê]ncia|resistencia|resistance/i.test(String(zone.label || "")))?.price;
+  const zonePrices = zones.map((zone) => firstFiniteNumber(zone.price)).filter((value): value is number => value != null);
+  return {
+    support: firstFiniteNumber(support, zonePrices.length ? Math.min(...zonePrices) : null, fallbackLevel),
+    resistance: firstFiniteNumber(resistance, zonePrices.length ? Math.max(...zonePrices) : null, fallbackLevel),
+  };
+}
+
+function buildOperationalDecision(input: {
+  locale: AppLocale;
+  cards: EssentialDecisionCard[];
+  conclusion: StrategicConclusion;
+  chart: ChartPayload | null;
+  hasCoreData: boolean;
+}): OperationalDecision {
+  const isEnglish = input.locale === "en-US";
+  const [scoreCard, directionCard, tradeCard, regimeCard, flowCard, liquidityCard, riskCard] = input.cards;
+  const score = numericScoreFromDecisionCard(scoreCard);
+  const directionTone = decisionToneFromText(directionCard?.value, tradeCard?.value);
+  const biasTone = decisionToneFromText(regimeCard?.value, directionCard?.value);
+  const flowTone = decisionToneFromText(flowCard?.value);
+  const riskLevel = strategicRiskLevelFromText(riskCard?.value);
+  const fallbackLiquidity = extractLevelFromLiquidityText(liquidityCard?.value);
+  const zones = resolveOperationalZones(input.chart, fallbackLiquidity);
+  const confidenceBase = score == null ? null : clampNumber(Math.round(score * 10), 0, 100);
+  const confidence = confidenceBase == null
+    ? null
+    : clampNumber(
+        confidenceBase +
+          (riskLevel === "low" ? 5 : riskLevel === "high" ? -12 : -4) +
+          (flowTone === "neutral" ? -5 : 0) +
+          (!input.hasCoreData ? -35 : 0),
+        0,
+        100,
+      );
+  const confidenceLabel = confidence == null
+    ? (isEnglish ? "No confidence" : "Sem confiança")
+    : confidence >= 75
+      ? (isEnglish ? "High confidence" : "Confiança alta")
+      : confidence >= 55
+        ? (isEnglish ? "Moderate confidence" : "Confiança moderada")
+        : (isEnglish ? "Low confidence" : "Confiança baixa");
+  const riskText = riskCard?.value || (isEnglish ? "No read" : "Sem leitura");
+  const biasText = regimeCard?.value || directionCard?.value || (isEnglish ? "No read" : "Sem leitura");
+  const incomplete = !input.hasCoreData || score == null;
+
+  let action = isEnglish ? "WAIT FOR CONFIRMATION" : "AGUARDAR CONFIRMAÇÃO";
+  let tone: DecisionTone = "watch";
+  if (incomplete) {
+    action = isEnglish ? "WAIT FOR REAL DATA" : "AGUARDAR DADOS REAIS";
+    tone = "watch";
+  } else if (directionTone === "exit") {
+    action = isEnglish ? "CLOSE OR PROTECT POSITION" : "ENCERRAR / PROTEGER POSIÇÃO";
+    tone = "exit";
+  } else if (directionTone === "bearish" || biasTone === "bearish") {
+    action = riskLevel === "high"
+      ? (isEnglish ? "DO NOT BUY" : "NÃO ENTRAR COMPRADO")
+      : (isEnglish ? "SHORT ONLY WITH CONFIRMATION" : "SHORT SOMENTE COM CONFIRMAÇÃO");
+    tone = "bearish";
+  } else if (directionTone === "bullish" || biasTone === "bullish") {
+    action = riskLevel === "low" && confidence != null && confidence >= 70
+      ? (isEnglish ? "LOOK FOR BUY TRIGGER" : "BUSCAR GATILHO DE COMPRA")
+      : (isEnglish ? "BUY ONLY WITH CONFIRMATION" : "COMPRA SOMENTE COM CONFIRMAÇÃO");
+    tone = "bullish";
+  }
+
+  const reasons = (() => {
+    if (incomplete) {
+      return isEnglish
+        ? ["Real price/volume/score are not complete", "Operational trade remains blocked", "Wait for the next confirmed snapshot"]
+        : ["Preço, volume ou Score Mestre ainda não estão completos", "Trade operacional permanece bloqueado", "Aguardar o próximo snapshot confirmado"];
+    }
+    if (tone === "bullish") {
+      return [
+        isEnglish ? `Master Score ${score?.toFixed(1)} supports a controlled buy thesis` : `Score Mestre ${score?.toFixed(1)} sustenta uma tese compradora controlada`,
+        flowTone === "bullish"
+          ? (isEnglish ? "Institutional flow supports buyers" : "Fluxo institucional apoia compradores")
+          : (isEnglish ? "Flow still needs confirmation" : "Fluxo ainda precisa confirmar"),
+        isEnglish ? "Entry must happen only after clean price confirmation" : "Entrada somente depois de confirmação limpa no preço",
+      ];
+    }
+    if (tone === "bearish" || tone === "exit") {
+      return [
+        flowTone === "bearish"
+          ? (isEnglish ? "Seller flow is stronger now" : "Fluxo vendedor está mais forte agora")
+          : (isEnglish ? "Buyer flow is not confirmed" : "Fluxo comprador não está confirmado"),
+        isEnglish ? "Resistance/liquidity is the main decision zone" : "Resistência/liquidez é a principal zona de decisão",
+        riskLevel === "high"
+          ? (isEnglish ? "High risk demands capital protection" : "Risco alto exige preservação de capital")
+          : (isEnglish ? "Wait for price and volume trigger before action" : "Aguardar gatilho de preço e volume antes da ação"),
+      ];
+    }
+    return isEnglish
+      ? ["No side has enough confirmation", "Price, volume and flow must align", "Waiting is the professional decision now"]
+      : ["Nenhum lado tem confirmação suficiente", "Preço, volume e fluxo precisam alinhar", "Aguardar é a decisão profissional agora"];
+  })();
+
+  const supportText = zones.support != null ? formatLocalePrice(zones.support, input.locale) : (isEnglish ? "No level" : "Sem nível");
+  const resistanceText = zones.resistance != null ? formatLocalePrice(zones.resistance, input.locale) : (isEnglish ? "No level" : "Sem nível");
+  const invalidation = tone === "bullish"
+    ? (zones.support != null ? `${isEnglish ? "Below" : "Abaixo de"} ${supportText}` : (isEnglish ? "Below confirmed support/VWAP" : "Abaixo do suporte/VWAP confirmado"))
+    : tone === "bearish" || tone === "exit"
+      ? (zones.resistance != null ? `${isEnglish ? "Above" : "Acima de"} ${resistanceText}` : (isEnglish ? "Above confirmed resistance/VWAP" : "Acima da resistência/VWAP confirmada"))
+      : (isEnglish ? "After confirmed range break" : "Após rompimento confirmado da faixa");
+  const tradeZone = tone === "bullish"
+    ? (zones.support != null ? `${isEnglish ? "Buy zone" : "Zona de compra"}: ${supportText}` : (isEnglish ? "Buy zone: wait for trigger" : "Zona de compra: aguardar gatilho"))
+    : tone === "bearish" || tone === "exit"
+      ? (zones.resistance != null ? `${isEnglish ? "Sell zone" : "Zona de venda"}: ${resistanceText}` : (isEnglish ? "Sell zone: wait for trigger" : "Zona de venda: aguardar gatilho"))
+      : (isEnglish ? "No active zone" : "Sem zona ativa");
+
+  return {
+    action,
+    tone,
+    confidence,
+    confidenceLabel,
+    bias: biasText,
+    risk: riskText,
+    reasons,
+    levels: [
+      { label: isEnglish ? "Resistance" : "Resistência", value: resistanceText },
+      { label: isEnglish ? "Support" : "Suporte", value: supportText },
+      { label: isEnglish ? "Invalidation" : "Invalidação", value: invalidation },
+      { label: isEnglish ? "Trade Zone" : "Zona operacional", value: tradeZone },
+    ],
+  };
 }
 
 function tonesConflict(left: DecisionTone, right: DecisionTone) {
@@ -5670,6 +6011,15 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
       const initialQuoteSymbols = Array.from(new Set([...priorityPublicWatchSymbols, ...publicTickerTapeSymbols]));
 
+      getPublicQuotesRobust(publicTickerTapeSymbols, 16, 0)
+        .then((nextQuotes) => {
+          if (cancelled) return;
+          const quoteMap = Object.fromEntries((nextQuotes?.items || []).map((item) => [item.symbol, item]));
+          setTickerTapeQuotes((current) => mergeQuoteState(current, quoteMap));
+          setPublicQuotes((current) => mergeQuoteState(current, quoteMap));
+        })
+        .catch(() => undefined);
+
       getPublicQuotesRobust(initialQuoteSymbols, 32, 0)
         .then((nextQuotes) => {
           if (cancelled) return;
@@ -6886,9 +7236,63 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     [syntheticSearchCandidate, remoteSearchItems, filteredUniverse],
   );
   const currentRanking = useMemo(() => rankingRows.find((item) => item.symbol === selectedTicker), [rankingRows, selectedTicker]);
+  const currentTopSignal = useMemo(
+    () => radarRows.find((item) => normalizeSymbol(item.ticker || item.symbol || "") === selectedTicker),
+    [radarRows, selectedTicker],
+  );
+  const workspaceSymbolSnapshot = useMemo<CanonicalSnapshotRow | null>(() => {
+    const snapshots = workspace?.symbol_snapshots || {};
+    const direct = snapshots[selectedTicker] || snapshots[selectedTicker.toUpperCase()];
+    return direct ? (direct as CanonicalSnapshotRow) : null;
+  }, [workspace?.symbol_snapshots, selectedTicker]);
+  const currentSnapshotRow = useMemo<CanonicalSnapshotRow | null>(() => {
+    const candidates = [workspaceSymbolSnapshot, currentRanking, currentTopSignal] as Array<
+      CanonicalSnapshotRow | null | undefined
+    >;
+    return candidates.find(snapshotHasCoreData) || candidates.find(Boolean) || null;
+  }, [currentRanking, currentTopSignal, workspaceSymbolSnapshot]);
+  const snapshotQuote = useMemo(
+    () => snapshotQuoteFromRow(selectedTicker, currentSnapshotRow),
+    [currentSnapshotRow, selectedTicker],
+  );
+  const snapshotInsight = useMemo(
+    () => snapshotInsightFromRow(selectedTicker, currentSnapshotRow),
+    [currentSnapshotRow, selectedTicker],
+  );
   const currentWatchItem = useMemo(() => watchUniverse.find((item) => item.symbol === selectedTicker), [watchUniverse, selectedTicker]);
   const currentPublicQuote = resolveQuoteForSymbol(selectedTicker, publicQuotes, tickerTapeQuotes);
-  const displayQuote = quoteHasMarketValue(currentPublicQuote) ? currentPublicQuote : activeQuote;
+  const watchlistQuoteFallback = useMemo<QuotePayload | null>(() => {
+    const watchPrice = firstFiniteNumber(currentWatchItem?.price);
+    if (watchPrice == null || watchPrice <= 0) return null;
+    return {
+      ...(activeQuote || currentPublicQuote || {}),
+      symbol: selectedTicker,
+      price: watchPrice,
+      change_pct: currentWatchItem?.changePct ?? activeQuote?.change_pct ?? currentPublicQuote?.change_pct ?? null,
+      volume: currentWatchItem?.volume ?? activeQuote?.volume ?? currentPublicQuote?.volume ?? null,
+      average_volume: currentWatchItem?.averageVolume ?? (activeQuote as any)?.average_volume ?? (currentPublicQuote as any)?.average_volume ?? null,
+      avg_volume: currentWatchItem?.averageVolume ?? (activeQuote as any)?.avg_volume ?? (currentPublicQuote as any)?.avg_volume ?? null,
+      rel_volume: currentWatchItem?.relVolume ?? (activeQuote as any)?.rel_volume ?? (currentPublicQuote as any)?.rel_volume ?? null,
+      source: "watchlist_fallback",
+      quote_status: "reference",
+    } as QuotePayload;
+  }, [
+    activeQuote,
+    currentPublicQuote,
+    currentWatchItem?.averageVolume,
+    currentWatchItem?.changePct,
+    currentWatchItem?.price,
+    currentWatchItem?.relVolume,
+    currentWatchItem?.volume,
+    selectedTicker,
+  ]);
+  const displayQuote = quoteHasMarketValue(snapshotQuote)
+    ? snapshotQuote
+    : quoteHasMarketValue(currentPublicQuote)
+      ? currentPublicQuote
+      : quoteHasMarketValue(activeQuote)
+        ? activeQuote
+        : watchlistQuoteFallback || snapshotQuote || activeQuote || currentPublicQuote;
   const displayQuoteHasCoreData = quoteHasMarketValue(displayQuote) && firstPositiveFiniteNumber(displayQuote?.volume) != null;
   const currentPublicInsight = normalizeSymbol(publicInsight?.symbol || "") === selectedTicker ? publicInsight : null;
   useEffect(() => {
@@ -6919,20 +7323,24 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const currentDerivedScore = useMemo(
     () => {
       if (!displayQuoteHasCoreData) return null;
+      if (snapshotInsight?.score != null) return snapshotInsight.score;
       return derivePublicScore({
         changePct: displayQuote?.change_pct ?? null,
-        rsi: currentPublicInsight?.rsi ?? (currentRanking?.rsi != null ? Number(currentRanking.rsi) : null),
-        trend: activeChart?.summary?.trend_bias || currentPublicInsight?.trend_bias || currentPublicInsight?.signal || currentRanking?.trend || null,
+        rsi: snapshotInsight?.rsi ?? currentPublicInsight?.rsi ?? (currentRanking?.rsi != null ? Number(currentRanking.rsi) : null),
+        trend: snapshotInsight?.trend_bias || snapshotInsight?.signal || currentPublicInsight?.trend_bias || currentPublicInsight?.signal || currentRanking?.trend || null,
         volume: displayQuote?.volume ?? null,
       });
     },
     [
-      activeChart?.summary?.trend_bias,
       currentPublicInsight?.rsi,
       currentPublicInsight?.signal,
       currentPublicInsight?.trend_bias,
       currentRanking?.rsi,
       currentRanking?.trend,
+      snapshotInsight?.rsi,
+      snapshotInsight?.score,
+      snapshotInsight?.signal,
+      snapshotInsight?.trend_bias,
       displayQuoteHasCoreData,
       displayQuote?.change_pct,
       displayQuote?.volume,
@@ -6940,10 +7348,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   );
   const derivedPublicInsight = useMemo<PublicInsightPayload | null>(() => {
     if (!displayQuoteHasCoreData) return null;
+    if (snapshotInsight) return snapshotInsight;
     if (currentPublicInsight) return currentPublicInsight;
 
     const derivedTrend =
-      activeChart?.summary?.trend_bias ||
       currentRanking?.trend ||
       (displayQuote?.change_pct != null
         ? displayQuote.change_pct > 0
@@ -6979,7 +7387,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             : "HOLD",
     };
   }, [
-    activeChart?.summary?.trend_bias,
     currentDerivedScore,
     currentPublicInsight,
     currentRanking?.rsi,
@@ -6989,6 +7396,31 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     displayQuoteHasCoreData,
     displayQuote,
     selectedTicker,
+    snapshotInsight,
+  ]);
+  const chartFallbackQuote = useMemo(() => {
+    if (quoteHasMarketValue(displayQuote)) return displayQuote;
+    const watchPrice = firstFiniteNumber(currentWatchItem?.price);
+    if (watchPrice == null || watchPrice <= 0) return displayQuote;
+    return {
+      ...(displayQuote || {}),
+      symbol: selectedTicker,
+      price: watchPrice,
+      change_pct: currentWatchItem?.changePct ?? displayQuote?.change_pct ?? null,
+      volume: currentWatchItem?.volume ?? displayQuote?.volume ?? null,
+      average_volume: currentWatchItem?.averageVolume ?? (displayQuote as any)?.average_volume ?? null,
+      rel_volume: currentWatchItem?.relVolume ?? (displayQuote as any)?.rel_volume ?? null,
+      source: "watchlist_fallback",
+      quote_status: "reference",
+    } as QuotePayload;
+  }, [
+    currentWatchItem?.averageVolume,
+    currentWatchItem?.changePct,
+    currentWatchItem?.price,
+    currentWatchItem?.relVolume,
+    currentWatchItem?.volume,
+    displayQuote,
+    selectedTicker,
   ]);
   const chartForDisplay = useMemo(() => {
     const hasLiveSeries = Boolean(activeChart?.ohlc?.length || activeChart?.series?.length);
@@ -6996,33 +7428,25 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     return buildQuoteFallbackChart(
       selectedTicker,
       chartInterval,
-      displayQuote,
+      chartFallbackQuote,
       derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || currentRanking?.trend || null,
     );
   }, [
     activeChart,
     chartInterval,
+    chartFallbackQuote,
     currentRanking?.trend,
     derivedPublicInsight?.signal,
     derivedPublicInsight?.trend_bias,
-    displayQuote,
     selectedTicker,
   ]);
-  const chartMovement = useMemo(
-    () => deriveChartMovement(chartForDisplay || activeChart),
-    [activeChart, chartForDisplay],
-  );
-  const chartVolume = useMemo(
-    () => deriveChartVolume(chartForDisplay || activeChart),
-    [activeChart, chartForDisplay],
-  );
   const effectiveAiScore = useMemo(
     () => displayQuoteHasCoreData ? usableScore(derivedPublicInsight?.score, currentRanking?.score, currentDerivedScore) : null,
     [derivedPublicInsight?.score, currentRanking?.score, currentDerivedScore, displayQuoteHasCoreData],
   );
-  const priceMovementValue = firstNonZeroFiniteNumber(displayQuote?.change, chartMovement?.change) ?? (displayQuote?.change ?? null);
-  const priceMovementPercent = firstNonZeroFiniteNumber(displayQuote?.change_pct, chartMovement?.changePct) ?? (displayQuote?.change_pct ?? null);
-  const headerVolume = firstPositiveFiniteNumber(displayQuote?.volume, chartVolume);
+  const priceMovementValue = firstFiniteNumber(displayQuote?.change) ?? null;
+  const priceMovementPercent = firstFiniteNumber(displayQuote?.change_pct) ?? null;
+  const headerVolume = firstPositiveFiniteNumber(displayQuote?.volume);
   const symbolLabel = currentWatchItem?.label || symbolName(selectedTicker);
   const currentAiKey = AI_TOOL_TAB_MAP[currentTab as keyof typeof AI_TOOL_TAB_MAP];
   const currentAiRows: AiToolRow[] = useMemo(
@@ -7042,7 +7466,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         const ticker = normalizeSymbol(String((row as any).ticker || (row as any).symbol || ""));
         if (!ticker) return;
         const candidate = { ...(row as AiToolRow), tool: toolKey, ticker };
-        if (!isOperationalAiFinding(candidate)) return;
+        if (!isAiDealFinding(candidate)) return;
         unique.add(aiAlertSignalKey(candidate));
       });
       counts[tabId] = unique.size;
@@ -7062,7 +7486,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         const ticker = normalizeSymbol(String((row as any).ticker || (row as any).symbol || ""));
         if (!ticker) return;
         const candidate = { ...(row as AiToolRow), tool: toolKey, ticker };
-        if (!isOperationalAiFinding(candidate)) return;
+        if (!isAiDealFinding(candidate)) return;
         signatures.push(aiAlertComparableSignature(candidate));
       });
     }
@@ -7084,8 +7508,18 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, [aiFindingSignalKey]);
   const newsRows = useMemo(
     () => {
+      const sortedTickerNews = ((activeNews?.items || []) as NewsItem[])
+        .filter((item) => newsMatchesSelectedTicker(item, selectedTicker))
+        .sort((a, b) => {
+          const bTime = Date.parse(newsSourceTimestamp(b) || "");
+          const aTime = Date.parse(newsSourceTimestamp(a) || "");
+          if (Number.isFinite(bTime) && Number.isFinite(aTime) && bTime !== aTime) return bTime - aTime;
+          if (Number.isFinite(bTime)) return -1;
+          if (Number.isFinite(aTime)) return 1;
+          return 0;
+        });
       const matchedNews = dedupeNewsForTicker(
-        ((activeNews?.items || []) as NewsItem[]).filter((item) => newsMatchesSelectedTicker(item, selectedTicker)),
+        sortedTickerNews,
         selectedTicker,
       );
       return matchedNews.map((item, index) => {
@@ -7098,7 +7532,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           : [];
         const impact = localizeImpactLabel(item.impact_label || item.impact || "Neutro", appLocale);
         const title = displayNewsTitle(item, selectedTicker, appLocale);
-        const rawHeadline = String(item.title || "").trim();
+        const rawHeadline = bestRawNewsHeadline(item, selectedTicker);
         const headline = isUsLocale ? clampHeadline(rawHeadline || title, 150) : title;
         const cardSummary = displayNewsBody(item, selectedTicker, appLocale);
         const traderTakeaway = buildNewsTraderTakeaway(item, selectedTicker, appLocale, index);
@@ -7148,10 +7582,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const scoreNumber = effectiveAiScore != null ? Number(effectiveAiScore) : Number.NaN;
     const rawChangeNumber = displayQuoteHasCoreData ? Number(displayQuote?.change_pct) : Number.NaN;
     const changeNumber = Number.isFinite(rawChangeNumber) ? rawChangeNumber : null;
-    const rawBias = displayQuoteHasCoreData ? chartForDisplay?.summary?.trend_bias || currentRanking?.trend || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || "" : "";
+    const rawBias = displayQuoteHasCoreData ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || currentRanking?.trend || "" : "";
     const biasValue = displayQuoteHasCoreData ? biasStrengthLabel(rawBias, scoreNumber, changeNumber ?? 0, appLocale) : "n/a";
-    const fallbackRsi = displayQuoteHasCoreData ? derivePublicRsi(changeNumber ?? 0, rawBias || biasValue) : null;
-    const rsiRaw = firstValidRsiNumber(currentRanking?.rsi, derivedPublicInsight?.rsi, fallbackRsi);
+    const rsiRaw = displayQuoteHasCoreData
+      ? firstValidRsiNumber(derivedPublicInsight?.rsi, currentRanking?.rsi, (displayQuote as any)?.rsi)
+      : null;
     const rsiDescriptor = describeRsiValue(rsiRaw, appLocale);
     const rsiValue = rsiDescriptor.label;
     const changeDirection = changeNumber == null
@@ -7168,8 +7603,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       currentWatchItem?.averageVolume,
     );
     const relVolume = firstPositiveFiniteNumber(
-      currentRanking?.rel_volume,
       derivedPublicInsight?.rel_volume,
+      currentRanking?.rel_volume,
       (displayQuote as any)?.rel_volume,
       (displayQuote as any)?.rvol,
       currentWatchItem?.relVolume,
@@ -7247,7 +7682,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     currentRanking?.trend,
     currentWatchItem?.averageVolume,
     currentWatchItem?.relVolume,
-    chartForDisplay?.summary?.trend_bias,
     derivedPublicInsight?.score,
     derivedPublicInsight?.rel_volume,
     derivedPublicInsight?.rsi,
@@ -7311,7 +7745,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         changePct: firstFiniteNumber(row?.changePct, row?.change_pct, existing.changePct, watchItem?.changePct, quote?.change_pct),
         rsi: firstFiniteNumber(row?.rsi, existing.rsi, watchItem?.rsi),
         volume: firstPositiveFiniteNumber(row?.volume, existing.volume, watchItem?.volume, quote?.volume),
-        timestamp: normalizeAlertEpoch(row?.timestamp ?? row?.detected_at ?? row?.updated_at ?? row?.last_seen_at ?? row?.created_at ?? existing.timestamp),
+        timestamp: normalizeAlertEpoch(row?.timestamp ?? row?.detected_at ?? row?.market_data_updated_at ?? row?.quote_time ?? row?.provider_timestamp ?? row?.created_at ?? existing.timestamp),
       });
     };
 
@@ -7332,7 +7766,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     selectedTicker,
     symbolLabel,
     effectiveAiScore,
-    chartForDisplay?.summary?.trend_bias,
     derivedPublicInsight?.trend_bias,
     derivedPublicInsight?.signal,
     derivedPublicInsight?.rsi,
@@ -7345,7 +7778,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const toolCandidates = useMemo(
     () =>
       [...toolCandidatesSource]
-        .filter((row) => isOperationalAiFinding(row as Partial<AiToolRow>) && scoreToolCandidateForTab(currentTab, row) > -999)
+        .filter((row) => isAiDealFinding({ ...(row as Partial<AiToolRow>), tool: currentAiKey }) && scoreToolCandidateForTab(currentTab, row) > -999)
         .sort((a, b) => scoreToolCandidateForTab(currentTab, b) - scoreToolCandidateForTab(currentTab, a))
         .slice(0, 80)
         .map((row, index) => {
@@ -7360,10 +7793,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           changePct: (row as any).changePct != null ? Number((row as any).changePct) : null,
           rsi: (row as any).rsi != null ? Number((row as any).rsi) : null,
           volume: (row as any).volume != null ? Number((row as any).volume) : null,
-          timestamp: normalizeAlertEpoch((row as any).timestamp ?? (row as any).detected_at ?? (row as any).updated_at ?? (row as any).last_seen_at ?? (row as any).created_at),
+          timestamp: normalizeAlertEpoch((row as any).timestamp ?? (row as any).detected_at ?? (row as any).market_data_updated_at ?? (row as any).quote_time ?? (row as any).provider_timestamp ?? (row as any).created_at),
         };
       }),
-    [toolCandidatesSource, selectedTicker, currentTab],
+    [toolCandidatesSource, selectedTicker, currentTab, currentAiKey],
   );
   const expandedToolCandidates = useMemo(
     () =>
@@ -7373,7 +7806,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           symbol: selectedTicker,
           label: symbolLabel,
           score: currentRanking?.score != null ? Number(currentRanking.score) : null,
-          trend: currentRanking?.trend || activeChart?.summary?.trend_bias || "monitorando",
+          trend: currentRanking?.trend || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || "monitorando",
           price: displayQuote?.price ?? null,
           changePct: displayQuote?.change_pct ?? null,
           rsi: firstValidRsiNumber(currentRanking?.rsi),
@@ -7382,7 +7815,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         };
         return { ...fallback, id: `${fallback.symbol}-${index}` };
       }),
-    [toolCandidates, selectedTicker, symbolLabel, currentRanking?.score, currentRanking?.trend, currentRanking?.rsi, activeChart?.summary?.trend_bias, displayQuote?.price, displayQuote?.change_pct, displayQuote?.volume],
+    [toolCandidates, selectedTicker, symbolLabel, currentRanking?.score, currentRanking?.trend, currentRanking?.rsi, derivedPublicInsight?.trend_bias, derivedPublicInsight?.signal, displayQuote?.price, displayQuote?.change_pct, displayQuote?.volume],
   );
   const visibleAiRows = useMemo<AiToolRow[]>(() => {
     if (!currentAiKey) return [];
@@ -7396,7 +7829,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           row.state ||
           row.signal ||
           (symbol === selectedTicker ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal : null) ||
-          activeChart?.summary?.trend_bias ||
           null;
         const rsi = firstValidRsiNumber(row.rsi, symbol === selectedTicker ? derivedPublicInsight?.rsi : null, derivePublicRsi(changePct, trend));
         const resolvedVolume = firstPositiveFiniteNumber(row.volume, (row as any).volume_24h, quote?.volume);
@@ -7478,7 +7910,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         };
       });
       return [...backendRows]
-        .filter(isOperationalAiFinding)
+        .filter(isAiDealFinding)
         .sort((a, b) => {
           const bTime = Date.parse(resolveAiAlertTimestamp(b) || "");
           const aTime = Date.parse(resolveAiAlertTimestamp(a) || "");
@@ -7494,7 +7926,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         const quote = resolveQuoteForSymbol(normalizedItemSymbol, publicQuotes, tickerTapeQuotes);
         const watchItem = watchUniverse.find((candidate) => candidate.symbol === normalizedItemSymbol);
         const changePct = quote?.change_pct ?? watchItem?.changePct ?? null;
-        const trend = item.trend || (normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal : null) || chartForDisplay?.summary?.trend_bias || "monitorando";
+        const trend = item.trend || (normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal : null) || "monitorando";
         const rsi = firstValidRsiNumber(item.rsi, normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.rsi : null, derivePublicRsi(changePct, trend));
         const resolvedVolume = firstPositiveFiniteNumber(quote?.volume, item.volume, watchItem?.volume);
         const rvol = deriveRelativeVolume(resolvedVolume);
@@ -7528,7 +7960,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           atr_pct: atrPct,
         };
       })
-      .filter((item) => isOperationalAiFinding(item as Partial<AiToolRow>) && scoreToolCandidateForTab(currentTab, item) > -999)
+      .filter((item) => isAiDealFinding({ ...(item as Partial<AiToolRow>), tool: currentAiKey }) && scoreToolCandidateForTab(currentTab, item) > -999)
       .sort((a, b) => {
         return scoreToolCandidateForTab(currentTab, b) - scoreToolCandidateForTab(currentTab, a);
       });
@@ -7597,8 +8029,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     tickerTapeQuotes,
     selectedTicker,
     currentTab,
-    activeChart?.summary?.trend_bias,
-    chartForDisplay?.summary?.trend_bias,
     derivedPublicInsight?.score,
     derivedPublicInsight?.rsi,
     derivedPublicInsight?.trend_bias,
@@ -7649,7 +8079,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           tool: currentAiKey,
           ticker: normalizeSymbol(String((row as any).ticker || (row as any).symbol || "")),
         }))
-        .filter(isOperationalAiFinding)
+        .filter(isAiDealFinding)
         .map((row) => aiAlertSignalKey(row)),
     );
     return visibleAiRows.filter((row) => realKeys.has(aiAlertSignalKey(row)));
@@ -7673,12 +8103,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         const key = aiAlertSignalKey(row);
         const existing = byKey.get(key);
         if (existing && aiAlertComparableSignature(existing) === aiAlertComparableSignature(row)) {
+          const existingFoundAt = resolveAiFindingTimestamp(existing);
+          const rowFoundAt = resolveAiFindingTimestamp(row);
+          const stableFoundAt = existingFoundAt || rowFoundAt || row.detected_at || existing.detected_at;
           if (isNewerAiAlert(row, existing)) {
             byKey.set(key, {
               ...existing,
               ...row,
               updated_at: row.updated_at || row.detected_at || existing.updated_at,
-              detected_at: row.detected_at || row.updated_at || existing.detected_at,
+              found_at: (existing as any).found_at || (row as any).found_at || stableFoundAt,
+              first_seen_at: (existing as any).first_seen_at || (row as any).first_seen_at || stableFoundAt,
+              detected_at: existing.detected_at || row.detected_at || stableFoundAt,
               last_seen_at: row.last_seen_at || row.updated_at || row.detected_at || existing.last_seen_at,
             });
           } else {
@@ -7686,11 +8121,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           }
           continue;
         }
+        const existingFoundAt = existing ? resolveAiFindingTimestamp(existing) : null;
+        const rowFoundAt = resolveAiFindingTimestamp(row);
+        const stableFoundAt = existingFoundAt || rowFoundAt || row.detected_at;
         byKey.set(key, {
           ...(existing || {}),
           ...row,
           updated_at: isNewerAiAlert(row, existing) ? row.updated_at : existing?.updated_at || row.updated_at,
-          detected_at: isNewerAiAlert(row, existing) ? row.detected_at || row.updated_at : existing?.detected_at || row.detected_at || row.updated_at,
+          found_at: (existing as any)?.found_at || (row as any).found_at || stableFoundAt,
+          first_seen_at: (existing as any)?.first_seen_at || (row as any).first_seen_at || stableFoundAt,
+          detected_at: existing?.detected_at || row.detected_at || stableFoundAt,
           last_seen_at: row.last_seen_at || row.updated_at || existing?.last_seen_at,
         });
       }
@@ -7722,14 +8162,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     () => visibleAiRows.map((row) => withAlertTimestamp(row)),
     [visibleAiRows],
   );
-  const currentTabAlertRows = (
-    currentAiRows.length &&
+  const currentTabHistory =
     aiAlertHistory[currentTab]?.resetKey === aiAlertResetKey &&
     aiAlertHistory[currentTab]?.source === "real" &&
     aiAlertHistory[currentTab]?.rows.length
       ? aiAlertHistory[currentTab].rows
-      : visibleAiRowsWithTimestamps
-  ).filter(isOperationalAiFinding);
+      : null;
+  const currentTabAlertRows = (currentTabHistory?.length ? currentTabHistory : visibleAiRowsWithTimestamps).filter(isAiDealFinding);
   const showSymbolHeader = currentTab === "grafico";
   const profileName = access?.display_name || access?.email || "Trader";
   const activePoll = useMemo(
@@ -7750,15 +8189,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }),
     [activePoll, appLocale, selectedTicker],
   );
-  const hasRenderedChartData = Boolean(chartForDisplay?.ohlc?.length || chartForDisplay?.series?.length);
-  const hasPublicSignal = Boolean(derivedPublicInsight?.score != null || derivedPublicInsight?.signal || derivedPublicInsight?.trend_bias);
+  const hasPublicSignal = Boolean(
+    displayQuoteHasCoreData &&
+      (derivedPublicInsight?.score != null || derivedPublicInsight?.signal || derivedPublicInsight?.trend_bias),
+  );
   const hasSignalSnapshot =
-    hasRenderedChartData &&
+    displayQuoteHasCoreData &&
     (currentRanking?.score != null || hasPublicSignal);
   const trendText = hasSignalSnapshot
     ? String(
         currentRanking?.trend ||
-          chartForDisplay?.summary?.trend_bias ||
           derivedPublicInsight?.trend_bias ||
           derivedPublicInsight?.signal ||
           "",
@@ -7835,22 +8275,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const priceDirectionClass = movementClass(priceMovementPercent, currentRanking?.trend, currentRanking?.score);
   const priceMovementLabel = marketSessionLabel(selectedTicker, appLocale);
   const hasPriceMovement = priceMovementValue != null || priceMovementPercent != null;
-  const essentialDecisionCards = useMemo(() => {
+  const essentialDecisionCards = useMemo<EssentialDecisionCard[]>(() => {
     const rawScoreValue = effectiveAiScore != null && Number.isFinite(Number(effectiveAiScore))
       ? Number(effectiveAiScore)
       : numericRankingScore != null
         ? numericRankingScore / 10
         : null;
-    const chartTicker = normalizeSymbol(String(chartForDisplay?.summary?.ticker || chartForDisplay?.ticker || ""));
-    const chartMatchesTicker = !chartTicker || chartTicker === selectedTicker;
-    const hasCoreData = Boolean(chartMatchesTicker && hasRenderedChartData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
+    const hasCoreData = Boolean(displayQuoteHasCoreData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
     const scoreValue = hasCoreData ? rawScoreValue : null;
     const scoreTone: DecisionTone = scoreValue == null ? "neutral" : scoreValue >= 6 ? "bullish" : scoreValue <= 4.8 ? "bearish" : "neutral";
-    const decisionChart = chartMatchesTicker ? chartForDisplay : null;
-    const marker = latestChartMarker(decisionChart);
-    const rawMarkerTone = decisionToneFromText(chartActionLabel(marker, appLocale), marker?.type, marker?.label, marker?.action_label);
-    const markerTone = rawMarkerTone === "exit" && scoreTone === "bullish" ? "watch" : rawMarkerTone;
-    const trendTone = decisionToneFromText(trendText, decisionChart?.summary?.trend_bias, derivedPublicInsight?.trend_bias, derivedPublicInsight?.signal);
+    const trendTone = decisionToneFromText(trendText, derivedPublicInsight?.trend_bias, derivedPublicInsight?.signal);
     const sameTicker = (row: AiToolRow) => normalizeSymbol(row.ticker || "") === selectedTicker;
     const toolRows = (keys: Array<keyof WorkspaceData["ai_tools"]>) =>
       keys.flatMap((key) => [
@@ -7864,28 +8298,25 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       : flowTone !== "neutral"
         ? flowTone
         : scoreTone;
-    const markerConflictsBase = markerTone !== "neutral" && markerTone !== "exit" && baseTone !== "neutral" && tonesConflict(markerTone, baseTone);
     const directionTone = !hasCoreData
       ? "neutral"
-      : markerTone !== "neutral" && markerTone !== "exit" && !markerConflictsBase
-        ? markerTone
-        : baseTone !== "neutral"
-          ? baseTone
-          : markerTone === "exit"
-            ? "exit"
-            : scoreTone;
-    const structuralConflict = markerTone !== "exit" && (tonesConflict(trendTone, flowTone) || tonesConflict(directionTone, flowTone));
-    const scoreConflict = markerTone !== "exit" && scoreTone !== "neutral" && directionTone !== "neutral" && directionTone !== "exit" && tonesConflict(directionTone, scoreTone);
+      : baseTone !== "neutral"
+        ? baseTone
+        : scoreTone;
+    const structuralConflict = tonesConflict(trendTone, flowTone) || tonesConflict(directionTone, flowTone);
+    const scoreConflict = scoreTone !== "neutral" && directionTone !== "neutral" && directionTone !== "exit" && tonesConflict(directionTone, scoreTone);
     const conflict = structuralConflict || scoreConflict;
     const tradeTone = conflict ? "watch" : directionTone === "exit" ? "exit" : directionTone;
     const scoreCardTone: DecisionTone = scoreValue == null ? "neutral" : scoreValue >= 7 ? "bullish" : scoreValue <= 5.5 ? "bearish" : "watch";
-    const riskCard = resolveRiskCard(scoreValue, hasCoreData, conflict, appLocale, currentRanking?.rsi ?? derivedPublicInsight?.rsi, rawScoreValue);
-    const regimeValue = humanizeMachineLabel(decisionChart?.summary?.trend_bias || trendText || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || "", appLocale);
+    const riskCard = resolveRiskCard(scoreValue, hasCoreData, conflict, appLocale, derivedPublicInsight?.rsi ?? currentRanking?.rsi, rawScoreValue);
+    const regimeValue = humanizeMachineLabel(trendText || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || "", appLocale);
     return [
       {
         label: isUsLocale ? "Master Score" : "Score Mestre",
-        value: scoreValue != null ? scoreValue.toFixed(1) : "n/a",
+        value: scoreValue != null ? `${scoreValue.toFixed(1)} / 10` : "n/a",
         tone: scoreCardTone,
+        meta: scoreConvictionLabel(scoreValue, appLocale),
+        meter: scoreValue != null ? clampNumber(scoreValue * 10, 0, 100) : null,
       },
       {
         label: isUsLocale ? "Likely Direction" : "Direção provável",
@@ -7905,22 +8336,21 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       flowCard,
       {
         label: isUsLocale ? "Liquidity Target" : "Liquidez alvo",
-        value: resolveLiquidityTarget(decisionChart, displayQuote?.price, directionTone, appLocale),
+        value: resolveLiquidityTarget(null, displayQuote?.price, directionTone, appLocale),
         tone: directionTone === "exit" ? "watch" : directionTone,
       },
       riskCard,
     ];
   }, [
     appLocale,
-    chartForDisplay,
     currentRanking?.rsi,
     derivedPublicInsight?.rsi,
     derivedPublicInsight?.signal,
     derivedPublicInsight?.trend_bias,
     displayQuote?.price,
+    displayQuoteHasCoreData,
     effectiveAiScore,
     headerVolume,
-    hasRenderedChartData,
     isUsLocale,
     numericRankingScore,
     publicAiTools?.tools,
@@ -7929,16 +8359,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     workspace?.ai_tools,
   ]);
   const strategicConclusion = useMemo(() => {
-    const hasCoreData = Boolean(hasRenderedChartData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
+    const hasCoreData = Boolean(displayQuoteHasCoreData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
     const scoreValue = hasCoreData && effectiveAiScore != null && Number.isFinite(Number(effectiveAiScore))
       ? Number(effectiveAiScore)
       : hasCoreData && numericRankingScore != null
         ? numericRankingScore / 10
         : null;
-    const fallbackRsi = quoteHasMarketValue(displayQuote)
-      ? derivePublicRsi(displayQuote?.change_pct ?? 0, chartForDisplay?.summary?.trend_bias || currentRanking?.trend || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || "")
-      : null;
-    const rsiNumber = firstValidRsiNumber(currentRanking?.rsi, derivedPublicInsight?.rsi, fallbackRsi);
+    const rsiNumber = firstValidRsiNumber(derivedPublicInsight?.rsi, currentRanking?.rsi, (displayQuote as any)?.rsi);
     const averageVolume = firstPositiveFiniteNumber(
       (displayQuote as any)?.average_volume,
       (displayQuote as any)?.averageVolume,
@@ -7947,8 +8374,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     );
     const resolvedVolume = firstPositiveFiniteNumber(headerVolume, displayQuote?.volume);
     const relVolume = firstPositiveFiniteNumber(
-      currentRanking?.rel_volume,
       derivedPublicInsight?.rel_volume,
+      currentRanking?.rel_volume,
       (displayQuote as any)?.rel_volume,
       (displayQuote as any)?.rvol,
       currentWatchItem?.relVolume,
@@ -7976,7 +8403,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     appLocale,
     currentRanking?.rel_volume,
     currentRanking?.rsi,
-    chartForDisplay?.summary?.trend_bias,
     currentRanking?.trend,
     currentWatchItem?.averageVolume,
     currentWatchItem?.relVolume,
@@ -7985,9 +8411,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     displayQuote,
     displayQuote?.price,
     displayQuote?.volume,
+    displayQuoteHasCoreData,
     effectiveAiScore,
     essentialDecisionCards,
-    hasRenderedChartData,
     headerVolume,
     numericRankingScore,
     selectedTicker,
@@ -7997,6 +8423,23 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     () => strategicSectionsForRender(strategicConclusion, appLocale, selectedTicker),
     [appLocale, selectedTicker, strategicConclusion],
   );
+  const operationalDecision = useMemo(() => {
+    const hasCoreData = Boolean(displayQuoteHasCoreData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
+    return buildOperationalDecision({
+      locale: appLocale,
+      cards: essentialDecisionCards,
+      conclusion: strategicConclusion,
+      chart: null,
+      hasCoreData,
+    });
+  }, [
+    appLocale,
+    displayQuote?.price,
+    displayQuoteHasCoreData,
+    essentialDecisionCards,
+    headerVolume,
+    strategicConclusion,
+  ]);
   useEffect(() => {
     if (currentTab !== "education" || !educationAnchor) return;
 
@@ -9098,8 +9541,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
   function renderGrafico() {
     const chartNews = newsRows[0];
+    const chartNewsTime = chartNews?.publishedTime || "";
     const chartNewsTitle = chartNews
-      ? localizeUiText(chartNews.title, appLocale, selectedTicker)
+      ? chartNews.headline
       : (isUsLocale ? "No ticker-specific news" : "Sem notícia específica do ativo");
     const chartNewsText = chartNews
       ? (isUsLocale
@@ -9108,12 +9552,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       : (isUsLocale ? `No ticker-specific news found right now for ${selectedTicker}.` : `Sem notícia específica encontrada agora para ${selectedTicker}.`);
     const showChartNewsBody = !sameUiText(chartNewsTitle, chartNewsText);
     const chartToolToggles: Array<{ key: keyof ChartSettings; checked: boolean; label: string }> = [
-      { key: "show_markers", checked: showMarkers, label: isUsLocale ? "Buy/Sell" : "Compra/Venda" },
-      { key: "show_zones", checked: showZones, label: isUsLocale ? "Liquidity" : "Liquidez" },
-      { key: "show_price_line", checked: showPriceLine, label: isUsLocale ? "Price line" : "Linha preço" },
       { key: "show_vwap", checked: showVwap, label: "VWAP" },
       { key: "show_averages", checked: showAverages, label: isUsLocale ? "Averages" : "Médias" },
-      { key: "show_supertrend", checked: showSupertrend, label: "Supertrend" },
       { key: "show_macd", checked: showMacd, label: "MACD" },
       { key: "show_rsi", checked: showRsi, label: "RSI" },
       { key: "show_volume", checked: showVolume, label: "Volume" },
@@ -9125,7 +9565,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           <div className="snbr-chart-topline">
             <div>
               <h2>{isUsLocale ? "Asset chart" : "Gráfico do ativo"}</h2>
-              <p>{isUsLocale ? `VWAP, buy/sell, liquidity and structural read for ${selectedTicker} in one screen.` : `VWAP, compra/venda, liquidez e leitura estrutural de ${selectedTicker} na mesma tela.`}</p>
             </div>
             <div className="snbr-chart-actions">
               {chartToolToggles.map((item) => (
@@ -9175,7 +9614,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
           <div className="snbr-chart-now-strip">
             <div>
-              <span>{isUsLocale ? "News now" : "Notícia agora"} · {selectedTicker}</span>
+              <span>
+                {isUsLocale ? "News now" : "Notícia agora"} · {selectedTicker}
+                {chartNewsTime ? ` · ${chartNewsTime}` : ""}
+              </span>
               <strong>{chartNewsTitle}</strong>
               {showChartNewsBody ? <p>{chartNewsText}</p> : null}
             </div>
@@ -10134,11 +10576,60 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               </div>
               {advancedMode ? (
                 <>
+                  <article className={cx("snbr-operational-decision", operationalDecision.tone)}>
+                    <div className="snbr-operational-main">
+                      <span className="snbr-operational-kicker">{isUsLocale ? "Decision Now" : "Decisão Agora"}</span>
+                      <strong>{operationalDecision.action}</strong>
+                      <div className="snbr-operational-confidence">
+                        <span>{isUsLocale ? "Confidence" : "Confiança"}</span>
+                        <strong>{operationalDecision.confidence != null ? `${operationalDecision.confidence}%` : "n/a"}</strong>
+                        <small>{operationalDecision.confidenceLabel}</small>
+                      </div>
+                    </div>
+                    <div className="snbr-operational-reasons">
+                      <span>{isUsLocale ? "Reason" : "Motivo"}</span>
+                      <ul>
+                        {operationalDecision.reasons.map((reason) => (
+                          <li key={reason}>{reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="snbr-operational-summary" aria-label={isUsLocale ? "Executive summary" : "Resumo executivo"}>
+                      <div>
+                        <span>{isUsLocale ? "Bias" : "Viés"}</span>
+                        <strong>{operationalDecision.bias}</strong>
+                      </div>
+                      <div>
+                        <span>{isUsLocale ? "Risk" : "Risco"}</span>
+                        <strong>{operationalDecision.risk}</strong>
+                      </div>
+                      <div>
+                        <span>{isUsLocale ? "Conviction" : "Convicção"}</span>
+                        <strong>{operationalDecision.confidence != null ? `${operationalDecision.confidence}%` : "n/a"}</strong>
+                      </div>
+                    </div>
+                    <div className="snbr-operational-levels">
+                      <span>{isUsLocale ? "Operational Levels" : "Níveis Operacionais"}</span>
+                      <div>
+                        {operationalDecision.levels.map((level) => (
+                          <small key={level.label}>
+                            <b>{level.label}:</b> {level.value}
+                          </small>
+                        ))}
+                      </div>
+                    </div>
+                  </article>
                   <div className="snbr-decision-grid">
                     {essentialDecisionCards.map((card) => (
                       <article key={`${card.label}-${card.value}`} className={cx("snbr-decision-card", card.tone)}>
                         <span>{card.label}</span>
                         <strong>{card.value}</strong>
+                        {card.meta ? <small>{card.meta}</small> : null}
+                        {card.meter != null ? (
+                          <div className="snbr-decision-meter" aria-hidden="true">
+                            <i style={{ width: `${card.meter}%` }} />
+                          </div>
+                        ) : null}
                       </article>
                     ))}
                   </div>

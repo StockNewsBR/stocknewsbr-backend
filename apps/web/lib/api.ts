@@ -274,12 +274,11 @@ function hasMarketQuoteValue(quote?: QuotePayload | null): quote is QuotePayload
   const status = String((quote as any).quote_status || "").toLowerCase();
   if (
     source === "empty" ||
-    source.includes("stale") ||
-    source.includes("last_good") ||
     status === "empty" ||
     status === "partial" ||
-    status === "stale" ||
-    (quote as any).stale === true
+    source.includes("no_price") ||
+    source.includes("no-price") ||
+    source.includes("empty")
   ) {
     return false;
   }

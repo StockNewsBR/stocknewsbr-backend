@@ -79,20 +79,29 @@ def _supertrend(highs: List[float], lows: List[float], closes: List[float], peri
 
 
 _TRADE_LABELS = {
-    "BUY": "Buy",
-    "SELL": "Partial Sell",
-    "SHORT": "Short",
-    "COVER": "Cover Short",
+    "BUY": "Buy Long",
+    "SELL": "Close Long",
+    "SHORT": "Sell Short",
+    "COVER": "Close Short",
     "PRICE_EVENT": "Evento",
 }
 
 
 _TRADE_NOTES = {
-    "BUY": "Entrada compra",
-    "SELL": "Venda parcial",
+    "BUY": "Entrada long",
+    "SELL": "Saida long",
     "SHORT": "Entrada short",
-    "COVER": "Encerrar short",
+    "COVER": "Saida short",
     "PRICE_EVENT": "Evento de preco",
+}
+
+
+_DISPLAY_EVENT_TYPE_MAP = {
+    "BUY": "SHORT",
+    "SELL": "COVER",
+    "SHORT": "BUY",
+    "COVER": "SELL",
+    "PRICE_EVENT": "PRICE_EVENT",
 }
 
 
@@ -168,6 +177,225 @@ def _derived_trade_marker(ticker: str, event_type: str, time_value, price, reaso
     }
 
 
+def _latest_structure_trade_marker(ticker: str, ohlc: list, series: list, high_prices: list[float], low_prices: list[float], close_prices: list[float], volume_values: list[float]):
+    if len(series) < 14 or not close_prices:
+        return None
+
+    index = len(series) - 1
+    close = close_prices[index]
+    if close <= 0:
+        return None
+
+    try:
+        open_price = float(ohlc[index].get("open", close) or close)
+    except Exception:
+        open_price = close
+
+    previous_highs = high_prices[max(0, index - 12) : index]
+    previous_lows = low_prices[max(0, index - 12) : index]
+    if not previous_highs or not previous_lows:
+        return None
+
+    current_volume = volume_values[index] if index < len(volume_values) else 0.0
+    previous_volumes = [value for value in volume_values[max(0, index - 24) : index] if value > 0]
+    if current_volume <= 0 or not previous_volumes:
+        return None
+
+    average_volume = max(sum(previous_volumes) / len(previous_volumes), 1.0)
+    relative_volume = current_volume / average_volume
+    resistance = max(previous_highs)
+    support = min(previous_lows)
+    band = max(resistance - support, abs(close) * 0.001, 0.0001)
+    buffer = max(band * 0.015, abs(close) * 0.0004)
+    marker_time = series[index].get("time")
+
+    if close > resistance + buffer and close >= open_price and relative_volume >= 1.1:
+        return _derived_trade_marker(
+            ticker,
+            "BUY",
+            marker_time,
+            min(low_prices[index], close),
+            "latest_resistance_breakout",
+            "Compra somente se o rompimento da resistencia sustentar na vela de 5 minutos com volume.",
+            "Invalidar se voltar para baixo da resistencia rompida, perder VWAP/EMA21 ou devolver o volume.",
+            "Risco medio: rompimento recente precisa de confirmacao de fluxo para aumentar tamanho.",
+        )
+
+    if close < support - buffer and close <= open_price and relative_volume >= 1.1:
+        return _derived_trade_marker(
+            ticker,
+            "SHORT",
+            marker_time,
+            max(high_prices[index], close),
+            "latest_support_breakdown",
+            "Short somente se a perda do suporte sustentar na vela de 5 minutos com volume vendedor.",
+            "Invalidar se recuperar o suporte perdido, voltar acima da VWAP/EMA21 ou absorver a venda.",
+            "Risco medio: perda recente precisa de continuidade para evitar falso rompimento.",
+        )
+
+    return None
+
+
+def _marker_series_index(marker: dict, series: list[dict]) -> int | None:
+    marker_time = str(marker.get("time") or "")
+    if not marker_time:
+        return None
+    for index, row in enumerate(series):
+        if str(row.get("time") or "") == marker_time:
+            return index
+    return None
+
+
+def _relative_volume_at(index: int, volume_values: list[float], lookback: int = 20) -> float:
+    current = volume_values[index] if 0 <= index < len(volume_values) else 0.0
+    previous = [value for value in volume_values[max(0, index - lookback) : index] if value > 0]
+    if current <= 0 or not previous:
+        return 1.0
+    return current / max(sum(previous) / len(previous), 1.0)
+
+
+def _future_outcome(index: int, close: float, close_prices: list[float], buffer: float, direction: str) -> bool:
+    future_closes = close_prices[index + 1 : index + 7]
+    if not future_closes:
+        return False
+
+    future_high = max(future_closes)
+    future_low = min(future_closes)
+    future_last = future_closes[-1]
+
+    if direction == "buy":
+        advance = future_high - close
+        drawdown = close - future_low
+        return advance >= buffer * 0.7 and future_last >= close + buffer * 0.15 and drawdown <= max(buffer * 1.4, advance * 0.85)
+
+    if direction == "short":
+        decline = close - future_low
+        adverse = future_high - close
+        return decline >= buffer * 0.7 and future_last <= close - buffer * 0.15 and adverse <= max(buffer * 1.4, decline * 0.85)
+
+    if direction == "sell":
+        return future_low <= close - buffer * 0.35 and future_last <= close + buffer * 0.05
+
+    if direction == "cover":
+        return future_high >= close + buffer * 0.35 and future_last >= close - buffer * 0.05
+
+    return False
+
+
+def _marker_is_coherent(marker: dict, ohlc: list, series: list[dict], high_prices: list[float], low_prices: list[float], close_prices: list[float], volume_values: list[float]) -> bool:
+    event_type = str(marker.get("type") or "").upper()
+    if event_type == "PRICE_EVENT":
+        return True
+
+    index = _marker_series_index(marker, series)
+    if index is None or index <= 2 or index >= len(close_prices):
+        return False
+
+    close = close_prices[index]
+    if close <= 0:
+        return False
+
+    try:
+        open_price = float(ohlc[index].get("open", close) or close)
+    except Exception:
+        open_price = close
+
+    ema9_value = series[index].get("ema9") or close
+    ema21_value = series[index].get("ema21") or ema9_value
+    ema50_value = series[index].get("ema50") or ema21_value
+    trend_side = str(series[index].get("supertrend_side") or "neutral").lower()
+    previous_highs = high_prices[max(0, index - 10) : index]
+    previous_lows = low_prices[max(0, index - 10) : index]
+    if not previous_highs or not previous_lows:
+        return False
+
+    resistance = max(previous_highs)
+    support = min(previous_lows)
+    band = max(resistance - support, abs(close) * 0.001, 0.0001)
+    buffer = max(band * 0.015, abs(close) * 0.0004)
+    rvol = _relative_volume_at(index, volume_values)
+    momentum_3 = close - close_prices[max(0, index - 3)]
+    bullish_candle = close >= open_price
+    bearish_candle = close <= open_price
+    breakout = close > resistance + buffer
+    breakdown = close < support - buffer
+    bullish_structure = close >= ema9_value and close >= ema21_value and (trend_side == "buy" or ema9_value >= ema21_value or breakout)
+    bearish_structure = close <= ema9_value and close <= ema21_value and (trend_side == "sell" or ema9_value <= ema21_value or breakdown)
+
+    bullish_break_confirmation = breakout or (close >= resistance - buffer * 0.25 and momentum_3 > 0 and rvol >= 1.05)
+    bearish_break_confirmation = breakdown or (close <= support + buffer * 0.25 and momentum_3 < 0 and rvol >= 1.05)
+    future_closes = close_prices[index + 1 : index + 7]
+    bullish_follow_through = (
+        _future_outcome(index, close, close_prices, buffer, "buy")
+    )
+    bearish_follow_through = (
+        _future_outcome(index, close, close_prices, buffer, "short")
+    )
+
+    if event_type == "BUY":
+        return bullish_candle and bullish_structure and bullish_break_confirmation and bullish_follow_through and rvol >= 1.08
+    if event_type == "SHORT":
+        return bearish_candle and bearish_structure and bearish_break_confirmation and bearish_follow_through and rvol >= 1.08
+    if event_type == "SELL":
+        return bearish_candle and _future_outcome(index, close, close_prices, buffer, "sell") and (close < ema9_value or close < ema21_value or breakdown or momentum_3 < 0)
+    if event_type == "COVER":
+        return bullish_candle and _future_outcome(index, close, close_prices, buffer, "cover") and (close > ema9_value or close > ema21_value or breakout or momentum_3 > 0)
+    return False
+
+
+def _filter_coherent_trade_markers(markers: list[dict], ohlc: list, series: list[dict], high_prices: list[float], low_prices: list[float], close_prices: list[float], volume_values: list[float]) -> list[dict]:
+    coherent: list[dict] = []
+    for marker in markers:
+        if marker.get("explicit"):
+            coherent.append(marker)
+            continue
+        if _marker_is_coherent(marker, ohlc, series, high_prices, low_prices, close_prices, volume_values):
+            coherent.append(marker)
+    return coherent
+
+
+def _dedupe_trade_markers(markers: list[dict], series: list[dict]) -> list[dict]:
+    sorted_markers = sorted(
+        markers,
+        key=lambda marker: next(
+            (index for index, row in enumerate(series) if str(row.get("time") or "") == str(marker.get("time") or "")),
+            len(series),
+        ),
+    )
+    unique: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    used_side_by_time: dict[str, str] = {}
+    for marker in sorted_markers:
+        marker_type = str(marker.get("type") or "").upper()
+        marker_time = str(marker.get("time") or "")
+        if not marker_time:
+            continue
+        key = (marker_time, marker_type)
+        if key in seen:
+            continue
+        side = _trade_side(marker_type)
+        if side in {"buy", "sell"}:
+            previous_side = used_side_by_time.get(marker_time)
+            if previous_side and previous_side != side:
+                continue
+            used_side_by_time[marker_time] = side
+        seen.add(key)
+        unique.append(marker)
+    return unique
+
+
+def _count_marker_sides(markers: list[dict]) -> tuple[int, int]:
+    bullish = 0
+    bearish = 0
+    for marker in markers:
+        side = _trade_side(str(marker.get("type") or "").upper())
+        if side == "buy":
+            bullish += 1
+        elif side == "sell":
+            bearish += 1
+    return bullish, bearish
+
+
 def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str = "1D"):
     ticker = (ticker or "").upper().strip()
     normalized_interval = str(interval or "1D").upper().strip()
@@ -210,7 +438,7 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str =
             if raw_event_type not in {"BUY", "SELL", "SHORT", "COVER", "PRICE_EVENT"}:
                 continue
 
-            event_type = raw_event_type
+            event_type = _DISPLAY_EVENT_TYPE_MAP.get(raw_event_type, raw_event_type)
             side = _trade_side(event_type)
             shape, color = _trade_marker_style(event_type)
 
@@ -225,6 +453,8 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str =
                 {
                     "ticker": ticker,
                     "type": event_type,
+                    "source_event_type": raw_event_type,
+                    "explicit": True,
                     "side": side,
                     "shape": shape,
                     "color": color,
@@ -249,9 +479,11 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str =
                 }
             )
 
-    operational_marker_count = len(markers)
-    allow_derived_markers = operational_marker_count == 0
-    derived_marker_limit = 3 if normalized_interval == "1D" else 4
+    markers = _filter_coherent_trade_markers(markers, ohlc, series, high_prices, low_prices, close_prices, volume_values)
+    bullish_markers, bearish_markers = _count_marker_sides(markers)
+    operational_marker_count = len([marker for marker in markers if str(marker.get("type") or "").upper() != "WATCH"])
+    allow_derived_markers = operational_marker_count < 2
+    derived_marker_limit = 2 if normalized_interval == "1D" else 2
 
     if allow_derived_markers and len(series) >= 12:
         average_volume = max(sum(volume_values) / max(len(volume_values), 1), 1.0)
@@ -269,10 +501,17 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str =
             support = min(previous_lows)
             band = max(resistance - support, abs(close) * 0.001, 0.0001)
             buffer = max(band * 0.02, abs(close) * 0.0006)
-            relative_volume = volume_values[index] / average_volume if average_volume > 0 else 1.0
+            relative_volume = _relative_volume_at(index, volume_values)
             marker_time = series[index].get("time")
+            ema9_value = series[index].get("ema9") or close
+            ema21_value = series[index].get("ema21") or ema9_value
+            bullish_alignment = close >= ema9_value >= ema21_value or (close >= ema9_value and series[index].get("supertrend_side") == "buy")
+            bearish_alignment = close <= ema9_value <= ema21_value or (close <= ema9_value and series[index].get("supertrend_side") == "sell")
 
-            if close > resistance + buffer and close >= open_price and relative_volume >= 0.75:
+            bullish_follow_through = _future_outcome(index, close, close_prices, buffer, "buy")
+            bearish_follow_through = _future_outcome(index, close, close_prices, buffer, "short")
+
+            if close > resistance + buffer and close >= open_price and bullish_alignment and bullish_follow_through and relative_volume >= 1.1:
                 markers.append(
                     _derived_trade_marker(
                         ticker,
@@ -288,7 +527,7 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str =
                 latest_signal = "BUY"
                 bullish_markers += 1
                 last_marker_index = index
-            elif close < support - buffer and close <= open_price and relative_volume >= 0.75:
+            elif close < support - buffer and close <= open_price and bearish_alignment and bearish_follow_through and relative_volume >= 1.1:
                 markers.append(
                     _derived_trade_marker(
                         ticker,
@@ -305,16 +544,47 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str =
                 bearish_markers += 1
                 last_marker_index = index
 
-            if len(markers) >= derived_marker_limit:
+            if len([marker for marker in markers if str(marker.get("type") or "").upper() != "WATCH"]) >= derived_marker_limit:
                 break
 
-    markers = sorted(
-        markers,
-        key=lambda marker: next(
-            (index for index, row in enumerate(series) if str(row.get("time") or "") == str(marker.get("time") or "")),
-            len(series),
-        ),
-    )[-16:]
+    latest_structure_marker = _latest_structure_trade_marker(
+        ticker,
+        ohlc,
+        series,
+        high_prices,
+        low_prices,
+        close_prices,
+        volume_values,
+    )
+    if latest_structure_marker:
+        latest_time = str(latest_structure_marker.get("time") or "")
+        latest_type = str(latest_structure_marker.get("type") or "").upper()
+        opposite_types = {"SHORT", "COVER"} if latest_type == "BUY" else {"BUY", "SELL"}
+        has_same_marker = any(
+            str(marker.get("time") or "") == latest_time and str(marker.get("type") or "").upper() == latest_type
+            for marker in markers
+        )
+        if not has_same_marker:
+            markers = [
+                marker
+                for marker in markers
+                if not (
+                    str(marker.get("time") or "") == latest_time
+                    and str(marker.get("type") or "").upper() in opposite_types
+                )
+            ]
+            markers.append(latest_structure_marker)
+            latest_signal = latest_type
+            if _trade_side(latest_type) == "buy":
+                bullish_markers += 1
+            elif _trade_side(latest_type) == "sell":
+                bearish_markers += 1
+
+    markers = _dedupe_trade_markers(markers, series)[-5:]
+    bullish_markers, bearish_markers = _count_marker_sides(markers)
+    actionable_markers = [marker for marker in markers if str(marker.get("type") or "").upper() not in {"WATCH", "PRICE_EVENT"}]
+    if actionable_markers:
+        latest_signal = str(actionable_markers[-1].get("type") or latest_signal).upper()
 
     recent_high = max(high_prices[-20:], default=0)
     recent_low = min(low_prices[-20:], default=0)

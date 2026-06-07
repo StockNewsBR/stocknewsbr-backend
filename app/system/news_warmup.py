@@ -15,7 +15,18 @@ logger = logging.getLogger("stocknewsbr.news_warmup")
 DEFAULT_NEWS_WARMUP_INTERVAL_SECONDS = max(120, int(os.getenv("NEWS_WARMUP_INTERVAL_SECONDS", "300")))
 DEFAULT_NEWS_WARMUP_LIMIT = max(8, int(os.getenv("NEWS_WARMUP_LIMIT", "24")))
 DEFAULT_NEWS_WARMUP_MAX_CALLS = max(4, int(os.getenv("NEWS_WARMUP_MAX_CALLS", "12")))
-REQUEST_PATH = Path(os.getenv("NEWS_WARMUP_REQUEST_FILE", "runtime/cache/news_warmup_requests.json"))
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _project_runtime_path(env_name: str, default_relative: str) -> Path:
+    configured = os.getenv(env_name)
+    if configured:
+        configured_path = Path(configured)
+        return configured_path if configured_path.is_absolute() else _PROJECT_ROOT / configured_path
+    return _PROJECT_ROOT / default_relative
+
+
+REQUEST_PATH = _project_runtime_path("NEWS_WARMUP_REQUEST_FILE", "runtime/cache/news_warmup_requests.json")
 
 _lock = RLock()
 _last_warmup_at = 0.0

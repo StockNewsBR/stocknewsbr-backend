@@ -16,6 +16,27 @@ export type RankingRow = {
   rel_volume?: number | string | null;
   breakout?: boolean;
   price?: number | null;
+  close?: number | null;
+  last_price?: number | null;
+  change?: number | string | null;
+  change_pct?: number | string | null;
+  volume?: number | string | null;
+  avg_volume?: number | string | null;
+  average_volume?: number | string | null;
+  vwap?: number | string | null;
+  macd?: number | string | null;
+  macd_signal?: number | string | null;
+  macd_histogram?: number | string | null;
+  data_quality?: string | null;
+  signal?: string | null;
+  trade_action?: string | null;
+  decision_ready?: boolean | null;
+  market_data_updated_at?: string | number | null;
+  last_bar_at?: string | number | null;
+  quote_time?: string | number | null;
+  provider_timestamp?: string | number | null;
+  blocked_reasons?: string[] | string | null;
+  warnings?: string[] | string | null;
 };
 
 export type SignalRow = {
@@ -25,6 +46,43 @@ export type SignalRow = {
   trend?: string | null;
   breakout?: boolean;
   price?: number | null;
+  close?: number | null;
+  last_price?: number | null;
+  change?: number | string | null;
+  change_pct?: number | string | null;
+  volume?: number | string | null;
+  avg_volume?: number | string | null;
+  average_volume?: number | string | null;
+  rel_volume?: number | string | null;
+  vwap?: number | string | null;
+  rsi?: number | string | null;
+  macd?: number | string | null;
+  macd_signal?: number | string | null;
+  macd_histogram?: number | string | null;
+  data_quality?: string | null;
+  signal?: string | null;
+  trade_action?: string | null;
+  decision_ready?: boolean | null;
+  market_data_updated_at?: string | number | null;
+  last_bar_at?: string | number | null;
+  quote_time?: string | number | null;
+  provider_timestamp?: string | number | null;
+  blocked_reasons?: string[] | string | null;
+  warnings?: string[] | string | null;
+};
+
+export type WorkspaceSymbolSnapshot = Partial<RankingRow & SignalRow> & Record<string, unknown>;
+
+export type WorkspaceMarketSnapshot = {
+  schema_version?: string;
+  generated_at?: string | null;
+  source?: string | null;
+  stale?: boolean;
+  market_snapshot_interval_seconds?: number;
+  ai_snapshot_interval_seconds?: number;
+  stats?: Record<string, unknown>;
+  data_status?: Record<string, unknown>;
+  symbol_count?: number;
 };
 
 export type AiToolMetrics = Record<string, string | number | boolean | null>;
@@ -60,6 +118,8 @@ export type AiToolRow = {
   quote_time?: string | number | null;
   provider_timestamp?: string | number | null;
   created_at?: string | number | null;
+  found_at?: string | number | null;
+  first_seen_at?: string | number | null;
   updated_at?: string;
   detected_at?: string;
   last_seen_at?: string;
@@ -168,6 +228,8 @@ export type WorkspaceData = {
   tabs: WorkspaceTab[];
   top_signals: SignalRow[];
   ranking: RankingRow[];
+  symbol_snapshots?: Record<string, WorkspaceSymbolSnapshot>;
+  market_snapshot?: WorkspaceMarketSnapshot;
   ai_tools: WorkspaceAiTools;
   featured_posts: FeedPost[];
   ticker_room_preview: {
@@ -216,6 +278,12 @@ export type WorkspaceData = {
     http_requests?: number;
     ws_connections?: number;
     chat_messages?: number;
+    snapshot_generated_at?: string | null;
+    snapshot_source?: string | null;
+    snapshot_stale?: boolean;
+    snapshot_actionable?: number;
+    snapshot_priced?: number;
+    snapshot_score_only?: number;
   };
   chart_capabilities: Record<string, boolean>;
 };
@@ -431,6 +499,12 @@ export type QuotePayload = {
   volume?: number;
   average_volume?: number;
   avg_volume?: number;
+  rel_volume?: number;
+  vwap?: number;
+  rsi?: number;
+  macd?: number;
+  macd_signal?: number;
+  macd_histogram?: number;
   high?: number;
   low?: number;
   source?: string;

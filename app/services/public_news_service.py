@@ -1,5 +1,7 @@
 import re
+from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import unquote
 
 from app.services.news_service import (
     get_cached_symbol_news,
@@ -72,6 +74,46 @@ def _normalize_news_text(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _is_generic_news_title(title: Any, ticker: str) -> bool:
+    normalized = _normalize_news_text(title)
+    symbol = _normalize_news_text(ticker)
+    return normalized in {
+        f"manchete internacional sobre {symbol}",
+        f"international headline about {symbol}",
+        f"headline about {symbol}",
+        f"noticia sobre {symbol}",
+        f"news about {symbol}",
+    }
+
+
+def _headline_from_url(url: Any) -> str:
+    text = str(url or "").strip()
+    if not text:
+        return ""
+    try:
+        slug = text.split("?", 1)[0].split("#", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+        slug = re.sub(r"\.(html?|php)$", "", slug, flags=re.IGNORECASE)
+        slug = unquote(slug)
+        slug = re.sub(r"[-_]+", " ", slug)
+        slug = re.sub(r"\s+", " ", slug).strip()
+        if not slug or re.fullmatch(r"\d+", slug):
+            return ""
+        return slug[:1].upper() + slug[1:]
+    except Exception:
+        return ""
+
+
+def _normalize_public_news_item(item: dict[str, Any], ticker: str) -> dict[str, Any]:
+    normalized = dict(item)
+    title = normalized.get("title") or normalized.get("headline")
+    if _is_generic_news_title(title, ticker):
+        url_title = _headline_from_url(normalized.get("url"))
+        if url_title:
+            normalized["title"] = url_title
+            normalized["headline"] = url_title
+    return normalized
+
+
 def _news_dedupe_key(item: dict[str, Any]) -> str:
     story_key = _normalize_news_text(item.get("story_key"))
     if story_key:
@@ -101,6 +143,45 @@ def _dedupe_news_items(items: list[dict[str, Any]], limit: int) -> list[dict[str
         if len(unique_items) >= limit:
             break
     return unique_items
+
+
+def _news_timestamp_epoch(item: dict[str, Any]) -> float:
+    candidates = (
+        item.get("published_at"),
+        item.get("provider_publish_time"),
+        item.get("providerPublishTime"),
+        item.get("pubDate"),
+        item.get("publishedAt"),
+        item.get("displayTime"),
+        (item.get("content") or {}).get("providerPublishTime") if isinstance(item.get("content"), dict) else None,
+        (item.get("content") or {}).get("pubDate") if isinstance(item.get("content"), dict) else None,
+        (item.get("content") or {}).get("publishedAt") if isinstance(item.get("content"), dict) else None,
+        (item.get("content") or {}).get("displayTime") if isinstance(item.get("content"), dict) else None,
+    )
+    for value in candidates:
+        if value in (None, ""):
+            continue
+        try:
+            if isinstance(value, (int, float)):
+                timestamp = float(value)
+                if timestamp > 10_000_000_000:
+                    timestamp /= 1000.0
+                return timestamp
+            text = str(value).strip()
+            if not text:
+                continue
+            numeric = float(text) if re.fullmatch(r"\d+(\.\d+)?", text) else None
+            if numeric is not None:
+                if numeric > 10_000_000_000:
+                    numeric /= 1000.0
+                return numeric
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        except Exception:
+            continue
+    return 0.0
 
 
 def _build_news_state(symbol: str, items: list[dict[str, Any]], cache: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
@@ -139,12 +220,13 @@ def _build_news_state(symbol: str, items: list[dict[str, Any]], cache: dict[str,
 def build_public_news_payload(symbol: str, limit: int = 6, source: str | None = None, allow_fetch: bool = True) -> dict:
     ticker = _normalize_symbol(symbol)
     safe_limit = max(1, min(int(limit or 6), 20))
-    fetched_items = (
-        get_symbol_news(ticker, limit=safe_limit)
-        if allow_fetch
-        else get_cached_symbol_news(ticker, limit=safe_limit)
-    )
-    scoped_items = [item for item in fetched_items if isinstance(item, dict) and _item_belongs_to_symbol(item, ticker)]
+    cached_items = get_cached_symbol_news(ticker, limit=safe_limit)
+    fetched_items = cached_items
+    if allow_fetch and len(cached_items) < safe_limit:
+        fetched_items = get_symbol_news(ticker, limit=safe_limit)
+    normalized_items = [_normalize_public_news_item(item, ticker) for item in fetched_items if isinstance(item, dict)]
+    scoped_items = [item for item in normalized_items if _item_belongs_to_symbol(item, ticker)]
+    scoped_items = sorted(scoped_items, key=_news_timestamp_epoch, reverse=True)
     items = _dedupe_news_items(scoped_items, safe_limit)
     report = get_news_cached_report(ticker, items)
     cache = get_news_cache_info(ticker)

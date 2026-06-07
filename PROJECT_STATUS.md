@@ -1,6 +1,6 @@
 # StockNewsBR Project Status
 
-Atualizado em: 2026-05-18
+Atualizado em: 2026-06-05
 
 ## Estado Atual
 
@@ -72,6 +72,7 @@ Atualizado em: 2026-05-18
 - Lista das IAs passa a mostrar os 20 achados reais mais recentes, mais novo primeiro; se entra achado novo, o item mais antigo sai da tela. Fallback visual não entra no histórico persistido.
 - Retomada corretiva 2026-05-18 BBAS3/PETR3: rompimento aceito acima da resistência agora vira `Buy Long`, não `Sell Short`; short só entra em perda de suporte ou falso rompimento/rejeição vendedor. Warmup intraday foi reduzido para capturar tendência que começa perto da abertura sem esperar metade do pregão.
 - Boxes de topo agora são cards explicativos reais para `Preço`, `Variação`, `Volume`, `Score IA`, `RSI` e `Bias`, com leitura direta do tipo "-0.24% indicando queda", "2,2 mi abaixo/perto/acima da média", "Score IA 5.0 indicando baixa/venda", "RSI neutro" e "Bias indicando lado operacional".
+- Retomada 2026-06-05 do TODO de forward test: replay/backtest agora contabiliza regime barra a barra, preserva regime/liquidez nos trades, agrega resultado por ticker/regime e mede overtrading lateral por taxa de entradas em `chop`/`range`/`squeeze` sem transformar `Watch` em operacao.
 
 ## Validado
 
@@ -191,6 +192,11 @@ Atualizado em: 2026-05-18
 - Smoke API `1D` de `BBAS3`: marcadores operacionais incluem `Sell Short`, `Close Short`, `Buy Long` no rompimento de alta e `Close Long` por `session_close`.
 - Smoke API `1D` de `PETR3`: tendencia de alta agora gera `Buy Long` operacional e fecha a posicao no fim do dia.
 - Smoke Playwright salvo em `runtime/request-fix-bbas3-engine-boxes.png` e `runtime/request-fix-petr3-engine-boxes.png`: painel abriu, boxes explicativos renderizaram 6 cards e o texto da pagina confirmou `Buy Long`/`Close Long`.
+- `venv\Scripts\python.exe -m py_compile app\portfolio\backtest_engine.py tests\test_backtest_engine.py`: OK em 2026-06-05.
+- `venv\Scripts\python.exe -m unittest tests.test_backtest_engine`: 7 testes OK cobrindo replay, lateral sem trade, forward test por regime e flag de overtrading lateral.
+- `venv\Scripts\python.exe -m unittest tests.test_backtest_engine tests.test_trend_breakout_signal_engine`: 24 testes OK.
+- `git diff --check -- app/portfolio/backtest_engine.py tests/test_backtest_engine.py`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
+- `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 191 testes OK; Yahoo Finance ainda imprimiu avisos externos para aliases sem dado, mas a suite passou.
 
 ## Controle da Etapa Atual
 
@@ -205,6 +211,7 @@ Atualizado em: 2026-05-18
 - Arquivos alterados nesta retomada corretiva 2026-05-18: `app/api/routes_public_market.py`, `app/services/ai_alert_history_service.py`, `apps/web/lib/api.ts`, `apps/web/lib/types.ts`, `apps/web/components/workspace-shell.tsx`, `tests/test_ai_alert_history_service.py`, `tests/test_public_market_routes.py` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada corretiva BBAS3/PETR3/boxes 2026-05-18: `app/ai/trade_decision.py`, `app/engine/trend_breakout_signal_engine.py`, `apps/web/app/globals.css`, `apps/web/components/workspace-shell.tsx`, `tests/test_trade_decision_engine.py`, `tests/test_trend_breakout_signal_engine.py` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada replay/backtest 2026-06-01: `app/portfolio/backtest_engine.py`, `tests/test_backtest_engine.py` e `PROJECT_STATUS.md`.
+- Arquivos alterados nesta retomada forward test 2026-06-05: `app/portfolio/backtest_engine.py`, `tests/test_backtest_engine.py` e `PROJECT_STATUS.md`.
 - Testes/smokes registrados: `npm run typecheck` em `apps/mobile`; `$env:REQUIRE_MOBILE_DEVICE='1'; npm run smoke:mobile`; `npm run export:android`.
 - Testes/smokes registrados nesta retomada: validacao do `venv` Python 3.11.9 e dependencias; unittest focado de `signal_cache`/snapshot/worker; unittest discover completo com 133 testes OK.
 - Testes/smokes registrados nesta retomada da engine/futuros/root web: unittest focado com 35 testes OK, unittest completo com 139 testes OK, `npm run build`, `start_all_local`, smoke API futures, smoke visual B3/USA e browser real da raiz.
@@ -212,6 +219,7 @@ Atualizado em: 2026-05-18
 - Testes/smokes registrados nesta retomada corretiva: unittest focado com 33 testes OK, unittest completo com 149 testes OK, `npm run build`, `start_all_local`, `npm run smoke:etapa7`, smoke direto de `/public/market/ai-tools` e screenshots finais do painel/Heat Map.
 - Testes/smokes registrados nesta retomada corretiva BBAS3/PETR3/boxes: unittest focado com 24 testes OK, unittest completo com 151 testes OK, `npm run build`, `start_all_local`, smoke API de `BBAS3`/`PETR3` e Playwright com screenshots dos boxes explicativos.
 - Testes/smokes registrados nesta retomada replay/backtest: `venv\Scripts\python.exe -m py_compile app\portfolio\backtest_engine.py tests\test_backtest_engine.py` OK; `venv\Scripts\python.exe -m unittest tests.test_backtest_engine tests.test_trend_breakout_signal_engine` com 21 testes OK; `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"` com 183 testes OK.
+- Testes/smokes registrados nesta retomada forward test: `py_compile` OK; `unittest tests.test_backtest_engine` com 7 testes OK; `unittest tests.test_backtest_engine tests.test_trend_breakout_signal_engine` com 24 testes OK; `git diff --check` sem erro; `unittest discover` com 191 testes OK.
 - Proxima etapa clara: checklist final de lancamento amplo so deve mexer em credenciais reais, Price IDs/assinaturas da Play Console e submissao EAS quando a conta Google Play estiver disponivel.
 - Stage/commit: fechado nesta rodada somente com os arquivos listados nesta etapa, sem incluir alteracoes antigas de outras etapas.
 
@@ -240,6 +248,7 @@ Atualizado em: 2026-05-18
 - Etapa 9: `npm run export:android` valida o bundle JS/asset Android; o AAB final de loja deve ser gerado por `npx eas build --platform android --profile production` no ambiente autenticado da Play/EAS.
 - Futuros B3 `WIN`/`WDO` estao com preco de referencia quando o provider publico nao entrega o contrato exato; para decisao executavel de day trade em B3, integrar feed oficial/contratado que entregue o contrato vigente com book/volume/agressao.
 - A engine agora usa regime/confianca/liquidez, mas hit rate institucional so deve ser aprovado por backtest/forward test por ativo, horario e regime; `Watch` continua sendo nao-operacao quando confirmacao faltar.
+- O forward test atual mede barras locais e replays/logs ja capturados; aprovacao real por ticker/regime ainda exige alimentar o fluxo com OHLC real de producao e revisar amostra por horario, regime e qualidade de volume.
 - Rodar `npm run build` enquanto `next dev` esta vivo pode corromper o manifesto `.next`; o `start_all_local.ps1` agora limpa esse cache ao reiniciar em modo dev.
 - A validacao visual de 2026-05-18 usa dados atuais do provider, nao os OHLC exatos dos prints antigos; para provar melhora nos mesmos candles dos prints, carregar replay/backtest com aquele dataset.
 - `ITUB4` em 2026-05-18 veio com sessao parcial curta; o short saiu com `coherence_status=watch` e risco medio porque ainda exigia confirmacao de breakdown em range.
@@ -261,7 +270,7 @@ Atualizado em: 2026-05-18
 - Se for criar commit, usar o MinGit por caminho absoluto enquanto o Codex nao recarregar PATH.
 - Separar refatoracoes institucionais maiores em commits pequenos por area: data/api, ai, web, tests.
 - Proxima melhoria de produto: codigo ja liga preco/volume real ao `signal_cache` via `warm_market_pool` e passou nos testes com o `venv` Python 3.11.9; acompanhar proximo ciclo real do worker com dados de mercado para confirmar auditoria IA `approved` em producao.
-- Proxima melhoria de trading: replay/backtest deterministico inicial da engine foi implementado com OHLC local, eventos `BUY`/`SELL`/`SHORT`/`COVER`, PnL, hit rate, expectancy, MAE/MFE, marcacao de posicao aberta e testes focados; proximo passo e rodar forward test real por ticker/regime e medir overtrading em lateral.
+- Proxima melhoria de trading: forward test local por ticker/regime foi implementado sobre o replay deterministico, com contagem de regime barra a barra, metricas por regime de entrada e status de overtrading lateral; proximo passo e alimentar com barras reais capturadas em producao/forward log e revisar resultado por ativo, horario e regime.
 - Proxima melhoria de trading 1D: usar `replay_trading_scenario` nos cenarios dos prints antigos (`ITUB4`, `AAPL`, `PETR4`, `PLTR`) assim que as mesmas barras forem carregadas, comparando trades perdidos, exits cedo e reducao de `Watch` sem depender de provider externo durante a analise.
 - Proxima melhoria de dados B3: se o produto exigir leilao/pre-abertura antes de 10:00, integrar provider que entregue esse feed; o chart atual nao inventa barras antes da primeira barra recebida.
 - Proxima melhoria de dados futuros B3: substituir `reference_proxy` por feed oficial do contrato `WIN`/`WDO` vigente antes de usar esses numeros para execucao real.

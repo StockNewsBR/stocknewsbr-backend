@@ -13,7 +13,7 @@ from app.system.system_metrics import provider_call_context, record_worker_stage
 
 logger = logging.getLogger("stocknewsbr.quote_warmup")
 
-DEFAULT_QUOTE_WARMUP_INTERVAL_SECONDS = max(60, int(os.getenv("QUOTE_WARMUP_INTERVAL_SECONDS", "180")))
+DEFAULT_QUOTE_WARMUP_INTERVAL_SECONDS = max(45, int(os.getenv("QUOTE_WARMUP_INTERVAL_SECONDS", "60")))
 DEFAULT_QUOTE_WARMUP_LIMIT = max(20, int(os.getenv("QUOTE_WARMUP_LIMIT", "140")))
 DEFAULT_QUOTE_WARMUP_CHUNK_SIZE = max(5, int(os.getenv("QUOTE_WARMUP_CHUNK_SIZE", "24")))
 DEFAULT_CHART_WARMUP_LIMIT = max(0, int(os.getenv("CHART_WARMUP_LIMIT", "24")))
@@ -206,7 +206,7 @@ def warm_quotes_once(
         for index in range(0, len(target_symbols), chunk_size):
             chunk = target_symbols[index : index + chunk_size]
             try:
-                resolved.update(get_price_snapshots(chunk) or {})
+                resolved.update(get_price_snapshots(chunk, force_refresh=True) or {})
             except Exception as exc:
                 failed_chunks += 1
                 logger.warning("Quote warmup chunk failed | chunk=%s | error=%s", chunk, exc)

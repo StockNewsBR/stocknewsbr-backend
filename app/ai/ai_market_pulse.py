@@ -10,6 +10,81 @@ from app.cache.signal_cache import signal_cache
 
 logger = logging.getLogger("stocknewsbr.market_pulse")
 
+_ACTIONABLE_SIGNALS = {"BUY", "SELL", "SHORT", "COVER"}
+_BULLISH_ACTIONS = {"BUY", "COVER"}
+_BEARISH_ACTIONS = {"SELL", "SHORT"}
+_BLOCKED_DATA_QUALITIES = {
+    "score_only",
+    "score only",
+    "missing",
+    "empty",
+    "stale",
+    "no_price",
+    "no-price",
+    "no price",
+    "provider_failed",
+    "provider-failed",
+    "provider failed",
+    "failed",
+    "error",
+    "timeout",
+    "unavailable",
+    "invalid",
+}
+_BLOCKED_STATUSES = _BLOCKED_DATA_QUALITIES
+
+
+def _safe_float(value, default=0.0):
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _has_positive_value(row, *keys):
+    return any(_safe_float(row.get(key)) > 0 for key in keys)
+
+
+def _signal_value(row):
+    return str(row.get("trade_action") or row.get("signal") or row.get("action") or "").upper().strip()
+
+
+def _has_blocking_reasons(row):
+    reasons = row.get("blocked_reasons") or row.get("warnings") or []
+    if isinstance(reasons, str):
+        return bool(reasons.strip())
+    if isinstance(reasons, (list, tuple, set)):
+        return any(str(item).strip() for item in reasons)
+    return False
+
+
+def _is_actionable_row(row):
+    if not isinstance(row, dict):
+        return False
+    signal = _signal_value(row)
+    if signal not in _ACTIONABLE_SIGNALS:
+        return False
+    if row.get("decision_ready") is False:
+        return False
+    if row.get("stale") is True or row.get("is_stale") is True:
+        return False
+    if str(row.get("data_quality") or "").lower().strip() in _BLOCKED_DATA_QUALITIES:
+        return False
+    for status_key in ("quote_status", "status", "provider_status", "market_data_status"):
+        if str(row.get(status_key) or "").lower().strip() in _BLOCKED_STATUSES:
+            return False
+    if row.get("provider_failed") is True or row.get("provider_error") is True:
+        return False
+    if _has_blocking_reasons(row):
+        return False
+    if not _has_positive_value(row, "price", "close", "last_price"):
+        return False
+    if not _has_positive_value(row, "volume", "last_volume"):
+        return False
+    return True
+
 
 def market_pulse(signals=None):
 
@@ -35,20 +110,17 @@ def market_pulse(signals=None):
 
         for r in results:
 
-            if not isinstance(r, dict):
-                continue
-
-            score = r.get("score")
-
-            if not isinstance(score, (int, float)):
+            if not _is_actionable_row(r):
                 continue
 
             valid_signals += 1
 
-            if score >= 60:
+            action = _signal_value(r)
+
+            if action in _BULLISH_ACTIONS:
                 bullish += 1
 
-            elif score <= 40:
+            elif action in _BEARISH_ACTIONS:
                 bearish += 1
 
         if valid_signals == 0:

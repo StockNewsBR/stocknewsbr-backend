@@ -79,16 +79,56 @@ def _positive_number(value: Any) -> float | None:
     return None
 
 
+_BLOCKED_AI_DATA_STATES = {
+    "score_only",
+    "score only",
+    "missing",
+    "empty",
+    "stale",
+    "no_price",
+    "no-price",
+    "no price",
+    "provider_failed",
+    "provider-failed",
+    "provider failed",
+    "failed",
+    "error",
+    "timeout",
+    "unavailable",
+    "invalid",
+}
+
+
+def _blocked_ai_state(value: Any) -> bool:
+    if value is None:
+        return False
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return False
+    return any(state in normalized for state in _BLOCKED_AI_DATA_STATES)
+
+
 def _is_operational_ai_row(row: Dict[str, Any]) -> bool:
     metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
-    quality = str(
-        row.get("data_quality")
-        or row.get("dataQuality")
-        or metrics.get("data_quality")
-        or metrics.get("dataQuality")
-        or ""
-    ).lower()
-    if "score_only" in quality or "missing" in quality or "empty" in quality:
+    state_values = [
+        row.get("data_quality"),
+        row.get("dataQuality"),
+        row.get("quote_status"),
+        row.get("status"),
+        row.get("provider_status"),
+        row.get("market_data_status"),
+        metrics.get("data_quality"),
+        metrics.get("dataQuality"),
+        metrics.get("quote_status"),
+        metrics.get("status"),
+        metrics.get("provider_status"),
+        metrics.get("market_data_status"),
+    ]
+    if any(_blocked_ai_state(value) for value in state_values):
+        return False
+    if row.get("stale") is True or row.get("is_stale") is True:
+        return False
+    if row.get("provider_failed") is True or row.get("provider_error"):
         return False
     return (
         _positive_number(row.get("price") or metrics.get("price")) is not None
@@ -104,18 +144,35 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
     bootstrap = get_public_bootstrap()
     metrics = get_metrics_snapshot()
     snapshot = get_snapshot()
+    if not isinstance(snapshot, dict):
+        snapshot = {}
     snapshot_signals = _safe_rows(snapshot.get("signals"))
     top_signals = snapshot_signals[:12]
+    symbol_snapshots = snapshot.get("symbol_snapshots") if isinstance(snapshot.get("symbol_snapshots"), dict) else {}
+    market_snapshot = {
+        "schema_version": snapshot.get("schema_version"),
+        "generated_at": snapshot.get("generated_at"),
+        "source": snapshot.get("source"),
+        "stale": bool(snapshot.get("stale")),
+        "market_snapshot_interval_seconds": snapshot.get("market_snapshot_interval_seconds"),
+        "ai_snapshot_interval_seconds": snapshot.get("ai_snapshot_interval_seconds"),
+        "stats": snapshot.get("stats") if isinstance(snapshot.get("stats"), dict) else {},
+        "data_status": snapshot.get("data_status") if isinstance(snapshot.get("data_status"), dict) else {},
+        "symbol_count": len(symbol_snapshots),
+    }
+    data_status = market_snapshot["data_status"] if isinstance(market_snapshot.get("data_status"), dict) else {}
     ranking_source = get_ranking() or []
     ranking_rows = _safe_rows(ranking_source if isinstance(ranking_source, list) else [])
-    ranking = ranking_rows[:12]
+    ranking = snapshot_signals[:200] if snapshot_signals else ranking_rows[:200]
     featured_posts = _safe_rows(get_posts(limit=10))
     ai_outputs = _coerce_ai_outputs(snapshot.get("ai_tools"))
     market_decision = snapshot.get("decision") if isinstance(snapshot, dict) else {}
 
     if not _has_operational_ai_outputs(ai_outputs):
         history_payload = get_ai_alert_history_snapshot()
-        ai_outputs = _coerce_ai_outputs(history_payload.get("tools") if isinstance(history_payload, dict) else {})
+        history_outputs = _coerce_ai_outputs(history_payload.get("tools") if isinstance(history_payload, dict) else {})
+        if _has_operational_ai_outputs(history_outputs):
+            ai_outputs = history_outputs
 
     if not isinstance(market_decision, dict) or not market_decision:
         market_decision = {
@@ -162,6 +219,8 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "tabs": tabs,
         "top_signals": top_signals,
         "ranking": ranking,
+        "symbol_snapshots": symbol_snapshots,
+        "market_snapshot": market_snapshot,
         "featured_posts": featured_posts,
         "ticker_room_preview": {
             "symbol": pinned_ticker,
@@ -184,6 +243,12 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
             "http_requests": metrics["http_requests"],
             "ws_connections": metrics["ws_connections"],
             "chat_messages": metrics["chat_messages"],
+            "snapshot_generated_at": market_snapshot.get("generated_at"),
+            "snapshot_source": market_snapshot.get("source"),
+            "snapshot_stale": market_snapshot.get("stale"),
+            "snapshot_actionable": data_status.get("actionable", 0),
+            "snapshot_priced": data_status.get("priced", 0),
+            "snapshot_score_only": data_status.get("score_only", 0),
         },
         "chart_capabilities": {
             "overlay_markers": True,

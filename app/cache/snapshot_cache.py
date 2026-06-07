@@ -7,6 +7,16 @@ from pathlib import Path
 
 from app.system.system_metrics import record_cache_lookup, update_cache_timestamp
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _project_runtime_path(env_name: str, default_relative: str) -> Path:
+    configured = os.getenv(env_name)
+    if configured:
+        configured_path = Path(configured)
+        return configured_path if configured_path.is_absolute() else _PROJECT_ROOT / configured_path
+    return _PROJECT_ROOT / default_relative
+
 
 _RESERVED_KEYS = {
     "signals",
@@ -33,7 +43,7 @@ class SnapshotCache:
         self._last_good_timestamp: float = 0.0
         self._disk_mtime: float = 0.0
         self._lock = threading.RLock()
-        self._storage_path = Path(os.getenv("SNAPSHOT_CACHE_FILE", "runtime/cache/snapshot.json"))
+        self._storage_path = _project_runtime_path("SNAPSHOT_CACHE_FILE", "runtime/cache/snapshot.json")
 
     def _empty_payload(self) -> Dict[str, Any]:
         return {

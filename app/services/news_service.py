@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -27,7 +28,18 @@ _NEWS_MAX_CLUSTER_CANDIDATES = 12
 _NEWS_CACHE: dict[str, dict[str, Any]] = {}
 _NEWS_PROVIDER_STATUS: dict[str, dict[str, Any]] = {}
 _REQUEST_LOCKS: dict[str, threading.Lock] = {}
-_NEWS_CACHE_FILE = Path("runtime/cache/news_cache.json")
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _project_runtime_path(env_name: str, default_relative: str) -> Path:
+    configured = os.getenv(env_name)
+    if configured:
+        configured_path = Path(configured)
+        return configured_path if configured_path.is_absolute() else _PROJECT_ROOT / configured_path
+    return _PROJECT_ROOT / default_relative
+
+
+_NEWS_CACHE_FILE = _project_runtime_path("NEWS_CACHE_FILE", "runtime/cache/news_cache.json")
 _NEWS_CACHE_LOADED = False
 
 
@@ -1428,8 +1440,8 @@ def build_symbol_news(ticker: str, raw_items: list[dict[str, Any]], limit: int =
 
     normalized_items.sort(
         key=lambda item: (
-            float(item.get("ranking_score", 0.0) or 0.0),
             item.get("published_at") or "",
+            float(item.get("ranking_score", 0.0) or 0.0),
         ),
         reverse=True,
     )
@@ -1437,12 +1449,26 @@ def build_symbol_news(ticker: str, raw_items: list[dict[str, Any]], limit: int =
     clustered = _cluster_news(normalized_items)
 
     ordered = list(clustered)
-    ordered.sort(
-        key=lambda item: (
+    def _priority_key(item: dict[str, Any]) -> tuple[Any, ...]:
+        labels = {str(label).lower() for label in item.get("labels", []) if label}
+        direct_match = 1 if item.get("direct_ticker_match") else 0
+        editorial_priority = 0
+        if labels.intersection({"resultado", "guidance", "fato relevante", "regulacao", "m&a"}):
+            editorial_priority += 2
+        if labels.intersection({"macro", "juros", "inflacao"}) and not direct_match:
+            editorial_priority -= 1
+        return (
             1 if item.get("useful", True) else 0,
+            direct_match,
+            editorial_priority,
+            float(item.get("relevance_score", 0.0) or 0.0),
+            float(item.get("confidence_score", 0.0) or 0.0),
             float(item.get("ranking_score", 0.0) or 0.0),
             item.get("published_at") or "",
-        ),
+        )
+
+    ordered.sort(
+        key=_priority_key,
         reverse=True,
     )
 
@@ -1567,8 +1593,13 @@ def get_cached_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
 
 
 def get_news_cached_report(ticker: str, items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    _load_news_cache_once()
     normalized_ticker = _normalize_ticker(ticker)
+    with _CACHE_LOCK:
+        cached = _NEWS_CACHE.get(normalized_ticker)
+        report = cached.get("report") if isinstance(cached, dict) else None
+        if isinstance(report, dict):
+            return dict(report)
+    _load_news_cache_once()
     with _CACHE_LOCK:
         cached = _NEWS_CACHE.get(normalized_ticker)
         report = cached.get("report") if isinstance(cached, dict) else None

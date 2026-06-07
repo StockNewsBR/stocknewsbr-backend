@@ -9,6 +9,15 @@ from typing import Dict, List
 logger = logging.getLogger("stocknewsbr.cache.signal_layer")
 
 MAX_SIGNALS = 2000
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _project_runtime_path(env_name: str, default_relative: str) -> Path:
+    configured = os.getenv(env_name)
+    if configured:
+        configured_path = Path(configured)
+        return configured_path if configured_path.is_absolute() else _PROJECT_ROOT / configured_path
+    return _PROJECT_ROOT / default_relative
 
 
 class SignalCacheLayer:
@@ -17,7 +26,7 @@ class SignalCacheLayer:
         self._timestamp: float = 0.0
         self._disk_mtime: float = 0.0
         self._lock = threading.RLock()
-        self._storage_path = Path(os.getenv("SIGNAL_CACHE_FILE", "runtime/cache/signals.json"))
+        self._storage_path = _project_runtime_path("SIGNAL_CACHE_FILE", "runtime/cache/signals.json")
 
     def _ensure_storage_dir(self):
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
