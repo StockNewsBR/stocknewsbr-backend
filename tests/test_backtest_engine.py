@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.portfolio.backtest_engine import (
     analyze_forward_replays,
+    compare_replay_scenarios,
     backtest_trading_scenarios,
     forward_test_trading_scenarios,
     replay_trading_scenario,
@@ -238,6 +239,54 @@ class BacktestEngineTests(unittest.TestCase):
         self.assertEqual(analysis["overtrading"]["lateral_trades"], 3)
         self.assertGreater(analysis["overtrading"]["lateral_entry_rate_per_100_bars"], 4.0)
         self.assertEqual(analysis["regime_metrics"]["range"]["bucket"], "lateral")
+
+    def test_compare_replay_scenarios_reports_missed_trades_early_exits_and_watch_reduction(self):
+        reference = {
+            "trades": [
+                {
+                    "side": "long",
+                    "entry_time": "2026-06-01T10:00:00+00:00",
+                    "entry_price": 100.0,
+                    "entry_event_type": "BUY",
+                    "bars_held": 8,
+                    "exit_reason": "target",
+                    "pnl_pct": 3.2,
+                },
+                {
+                    "side": "short",
+                    "entry_time": "2026-06-01T11:00:00+00:00",
+                    "entry_price": 105.0,
+                    "entry_event_type": "SHORT",
+                    "bars_held": 5,
+                    "exit_reason": "stop",
+                    "pnl_pct": -1.1,
+                },
+            ],
+            "watch_signals": {"count": 6},
+        }
+        current = {
+            "trades": [
+                {
+                    "side": "long",
+                    "entry_time": "2026-06-01T10:00:00+00:00",
+                    "entry_price": 100.0,
+                    "entry_event_type": "BUY",
+                    "bars_held": 4,
+                    "exit_reason": "session_close",
+                    "pnl_pct": 1.5,
+                }
+            ],
+            "watch_signals": {"count": 2},
+        }
+
+        comparison = compare_replay_scenarios(reference, current)
+
+        self.assertEqual(comparison["matched_trades"], 1)
+        self.assertEqual(comparison["missed_trades"], 1)
+        self.assertEqual(comparison["early_exits"], 1)
+        self.assertEqual(comparison["watch_reduction"], 4)
+        self.assertEqual(comparison["reference_watch_signals"], 6)
+        self.assertEqual(comparison["current_watch_signals"], 2)
 
 
 if __name__ == "__main__":

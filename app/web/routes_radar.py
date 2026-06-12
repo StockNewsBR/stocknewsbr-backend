@@ -41,7 +41,7 @@ def get_radar():
                 if s.get("events") and is_actionable_snapshot_row(s):
 
                     item = snapshot_surface_row(s)
-                    item["score"] = s.get("score", 0)
+                    item["score"] = s.get("master_score", s.get("score", 0))
                     radar.append(item)
 
             except Exception:

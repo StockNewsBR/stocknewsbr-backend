@@ -1,6 +1,6 @@
 # StockNewsBR Project Status
 
-Atualizado em: 2026-06-11
+Atualizado em: 2026-06-12
 
 ## Estado Atual
 
@@ -77,6 +77,11 @@ Atualizado em: 2026-06-11
 - O contrato compartilhado de snapshot agora diferencia interesse direcional, operacao acionavel, bloqueio operacional e watchlist; `score_only`, `stale`, `NO_TRADE`, `DO_NOT_TRADE`, falha de provider, `blocked_reasons` e sinais ativos sem `decision_ready=True` nao inflam leitura operacional bullish/bearish.
 - `SnapshotCache` nao recalcula mais `stats.bullish`/`stats.bearish` por score bruto ao normalizar payload; esses campos seguem apenas sinais realmente acionaveis.
 - Radar legado `/market/radar` deixa de colocar linhas bloqueadas/score_only no bucket `bearish`, preservando a regra de que radar nao transforma bloqueio em oportunidade operacional.
+- Missao 12 - Score Mestre Institucional fechada em 2026-06-12: Score Mestre virou sintese institucional unica, fora de `ai_tools`, consumindo 9 IAs oficiais, Market Pulse, Data Quality e Auditor Institucional.
+- O contrato por ativo agora expõe `master_score`, `master_direction`, `master_conviction`, `master_confidence`, `master_summary`, `master_reasoning`, `master_risk`, `master_status` e `opinion_change_conditions`.
+- Score Mestre consome diretamente o Auditor: `BLOCKED` no Auditor vira `master_status=BLOCKED`, score limitado, decisao operacional bloqueada e mensagem `NAO OPERAR AGORA`.
+- Score alto isolado, news isolada, momentum isolado ou flow isolado nao promovem direcao bullish/bearish; a direcao exige contexto institucional entre fluxo/liquidez/tendencia/smart money/regime.
+- Snapshot, workspace, ranking, radar, Telegram, push, chart context e insight publico passam a carregar ou respeitar Score Mestre; ranking/radar ordenam por `master_score` quando disponivel.
 
 ## Validado
 
@@ -209,6 +214,12 @@ Atualizado em: 2026-06-11
 - `venv\Scripts\python.exe -m unittest tests.test_market_pulse_actionable tests.test_ranking_service tests.test_single_snapshot_source tests.test_market_snapshot_ai_tools tests.test_system_health`: 38 testes OK em 2026-06-11.
 - `git diff --check -- app/services/snapshot_contract.py app/ai/ai_market_pulse.py app/cache/snapshot_cache.py app/engine/market_snapshot_engine.py app/api/market_routes.py tests/test_market_pulse_actionable.py tests/test_single_snapshot_source.py`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
 - Probe direto do Market Pulse em 2026-06-11 confirmou: 3 candidatos bullish, 1 bullish acionavel, 1 bearish acionavel, 1 bloqueado auditavel, 1 watchlist e sentimento neutro por operacoes acionaveis equilibradas.
+- `venv\Scripts\python.exe -m py_compile app\ai\ai_master_score.py app\engine\market_snapshot_engine.py app\services\snapshot_contract.py app\services\ranking.py app\ai\ai_market_radar.py app\system\push_dispatcher.py app\telegram\telegram_alert_formatter.py app\telegram\telegram_alert_engine.py app\api\routes_public_market_live.py app\engine\signal_engine.py tests\test_master_score_institutional.py`: OK em 2026-06-12.
+- `venv\Scripts\python.exe -m unittest tests.test_master_score_institutional`: 12 testes OK cobrindo bullish forte, bearish forte, neutral, auditor blocked, auditor caution, conflito entre IAs, score alto sem contexto, consenso alto/baixo, risk alto, snapshot, workspace, ranking, radar e API publica.
+- `venv\Scripts\python.exe -m unittest tests.test_master_score_institutional tests.test_institutional_auditor tests.test_market_snapshot_ai_tools tests.test_workspace_ai_tools tests.test_ranking_service tests.test_single_snapshot_source`: 54 testes OK; Yahoo Finance imprimiu avisos externos conhecidos sem quebrar a suite.
+- `venv\Scripts\python.exe -m unittest discover -s tests`: 248 testes OK; Yahoo Finance imprimiu avisos externos conhecidos para aliases invalidos/delistados.
+- `npm exec -- tsc --noEmit --incremental false` em `apps/web`: OK.
+- `git diff --check`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
 
 ## Controle da Etapa Atual
 
@@ -224,7 +235,9 @@ Atualizado em: 2026-06-11
 - Arquivos alterados nesta retomada corretiva BBAS3/PETR3/boxes 2026-05-18: `app/ai/trade_decision.py`, `app/engine/trend_breakout_signal_engine.py`, `apps/web/app/globals.css`, `apps/web/components/workspace-shell.tsx`, `tests/test_trade_decision_engine.py`, `tests/test_trend_breakout_signal_engine.py` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada replay/backtest 2026-06-01: `app/portfolio/backtest_engine.py`, `tests/test_backtest_engine.py` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada forward test 2026-06-05: `app/portfolio/backtest_engine.py`, `tests/test_backtest_engine.py` e `PROJECT_STATUS.md`.
+- Arquivos alterados nesta retomada da analise comparativa 1D: `app/portfolio/backtest_engine.py`, `tests/test_backtest_engine.py` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada da Missao 8: `app/services/snapshot_contract.py`, `app/ai/ai_market_pulse.py`, `app/cache/snapshot_cache.py`, `app/engine/market_snapshot_engine.py`, `app/api/market_routes.py`, `tests/test_market_pulse_actionable.py`, `tests/test_single_snapshot_source.py` e `PROJECT_STATUS.md`.
+- Arquivos alterados nesta retomada da Missao 12: `app/ai/ai_master_score.py`, `app/engine/market_snapshot_engine.py`, `app/services/snapshot_contract.py`, `app/services/ranking.py`, `app/ai/ai_market_radar.py`, `app/system/push_dispatcher.py`, `app/telegram/telegram_alert_formatter.py`, `app/telegram/telegram_alert_engine.py`, `app/api/routes_public_market_live.py`, `app/api/market_routes.py`, `app/api/routes_radar.py`, `app/web/routes_radar.py`, `app/engine/signal_engine.py`, `app/cache/snapshot_cache.py`, `app/services/workspace_service.py`, `apps/web/lib/types.ts`, `tests/test_master_score_institutional.py` e `PROJECT_STATUS.md`.
 - Testes/smokes registrados: `npm run typecheck` em `apps/mobile`; `$env:REQUIRE_MOBILE_DEVICE='1'; npm run smoke:mobile`; `npm run export:android`.
 - Testes/smokes registrados nesta retomada: validacao do `venv` Python 3.11.9 e dependencias; unittest focado de `signal_cache`/snapshot/worker; unittest discover completo com 133 testes OK.
 - Testes/smokes registrados nesta retomada da engine/futuros/root web: unittest focado com 35 testes OK, unittest completo com 139 testes OK, `npm run build`, `start_all_local`, smoke API futures, smoke visual B3/USA e browser real da raiz.
@@ -233,6 +246,7 @@ Atualizado em: 2026-06-11
 - Testes/smokes registrados nesta retomada corretiva BBAS3/PETR3/boxes: unittest focado com 24 testes OK, unittest completo com 151 testes OK, `npm run build`, `start_all_local`, smoke API de `BBAS3`/`PETR3` e Playwright com screenshots dos boxes explicativos.
 - Testes/smokes registrados nesta retomada replay/backtest: `venv\Scripts\python.exe -m py_compile app\portfolio\backtest_engine.py tests\test_backtest_engine.py` OK; `venv\Scripts\python.exe -m unittest tests.test_backtest_engine tests.test_trend_breakout_signal_engine` com 21 testes OK; `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"` com 183 testes OK.
 - Testes/smokes registrados nesta retomada forward test: `py_compile` OK; `unittest tests.test_backtest_engine` com 7 testes OK; `unittest tests.test_backtest_engine tests.test_trend_breakout_signal_engine` com 24 testes OK; `git diff --check` sem erro; `unittest discover` com 191 testes OK.
+- Testes/smokes registrados nesta retomada da analise comparativa 1D: `venv\Scripts\python.exe -m py_compile app\portfolio\backtest_engine.py tests\test_backtest_engine.py` OK; `venv\Scripts\python.exe -m unittest tests.test_backtest_engine` com 8 testes OK.
 - Testes/smokes registrados nesta retomada da Missao 8: `py_compile` OK; `unittest tests.test_market_pulse_actionable` com 5 testes OK; `unittest tests.test_single_snapshot_source` com 15 testes OK; `unittest tests.test_ranking_service` com 8 testes OK; `unittest tests.test_market_snapshot_ai_tools` com 6 testes OK; suite ampliada `tests.test_market_pulse_actionable tests.test_ranking_service tests.test_single_snapshot_source tests.test_market_snapshot_ai_tools tests.test_system_health` com 38 testes OK; `git diff --check` sem erro.
 - Proxima etapa clara: checklist final de lancamento amplo so deve mexer em credenciais reais, Price IDs/assinaturas da Play Console e submissao EAS quando a conta Google Play estiver disponivel.
 - Stage/commit: fechado nesta rodada somente com os arquivos listados nesta etapa, sem incluir alteracoes antigas de outras etapas.
@@ -264,6 +278,8 @@ Atualizado em: 2026-06-11
 - A engine agora usa regime/confianca/liquidez, mas hit rate institucional so deve ser aprovado por backtest/forward test por ativo, horario e regime; `Watch` continua sendo nao-operacao quando confirmacao faltar.
 - O forward test atual mede barras locais e replays/logs ja capturados; aprovacao real por ticker/regime ainda exige alimentar o fluxo com OHLC real de producao e revisar amostra por horario, regime e qualidade de volume.
 - Missao 8: os campos institucionais estao prontos no backend/snapshot/Market Pulse; se alguma tela externa ainda ler somente `stats.bullish`/`stats.bearish`, ela recebera contagem acionavel, mas a exibicao comercial ideal deve migrar para `bullish_candidates` vs `actionable_bullish` para nao parecer otimista com bloqueio.
+- Missao 12: o Score Mestre ficou deliberadamente conservador; pode reduzir sinais acionaveis quando houver consenso baixo, direcao neutra ou contexto institucional incompleto mesmo com score bruto alto.
+- Missao 12: `master_status` segue o Auditor, enquanto conflitos de contexto podem tornar o sinal nao acionavel por `master_score_context_not_confirmed`; a UI deve diferenciar status do Auditor de direcao/conviccao do Score Mestre.
 - Rodar `npm run build` enquanto `next dev` esta vivo pode corromper o manifesto `.next`; o `start_all_local.ps1` agora limpa esse cache ao reiniciar em modo dev.
 - A validacao visual de 2026-05-18 usa dados atuais do provider, nao os OHLC exatos dos prints antigos; para provar melhora nos mesmos candles dos prints, carregar replay/backtest com aquele dataset.
 - `ITUB4` em 2026-05-18 veio com sessao parcial curta; o short saiu com `coherence_status=watch` e risco medio porque ainda exigia confirmacao de breakdown em range.
@@ -287,6 +303,7 @@ Atualizado em: 2026-06-11
 - Proxima melhoria de produto: codigo ja liga preco/volume real ao `signal_cache` via `warm_market_pool` e passou nos testes com o `venv` Python 3.11.9; acompanhar proximo ciclo real do worker com dados de mercado para confirmar auditoria IA `approved` em producao.
 - Proxima melhoria de trading: forward test local por ticker/regime foi implementado sobre o replay deterministico, com contagem de regime barra a barra, metricas por regime de entrada e status de overtrading lateral; proximo passo e alimentar com barras reais capturadas em producao/forward log e revisar resultado por ativo, horario e regime.
 - Missao 8 esta fechada no escopo solicitado; nao iniciar Missao 9 ou posteriores sem pedido explicito.
-- Proxima melhoria de trading 1D: usar `replay_trading_scenario` nos cenarios dos prints antigos (`ITUB4`, `AAPL`, `PETR4`, `PLTR`) assim que as mesmas barras forem carregadas, comparando trades perdidos, exits cedo e reducao de `Watch` sem depender de provider externo durante a analise.
+- Missao 12 esta fechada no escopo solicitado; nao iniciar Missao 13, Missao 17, Missao 18 ou Missao 24A sem pedido explicito.
+- Proxima melhoria de trading 1D: aplicar `compare_replay_scenarios()` aos cenarios dos prints antigos (`ITUB4`, `AAPL`, `PETR4`, `PLTR`) assim que as mesmas barras forem carregadas, comparando trades perdidos, exits cedo e reducao de `Watch` sem depender de provider externo durante a analise.
 - Proxima melhoria de dados B3: se o produto exigir leilao/pre-abertura antes de 10:00, integrar provider que entregue esse feed; o chart atual nao inventa barras antes da primeira barra recebida.
 - Proxima melhoria de dados futuros B3: substituir `reference_proxy` por feed oficial do contrato `WIN`/`WDO` vigente antes de usar esses numeros para execucao real.

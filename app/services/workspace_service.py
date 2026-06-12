@@ -155,6 +155,8 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "market_pulse": snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else {},
         "auditor": snapshot.get("auditor") if isinstance(snapshot.get("auditor"), dict) else {},
         "institutional_auditor": snapshot.get("institutional_auditor") if isinstance(snapshot.get("institutional_auditor"), dict) else {},
+        "master_score": snapshot.get("master_score") if isinstance(snapshot.get("master_score"), dict) else {},
+        "master_scores": snapshot.get("master_scores") if isinstance(snapshot.get("master_scores"), list) else [],
         "symbol_count": len(symbol_snapshots),
     }
     data_status = market_snapshot["data_status"] if isinstance(market_snapshot.get("data_status"), dict) else {}
@@ -265,4 +267,6 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "market_decision": market_decision if isinstance(market_decision, dict) else {},
         "auditor": snapshot.get("auditor") if isinstance(snapshot.get("auditor"), dict) else {},
         "institutional_auditor": snapshot.get("institutional_auditor") if isinstance(snapshot.get("institutional_auditor"), dict) else {},
+        "master_score": snapshot.get("master_score") if isinstance(snapshot.get("master_score"), dict) else {},
+        "master_scores": snapshot.get("master_scores") if isinstance(snapshot.get("master_scores"), list) else [],
     }

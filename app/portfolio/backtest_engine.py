@@ -135,6 +135,15 @@ def _event_key(event: Mapping[str, Any]) -> tuple[str, str, float, str]:
     )
 
 
+def _trade_signature(trade: Mapping[str, Any]) -> tuple[str, str, float, str]:
+    return (
+        str(trade.get("side") or "").strip().lower(),
+        str(trade.get("entry_time") or "").strip(),
+        round(_safe_float(trade.get("entry_price")), 6),
+        str(trade.get("entry_event_type") or "").strip().upper(),
+    )
+
+
 def _event_bar_index(event: Mapping[str, Any], rows: Sequence[Mapping[str, Any]], fallback: int) -> int:
     event_time = str(event.get("time") or "")
     for index, row in enumerate(rows):
@@ -411,14 +420,15 @@ def _collect_replay_events(
     *,
     timeframe: str,
     ai_context: Dict[str, Any] | None,
-) -> tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, int]]:
+) -> tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, int], Dict[str, int]]:
     seen = set()
     events: List[Dict[str, Any]] = []
     latest_payload: Dict[str, Any] | None = None
     regime_bar_counts: Dict[str, int] = {}
+    signal_counts: Dict[str, int] = {}
 
     if not rows:
-        return [], build_trend_breakout_payload(symbol, [], timeframe=timeframe, ai_context=ai_context), regime_bar_counts
+        return [], build_trend_breakout_payload(symbol, [], timeframe=timeframe, ai_context=ai_context), regime_bar_counts, signal_counts
 
     for end_index in range(1, len(rows) + 1):
         latest_payload = build_trend_breakout_payload(
@@ -432,6 +442,8 @@ def _collect_replay_events(
 
         for event in latest_payload.get("events", []):
             event_type = str(event.get("type") or "").upper()
+            if event_type:
+                signal_counts[event_type] = signal_counts.get(event_type, 0) + 1
             if event_type not in ENTRY_EVENTS and event_type not in EXIT_EVENTS:
                 continue
 
@@ -446,6 +458,7 @@ def _collect_replay_events(
         events,
         latest_payload or build_trend_breakout_payload(symbol, rows, timeframe=timeframe, ai_context=ai_context),
         regime_bar_counts,
+        signal_counts,
     )
 
 
@@ -457,7 +470,12 @@ def replay_trading_scenario(
     ai_context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     rows, dropped = _normalize_ohlc_rows(ohlc)
-    events, payload, regime_bar_counts = _collect_replay_events(symbol, rows, timeframe=timeframe, ai_context=ai_context)
+    events, payload, regime_bar_counts, signal_counts = _collect_replay_events(
+        symbol,
+        rows,
+        timeframe=timeframe,
+        ai_context=ai_context,
+    )
     trades = _simulate_trades(events, rows)
     metrics = _summarize_trades(trades, bars_count=len(rows), regime_bar_counts=regime_bar_counts)
 
@@ -482,6 +500,12 @@ def replay_trading_scenario(
         "regime_bar_counts": regime_bar_counts,
         "regime_metrics": _summarize_trades_by_entry_regime(trades, regime_bar_counts=regime_bar_counts),
         "overtrading": metrics["overtrading"],
+        "signal_counts": signal_counts,
+        "watch_signals": {
+            "count": sum(signal_counts.get(signal, 0) for signal in ("WATCH_BUY", "WATCH_SHORT")),
+            "buy": signal_counts.get("WATCH_BUY", 0),
+            "short": signal_counts.get("WATCH_SHORT", 0),
+        },
         "context": payload.get("context", {}),
     }
 
@@ -557,6 +581,53 @@ def analyze_forward_replays(results: Mapping[str, Mapping[str, Any]]) -> Dict[st
         "regime_metrics": _summarize_trades_by_entry_regime(all_trades, regime_bar_counts=aggregate_regime_counts),
         "overtrading": metrics["overtrading"],
         "symbols": symbol_summaries,
+    }
+
+
+def compare_replay_scenarios(reference: Mapping[str, Any], current: Mapping[str, Any]) -> Dict[str, Any]:
+    reference_trades = [trade for trade in reference.get("trades") or [] if isinstance(trade, Mapping)]
+    current_trades = [trade for trade in current.get("trades") or [] if isinstance(trade, Mapping)]
+    reference_by_signature = {_trade_signature(trade): trade for trade in reference_trades}
+    current_by_signature = {_trade_signature(trade): trade for trade in current_trades}
+
+    missed_signatures = [signature for signature in reference_by_signature if signature not in current_by_signature]
+    extra_signatures = [signature for signature in current_by_signature if signature not in reference_by_signature]
+
+    early_exits = 0
+    improved_exits = 0
+    matched_trades = 0
+
+    for signature, reference_trade in reference_by_signature.items():
+        current_trade = current_by_signature.get(signature)
+        if current_trade is None:
+            continue
+
+        matched_trades += 1
+        reference_bars = max(0, _safe_int(reference_trade.get("bars_held")))
+        current_bars = max(0, _safe_int(current_trade.get("bars_held")))
+        reference_exit = str(reference_trade.get("exit_reason") or "").strip().lower()
+        current_exit = str(current_trade.get("exit_reason") or "").strip().lower()
+
+        if current_bars < reference_bars or (current_exit == "session_close" and reference_exit != "session_close"):
+            early_exits += 1
+        if current_bars >= reference_bars and current_trade.get("status") == "closed" and current_trade.get("pnl_pct", 0) >= reference_trade.get("pnl_pct", 0):
+            improved_exits += 1
+
+    reference_watch = _safe_int((reference.get("watch_signals") or {}).get("count"))
+    current_watch = _safe_int((current.get("watch_signals") or {}).get("count"))
+    watch_reduction = reference_watch - current_watch
+
+    return {
+        "matched_trades": matched_trades,
+        "missed_trades": len(missed_signatures),
+        "missed_trade_signatures": missed_signatures,
+        "extra_trades": len(extra_signatures),
+        "extra_trade_signatures": extra_signatures,
+        "early_exits": early_exits,
+        "improved_exits": improved_exits,
+        "watch_reduction": watch_reduction,
+        "reference_watch_signals": reference_watch,
+        "current_watch_signals": current_watch,
     }
 
 

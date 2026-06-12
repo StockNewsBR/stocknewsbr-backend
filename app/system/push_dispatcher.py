@@ -48,7 +48,7 @@ def _eligible_signals(signals):
             continue
 
         try:
-            score = float(item.get("score", 0) or 0)
+            score = float(item.get("master_score", item.get("score", 0)) or 0)
         except Exception:
             score = 0.0
 
@@ -110,8 +110,8 @@ def dispatch_signal_pushes(signals):
 
             title = f"Alerta SNBR: {ticker}"
             body = (
-                f"Score {round(float(signal.get('score', 0) or 0), 2)} | "
-                f"Trend {signal.get('trend') or 'n/a'}"
+                f"Score Mestre {round(float(signal.get('master_score', signal.get('score', 0)) or 0), 2)} | "
+                f"{signal.get('master_direction') or signal.get('trend') or 'n/a'}"
             )
 
             signal_sent = 0
@@ -128,6 +128,13 @@ def dispatch_signal_pushes(signals):
                     data={
                         "ticker": ticker,
                         "score": str(signal.get("score", "")),
+                        "master_score": str(signal.get("master_score", "")),
+                        "master_direction": str(signal.get("master_direction", "")),
+                        "master_conviction": str(signal.get("master_conviction", "")),
+                        "master_confidence": str(signal.get("master_confidence", "")),
+                        "master_risk": str(signal.get("master_risk", "")),
+                        "master_status": str(signal.get("master_status", "")),
+                        "master_summary": str(signal.get("master_summary", "")),
                         "trend": str(signal.get("trend", "")),
                         "price": str(signal.get("price", "")),
                         "volume": str(signal.get("volume", "")),

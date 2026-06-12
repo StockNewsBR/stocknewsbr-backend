@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query
 
+from app.cache.snapshot_cache import get_snapshot_ticker
 from app.engine.signal_engine import build_chart_signal_payload
 from app.market.market_data_loader import (
     get_display_symbol,
@@ -99,6 +100,23 @@ def _symbol_aliases(symbol: str) -> list[str]:
             aliases.append(f"{base}.SA")
 
     return _dedupe_public_symbols(aliases)
+
+
+def _snapshot_master_context(symbol: str) -> dict:
+    row = get_snapshot_ticker(_symbol_aliases(symbol))
+    if not isinstance(row, dict):
+        return {}
+    return {
+        "master_score": row.get("master_score"),
+        "master_direction": row.get("master_direction"),
+        "master_conviction": row.get("master_conviction"),
+        "master_confidence": row.get("master_confidence"),
+        "master_summary": row.get("master_summary"),
+        "master_reasoning": row.get("master_reasoning") if isinstance(row.get("master_reasoning"), dict) else {},
+        "master_risk": row.get("master_risk"),
+        "master_status": row.get("master_status"),
+        "opinion_change_conditions": row.get("opinion_change_conditions") or [],
+    }
 
 
 def _is_blocked_public_symbol(symbol: str) -> bool:
@@ -495,10 +513,12 @@ def public_quotes(symbols: str = Query(default="")):
 def public_market_insight(symbol: str, interval: str = "1D"):
     ticker = _normalize_public_symbol(symbol)
     response_symbol = _response_symbol(ticker)
+    master_context = _snapshot_master_context(ticker)
     if _is_blocked_public_symbol(ticker):
         return {
             "symbol": response_symbol,
             "score": None,
+            **master_context,
             "rsi": None,
             "trend_bias": None,
             "signal": None,
@@ -510,6 +530,7 @@ def public_market_insight(symbol: str, interval: str = "1D"):
         return {
             "symbol": response_symbol,
             "score": None,
+            **master_context,
             "rsi": None,
             "trend_bias": None,
             "signal": None,
@@ -542,6 +563,7 @@ def public_market_insight(symbol: str, interval: str = "1D"):
     return {
         "symbol": response_symbol,
         "score": score,
+        **master_context,
         "rsi": rsi,
         "trend_bias": trend_bias,
         "signal": insight.get("signal") or trend_bias,

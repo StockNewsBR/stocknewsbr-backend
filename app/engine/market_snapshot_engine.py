@@ -9,9 +9,9 @@ import pandas as pd
 
 from app.ai.feature_hub import build_ai_payload_bundle
 from app.ai.ai_market_pulse import market_pulse as build_market_pulse
+from app.ai.ai_master_score import apply_master_scores_by_ticker, run_master_score
 from app.ai.institutional_auditor import (
     apply_audit_to_ai_tools,
-    apply_audits_by_ticker,
     audit_index,
     audit_market_rows,
     summarize_audits,
@@ -85,6 +85,13 @@ def _safe_score(row):
         return 0.0
 
 
+def _safe_master_score(row):
+    try:
+        return float(row.get("master_score", row.get("score", 0)) or 0)
+    except Exception:
+        return _safe_score(row)
+
+
 def _normalize_pool_key(value: str | None) -> str:
     ticker = str(value or "").upper().strip()
 
@@ -134,6 +141,14 @@ def _has_blocking_reasons(row) -> bool:
 
 def _is_actionable_snapshot_row(row) -> bool:
     return _contract_is_actionable_snapshot_row(row)
+
+
+def _apply_master_scores_to_ai_tools(ai_tools, master_score_rows):
+    output = {}
+    for tool, rows in (ai_tools or {}).items():
+        safe_rows = rows if isinstance(rows, list) else []
+        output[tool] = apply_master_scores_by_ticker(safe_rows, master_score_rows)
+    return output
 
 
 def _apply_data_quality(row):
@@ -381,11 +396,9 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             limit=AI_OUTPUT_LIMIT,
         )
         ai_tools = ai_bundle.get("ai_tools") if isinstance(ai_bundle, dict) else {}
-        master_score_rows = ai_bundle.get("master_score") if isinstance(ai_bundle, dict) else []
     except Exception:
         logger.exception("Snapshot AI payload build failed")
         ai_tools = {}
-        master_score_rows = []
 
     pre_audit_pulse = build_market_pulse(normalized)
     snapshot_context = {
@@ -402,8 +415,16 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
     )
     audits = audit_index(normalized)
     ai_tools = apply_audit_to_ai_tools(ai_tools, audits)
-    master_score_rows = apply_audits_by_ticker(master_score_rows, audits)
-    normalized.sort(key=_safe_score, reverse=True)
+    post_audit_pulse = build_market_pulse(normalized)
+    master_score_rows = run_master_score(
+        normalized,
+        limit=AI_OUTPUT_LIMIT,
+        ai_tools=ai_tools,
+        market_pulse=post_audit_pulse,
+    )
+    normalized = apply_master_scores_by_ticker(normalized, master_score_rows)
+    ai_tools = _apply_master_scores_to_ai_tools(ai_tools, master_score_rows)
+    normalized.sort(key=_safe_master_score, reverse=True)
     record_signal_quality_coverage(normalized, source=f"snapshot:{source}")
 
     actionable_rows = [row for row in normalized if _is_actionable_snapshot_row(row)]
@@ -441,8 +462,11 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         "actionable_bearish": signal_stats["actionable_bearish"],
         "blocked_signals": signal_stats["blocked_signals"],
         "watchlist_candidates": signal_stats["watchlist_candidates"],
+        "master_approved": sum(1 for row in normalized if str(row.get("master_status") or "").upper() == "APPROVED"),
+        "master_caution": sum(1 for row in normalized if str(row.get("master_status") or "").upper() == "CAUTION"),
+        "master_blocked": sum(1 for row in normalized if str(row.get("master_status") or "").upper() == "BLOCKED"),
     }
-    post_audit_pulse = build_market_pulse(normalized)
+    final_market_pulse = build_market_pulse(normalized)
     auditor_summary = summarize_audits(normalized)
 
     decision = summarize_trade_decision(master_score_rows)
@@ -459,6 +483,8 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
         "signals": normalized[:200],
         "leaders": normalized[:20],
+        "master_scores": master_score_rows,
+        "master_score": master_score_rows[0] if master_score_rows else {},
         "symbol_snapshots": {
             str(row.get("symbol") or row.get("ticker") or "").upper(): row
             for row in normalized[:200]
@@ -466,14 +492,15 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         },
         "ai_tools": ai_tools,
         "ai_architecture": {
-            "version": "v4_mission_10",
+            "version": "v4_mission_12",
             "official_ai_count": 9,
             "trend_ia_decision": "dedicated",
             "master_score_exposed_as_ai": False,
+            "master_score_contract": "institutional_synthesis",
             "internal_engine_keys": ai_bundle.get("internal_engine_keys", []) if isinstance(ai_bundle, dict) else [],
         },
         "decision": decision,
-        "market_pulse": post_audit_pulse,
+        "market_pulse": final_market_pulse,
         "auditor": auditor_summary,
         "institutional_auditor": auditor_summary,
         "generated_at": generated_at,

@@ -10,6 +10,7 @@ BULLISH_WATCH_SIGNALS = {"WATCH_BUY", "WATCH_LONG", "LONG_WATCH"}
 BEARISH_WATCH_SIGNALS = {"WATCH_SHORT", "WATCH_SELL", "SHORT_WATCH"}
 WATCH_SIGNALS = {"WATCH", "WAIT", "HOLD"} | BULLISH_WATCH_SIGNALS | BEARISH_WATCH_SIGNALS
 NO_TRADE_SIGNALS = {"NO_TRADE", "DO_NOT_TRADE"}
+MASTER_DIRECTIONS = {"BULLISH", "BEARISH", "NEUTRAL"}
 READY_DECISION_STATES = {"BUY_READY", "SELL_READY", "SHORT_READY"}
 BLOCKED_DECISION_STATES = {"WATCH", "WAIT", "NO_TRADE", "DO_NOT_TRADE"}
 READY_STATE_BY_SIGNAL = {
@@ -130,6 +131,14 @@ def snapshot_row_orientation(row: Any) -> str | None:
     if not isinstance(row, dict):
         return None
 
+    master_direction = str(row.get("master_direction") or "").upper().strip()
+    if master_direction == "BULLISH":
+        return "bullish"
+    if master_direction == "BEARISH":
+        return "bearish"
+    if master_direction == "NEUTRAL":
+        return None
+
     signal = snapshot_signal_value(row)
     if signal in BULLISH_ACTIONS or signal in BULLISH_WATCH_SIGNALS:
         return "bullish"
@@ -184,13 +193,40 @@ def is_auditor_blocked(row: dict[str, Any]) -> bool:
     return False
 
 
+def master_status_value(row: dict[str, Any]) -> str:
+    return str(row.get("master_status") or "").upper().strip()
+
+
+def master_direction_value(row: dict[str, Any]) -> str:
+    value = str(row.get("master_direction") or "").upper().strip()
+    return value if value in MASTER_DIRECTIONS else ""
+
+
+def master_confirms_signal(row: dict[str, Any]) -> bool:
+    direction = master_direction_value(row)
+    if not direction:
+        return True
+    signal = snapshot_signal_value(row)
+    if signal not in ACTIONABLE_SIGNALS:
+        return True
+    if direction == "BULLISH":
+        return signal in BULLISH_ACTIONS
+    if direction == "BEARISH":
+        return signal in BEARISH_ACTIONS
+    return False
+
+
 def is_actionable_snapshot_row(row: Any) -> bool:
     if not isinstance(row, dict):
         return False
     if is_auditor_blocked(row):
         return False
+    if master_status_value(row) == "BLOCKED":
+        return False
     signal = snapshot_signal_value(row)
     if signal not in ACTIONABLE_SIGNALS:
+        return False
+    if not master_confirms_signal(row):
         return False
     if row.get("decision_ready") is not True:
         return False
@@ -241,6 +277,10 @@ def is_blocked_snapshot_row(row: Any) -> bool:
         return True
     if is_auditor_blocked(row):
         return True
+    if master_status_value(row) == "BLOCKED":
+        return True
+    if snapshot_signal_value(row) in ACTIONABLE_SIGNALS and not master_confirms_signal(row):
+        return True
     if row.get("stale") is True or row.get("is_stale") is True:
         return True
     if str(row.get("data_quality") or "").lower().strip() in BLOCKED_DATA_QUALITIES:
@@ -286,6 +326,15 @@ def snapshot_row_summary(row: dict[str, Any]) -> dict[str, Any]:
         "audit_blocks": row.get("audit_blocks") or [],
         "audit_warnings": row.get("audit_warnings") or [],
         "blocked_by_auditor": bool(row.get("blocked_by_auditor") is True),
+        "master_score": row.get("master_score"),
+        "master_direction": row.get("master_direction"),
+        "master_conviction": row.get("master_conviction"),
+        "master_confidence": row.get("master_confidence"),
+        "master_summary": row.get("master_summary"),
+        "master_reasoning": row.get("master_reasoning") if isinstance(row.get("master_reasoning"), dict) else {},
+        "master_risk": row.get("master_risk"),
+        "master_status": row.get("master_status"),
+        "opinion_change_conditions": row.get("opinion_change_conditions") or [],
     }
 
 

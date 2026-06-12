@@ -174,7 +174,7 @@ def send_bulk_alert(signals, regime=None):
             if not is_actionable_snapshot_row(s):
                 continue
 
-            score = s.get("score")
+            score = s.get("master_score", s.get("score"))
 
             if not isinstance(score, (int, float)):
                 continue

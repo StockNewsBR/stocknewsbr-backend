@@ -41,6 +41,22 @@ def _metric_ai_row(row: Dict[str, Any] | None, score_key: str, state_key: str) -
     return output
 
 
+def _snapshot_master_score_row(row: Dict[str, Any] | None) -> Dict[str, Any] | None:
+    if not isinstance(row, dict) or row.get("master_score") in (None, ""):
+        return None
+    direction = str(row.get("master_direction") or "NEUTRAL").lower()
+    return {
+        "ticker": row.get("ticker") or row.get("symbol"),
+        "tool": "master_score",
+        "score": row.get("master_score"),
+        "state": direction,
+        "master_direction": row.get("master_direction"),
+        "master_status": row.get("master_status"),
+        "master_risk": row.get("master_risk"),
+        "reason": row.get("master_summary"),
+    }
+
+
 def _build_ai_context_from_snapshot(symbol: str) -> Dict[str, Any]:
     snapshot = get_snapshot()
     ai_tools = snapshot.get("ai_tools", {}) if isinstance(snapshot, dict) else {}
@@ -51,6 +67,12 @@ def _build_ai_context_from_snapshot(symbol: str) -> Dict[str, Any]:
     official_momentum = _find_ai_row(ai_tools.get("momentum", []), normalized)
     official_smart_money = _find_ai_row(ai_tools.get("smart_money", []), normalized)
     official_regime = _find_ai_row(ai_tools.get("regime", []), normalized)
+
+    seed_row = None
+    for key, value in by_ticker.items():
+        if _normalize_symbol(key) == normalized and isinstance(value, dict):
+            seed_row = value
+            break
 
     context = {
         "heat_map": _find_ai_row(ai_tools.get("heat_map", []), normalized)
@@ -69,13 +91,11 @@ def _build_ai_context_from_snapshot(symbol: str) -> Dict[str, Any]:
         or _metric_ai_row(official_liquidity, "liquidity_map_score", "liquidity_map_state"),
         "market_regime": _find_ai_row(ai_tools.get("market_regime", []), normalized)
         or _metric_ai_row(official_regime, "regime_score", "regime_state"),
-        "master_score": _find_ai_row(ai_tools.get("master_score", []), normalized),
+        "master_score": _find_ai_row(ai_tools.get("master_score", []), normalized) or _snapshot_master_score_row(seed_row),
     }
 
     if context["market_regime"] and context["smart_money"] and context["master_score"]:
         return context
-
-    seed_row = by_ticker.get(normalized)
 
     if not isinstance(seed_row, dict):
         return context

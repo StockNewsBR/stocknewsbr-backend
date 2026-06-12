@@ -156,7 +156,9 @@ def get_market_radar(current_user=Depends(require_active_plan)):
             if "SWEEP" in haystack or "LIQUIDITY" in haystack:
                 buckets["liquidity_sweep"].append(row)
 
-            if "BEARISH" in haystack or _safe_float(row.get("score")) <= 30:
+            master_direction = str(row.get("master_direction") or "").upper()
+            master_score = _safe_float(row.get("master_score", row.get("score")))
+            if "BEARISH" in haystack or master_direction == "BEARISH" or master_score <= 30:
                 buckets["bearish"].append(row)
 
         return {

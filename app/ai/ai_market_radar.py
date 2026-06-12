@@ -123,13 +123,17 @@ def analyze_symbol(symbol):
 
         radar = radar_rows[0]
         score = _safe_float(radar.get("score") or radar.get("radar_score") or 0)
+        source = rows[0] if rows else {}
 
         if score < 60:
             return None
 
         return {
             "symbol": normalized,
-            "radar_score": score
+            "radar_score": score,
+            "master_score": source.get("master_score"),
+            "master_direction": source.get("master_direction"),
+            "master_status": source.get("master_status"),
         }
 
     except Exception:
@@ -145,15 +149,28 @@ def build_radar():
 
     try:
         actionable_rows = [row for row in get_snapshot_signals() if is_actionable_snapshot_row(row)]
+        source_by_ticker = {
+            _normalize_symbol(row.get("ticker") or row.get("symbol")): row
+            for row in actionable_rows
+            if isinstance(row, dict)
+        }
 
         for row in run_radar(actionable_rows, limit=50):
             symbol = row.get("ticker") or row.get("symbol")
             if not symbol:
                 continue
+            source = source_by_ticker.get(_normalize_symbol(symbol), {})
             results.append(
                 {
                     "symbol": _normalize_symbol(symbol),
                     "radar_score": _safe_float(row.get("score") or row.get("radar_score") or 0),
+                    "master_score": source.get("master_score"),
+                    "master_direction": source.get("master_direction"),
+                    "master_conviction": source.get("master_conviction"),
+                    "master_confidence": source.get("master_confidence"),
+                    "master_summary": source.get("master_summary"),
+                    "master_risk": source.get("master_risk"),
+                    "master_status": source.get("master_status"),
                     "state": row.get("state"),
                     "source": row.get("source") or "snapshot",
                     "data_quality": coerce_data_quality(row),

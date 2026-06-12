@@ -11,6 +11,18 @@ export type WorkspaceTab = {
 export type RankingRow = {
   symbol: string;
   score: number;
+  source_score?: number | string | null;
+  master_score?: number | null;
+  master_direction?: "BULLISH" | "BEARISH" | "NEUTRAL" | string | null;
+  master_conviction?: string | null;
+  master_confidence?: string | null;
+  master_summary?: string | null;
+  master_reasoning?: Record<string, unknown> | null;
+  master_risk?: string | null;
+  master_status?: "APPROVED" | "CAUTION" | "BLOCKED" | string | null;
+  master_visual_status?: string | null;
+  master_visual_label?: string | null;
+  opinion_change_conditions?: string[] | null;
   trend?: string | null;
   rsi?: number | string | null;
   rel_volume?: number | string | null;
@@ -51,6 +63,17 @@ export type SignalRow = {
   ticker?: string;
   symbol?: string;
   score?: number;
+  master_score?: number | null;
+  master_direction?: "BULLISH" | "BEARISH" | "NEUTRAL" | string | null;
+  master_conviction?: string | null;
+  master_confidence?: string | null;
+  master_summary?: string | null;
+  master_reasoning?: Record<string, unknown> | null;
+  master_risk?: string | null;
+  master_status?: "APPROVED" | "CAUTION" | "BLOCKED" | string | null;
+  master_visual_status?: string | null;
+  master_visual_label?: string | null;
+  opinion_change_conditions?: string[] | null;
   trend?: string | null;
   breakout?: boolean;
   price?: number | null;
@@ -101,6 +124,8 @@ export type WorkspaceMarketSnapshot = {
   market_pulse?: Record<string, unknown>;
   auditor?: Record<string, unknown>;
   institutional_auditor?: Record<string, unknown>;
+  master_score?: Record<string, unknown>;
+  master_scores?: Record<string, unknown>[];
   symbol_count?: number;
 };
 
@@ -170,6 +195,17 @@ export type AiToolRow = {
   risk_summary?: string | null;
   risk_blocks?: string[] | null;
   no_trade_reason?: string | null;
+  master_score?: number | null;
+  master_direction?: "BULLISH" | "BEARISH" | "NEUTRAL" | string | null;
+  master_conviction?: string | null;
+  master_confidence?: string | null;
+  master_summary?: string | null;
+  master_reasoning?: Record<string, unknown> | null;
+  master_risk?: string | null;
+  master_status?: "APPROVED" | "CAUTION" | "BLOCKED" | string | null;
+  master_visual_status?: string | null;
+  master_visual_label?: string | null;
+  opinion_change_conditions?: string[] | null;
 };
 
 export type WorkspaceAiTools = {
@@ -277,6 +313,8 @@ export type WorkspaceData = {
   market_snapshot?: WorkspaceMarketSnapshot;
   auditor?: Record<string, unknown>;
   institutional_auditor?: Record<string, unknown>;
+  master_score?: Record<string, unknown>;
+  master_scores?: Record<string, unknown>[];
   ai_tools: WorkspaceAiTools;
   featured_posts: FeedPost[];
   ticker_room_preview: {
@@ -567,6 +605,15 @@ export type QuotePayload = {
 export type PublicInsightPayload = {
   symbol: string;
   score?: number | null;
+  master_score?: number | null;
+  master_direction?: string | null;
+  master_conviction?: string | null;
+  master_confidence?: string | null;
+  master_summary?: string | null;
+  master_reasoning?: Record<string, unknown> | null;
+  master_risk?: string | null;
+  master_status?: string | null;
+  opinion_change_conditions?: string[] | null;
   rsi?: number | null;
   rel_volume?: number | null;
   trend_bias?: string | null;

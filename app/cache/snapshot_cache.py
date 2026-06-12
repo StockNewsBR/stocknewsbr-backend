@@ -94,7 +94,7 @@ class SnapshotCache:
             normalized.append(row)
 
         normalized.sort(
-            key=lambda row: float(row.get("score", 0) or 0),
+            key=lambda row: float(row.get("master_score", row.get("score", 0)) or 0),
             reverse=True,
         )
 

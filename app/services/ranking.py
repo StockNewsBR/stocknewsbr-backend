@@ -236,7 +236,7 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
             continue
 
         try:
-            score = float(row.get("score", 0) or 0)
+            score = float(row.get("master_score", row.get("score", 0)) or 0)
         except Exception:
             score = 0.0
 
@@ -245,6 +245,18 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
                 "ticker": symbol,
                 "symbol": symbol,
                 "score": score,
+                "source_score": row.get("score"),
+                "master_score": row.get("master_score"),
+                "master_direction": row.get("master_direction"),
+                "master_conviction": row.get("master_conviction"),
+                "master_confidence": row.get("master_confidence"),
+                "master_summary": row.get("master_summary"),
+                "master_reasoning": row.get("master_reasoning") if isinstance(row.get("master_reasoning"), dict) else {},
+                "master_risk": row.get("master_risk"),
+                "master_status": row.get("master_status"),
+                "master_visual_status": row.get("master_visual_status"),
+                "master_visual_label": row.get("master_visual_label"),
+                "opinion_change_conditions": row.get("opinion_change_conditions") or [],
                 "trend": row.get("trend"),
                 "rsi": row.get("rsi"),
                 "breakout": bool(row.get("breakout", False)),
