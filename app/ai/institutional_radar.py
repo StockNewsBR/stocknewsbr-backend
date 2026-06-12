@@ -318,6 +318,7 @@ def institutional_radar_items(rows: Iterable[Dict[str, Any]], limit: int = 20) -
         and not row.get("radar_no_trade_now")
         and not row.get("radar_discarded")
         and _safe_score(row.get("radar_prioritization_score") or row.get("radar_priority_score"), 0.0) >= 45
+        and is_actionable_snapshot_row(row)
     ]
     items.sort(key=lambda row: _safe_score(row.get("radar_prioritization_score") or row.get("radar_priority_score"), 0.0), reverse=True)
     return items[:limit]

@@ -3,6 +3,10 @@ import time
 import json
 import os
 import hashlib
+import atexit
+import shutil
+import sys
+import tempfile
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
@@ -10,6 +14,8 @@ from app.services.snapshot_contract import summarize_snapshot_rows
 from app.system.system_metrics import record_cache_lookup, update_cache_timestamp
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_TEST_RUNTIME_ROOT: Path | None = None
+_TEST_RUNTIME_CLEANUP_REGISTERED = False
 
 
 def _project_runtime_path(env_name: str, default_relative: str) -> Path:
@@ -18,6 +24,50 @@ def _project_runtime_path(env_name: str, default_relative: str) -> Path:
         configured_path = Path(configured)
         return configured_path if configured_path.is_absolute() else _PROJECT_ROOT / configured_path
     return _PROJECT_ROOT / default_relative
+
+
+def _is_test_process() -> bool:
+    explicit = os.getenv("STOCKNEWSBR_TEST_MODE")
+    if explicit is not None:
+        return explicit.strip().lower() in {"1", "true", "yes", "on"}
+    if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("PYTEST_VERSION"):
+        return True
+    argv = " ".join(str(arg).lower() for arg in sys.argv)
+    return (
+        "pytest" in argv
+        or ("unittest" in argv and ("discover" in argv or "tests" in argv or "test_" in argv))
+        or ("discover" in argv and "tests" in argv)
+        or any(str(arg).lower().startswith("tests.") for arg in sys.argv)
+        or any(Path(str(arg)).name.lower().startswith("test_") for arg in sys.argv)
+    )
+
+
+def _cleanup_test_runtime_root(path: Path) -> None:
+    try:
+        shutil.rmtree(path, ignore_errors=True)
+    except Exception:
+        pass
+
+
+def _test_runtime_root() -> Path:
+    global _TEST_RUNTIME_ROOT
+    global _TEST_RUNTIME_CLEANUP_REGISTERED
+
+    if _TEST_RUNTIME_ROOT is None:
+        _TEST_RUNTIME_ROOT = Path(tempfile.gettempdir()) / "stocknewsbr-tests" / f"snapshot-cache-{os.getpid()}"
+        _TEST_RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+    if not _TEST_RUNTIME_CLEANUP_REGISTERED:
+        atexit.register(_cleanup_test_runtime_root, _TEST_RUNTIME_ROOT)
+        _TEST_RUNTIME_CLEANUP_REGISTERED = True
+    return _TEST_RUNTIME_ROOT
+
+
+def _snapshot_runtime_path(env_name: str, default_relative: str) -> Path:
+    if os.getenv(env_name):
+        return _project_runtime_path(env_name, default_relative)
+    if _is_test_process():
+        return _test_runtime_root() / "runtime" / "cache" / Path(default_relative).name
+    return _project_runtime_path(env_name, default_relative)
 
 
 _RESERVED_KEYS = {
@@ -60,7 +110,7 @@ class SnapshotCache:
         self._last_good_signature: str = ""
         self._disk_write_min_interval_seconds = SNAPSHOT_DISK_WRITE_MIN_INTERVAL_SECONDS
         self._lock = threading.RLock()
-        self._storage_path = _project_runtime_path("SNAPSHOT_CACHE_FILE", "runtime/cache/snapshot.json")
+        self._storage_path = _snapshot_runtime_path("SNAPSHOT_CACHE_FILE", "runtime/cache/snapshot.json")
 
     def _empty_payload(self) -> Dict[str, Any]:
         return {
@@ -176,13 +226,23 @@ class SnapshotCache:
                 for key, value in ai_tools.items()
                 if isinstance(value, list)
             }
-        for key in ("master_score", "strategic_panel", "historical_confidence"):
+        for key in (
+            "auditor",
+            "institutional_auditor",
+            "master_score",
+            "strategic_panel",
+            "historical_confidence",
+            "institutional_conviction",
+            "institutional_priority",
+            "final_decision",
+            "institutional_consistency",
+        ):
             if isinstance(payload.get(key), dict):
                 cloned[key] = dict(payload.get(key, {}))
         for key in ("master_scores", "strategic_panels", "institutional_radar", "institutional_ranking", "historical_confidences", "operational_rules", "institutional_convictions", "institutional_priorities", "final_decisions"):
             if isinstance(payload.get(key), list):
                 cloned[key] = [dict(row) for row in payload.get(key, []) if isinstance(row, dict)]
-        for key in ("radar_metrics", "ranking_metrics", "historical_confidence_metrics", "operational_rules_metrics", "conviction_metrics", "priority_metrics", "final_decision_metrics"):
+        for key in ("radar_metrics", "ranking_metrics", "historical_confidence_metrics", "operational_rules_metrics", "conviction_metrics", "priority_metrics", "final_decision_metrics", "institutional_consistency_metrics"):
             if isinstance(payload.get(key), dict):
                 cloned[key] = dict(payload.get(key, {}))
         return cloned

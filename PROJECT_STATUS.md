@@ -109,6 +109,10 @@ Atualizado em: 2026-06-12
 - Missao 24A - Telegram Institucional fechada em 2026-06-12: Telegram virou consumidor dos contratos finais, sem gerar sinal, recalcular score ou promover oportunidade propria.
 - O Telegram agora bloqueia `operational_status=BLOCKED`, `audit_status=BLOCKED`, `decision_ready=False`, `radar_no_trade_now=True` e `final_decision=🔴 NÃO OPERAR AGORA`; somente envia alertas criticos, altos ou medios.
 - O contrato operacional do Telegram inclui `telegram_alert_fingerprint`, cooldown configuravel, resumo de ate 3 linhas, priorizacao critico > alto > medio, metricas, health de observabilidade e historico administrativo no workspace.
+- Missao 24B - Hardening Final para Go-Live Institucional fechada em 2026-06-12: testes agora usam snapshot temporario e nao gravam em `runtime/cache/snapshot.json`.
+- O snapshot raiz passou a carregar os contratos institucionais completos em formato singular/plural, incluindo Conviccao, Prioridade, Decisao Final e auditoria de consistencia sem alterar decisoes.
+- Workspace, dashboard e observabilidade agora exibem bloqueios operacionais com motivo explicito, metricas institucionais agregadas e inconsistencias auditadas.
+- A promocao de Ranking/Radar passa por `is_actionable_snapshot_row`, impedindo que linhas `BLOCKED` subam para surfaces promocionais, top_signals, Telegram ou push.
 
 ## Validado
 
@@ -196,6 +200,13 @@ Atualizado em: 2026-06-12
 - `venv\Scripts\python.exe -m unittest tests.test_single_snapshot_source`: 15 testes OK; Yahoo Finance imprimiu avisos externos conhecidos para aliases invalidos/delistados.
 - `venv\Scripts\python.exe -m unittest tests.test_observability_institutional`: 3 testes OK.
 - `venv\Scripts\python.exe -m unittest discover tests`: 322 testes OK; Yahoo Finance imprimiu avisos externos conhecidos para aliases invalidos/delistados.
+- `venv\Scripts\python.exe -m py_compile app\cache\snapshot_cache.py app\services\institutional_consistency_audit.py app\engine\market_snapshot_engine.py app\system\system_metrics.py app\system\observability_engine.py app\api\routes_system.py app\services\workspace_service.py app\ai\institutional_ranking.py app\ai\institutional_radar.py tests\test_mission_24b_hardening.py`: OK.
+- `venv\Scripts\python.exe -m unittest tests.test_mission_24b_hardening`: 7 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_mission_24b_hardening tests.test_institutional_ranking tests.test_institutional_radar tests.test_observability_institutional tests.test_telegram_institutional`: 38 testes OK.
+- `venv\Scripts\python.exe -m unittest discover -s tests`: 329 testes OK; Yahoo Finance imprimiu avisos externos conhecidos para aliases invalidos/delistados.
+- `npm exec -- tsc --noEmit --incremental false` em `apps\web`: OK.
+- `git diff --check`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
+- Verificacao de `runtime/cache/snapshot.json`: nenhum ticker/symbol/snapshot_id sintetico `BLOCKED`, `WATCH1`, `TEST`, `FAKE` ou `MOCK` apos a suite completa.
 - `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 113 testes OK.
 - `npm run build` em `apps/web`: build OK apos UX do grafico, tooltips e modos Guiado/Trader/Pro.
 - Browser interno em `http://127.0.0.1:3000/panel/F`: modos Guiado/Trader/Pro validados com `Leitura atual`, `Direcao operacional`, `Confirmacao necessaria`, `Invalidacao` e `Risco`.

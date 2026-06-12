@@ -51,6 +51,24 @@ _external_provider_symbol_calls = {}
 _external_provider_failures = {}
 _worker_stage_timings = {}
 _signal_quality_coverage = {}
+_institutional_auditor_metrics = {
+    "approved": 0,
+    "caution": 0,
+    "blocked": 0,
+    "average_audit_score": 0.0,
+    "updated_at": 0.0,
+}
+_master_score_metrics = {
+    "signals": 0,
+    "approved": 0,
+    "caution": 0,
+    "blocked": 0,
+    "bullish": 0,
+    "bearish": 0,
+    "neutral": 0,
+    "average_master_score": 0.0,
+    "updated_at": 0.0,
+}
 _institutional_radar_metrics = {
     "generated": 0,
     "promoted": 0,
@@ -115,6 +133,14 @@ _telegram_alert_metrics = {
     "critical": 0,
     "high": 0,
     "medium": 0,
+    "updated_at": 0.0,
+}
+_institutional_consistency_metrics = {
+    "signals_checked": 0,
+    "issues": 0,
+    "direction_conflicts": 0,
+    "priority_no_trade": 0,
+    "approved_operational_blocked": 0,
     "updated_at": 0.0,
 }
 
@@ -416,6 +442,77 @@ def record_signal_quality_coverage(rows, source: str = "signal_cache"):
         }
 
 
+def record_institutional_auditor_metrics(metrics: dict | None):
+    safe = metrics if isinstance(metrics, dict) else {}
+    with _lock:
+        _institutional_auditor_metrics.update(
+            {
+                "approved": int(safe.get("approved", 0) or 0),
+                "caution": int(safe.get("caution", 0) or 0),
+                "blocked": int(safe.get("blocked", 0) or 0),
+                "average_audit_score": round(float(safe.get("avg_audit_score", 0.0) or 0.0), 2),
+                "updated_at": time.time(),
+            }
+        )
+
+
+def get_institutional_auditor_metrics_snapshot():
+    with _lock:
+        return dict(_institutional_auditor_metrics)
+
+
+def record_master_score_metrics(rows_or_metrics):
+    if isinstance(rows_or_metrics, dict):
+        safe = rows_or_metrics
+        with _lock:
+            _master_score_metrics.update(
+                {
+                    "signals": int(safe.get("signals", 0) or 0),
+                    "approved": int(safe.get("approved", 0) or 0),
+                    "caution": int(safe.get("caution", 0) or 0),
+                    "blocked": int(safe.get("blocked", 0) or 0),
+                    "bullish": int(safe.get("bullish", 0) or 0),
+                    "bearish": int(safe.get("bearish", 0) or 0),
+                    "neutral": int(safe.get("neutral", 0) or 0),
+                    "average_master_score": round(float(safe.get("average_master_score", 0.0) or 0.0), 2),
+                    "updated_at": time.time(),
+                }
+            )
+        return
+
+    rows = [row for row in rows_or_metrics or [] if isinstance(row, dict)]
+    scores = []
+    status_counts = {"approved": 0, "caution": 0, "blocked": 0}
+    direction_counts = {"bullish": 0, "bearish": 0, "neutral": 0}
+    for row in rows:
+        try:
+            scores.append(float(row.get("master_score", row.get("score", 0.0)) or 0.0))
+        except (TypeError, ValueError):
+            pass
+        status = str(row.get("master_status") or "").strip().lower()
+        if status in status_counts:
+            status_counts[status] += 1
+        direction = str(row.get("master_direction") or "").strip().lower()
+        if direction in direction_counts:
+            direction_counts[direction] += 1
+
+    with _lock:
+        _master_score_metrics.update(
+            {
+                "signals": len(rows),
+                **status_counts,
+                **direction_counts,
+                "average_master_score": round(sum(scores) / len(scores), 2) if scores else 0.0,
+                "updated_at": time.time(),
+            }
+        )
+
+
+def get_master_score_metrics_snapshot():
+    with _lock:
+        return dict(_master_score_metrics)
+
+
 def record_institutional_radar_metrics(metrics: dict | None):
     safe = metrics if isinstance(metrics, dict) else {}
     with _lock:
@@ -570,6 +667,42 @@ def get_telegram_alert_metrics_snapshot():
         return dict(_telegram_alert_metrics)
 
 
+def record_institutional_consistency_metrics(metrics: dict | None):
+    safe = metrics if isinstance(metrics, dict) else {}
+    with _lock:
+        _institutional_consistency_metrics.update(
+            {
+                "signals_checked": int(safe.get("signals_checked", 0) or 0),
+                "issues": int(safe.get("issues", 0) or 0),
+                "direction_conflicts": int(safe.get("direction_conflicts", 0) or 0),
+                "priority_no_trade": int(safe.get("priority_no_trade", 0) or 0),
+                "approved_operational_blocked": int(safe.get("approved_operational_blocked", 0) or 0),
+                "updated_at": time.time(),
+            }
+        )
+
+
+def get_institutional_consistency_metrics_snapshot():
+    with _lock:
+        return dict(_institutional_consistency_metrics)
+
+
+def _institutional_metrics_snapshot_locked():
+    return {
+        "institutional_auditor": dict(_institutional_auditor_metrics),
+        "master_score": dict(_master_score_metrics),
+        "historical_confidence": dict(_historical_confidence_metrics),
+        "operational_rules": dict(_operational_rules_metrics),
+        "institutional_conviction": dict(_institutional_conviction_metrics),
+        "institutional_priority": dict(_institutional_priority_metrics),
+        "institutional_radar": dict(_institutional_radar_metrics),
+        "institutional_ranking": dict(_institutional_ranking_metrics),
+        "final_decision": dict(_final_decision_metrics),
+        "telegram_alerts": dict(_telegram_alert_metrics),
+        "institutional_consistency": dict(_institutional_consistency_metrics),
+    }
+
+
 def get_performance_metrics_snapshot():
     with _lock:
         http_metrics = {}
@@ -653,12 +786,16 @@ def get_performance_metrics_snapshot():
         }
         institutional_radar = dict(_institutional_radar_metrics)
         institutional_ranking = dict(_institutional_ranking_metrics)
+        institutional_auditor = dict(_institutional_auditor_metrics)
+        master_score = dict(_master_score_metrics)
         historical_confidence = dict(_historical_confidence_metrics)
         operational_rules = dict(_operational_rules_metrics)
         institutional_conviction = dict(_institutional_conviction_metrics)
         institutional_priority = dict(_institutional_priority_metrics)
         final_decision = dict(_final_decision_metrics)
         telegram_alerts = dict(_telegram_alert_metrics)
+        institutional_consistency = dict(_institutional_consistency_metrics)
+        institutional_metrics = _institutional_metrics_snapshot_locked()
 
         repeated_failures = sorted(
             (
@@ -684,6 +821,8 @@ def get_performance_metrics_snapshot():
         "external_provider_symbol_call_total": provider_symbol_metrics,
         "worker_stage_seconds": worker_metrics,
         "signal_quality_coverage": signal_quality,
+        "institutional_auditor": institutional_auditor,
+        "master_score": master_score,
         "institutional_radar": institutional_radar,
         "institutional_ranking": institutional_ranking,
         "historical_confidence": historical_confidence,
@@ -692,6 +831,8 @@ def get_performance_metrics_snapshot():
         "institutional_priority": institutional_priority,
         "final_decision": final_decision,
         "telegram_alerts": telegram_alerts,
+        "institutional_consistency": institutional_consistency,
+        "institutional_metrics": institutional_metrics,
         "provider_symbol_failures": repeated_failures,
     }
 
@@ -779,6 +920,18 @@ def format_prometheus_metrics() -> str:
         lines.append('signal_quality_score_only_total{source="%s"} %s' % (_label_value(source), int(item.get("score_only", 0))))
         lines.append('signal_quality_conflict_total{source="%s"} %s' % (_label_value(source), int(item.get("conflict_detected", 0))))
 
+    auditor_metrics = performance.get("institutional_auditor", {})
+    for field in ("approved", "caution", "blocked"):
+        lines.append('institutional_auditor_total{status="%s"} %s' % (_label_value(field), int(auditor_metrics.get(field, 0))))
+    lines.append("institutional_auditor_average_score %s" % float(auditor_metrics.get("average_audit_score", 0.0)))
+
+    master_metrics = performance.get("master_score", {})
+    for field in ("approved", "caution", "blocked"):
+        lines.append('master_score_total{status="%s"} %s' % (_label_value(field), int(master_metrics.get(field, 0))))
+    for field in ("bullish", "bearish", "neutral"):
+        lines.append('master_score_direction_total{direction="%s"} %s' % (_label_value(field), int(master_metrics.get(field, 0))))
+    lines.append("master_score_average %s" % float(master_metrics.get("average_master_score", 0.0)))
+
     radar_metrics = performance.get("institutional_radar", {})
     for field in ("generated", "promoted", "discarded", "blocked"):
         lines.append('institutional_radar_signals_total{state="%s"} %s' % (_label_value(field), int(radar_metrics.get(field, 0))))
@@ -820,6 +973,10 @@ def format_prometheus_metrics() -> str:
         lines.append('telegram_alert_events_total{event="%s"} %s' % (_label_value(field), int(telegram_metrics.get(field, 0))))
     for field in ("critical", "high", "medium"):
         lines.append('telegram_alerts_total{level="%s"} %s' % (_label_value(field), int(telegram_metrics.get(field, 0))))
+
+    consistency_metrics = performance.get("institutional_consistency", {})
+    for field in ("issues", "direction_conflicts", "priority_no_trade", "approved_operational_blocked"):
+        lines.append('institutional_consistency_total{type="%s"} %s' % (_label_value(field), int(consistency_metrics.get(field, 0))))
 
     for item in performance.get("provider_symbol_failures", []):
         lines.append(
@@ -940,6 +1097,7 @@ def get_scan_frequency():
 
 def get_metrics_snapshot():
     with _lock:
+        institutional_metrics = _institutional_metrics_snapshot_locked()
         return {
             "engine_cycles": engine_cycles,
             "scan_time": round(last_scan_time, 4) if last_scan_time else 0,
@@ -954,4 +1112,16 @@ def get_metrics_snapshot():
             "reports_created": reports_created,
             "uploads_completed": uploads_completed,
             "push_sends": push_sends,
+            "institutional_auditor": institutional_metrics["institutional_auditor"],
+            "master_score": institutional_metrics["master_score"],
+            "historical_confidence": institutional_metrics["historical_confidence"],
+            "operational_rules": institutional_metrics["operational_rules"],
+            "institutional_conviction": institutional_metrics["institutional_conviction"],
+            "institutional_priority": institutional_metrics["institutional_priority"],
+            "institutional_radar": institutional_metrics["institutional_radar"],
+            "institutional_ranking": institutional_metrics["institutional_ranking"],
+            "final_decision": institutional_metrics["final_decision"],
+            "telegram_alerts": institutional_metrics["telegram_alerts"],
+            "institutional_consistency": institutional_metrics["institutional_consistency"],
+            "institutional_metrics": institutional_metrics,
         }

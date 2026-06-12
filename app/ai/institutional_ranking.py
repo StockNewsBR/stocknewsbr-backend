@@ -314,6 +314,7 @@ def institutional_ranking_items(rows: Iterable[Dict[str, Any]], limit: int = 50)
         if isinstance(row, dict)
         and row.get("ranking_eligible") is True
         and _safe_float(row.get("ranking_opportunity_score"), 0.0) >= 45.0
+        and is_actionable_snapshot_row(row)
     ]
     items.sort(key=lambda row: _safe_float(row.get("ranking_opportunity_score"), 0.0), reverse=True)
     return items[:limit]

@@ -96,6 +96,17 @@ def system_status():
         "reports_created": metrics["reports_created"],
         "uploads_completed": metrics["uploads_completed"],
         "push_sends": metrics["push_sends"],
+        "institutional_metrics": metrics.get("institutional_metrics", {}),
+        "institutional_auditor": metrics.get("institutional_auditor", {}),
+        "master_score": metrics.get("master_score", {}),
+        "historical_confidence": metrics.get("historical_confidence", {}),
+        "operational_rules": metrics.get("operational_rules", {}),
+        "institutional_conviction": metrics.get("institutional_conviction", {}),
+        "institutional_priority": metrics.get("institutional_priority", {}),
+        "institutional_radar": metrics.get("institutional_radar", {}),
+        "institutional_ranking": metrics.get("institutional_ranking", {}),
+        "final_decision": metrics.get("final_decision", {}),
+        "telegram_alerts": metrics.get("telegram_alerts", {}),
         "snapshot_cache": get_snapshot_info(),
         "storage": get_storage_status(),
         "media": get_media_status(),
@@ -171,6 +182,7 @@ def observability_report():
         ranking={"status": "HEALTHY" if get_ranking() else "DEGRADED", "eligible": len(get_ranking() or []), "discarded": 0, "blocked": 0},
         radar={"status": "HEALTHY", "generated": status_metrics.get("signals_generated", 0), "filtered": 0, "blocked": 0},
         telegram=telegram_health,
+        institutional_metrics=status_metrics.get("institutional_metrics", {}),
         system_status={"status": "HEALTHY"},
     )
     return {
@@ -204,6 +216,10 @@ def engine_observability():
 
 @router.get("/observability/dashboard")
 def observability_dashboard():
+    status_metrics = get_metrics_snapshot()
+    ranking_rows = get_ranking() or []
+    push_status = get_push_status()
+    storage_status = get_storage_status()
     telegram_health = get_telegram_health()
     dashboard = build_observability_dashboard(
         snapshot=get_snapshot_info(),
@@ -212,24 +228,25 @@ def observability_dashboard():
         polls=get_poll_store_summary(),
         providers={
             "items": [
-                {"provider": "yahoo", "status": "DEGRADED" if get_metrics_snapshot().get("cache_age") and get_metrics_snapshot().get("cache_age") > 3600 else "HEALTHY"},
-                {"provider": "push", "status": "HEALTHY" if get_push_status().get("android_ready") else "DEGRADED"},
-                {"provider": "storage", "status": "HEALTHY" if get_storage_status().get("ready") else "DEGRADED"},
+                {"provider": "yahoo", "status": "DEGRADED" if status_metrics.get("cache_age") and status_metrics.get("cache_age") > 3600 else "HEALTHY"},
+                {"provider": "push", "status": "HEALTHY" if push_status.get("android_ready") else "DEGRADED"},
+                {"provider": "storage", "status": "HEALTHY" if storage_status.get("ready") else "DEGRADED"},
             ]
         },
         ranking={
-            "status": "HEALTHY" if get_ranking() else "DEGRADED",
-            "eligible": len(get_ranking() or []),
+            "status": "HEALTHY" if ranking_rows else "DEGRADED",
+            "eligible": len(ranking_rows),
             "discarded": 0,
             "blocked": 0,
         },
         radar={
-            "status": "HEALTHY" if get_metrics_snapshot().get("signals_generated", 0) else "DEGRADED",
-            "generated": get_metrics_snapshot().get("signals_generated", 0),
+            "status": "HEALTHY" if status_metrics.get("signals_generated", 0) else "DEGRADED",
+            "generated": status_metrics.get("signals_generated", 0),
             "filtered": 0,
             "blocked": 0,
         },
         telegram=telegram_health,
+        institutional_metrics=status_metrics.get("institutional_metrics", {}),
         system_status={"status": "HEALTHY"},
     )
     if dashboard.get("system_status") == "CRITICAL":

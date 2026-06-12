@@ -48,8 +48,14 @@ from app.engine.indicators.vector_indicator_engine import compute_rsi
 from app.services.snapshot_contract import is_actionable_snapshot_row as _contract_is_actionable_snapshot_row
 from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score
 from app.services.snapshot_contract import summarize_snapshot_rows
+from app.services.institutional_consistency_audit import audit_institutional_consistency
 from app.services.signal_history import store_signals
-from app.system.system_metrics import record_signal_quality_coverage
+from app.system.system_metrics import (
+    record_institutional_auditor_metrics,
+    record_institutional_consistency_metrics,
+    record_master_score_metrics,
+    record_signal_quality_coverage,
+)
 
 logger = logging.getLogger("stocknewsbr.snapshot_engine")
 AI_INPUT_LIMIT = 80
@@ -501,6 +507,7 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
     institutional_convictions = conviction_items(normalized, limit=AI_OUTPUT_LIMIT)
     institutional_priorities = priority_items(normalized, limit=AI_OUTPUT_LIMIT)
     final_decisions = final_decision_items(normalized, limit=AI_OUTPUT_LIMIT)
+    consistency_audit = audit_institutional_consistency(normalized, generated_at=generated_at)
     normalized.sort(key=_safe_master_score, reverse=True)
     record_signal_quality_coverage(normalized, source=f"snapshot:{source}")
 
@@ -568,8 +575,12 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         "final_decision_observe": final_decision_metrics["observe"],
         "final_decision_wait": final_decision_metrics["wait"],
         "final_decision_no_trade": final_decision_metrics["no_trade"],
+        "institutional_consistency_issues": consistency_audit["issue_count"],
     }
     auditor_summary = summarize_audits(normalized)
+    record_institutional_auditor_metrics(auditor_summary)
+    record_master_score_metrics(master_score_rows)
+    record_institutional_consistency_metrics(consistency_audit.get("metrics"))
 
     decision = summarize_trade_decision(master_score_rows)
     logger.info(
@@ -600,11 +611,16 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         "operational_rules": normalized[:AI_OUTPUT_LIMIT],
         "operational_rules_metrics": operational_rules_metrics,
         "institutional_convictions": institutional_convictions,
+        "institutional_conviction": institutional_convictions[0] if institutional_convictions else {},
         "conviction_metrics": conviction_metrics,
         "institutional_priorities": institutional_priorities,
+        "institutional_priority": institutional_priorities[0] if institutional_priorities else {},
         "priority_metrics": priority_metrics,
         "final_decisions": final_decisions,
+        "final_decision": final_decisions[0] if final_decisions else {},
         "final_decision_metrics": final_decision_metrics,
+        "institutional_consistency": consistency_audit,
+        "institutional_consistency_metrics": consistency_audit.get("metrics", {}),
         "symbol_snapshots": {
             str(row.get("symbol") or row.get("ticker") or "").upper(): row
             for row in normalized[:200]
@@ -678,6 +694,7 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             "final_decision_observe": final_decision_metrics["observe"],
             "final_decision_wait": final_decision_metrics["wait"],
             "final_decision_no_trade": final_decision_metrics["no_trade"],
+            "institutional_consistency_issues": consistency_audit["issue_count"],
         },
     }
 

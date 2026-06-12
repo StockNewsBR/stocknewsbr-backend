@@ -174,6 +174,7 @@ def build_observability_dashboard(
     ranking: Dict[str, Any] | None = None,
     radar: Dict[str, Any] | None = None,
     telegram: Dict[str, Any] | None = None,
+    institutional_metrics: Dict[str, Any] | None = None,
     system_status: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     snapshot = snapshot or {}
@@ -184,6 +185,7 @@ def build_observability_dashboard(
     ranking = ranking or {}
     radar = radar or {}
     telegram = telegram or {}
+    institutional_metrics = institutional_metrics or {}
     system_status = system_status or {}
 
     provider_rows = providers.get("items") if isinstance(providers.get("items"), list) else []
@@ -266,6 +268,8 @@ def build_observability_dashboard(
             "medium": int(telegram.get("medium", 0) or 0),
             "counts": dict(telegram_counts),
         },
+        "institutional_metrics": institutional_metrics,
+        "institutional_consistency": institutional_metrics.get("institutional_consistency", {}),
         "recent_errors": recent_errors[:12],
         "error_center": {
             "total": len(recent_errors),
