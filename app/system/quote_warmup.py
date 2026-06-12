@@ -17,6 +17,8 @@ DEFAULT_QUOTE_WARMUP_INTERVAL_SECONDS = max(45, int(os.getenv("QUOTE_WARMUP_INTE
 DEFAULT_QUOTE_WARMUP_LIMIT = max(20, int(os.getenv("QUOTE_WARMUP_LIMIT", "140")))
 DEFAULT_QUOTE_WARMUP_CHUNK_SIZE = max(5, int(os.getenv("QUOTE_WARMUP_CHUNK_SIZE", "24")))
 DEFAULT_CHART_WARMUP_LIMIT = max(0, int(os.getenv("CHART_WARMUP_LIMIT", "24")))
+DEFAULT_QUOTE_COOLDOWN_SECONDS = max(120, int(os.getenv("QUOTE_WARMUP_COOLDOWN_SECONDS", "300")))
+DEFAULT_CHART_COOLDOWN_SECONDS = max(120, int(os.getenv("CHART_WARMUP_COOLDOWN_SECONDS", "300")))
 DEFAULT_CHART_WARMUP_INTERVALS = [
     item.strip().upper()
     for item in os.getenv("CHART_WARMUP_INTERVALS", "1D,1W,1M,3M,6M,YTD,1Y,ALL").split(",")
@@ -28,6 +30,8 @@ _stop_event = threading.Event()
 _lock = threading.RLock()
 _request_last_at: dict[str, float] = {}
 _request_running: set[str] = set()
+_quote_cooldowns: dict[str, float] = {}
+_chart_cooldowns: dict[str, float] = {}
 
 _PUBLIC_QUOTE_PRIORITY = [
     "PETR4",
@@ -122,6 +126,50 @@ def _dedupe(symbols: Iterable[str]) -> list[str]:
     return result
 
 
+def _quote_cooldown_key(symbol: str) -> str:
+    return _clean_symbol(symbol)
+
+
+def _chart_cooldown_key(symbol: str, interval: str) -> str:
+    return f"{_clean_symbol(symbol)}:{str(interval or '1D').strip().upper()}"
+
+
+def _is_quote_on_cooldown(symbol: str, now: float | None = None) -> bool:
+    key = _quote_cooldown_key(symbol)
+    if not key:
+        return False
+    current_time = now or time.time()
+    with _lock:
+        cooldown_until = float(_quote_cooldowns.get(key) or 0.0)
+    return cooldown_until > current_time
+
+
+def _mark_quote_cooldown(symbol: str, seconds: int = DEFAULT_QUOTE_COOLDOWN_SECONDS) -> None:
+    key = _quote_cooldown_key(symbol)
+    if not key:
+        return
+    with _lock:
+        _quote_cooldowns[key] = time.time() + max(60, int(seconds or DEFAULT_QUOTE_COOLDOWN_SECONDS))
+
+
+def _is_chart_on_cooldown(symbol: str, interval: str, now: float | None = None) -> bool:
+    key = _chart_cooldown_key(symbol, interval)
+    if not key:
+        return False
+    current_time = now or time.time()
+    with _lock:
+        cooldown_until = float(_chart_cooldowns.get(key) or 0.0)
+    return cooldown_until > current_time
+
+
+def _mark_chart_cooldown(symbol: str, interval: str, seconds: int = DEFAULT_CHART_COOLDOWN_SECONDS) -> None:
+    key = _chart_cooldown_key(symbol, interval)
+    if not key:
+        return
+    with _lock:
+        _chart_cooldowns[key] = time.time() + max(60, int(seconds or DEFAULT_CHART_COOLDOWN_SECONDS))
+
+
 def public_quote_symbols(limit: int | None = None) -> list[str]:
     symbols = _dedupe(
         [
@@ -167,6 +215,8 @@ def warm_charts_once(symbols: Iterable[str] | None = None, *, limit: int | None 
     with provider_call_context("chart_warmup"):
         for symbol in target_symbols:
             for interval in target_intervals:
+                if _is_chart_on_cooldown(symbol, interval):
+                    continue
                 try:
                     rows = []
                     for candidate in _chart_symbol_candidates(symbol):
@@ -175,8 +225,11 @@ def warm_charts_once(symbols: Iterable[str] | None = None, *, limit: int | None 
                             break
                     if rows:
                         resolved += 1
+                    else:
+                        _mark_chart_cooldown(symbol, interval)
                 except Exception as exc:
                     failed += 1
+                    _mark_chart_cooldown(symbol, interval)
                     logger.warning("Chart warmup failed | symbol=%s | interval=%s | error=%s", symbol, interval, exc)
 
     record_worker_stage_duration("chart_warmup", time.perf_counter() - start, success=failed == 0 or resolved > 0)
@@ -205,10 +258,17 @@ def warm_quotes_once(
     with provider_call_context("quote_warmup"):
         for index in range(0, len(target_symbols), chunk_size):
             chunk = target_symbols[index : index + chunk_size]
+            if all(_is_quote_on_cooldown(symbol) for symbol in chunk):
+                continue
             try:
                 resolved.update(get_price_snapshots(chunk, force_refresh=True) or {})
+                if not resolved:
+                    for symbol in chunk:
+                        _mark_quote_cooldown(symbol)
             except Exception as exc:
                 failed_chunks += 1
+                for symbol in chunk:
+                    _mark_quote_cooldown(symbol)
                 logger.warning("Quote warmup chunk failed | chunk=%s | error=%s", chunk, exc)
 
     success = failed_chunks == 0 or bool(resolved)

@@ -15,6 +15,7 @@ logger = logging.getLogger("stocknewsbr.news_warmup")
 DEFAULT_NEWS_WARMUP_INTERVAL_SECONDS = max(120, int(os.getenv("NEWS_WARMUP_INTERVAL_SECONDS", "300")))
 DEFAULT_NEWS_WARMUP_LIMIT = max(8, int(os.getenv("NEWS_WARMUP_LIMIT", "24")))
 DEFAULT_NEWS_WARMUP_MAX_CALLS = max(4, int(os.getenv("NEWS_WARMUP_MAX_CALLS", "12")))
+DEFAULT_NEWS_COOLDOWN_SECONDS = max(120, int(os.getenv("NEWS_WARMUP_COOLDOWN_SECONDS", "600")))
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -32,6 +33,7 @@ _lock = RLock()
 _last_warmup_at = 0.0
 _async_last_request_at: dict[str, float] = {}
 _async_running: set[str] = set()
+_symbol_cooldowns: dict[str, float] = {}
 
 _NEWS_PRIORITY = [
     "F",
@@ -71,6 +73,24 @@ def _dedupe(symbols: Iterable[str]) -> list[str]:
         seen.add(value)
         result.append(value)
     return result
+
+
+def _is_on_cooldown(symbol: str, now: float | None = None) -> bool:
+    ticker = _clean_symbol(symbol)
+    if not ticker:
+        return False
+    current_time = now or time.time()
+    with _lock:
+        cooldown_until = float(_symbol_cooldowns.get(ticker) or 0.0)
+    return cooldown_until > current_time
+
+
+def _mark_cooldown(symbol: str, seconds: int = DEFAULT_NEWS_COOLDOWN_SECONDS) -> None:
+    ticker = _clean_symbol(symbol)
+    if not ticker:
+        return
+    with _lock:
+        _symbol_cooldowns[ticker] = time.time() + max(60, int(seconds or DEFAULT_NEWS_COOLDOWN_SECONDS))
 
 
 def _read_requests() -> dict[str, dict]:
@@ -151,7 +171,10 @@ def _warm_single_request(symbol: str, limit: int, key: str) -> None:
         success = bool(items)
         if items:
             _drop_warmed_requests([symbol])
+        else:
+            _mark_cooldown(symbol)
     except Exception:
+        _mark_cooldown(symbol)
         logger.exception("Async news warmup failed for %s", symbol)
     finally:
         with _lock:
@@ -214,14 +237,22 @@ def warm_news_once(limit: int = DEFAULT_NEWS_WARMUP_LIMIT, max_calls: int = DEFA
         for symbol, item_limit in target_pairs:
             if attempted >= max_calls:
                 break
+            if _is_on_cooldown(symbol, now):
+                continue
             if get_cached_symbol_news(symbol, limit=item_limit):
                 cached += 1
                 warmed.append(symbol)
                 continue
             attempted += 1
-            items = get_symbol_news(symbol, limit=item_limit)
-            if items:
-                warmed.append(symbol)
+            try:
+                items = get_symbol_news(symbol, limit=item_limit)
+                if items:
+                    warmed.append(symbol)
+                else:
+                    _mark_cooldown(symbol)
+            except Exception:
+                _mark_cooldown(symbol)
+                logger.warning("News warmup failed | symbol=%s | limit=%s", symbol, item_limit)
 
     _drop_warmed_requests(warmed)
     _last_warmup_at = now

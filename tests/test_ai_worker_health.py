@@ -3,6 +3,9 @@ from unittest.mock import patch
 
 import worker
 from app.system import ai_worker
+from app.system import chart_warmup
+from app.system import news_warmup
+from app.system import quote_warmup
 from app.system import snapshot_worker
 from app.cache.snapshot_cache import SnapshotCache
 
@@ -185,6 +188,150 @@ class AiWorkerHealthTests(unittest.TestCase):
             snapshot_worker._stop_event = original_stop_event
 
         generate_snapshot.assert_called_once_with()
+
+    def test_news_warmup_skips_repeated_empty_provider_calls_during_cooldown(self):
+        original_last_warmup_at = news_warmup._last_warmup_at
+        original_cooldowns = dict(news_warmup._symbol_cooldowns)
+        try:
+            news_warmup._last_warmup_at = 0.0
+            news_warmup._symbol_cooldowns.clear()
+            with patch.object(news_warmup, "_requested_symbols", return_value=[("PETR4", 6)]), patch.object(
+                news_warmup,
+                "get_cached_symbol_news",
+                return_value=[],
+            ), patch.object(
+                news_warmup,
+                "get_symbol_news",
+                return_value=[],
+            ) as get_news, patch.object(
+                news_warmup,
+                "_is_on_cooldown",
+                return_value=False,
+            ):
+                first = news_warmup.warm_news_once(limit=0, max_calls=1)
+            self.assertIn("PETR4", news_warmup._symbol_cooldowns)
+            with patch.object(news_warmup, "_requested_symbols", return_value=[("PETR4", 6)]), patch.object(
+                news_warmup,
+                "get_cached_symbol_news",
+                return_value=[],
+            ), patch.object(
+                news_warmup,
+                "get_symbol_news",
+                return_value=[],
+            ) as get_news_second, patch.object(
+                news_warmup,
+                "_is_on_cooldown",
+                return_value=True,
+            ):
+                second = news_warmup.warm_news_once(limit=1, max_calls=1)
+        finally:
+            news_warmup._last_warmup_at = original_last_warmup_at
+            news_warmup._symbol_cooldowns.clear()
+            news_warmup._symbol_cooldowns.update(original_cooldowns)
+
+        self.assertEqual(first["attempted"], 1)
+        self.assertEqual(second["attempted"], 0)
+        self.assertEqual(get_news.call_count, 1)
+        self.assertEqual(get_news_second.call_count, 0)
+
+    def test_quote_warmup_skips_repeated_empty_provider_calls_during_cooldown(self):
+        original_quote_cooldowns = dict(quote_warmup._quote_cooldowns)
+        try:
+            quote_warmup._quote_cooldowns.clear()
+            with patch.object(
+                quote_warmup,
+                "public_quote_symbols",
+                return_value=["PETR4"],
+            ), patch.object(
+                quote_warmup,
+                "get_price_snapshots",
+                return_value={},
+            ) as get_prices, patch.object(
+                quote_warmup.time,
+                "time",
+                return_value=1000.0,
+            ):
+                first = quote_warmup.warm_quotes_once(limit=1, chunk_size=1)
+            quote_warmup._quote_cooldowns["PETR4"] = 2000.0
+            with patch.object(
+                quote_warmup,
+                "public_quote_symbols",
+                return_value=["PETR4"],
+            ), patch.object(
+                quote_warmup,
+                "get_price_snapshots",
+                return_value={},
+            ), patch.object(
+                quote_warmup.time,
+                "time",
+                return_value=1301.0,
+            ):
+                second = quote_warmup.warm_quotes_once(limit=1, chunk_size=1)
+        finally:
+            quote_warmup._quote_cooldowns.clear()
+            quote_warmup._quote_cooldowns.update(original_quote_cooldowns)
+
+        self.assertEqual(first["resolved"], 0)
+        self.assertEqual(second["resolved"], 0)
+        self.assertEqual(get_prices.call_count, 1)
+
+    def test_chart_warmup_skips_repeated_empty_provider_calls_during_cooldown(self):
+        original_chart_cooldowns = dict(chart_warmup._pair_cooldowns)
+        try:
+            chart_warmup._pair_cooldowns.clear()
+            with patch.object(
+                chart_warmup,
+                "_requested_pairs",
+                return_value=[("PETR4", "1D")],
+            ), patch.object(
+                chart_warmup,
+                "_default_symbols",
+                return_value=["PETR4"],
+            ), patch.object(
+                chart_warmup,
+                "get_cached_chart_data",
+                return_value=[],
+            ), patch.object(
+                chart_warmup,
+                "get_chart_data",
+                return_value=[],
+            ) as get_chart, patch.object(
+                chart_warmup,
+                "_is_on_cooldown",
+                return_value=False,
+            ):
+                first = chart_warmup.warm_charts_once(limit=1, max_calls=1)
+            self.assertIn("PETR4:1D", chart_warmup._pair_cooldowns)
+            with patch.object(
+                chart_warmup,
+                "_requested_pairs",
+                return_value=[("PETR4", "1D")],
+            ), patch.object(
+                chart_warmup,
+                "_default_symbols",
+                return_value=["PETR4"],
+            ), patch.object(
+                chart_warmup,
+                "get_cached_chart_data",
+                return_value=[],
+            ), patch.object(
+                chart_warmup,
+                "get_chart_data",
+                return_value=[],
+            ) as get_chart_second, patch.object(
+                chart_warmup,
+                "_is_on_cooldown",
+                return_value=True,
+            ):
+                second = chart_warmup.warm_charts_once(limit=1, max_calls=1)
+        finally:
+            chart_warmup._pair_cooldowns.clear()
+            chart_warmup._pair_cooldowns.update(original_chart_cooldowns)
+
+        self.assertEqual(first["attempted"], 1)
+        self.assertEqual(second["attempted"], 0)
+        self.assertEqual(get_chart.call_count, 1)
+        self.assertEqual(get_chart_second.call_count, 0)
 
 
 if __name__ == "__main__":

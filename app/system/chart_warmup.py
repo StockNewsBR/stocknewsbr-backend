@@ -37,8 +37,10 @@ DEFAULT_INTERVALS = tuple(
     for item in os.getenv("CHART_PREWARM_INTERVALS", "1D,1W,1M,3M,6M,YTD,1Y,ALL").split(",")
     if item.strip()
 )
+DEFAULT_CHART_COOLDOWN_SECONDS = max(120, int(os.getenv("CHART_WARMUP_COOLDOWN_SECONDS", "300")))
 _REQUEST_LOCK = RLock()
 _B3_MINI_FUTURE_RE = re.compile(r"^(WIN|WDO)[FGHJKMNQUVXZ]\d{2}$")
+_pair_cooldowns: dict[str, float] = {}
 
 
 def _normalize_symbol(value: object) -> str:
@@ -48,6 +50,24 @@ def _normalize_symbol(value: object) -> str:
 def _normalize_interval(value: object) -> str:
     normalized = str(value or "1D").upper().strip()
     return "ALL" if normalized == "ALL" else normalized
+
+
+def _pair_key(symbol: str, interval: str) -> str:
+    return f"{_normalize_symbol(symbol)}:{_normalize_interval(interval)}"
+
+
+def _is_on_cooldown(symbol: str, interval: str, now: float | None = None) -> bool:
+    key = _pair_key(symbol, interval)
+    current_time = now or time.time()
+    with _REQUEST_LOCK:
+        cooldown_until = float(_pair_cooldowns.get(key) or 0.0)
+    return cooldown_until > current_time
+
+
+def _mark_cooldown(symbol: str, interval: str, seconds: int = DEFAULT_CHART_COOLDOWN_SECONDS) -> None:
+    key = _pair_key(symbol, interval)
+    with _REQUEST_LOCK:
+        _pair_cooldowns[key] = time.time() + max(60, int(seconds or DEFAULT_CHART_COOLDOWN_SECONDS))
 
 
 def _is_blocked_chart_symbol(symbol: str) -> bool:
@@ -163,15 +183,23 @@ def warm_charts_once(limit: int = 24, max_calls: int = 12, intervals: Iterable[s
         for symbol, interval in pairs:
             if attempted >= max_calls:
                 break
+            if _is_on_cooldown(symbol, interval):
+                continue
             if get_cached_chart_data(symbol, interval):
                 skipped += 1
                 warmed.append((symbol, interval))
                 continue
             attempted += 1
-            rows = get_chart_data(symbol, interval)
-            if rows:
-                warmed.append((symbol, interval))
+            try:
+                rows = get_chart_data(symbol, interval)
+                if rows:
+                    warmed.append((symbol, interval))
+                else:
+                    _mark_cooldown(symbol, interval)
+            except Exception as exc:
+                _mark_cooldown(symbol, interval)
+                logger.warning("Chart warmup failed | symbol=%s | interval=%s | error=%s", symbol, interval, exc)
 
     _drop_warmed_requests(warmed)
-    record_worker_stage_duration("chart_warmup", time.perf_counter() - start, success=True)
+    record_worker_stage_duration("chart_warmup", time.perf_counter() - start, success=bool(warmed) or skipped > 0)
     return {"requested": len(requested_pairs), "attempted": attempted, "warmed": len(warmed), "skipped": skipped}

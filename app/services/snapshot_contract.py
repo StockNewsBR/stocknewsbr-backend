@@ -31,6 +31,77 @@ BLOCKED_DATA_QUALITIES = {
     "invalid",
 }
 
+QUALITY_REAL_TIME = "real_time"
+QUALITY_CACHED = "cached"
+QUALITY_STALE = "stale"
+QUALITY_EMPTY = "empty"
+QUALITY_INVALID = "invalid"
+QUALITY_SCORE_ONLY = "score_only"
+QUALITY_LABELS = {
+    QUALITY_REAL_TIME: "Dados Confiáveis",
+    QUALITY_CACHED: "Dados Confiáveis",
+    QUALITY_STALE: "Dados Limitados",
+    QUALITY_EMPTY: "Dados Limitados",
+    QUALITY_INVALID: "Dados Limitados",
+    QUALITY_SCORE_ONLY: "Dados Parciais",
+}
+
+
+def coerce_data_quality(row: Any) -> str:
+    if not isinstance(row, dict):
+        return QUALITY_INVALID
+
+    raw = str(
+        row.get("data_quality")
+        or row.get("quote_status")
+        or row.get("status")
+        or row.get("provider_status")
+        or row.get("market_data_status")
+        or ""
+    ).strip().lower()
+
+    if raw in {QUALITY_REAL_TIME, QUALITY_CACHED, QUALITY_STALE, QUALITY_EMPTY, QUALITY_INVALID, QUALITY_SCORE_ONLY}:
+        return raw
+
+    if row.get("provider_error") or row.get("provider_failed"):
+        return QUALITY_INVALID
+    if row.get("stale") is True or row.get("is_stale") is True:
+        return QUALITY_STALE
+    if raw in {"priced", "valid", "fresh", "ok", "real", "market_cache", "snapshot"}:
+        return QUALITY_CACHED if row.get("source") in {"cached", "snapshot", "cache", "market_cache"} else QUALITY_REAL_TIME
+    if raw in {"partial", "limited"}:
+        return QUALITY_SCORE_ONLY
+    if raw in {"missing", "empty", "no_price", "no-price", "no price", "unavailable"}:
+        return QUALITY_EMPTY
+    if raw in {"invalid", "error", "failed", "timeout", "provider_failed", "provider-failed", "provider failed"}:
+        return QUALITY_INVALID
+    if raw == "score_only" or raw == "score only":
+        return QUALITY_SCORE_ONLY
+
+    price_ok = has_positive_value(row, "price", "close", "last_price")
+    volume_ok = has_positive_value(row, "volume", "last_volume")
+    if price_ok and volume_ok:
+        return QUALITY_REAL_TIME if row.get("source") in {"market", "real_time", "realtime"} else QUALITY_CACHED
+    if price_ok or volume_ok:
+        return QUALITY_SCORE_ONLY
+    return QUALITY_EMPTY
+
+
+def data_quality_label(quality: str) -> str:
+    return QUALITY_LABELS.get(str(quality or "").strip().lower(), "Dados Limitados")
+
+
+def data_quality_score(quality: str) -> int:
+    normalized = str(quality or "").strip().lower()
+    return {
+        QUALITY_REAL_TIME: 100,
+        QUALITY_CACHED: 88,
+        QUALITY_SCORE_ONLY: 52,
+        QUALITY_STALE: 35,
+        QUALITY_EMPTY: 12,
+        QUALITY_INVALID: 0,
+    }.get(normalized, 0)
+
 
 def safe_float(value: Any, default: float = 0.0) -> float:
     try:
