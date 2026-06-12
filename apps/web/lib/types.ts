@@ -355,6 +355,59 @@ export type ChatMessage = {
   created_at: number;
 };
 
+export type WorkspaceObservabilityDashboard = {
+  system_status: string;
+  providers?: {
+    status?: string;
+    items?: Array<{ provider?: string; status?: string }>;
+    counts?: Record<string, number>;
+  };
+  snapshot_health?: {
+    status?: string;
+    signals_generated?: number;
+    invalid?: number;
+    discarded?: number;
+    blocked?: number;
+  };
+  auditor_health?: {
+    status?: string;
+    counts?: Record<string, number>;
+    blocked_ratio?: number;
+  };
+  score_health?: {
+    status?: string;
+    distribution?: Record<string, number>;
+  };
+  radar_health?: {
+    status?: string;
+    generated?: number;
+    filtered?: number;
+    blocked?: number;
+    counts?: Record<string, number>;
+  };
+  ranking_health?: {
+    status?: string;
+    eligible?: number;
+    discarded?: number;
+    blocked?: number;
+    counts?: Record<string, number>;
+  };
+  telegram_health?: {
+    status?: string;
+    sent?: number;
+    blocked?: number;
+    discarded?: number;
+    errors?: number;
+    counts?: Record<string, number>;
+  };
+  recent_errors?: Array<{ kind?: string; message?: string; severity?: string; source?: string; timestamp?: number }>;
+  error_center?: {
+    total?: number;
+    groups?: Record<string, number>;
+  };
+  alerts?: Array<{ kind?: string; message?: string; severity?: string } | null>;
+};
+
 export type WorkspaceData = {
   brand: string;
   workspace_mode: string;
@@ -371,6 +424,7 @@ export type WorkspaceData = {
   strategic_panel?: StrategicPanel;
   strategic_panels?: StrategicPanel[];
   strategic_panel_summary?: string;
+  observability?: WorkspaceObservabilityDashboard;
   ai_tools: WorkspaceAiTools;
   featured_posts: FeedPost[];
   ticker_room_preview: {

@@ -8,12 +8,13 @@ from fastapi.responses import PlainTextResponse
 from app.cache.snapshot_cache import get_snapshot_info
 from app.dependencies import require_internal_token
 from app.services.media_service import get_media_status
+from app.services.ranking import get_ranking
 from app.services.poll_service import get_poll_store_summary
 from app.services.push_service import get_push_status
 from app.services.storage_service import get_storage_status
 from app.social.moderation import get_moderation_summary
 from app.system.ai_tab_audit import get_ai_tab_audit_history, get_ai_tab_audit_report, run_ai_tab_audit
-from app.system.observability_engine import get_metrics
+from app.system.observability_engine import build_observability_dashboard, get_metrics, record_observability_event
 from app.system.system_metrics import format_prometheus_metrics, get_metrics_snapshot, get_performance_metrics_snapshot
 
 router = APIRouter(
@@ -148,6 +149,28 @@ def observability_report():
     metrics = get_metrics()
     status_metrics = get_metrics_snapshot()
     performance_metrics = get_performance_metrics_snapshot()
+    dashboard = build_observability_dashboard(
+        snapshot={
+            "signals": status_metrics.get("signals_generated", 0),
+            "invalid": status_metrics.get("http_errors", 0),
+            "discarded": 0,
+            "blocked": 0,
+            "master_scores": [],
+        },
+        ai_worker=get_ai_worker_report(),
+        ai_tabs=get_ai_tab_audit_report(),
+        polls=get_poll_store_summary(),
+        providers={
+            "items": [
+                {"provider": "system", "status": "HEALTHY"},
+                {"provider": "news", "status": "HEALTHY" if get_push_status().get("android_ready") else "DEGRADED"},
+            ]
+        },
+        ranking={"status": "HEALTHY" if get_ranking() else "DEGRADED", "eligible": len(get_ranking() or []), "discarded": 0, "blocked": 0},
+        radar={"status": "HEALTHY", "generated": status_metrics.get("signals_generated", 0), "filtered": 0, "blocked": 0},
+        telegram={"status": "HEALTHY" if get_push_status().get("android_ready") else "DEGRADED", "sent": int(get_push_status().get("registered_tokens", 0) or 0), "blocked": 0, "discarded": 0, "errors": 0},
+        system_status={"status": "HEALTHY"},
+    )
     return {
         "uptime_seconds": metrics["uptime_seconds"],
         "engine_cycles": status_metrics["engine_cycles"],
@@ -160,6 +183,7 @@ def observability_report():
         "push_sends": status_metrics["push_sends"],
         "moderation": get_moderation_summary(),
         "performance": performance_metrics,
+        "dashboard": dashboard,
     }
 
 
@@ -174,6 +198,46 @@ def engine_observability():
         "engine_cycles": metrics["engine_cycles"],
         "peak_signals": metrics["peak_signals"],
     }
+
+
+@router.get("/observability/dashboard")
+def observability_dashboard():
+    dashboard = build_observability_dashboard(
+        snapshot=get_snapshot_info(),
+        ai_worker=get_ai_worker_report(),
+        ai_tabs=get_ai_tab_audit_report(),
+        polls=get_poll_store_summary(),
+        providers={
+            "items": [
+                {"provider": "yahoo", "status": "DEGRADED" if get_metrics_snapshot().get("cache_age") and get_metrics_snapshot().get("cache_age") > 3600 else "HEALTHY"},
+                {"provider": "push", "status": "HEALTHY" if get_push_status().get("android_ready") else "DEGRADED"},
+                {"provider": "storage", "status": "HEALTHY" if get_storage_status().get("ready") else "DEGRADED"},
+            ]
+        },
+        ranking={
+            "status": "HEALTHY" if get_ranking() else "DEGRADED",
+            "eligible": len(get_ranking() or []),
+            "discarded": 0,
+            "blocked": 0,
+        },
+        radar={
+            "status": "HEALTHY" if get_metrics_snapshot().get("signals_generated", 0) else "DEGRADED",
+            "generated": get_metrics_snapshot().get("signals_generated", 0),
+            "filtered": 0,
+            "blocked": 0,
+        },
+        telegram={
+            "status": "HEALTHY" if get_push_status().get("android_ready") else "DEGRADED",
+            "sent": get_push_status().get("android_ready", 0),
+            "blocked": 0,
+            "discarded": 0,
+            "errors": 0,
+        },
+        system_status={"status": "HEALTHY"},
+    )
+    if dashboard.get("system_status") == "CRITICAL":
+        record_observability_event("system", "observability dashboard critical", severity="critical")
+    return dashboard
 
 
 @router.get("/ai-worker")

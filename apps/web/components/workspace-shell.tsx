@@ -73,6 +73,7 @@ import type {
   UserAccess,
   WorkspaceData,
   WorkspaceTab,
+  WorkspaceObservabilityDashboard,
 } from "@/lib/types";
 
 type Props = {
@@ -9856,6 +9857,97 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     );
   }
 
+  function renderObservability() {
+    const observability = (workspace?.observability || {}) as WorkspaceObservabilityDashboard;
+    const providerItems = observability.providers?.items || [];
+    const recentErrors = observability.recent_errors || [];
+    const alertItems = (observability.alerts || []).filter(Boolean);
+
+    return (
+      <section className="snbr-tool-shell">
+        <div className="snbr-tool-head">
+          <div>
+            <h2>{isUsLocale ? "Observability" : "Observabilidade"}</h2>
+            <p>{isUsLocale ? "Admin view for health, providers and recent errors." : "Visão administrativa de saúde, providers e erros recentes."}</p>
+          </div>
+          <span className={cx("snbr-chip", String(observability.system_status || "HEALTHY").toLowerCase())}>{String(observability.system_status || "HEALTHY")}</span>
+        </div>
+
+        <div className="snbr-tool-reading-grid">
+          <div className="snbr-tool-reading-card">
+            <span>{isUsLocale ? "System" : "Sistema"}</span>
+            <strong>{String(observability.system_status || "HEALTHY")}</strong>
+            <p>{isUsLocale ? "Consolidated health center." : "Health center consolidado."}</p>
+          </div>
+          <div className="snbr-tool-reading-card">
+            <span>{isUsLocale ? "Snapshot health" : "Saúde do snapshot"}</span>
+            <strong>{String(observability.snapshot_health?.status || "HEALTHY")}</strong>
+            <p>{observability.snapshot_health?.signals_generated || 0} {isUsLocale ? "generated" : "gerados"}</p>
+          </div>
+          <div className="snbr-tool-reading-card">
+            <span>{isUsLocale ? "Auditor health" : "Saúde do auditor"}</span>
+            <strong>{String(observability.auditor_health?.status || "IDLE")}</strong>
+            <p>{observability.auditor_health?.blocked_ratio != null ? `${Math.round((observability.auditor_health.blocked_ratio || 0) * 100)}% blocked` : "--"}</p>
+          </div>
+          <div className="snbr-tool-reading-card">
+            <span>{isUsLocale ? "Radar health" : "Saúde do radar"}</span>
+            <strong>{String(observability.radar_health?.status || "IDLE")}</strong>
+            <p>{observability.radar_health?.generated || 0} / {observability.radar_health?.blocked || 0}</p>
+          </div>
+          <div className="snbr-tool-reading-card">
+            <span>{isUsLocale ? "Ranking health" : "Saúde do ranking"}</span>
+            <strong>{String(observability.ranking_health?.status || "IDLE")}</strong>
+            <p>{observability.ranking_health?.eligible || 0} {isUsLocale ? "eligible" : "elegíveis"}</p>
+          </div>
+          <div className="snbr-tool-reading-card">
+            <span>{isUsLocale ? "Telegram health" : "Saúde do Telegram"}</span>
+            <strong>{String(observability.telegram_health?.status || "IDLE")}</strong>
+            <p>{observability.telegram_health?.sent || 0} {isUsLocale ? "sent" : "enviados"}</p>
+          </div>
+        </div>
+
+        <div className="snbr-tool-stack">
+          <div className="snbr-tool-reading-card">
+            <span>{isUsLocale ? "Providers" : "Providers"}</span>
+            <strong>{isUsLocale ? "Current status" : "Status atual"}</strong>
+            <div className="snbr-pill-row">
+              {providerItems.length ? providerItems.map((item: any) => (
+                <span key={`${item.provider}-${item.status}`} className={cx("snbr-chip", String(item.status || "HEALTHY").toLowerCase())}>
+                  {item.provider}: {item.status}
+                </span>
+              )) : <span className="snbr-chip">{isUsLocale ? "No provider data" : "Sem dados de provider"}</span>}
+            </div>
+          </div>
+
+          <div className="snbr-tool-reading-card">
+            <span>{isUsLocale ? "Error center" : "Centro de erros"}</span>
+            <strong>{recentErrors.length} {isUsLocale ? "recent errors" : "erros recentes"}</strong>
+            <p>{isUsLocale ? "Grouped without log spam." : "Agrupado sem spam de logs."}</p>
+            <div className="snbr-tool-stack">
+              {recentErrors.slice(0, 6).map((item: any, index: number) => (
+                <div key={`${item.kind || "error"}-${item.timestamp || index}`} className="snbr-chip">
+                  {item.kind}: {item.message}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="snbr-tool-reading-card">
+            <span>{isUsLocale ? "Internal alerts" : "Alertas internos"}</span>
+            <strong>{alertItems.length}</strong>
+            <div className="snbr-tool-stack">
+              {alertItems.slice(0, 6).map((item: any, index: number) => (
+                <div key={`${item.kind || "alert"}-${index}`} className="snbr-chip">
+                  {item.message} · {item.severity}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   function renderReferrals() {
     const rows = referralLeaderboard?.items || [];
     const ruleText = isUsLocale
@@ -9932,6 +10024,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     if (currentTab === "regime") return renderToolTab(TOOL_COPY.regime.title, TOOL_COPY.regime.description);
     if (currentTab === "referrals") return renderReferrals();
     if (currentTab === "education") return renderEducation();
+    if (currentTab === "observability") return renderObservability();
     return renderGrafico();
   }
 

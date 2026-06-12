@@ -15,6 +15,7 @@ from app.services.snapshot_contract import is_actionable_snapshot_row
 from app.services.ticker_room_service import list_room_messages
 from app.services.workspace_layout_service import get_user_workspace_layout
 from app.social.posts import get_posts
+from app.api import routes_system
 from app.system.system_metrics import get_metrics_snapshot
 
 
@@ -188,6 +189,7 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
     help_center = get_help_center_blueprint()
     media_status = get_media_status()
     push_status = get_push_status()
+    observability = routes_system.observability_dashboard()
     layout = get_user_workspace_layout(user_id or 0)
     saved_order = layout.get("tabs", [])
     pinned_ticker = layout.get("pinned_ticker", "PETR4")
@@ -230,6 +232,7 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "help_center": help_center,
         "media": media_status,
         "push": push_status,
+        "observability": observability,
         "pricing": bootstrap["pricing"],
         "launch_roadmap": bootstrap["launch_roadmap"],
         "ai_modules": bootstrap["ai_modules"],
