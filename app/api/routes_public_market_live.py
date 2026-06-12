@@ -119,6 +119,14 @@ def _snapshot_master_context(symbol: str) -> dict:
         "strategic_panel": row.get("strategic_panel") if isinstance(row.get("strategic_panel"), dict) else {},
         "strategic_panel_summary": row.get("strategic_panel_summary") or "",
         "recommended_action": row.get("recommended_action"),
+        "radar_prioritization_score": row.get("radar_prioritization_score"),
+        "radar_priority_score": row.get("radar_priority_score"),
+        "radar_priority": row.get("radar_priority"),
+        "radar_level": row.get("radar_level"),
+        "radar_reason": row.get("radar_reason"),
+        "radar_summary": row.get("radar_summary"),
+        "radar_no_trade_now": bool(row.get("radar_no_trade_now")),
+        "radar_blocked_reasons": row.get("radar_blocked_reasons") or [],
     }
 
 

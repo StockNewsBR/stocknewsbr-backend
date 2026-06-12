@@ -51,6 +51,13 @@ _external_provider_symbol_calls = {}
 _external_provider_failures = {}
 _worker_stage_timings = {}
 _signal_quality_coverage = {}
+_institutional_radar_metrics = {
+    "generated": 0,
+    "promoted": 0,
+    "discarded": 0,
+    "blocked": 0,
+    "updated_at": 0.0,
+}
 
 
 def _quantile(sorted_values, quantile: float) -> float:
@@ -350,6 +357,25 @@ def record_signal_quality_coverage(rows, source: str = "signal_cache"):
         }
 
 
+def record_institutional_radar_metrics(metrics: dict | None):
+    safe = metrics if isinstance(metrics, dict) else {}
+    with _lock:
+        _institutional_radar_metrics.update(
+            {
+                "generated": int(safe.get("generated", 0) or 0),
+                "promoted": int(safe.get("promoted", 0) or 0),
+                "discarded": int(safe.get("discarded", 0) or 0),
+                "blocked": int(safe.get("blocked", 0) or 0),
+                "updated_at": time.time(),
+            }
+        )
+
+
+def get_institutional_radar_metrics_snapshot():
+    with _lock:
+        return dict(_institutional_radar_metrics)
+
+
 def get_performance_metrics_snapshot():
     with _lock:
         http_metrics = {}
@@ -431,6 +457,7 @@ def get_performance_metrics_snapshot():
             source: dict(entry)
             for source, entry in _signal_quality_coverage.items()
         }
+        institutional_radar = dict(_institutional_radar_metrics)
 
         repeated_failures = sorted(
             (
@@ -456,6 +483,7 @@ def get_performance_metrics_snapshot():
         "external_provider_symbol_call_total": provider_symbol_metrics,
         "worker_stage_seconds": worker_metrics,
         "signal_quality_coverage": signal_quality,
+        "institutional_radar": institutional_radar,
         "provider_symbol_failures": repeated_failures,
     }
 
@@ -542,6 +570,10 @@ def format_prometheus_metrics() -> str:
         lines.append('signal_quality_coverage_ratio{source="%s",field="priced"} %s' % (_label_value(source), float(item.get("priced_coverage", 0.0))))
         lines.append('signal_quality_score_only_total{source="%s"} %s' % (_label_value(source), int(item.get("score_only", 0))))
         lines.append('signal_quality_conflict_total{source="%s"} %s' % (_label_value(source), int(item.get("conflict_detected", 0))))
+
+    radar_metrics = performance.get("institutional_radar", {})
+    for field in ("generated", "promoted", "discarded", "blocked"):
+        lines.append('institutional_radar_signals_total{state="%s"} %s' % (_label_value(field), int(radar_metrics.get(field, 0))))
 
     for item in performance.get("provider_symbol_failures", []):
         lines.append(

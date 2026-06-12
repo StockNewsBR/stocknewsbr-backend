@@ -8,6 +8,7 @@ import logging
 import pandas as pd
 
 from app.ai.ai_radar import run_radar
+from app.ai.institutional_radar import enrich_institutional_radar_rows, institutional_radar_items
 from app.cache.snapshot_cache import get_snapshot_signals
 from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score, is_actionable_snapshot_row
 
@@ -131,6 +132,12 @@ def analyze_symbol(symbol):
         return {
             "symbol": normalized,
             "radar_score": score,
+            "radar_prioritization_score": source.get("radar_prioritization_score"),
+            "radar_priority_score": source.get("radar_priority_score"),
+            "radar_priority": source.get("radar_priority"),
+            "radar_level": source.get("radar_level"),
+            "radar_reason": source.get("radar_reason"),
+            "radar_summary": source.get("radar_summary"),
             "master_score": source.get("master_score"),
             "master_direction": source.get("master_direction"),
             "master_status": source.get("master_status"),
@@ -151,14 +158,20 @@ def build_radar():
     results = []
 
     try:
-        actionable_rows = [row for row in get_snapshot_signals() if is_actionable_snapshot_row(row)]
+        snapshot_rows = [row for row in get_snapshot_signals() if isinstance(row, dict)]
+        enriched_rows, _metrics = enrich_institutional_radar_rows(snapshot_rows, record_metrics=True)
+        actionable_rows = [
+            row
+            for row in institutional_radar_items(enriched_rows, limit=50)
+            if is_actionable_snapshot_row(row)
+        ]
         source_by_ticker = {
             _normalize_symbol(row.get("ticker") or row.get("symbol")): row
             for row in actionable_rows
             if isinstance(row, dict)
         }
 
-        for row in run_radar(actionable_rows, limit=50):
+        for row in actionable_rows:
             symbol = row.get("ticker") or row.get("symbol")
             if not symbol:
                 continue
@@ -167,6 +180,14 @@ def build_radar():
                 {
                     "symbol": _normalize_symbol(symbol),
                     "radar_score": _safe_float(row.get("score") or row.get("radar_score") or 0),
+                    "radar_prioritization_score": source.get("radar_prioritization_score"),
+                    "radar_priority_score": source.get("radar_priority_score"),
+                    "radar_priority": source.get("radar_priority"),
+                    "radar_level": source.get("radar_level"),
+                    "radar_reason": source.get("radar_reason"),
+                    "radar_summary": source.get("radar_summary"),
+                    "radar_no_trade_now": bool(source.get("radar_no_trade_now")),
+                    "radar_blocked_reasons": source.get("radar_blocked_reasons") or [],
                     "master_score": source.get("master_score"),
                     "master_direction": source.get("master_direction"),
                     "master_conviction": source.get("master_conviction"),
@@ -198,6 +219,6 @@ def build_radar():
 
         logger.exception("Radar scanner error")
 
-    results.sort(key=lambda x: x["radar_score"], reverse=True)
+    results.sort(key=lambda x: _safe_float(x.get("radar_prioritization_score") or x.get("radar_priority_score") or x.get("radar_score")), reverse=True)
 
     return results

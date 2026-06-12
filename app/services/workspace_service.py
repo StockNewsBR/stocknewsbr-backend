@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 
 from app.Frontend.layout import get_layout
 from app.cache.snapshot_cache import get_snapshot
+from app.ai.institutional_radar import ensure_institutional_radar_rows, institutional_radar_items
 from app.services.ai_alert_history_service import persist_ai_alert_history
 from app.ai.ai_specialists import OFFICIAL_AI_TOOL_KEYS
 from app.services.help_center_service import get_help_center_blueprint
@@ -135,14 +136,19 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
     snapshot = get_snapshot()
     if not isinstance(snapshot, dict):
         snapshot = {}
-    snapshot_signals = _safe_rows(snapshot.get("signals"))
+    snapshot_signals = ensure_institutional_radar_rows(
+        _safe_rows(snapshot.get("signals")),
+        ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
+        market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
+    )
     actionable_signals = [row for row in snapshot_signals if is_actionable_snapshot_row(row)]
+    radar_signals = institutional_radar_items(actionable_signals, limit=50)
     blocked_signals = [
         row
         for row in snapshot_signals
         if row.get("blocked_by_auditor") is True or str(row.get("audit_status") or "").upper() == "BLOCKED"
     ]
-    top_signals = actionable_signals[:12]
+    top_signals = radar_signals[:12] if radar_signals else actionable_signals[:12]
     symbol_snapshots = snapshot.get("symbol_snapshots") if isinstance(snapshot.get("symbol_snapshots"), dict) else {}
     market_snapshot = {
         "schema_version": snapshot.get("schema_version"),
@@ -161,6 +167,8 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "strategic_panel": snapshot.get("strategic_panel") if isinstance(snapshot.get("strategic_panel"), dict) else {},
         "strategic_panels": snapshot.get("strategic_panels") if isinstance(snapshot.get("strategic_panels"), list) else [],
         "strategic_panel_summary": snapshot.get("strategic_panel_summary") or "",
+        "institutional_radar": snapshot.get("institutional_radar") if isinstance(snapshot.get("institutional_radar"), list) else radar_signals[:20],
+        "radar_metrics": snapshot.get("radar_metrics") if isinstance(snapshot.get("radar_metrics"), dict) else {},
         "symbol_count": len(symbol_snapshots),
     }
     data_status = market_snapshot["data_status"] if isinstance(market_snapshot.get("data_status"), dict) else {}
@@ -220,6 +228,7 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "channel": channel,
         "tabs": tabs,
         "top_signals": top_signals,
+        "institutional_radar": radar_signals[:20],
         "ranking": ranking,
         "blocked_signals": blocked_signals[:50],
         "symbol_snapshots": symbol_snapshots,

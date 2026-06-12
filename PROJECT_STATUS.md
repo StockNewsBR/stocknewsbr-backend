@@ -90,6 +90,8 @@ Atualizado em: 2026-06-12
 - A homepage comercial foi reposicionada para leitura rapida e conversao, consumindo apenas contratos e metricas ja existentes, sem criar novas analises ou indicadores.
 - Missao 16 - Observabilidade Institucional fechada em 2026-06-12: o workspace administrativo agora exibe health center, providers, snapshot health, auditor health, score health, radar health, ranking health, telegram health e error center.
 - A observabilidade institucional foi implementada como camada de diagnostico e suporte, sem alterar Auditor, Score Mestre, Painel Estrategico ou logica operacional.
+- Missao 17 - Radar Institucional fechada em 2026-06-12: o Radar agora consome Auditor Institucional, Score Mestre, Painel Estrategico, Market Pulse, Risk IA, Data Quality e Decision Ready para priorizar apenas oportunidades auditadas.
+- O contrato do Radar propaga `radar_prioritization_score`, `radar_priority_score`, `radar_priority`, `radar_level`, `radar_reason`, `radar_summary`, `radar_no_trade_now` e `radar_blocked_reasons` no snapshot, workspace e APIs.
 
 ## Validado
 
@@ -129,6 +131,12 @@ Atualizado em: 2026-06-12
 - `npm run typecheck` em `apps\mobile`: OK.
 - `venv\Scripts\python.exe -m py_compile app\system\observability_engine.py app\api\routes_system.py app\services\workspace_service.py app\Frontend\layout.py tests\test_observability_institutional.py`: OK.
 - `venv\Scripts\python.exe -m unittest tests.test_observability_institutional`: 3 testes OK.
+- `venv\Scripts\python.exe -m py_compile app\ai\institutional_radar.py app\ai\ai_market_radar.py app\engine\market_snapshot_engine.py app\cache\snapshot_cache.py app\api\routes_radar.py app\web\routes_radar.py app\api\market_routes.py app\services\workspace_service.py app\system\system_metrics.py app\api\routes_public_market_live.py tests\test_institutional_radar.py`: OK.
+- `venv\Scripts\python.exe -m unittest tests.test_institutional_radar`: 9 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_single_snapshot_source tests.test_institutional_radar tests.test_institutional_auditor tests.test_master_score_institutional`: 45 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_ai_radar tests.test_institutional_auditor tests.test_master_score_institutional tests.test_strategic_panel tests.test_single_snapshot_source tests.test_workspace_ai_tools`: OK apos ajuste de compatibilidade da rota legada.
+- `venv\Scripts\python.exe -m unittest discover -s tests`: 271 testes OK.
+- `npm exec -- tsc --noEmit --incremental false` em `apps\web`: OK.
 - `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 113 testes OK.
 - `npm run build` em `apps/web`: build OK apos UX do grafico, tooltips e modos Guiado/Trader/Pro.
 - Browser interno em `http://127.0.0.1:3000/panel/F`: modos Guiado/Trader/Pro validados com `Leitura atual`, `Direcao operacional`, `Confirmacao necessaria`, `Invalidacao` e `Risco`.
@@ -304,6 +312,8 @@ Atualizado em: 2026-06-12
 - Missao 12: `master_status` segue o Auditor, enquanto conflitos de contexto podem tornar o sinal nao acionavel por `master_score_context_not_confirmed`; a UI deve diferenciar status do Auditor de direcao/conviccao do Score Mestre.
 - Missao 13: o Painel Estrategico herda o conservadorismo do Score Mestre e do Auditor; em contexto incompleto pode recomendar `OBSERVAR`, `AGUARDAR` ou `NAO OPERAR AGORA` mesmo com score bruto alto.
 - Missao 13: `strategic_panel_summary` e `why` sao sinteses curtas; detalhes completos continuam nos contratos de Score Mestre, Auditor e IAs especialistas.
+- Missao 17: o Radar Institucional ficou mais seletivo; oportunidades com consenso fraco, baixa confianca, risco alto, `decision_ready=False`, `score_only`, `stale`, `invalid`, `empty` ou bloqueio do Auditor/Painel deixam de ser promovidas.
+- Missao 17: a rota legada `/market/radar` preserva fallback para snapshots antigos sem contrato de Radar, mas snapshots novos devem usar `radar_prioritization_score` como criterio principal.
 - Rodar `npm run build` enquanto `next dev` esta vivo pode corromper o manifesto `.next`; o `start_all_local.ps1` agora limpa esse cache ao reiniciar em modo dev.
 - A validacao visual de 2026-05-18 usa dados atuais do provider, nao os OHLC exatos dos prints antigos; para provar melhora nos mesmos candles dos prints, carregar replay/backtest com aquele dataset.
 - `ITUB4` em 2026-05-18 veio com sessao parcial curta; o short saiu com `coherence_status=watch` e risco medio porque ainda exigia confirmacao de breakdown em range.
@@ -323,15 +333,14 @@ Atualizado em: 2026-06-12
 - Etapa 9 esta 100% concluida no codigo/app: app mobile abre ativo por rota de ticker, grafico e utilizavel com ranges/candles/zonas/marcadores, login/plano refletem BR/USA, smoke com emulador passou e Google Play esta preparado por EAS/App Bundle.
 - Etapa 10 / Missao 15 esta 100% concluida no escopo comercial: homepage, diferenciais, como funciona, planos, trial, CTA, prova social, help e FAQ foram ajustados para conversao sem mexer na logica de trading.
 - Etapa 11 / Missao 16 esta 100% concluida no escopo de observabilidade: health center, providers, error center e painel administrativo foram expostos sem mexer na logica operacional.
+- Etapa 12 / Missao 17 esta 100% concluida no escopo do Radar Institucional: Radar prioriza oportunidades auditadas, gera razao/resumo, propaga contrato no snapshot/workspace/API e registra metricas de gerados/promovidos/descartados/bloqueados.
 - Reexecutar smoke completo apos qualquer mudanca em provider/cache/chart/news, worker ou nas abas IA.
 - Se for criar commit, usar o MinGit por caminho absoluto enquanto o Codex nao recarregar PATH.
 - Separar refatoracoes institucionais maiores em commits pequenos por area: data/api, ai, web, tests.
 - Proxima melhoria de produto: codigo ja liga preco/volume real ao `signal_cache` via `warm_market_pool` e passou nos testes com o `venv` Python 3.11.9; acompanhar proximo ciclo real do worker com dados de mercado para confirmar auditoria IA `approved` em producao.
 - Proxima melhoria de trading: forward test local por ticker/regime foi implementado sobre o replay deterministico, com contagem de regime barra a barra, metricas por regime de entrada e status de overtrading lateral; proximo passo e alimentar com barras reais capturadas em producao/forward log e revisar resultado por ativo, horario e regime.
 - Missao 8 esta fechada no escopo solicitado; nao iniciar Missao 9 ou posteriores sem pedido explicito.
-- Missao 13 esta fechada no escopo solicitado; nao iniciar Missao 17, Missao 18 ou Missao 24A sem pedido explicito.
-- Missao 15 esta fechada no escopo solicitado; nao iniciar Missao 16, Missao 17 ou Missao 24A sem pedido explicito.
-- Missao 16 esta fechada no escopo solicitado; nao iniciar Missao 17, Missao 18 ou Missao 24A sem pedido explicito.
+- Missao 17 esta fechada no escopo solicitado; nao iniciar Missao 18, Missao 19 ou Missao 24A sem pedido explicito.
 - Proxima melhoria de trading 1D: aplicar `compare_replay_scenarios()` aos cenarios dos prints antigos (`ITUB4`, `AAPL`, `PETR4`, `PLTR`) assim que as mesmas barras forem carregadas, comparando trades perdidos, exits cedo e reducao de `Watch` sem depender de provider externo durante a analise.
 - Proxima melhoria de dados B3: se o produto exigir leilao/pre-abertura antes de 10:00, integrar provider que entregue esse feed; o chart atual nao inventa barras antes da primeira barra recebida.
 - Proxima melhoria de dados futuros B3: substituir `reference_proxy` por feed oficial do contrato `WIN`/`WDO` vigente antes de usar esses numeros para execucao real.

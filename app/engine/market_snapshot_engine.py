@@ -10,6 +10,7 @@ import pandas as pd
 from app.ai.feature_hub import build_ai_payload_bundle
 from app.ai.ai_market_pulse import market_pulse as build_market_pulse
 from app.ai.ai_master_score import apply_master_scores_by_ticker, run_master_score
+from app.ai.institutional_radar import enrich_institutional_radar_rows, institutional_radar_items
 from app.ai.strategic_panel import apply_strategic_panels_by_ticker, build_strategic_panels
 from app.ai.institutional_auditor import (
     apply_audit_to_ai_tools,
@@ -432,6 +433,13 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
     )
     master_score_rows = apply_strategic_panels_by_ticker(master_score_rows, strategic_panel_rows)
     normalized = apply_strategic_panels_by_ticker(normalized, strategic_panel_rows)
+    final_market_pulse = build_market_pulse(normalized)
+    normalized, radar_metrics = enrich_institutional_radar_rows(
+        normalized,
+        ai_tools=ai_tools,
+        market_pulse=final_market_pulse,
+    )
+    institutional_radar = institutional_radar_items(normalized, limit=AI_OUTPUT_LIMIT)
     normalized.sort(key=_safe_master_score, reverse=True)
     record_signal_quality_coverage(normalized, source=f"snapshot:{source}")
 
@@ -473,8 +481,11 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         "master_approved": sum(1 for row in normalized if str(row.get("master_status") or "").upper() == "APPROVED"),
         "master_caution": sum(1 for row in normalized if str(row.get("master_status") or "").upper() == "CAUTION"),
         "master_blocked": sum(1 for row in normalized if str(row.get("master_status") or "").upper() == "BLOCKED"),
+        "radar_generated": radar_metrics["generated"],
+        "radar_promoted": radar_metrics["promoted"],
+        "radar_discarded": radar_metrics["discarded"],
+        "radar_blocked": radar_metrics["blocked"],
     }
-    final_market_pulse = build_market_pulse(normalized)
     auditor_summary = summarize_audits(normalized)
 
     decision = summarize_trade_decision(master_score_rows)
@@ -496,6 +507,8 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         "strategic_panels": strategic_panel_rows,
         "strategic_panel": strategic_panel_rows[0] if strategic_panel_rows else {},
         "strategic_panel_summary": strategic_panel_rows[0].get("strategic_panel_summary") if strategic_panel_rows else "",
+        "institutional_radar": institutional_radar,
+        "radar_metrics": radar_metrics,
         "symbol_snapshots": {
             str(row.get("symbol") or row.get("ticker") or "").upper(): row
             for row in normalized[:200]
@@ -509,6 +522,7 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             "master_score_exposed_as_ai": False,
             "master_score_contract": "institutional_synthesis",
             "strategic_panel_contract": "ten_second_institutional_read",
+            "institutional_radar_contract": "mission_17_prioritized_attention",
             "internal_engine_keys": ai_bundle.get("internal_engine_keys", []) if isinstance(ai_bundle, dict) else [],
         },
         "decision": decision,
@@ -536,6 +550,10 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             "watchlist_candidates": signal_stats["watchlist_candidates"],
             "bullish": bullish,
             "bearish": bearish,
+            "radar_generated": radar_metrics["generated"],
+            "radar_promoted": radar_metrics["promoted"],
+            "radar_discarded": radar_metrics["discarded"],
+            "radar_blocked": radar_metrics["blocked"],
         },
     }
 

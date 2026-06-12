@@ -7,6 +7,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.ai.institutional_radar import ensure_institutional_radar_rows, institutional_radar_items
 from app.cache.snapshot_cache import get_snapshot_signals
 from app.dependencies import require_active_plan
 from app.services.quote_service import get_cached_quote_payload
@@ -132,14 +133,19 @@ def get_market_radar(current_user=Depends(require_active_plan)):
     del current_user
 
     try:
-        signals = get_snapshot_signals()
+        raw_signals = get_snapshot_signals()
+        has_radar_contract = any(isinstance(row, dict) and ("radar_prioritization_score" in row or "radar_priority_score" in row) for row in raw_signals)
+        signals = ensure_institutional_radar_rows(raw_signals)
+        radar_signals = institutional_radar_items(signals, limit=50)
+        if not radar_signals and not has_radar_contract:
+            radar_signals = [row for row in signals if is_actionable_snapshot_row(row)]
         buckets = {
             "momentum": [],
             "liquidity_sweep": [],
             "bearish": [],
         }
 
-        for row in signals:
+        for row in radar_signals:
             if not isinstance(row, dict):
                 continue
 
@@ -148,9 +154,10 @@ def get_market_radar(current_user=Depends(require_active_plan)):
 
             signal_name = str(row.get("signal", "")).upper()
             events = " ".join(str(event) for event in row.get("events", []))
-            haystack = f"{signal_name} {events}".upper()
+            institutional = f"{row.get('radar_reason', '')} {row.get('radar_summary', '')} {row.get('radar_level', '')}"
+            haystack = f"{signal_name} {events} {institutional}".upper()
 
-            if "MOMENTUM" in haystack:
+            if "MOMENTUM" in haystack or row.get("radar_level"):
                 buckets["momentum"].append(row)
 
             if "SWEEP" in haystack or "LIQUIDITY" in haystack:

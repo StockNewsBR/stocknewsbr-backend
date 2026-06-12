@@ -5,6 +5,7 @@
 from fastapi import APIRouter, Depends
 import logging
 
+from app.ai.institutional_radar import ensure_institutional_radar_rows, institutional_radar_items
 from app.cache.snapshot_cache import get_snapshot_signals
 from app.dependencies import require_channel_access
 from app.services.snapshot_contract import is_actionable_snapshot_row, snapshot_surface_row
@@ -34,14 +35,15 @@ def get_radar():
 
         radar = []
 
-        for s in signals:
+        enriched_signals = ensure_institutional_radar_rows(signals)
+        for s in institutional_radar_items(enriched_signals, limit=50):
 
             try:
 
-                if s.get("events") and is_actionable_snapshot_row(s):
+                if is_actionable_snapshot_row(s):
 
                     item = snapshot_surface_row(s)
-                    item["score"] = s.get("master_score", s.get("score", 0))
+                    item["score"] = s.get("radar_prioritization_score", s.get("master_score", s.get("score", 0)))
                     radar.append(item)
 
             except Exception:
