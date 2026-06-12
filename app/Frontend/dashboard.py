@@ -6,7 +6,7 @@
 import logging
 from typing import Dict, Any, List
 
-from app.cache.signal_cache import signal_cache
+from app.cache.snapshot_cache import get_snapshot_signals
 from app.ai.market_heatmap import generate_heatmap
 from app.ai.market_narrative import generate_market_narrative
 
@@ -75,7 +75,7 @@ def get_dashboard() -> Dict[str, Any]:
 
     try:
 
-        signals = signal_cache.get()
+        signals = get_snapshot_signals()
 
         if not isinstance(signals, list):
             signals = []

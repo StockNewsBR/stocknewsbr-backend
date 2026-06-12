@@ -8,6 +8,21 @@ OPERATIONAL_ACTIONS = {"BUY", "SELL", "SHORT", "COVER"}
 ENTRY_OR_COVER_ACTIONS = {"BUY", "SHORT", "COVER"}
 ENTRY_ACTIONS = {"BUY", "SHORT"}
 NO_DECISION_ACTION = "NO_DECISION"
+BUY_READY_STATE = "BUY_READY"
+SELL_READY_STATE = "SELL_READY"
+SHORT_READY_STATE = "SHORT_READY"
+WATCH_STATE = "WATCH"
+WAIT_STATE = "WAIT"
+NO_TRADE_STATE = "NO_TRADE"
+DO_NOT_TRADE_STATE = "DO_NOT_TRADE"
+READY_DECISION_STATES = {BUY_READY_STATE, SELL_READY_STATE, SHORT_READY_STATE}
+NO_TRADE_MESSAGE = "⚠️ NÃO OPERAR AGORA"
+_READY_STATE_BY_ACTION = {
+    "BUY": BUY_READY_STATE,
+    "SELL": SELL_READY_STATE,
+    "COVER": SELL_READY_STATE,
+    "SHORT": SHORT_READY_STATE,
+}
 _BLOCKED_DATA_QUALITIES = {
     "score_only",
     "score only",
@@ -84,8 +99,197 @@ def _state(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
+def _is_truthy(value: Any) -> bool:
+    if value is True:
+        return True
+    if value is False or value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on", "blocked", "invalid"}
+
+
 def _reason_suffix(value: str) -> str:
     return str(value or "").replace(" ", "_").replace("-", "_")
+
+
+def _nested_dict(row: Dict[str, Any], *keys: str) -> Dict[str, Any]:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def _auditor_guard(row: Dict[str, Any]) -> List[str]:
+    reasons: List[str] = []
+    auditor = _nested_dict(row, "auditor", "institutional_auditor", "auditor_institucional", "audit")
+
+    for source in (row, auditor):
+        for key in (
+            "blocked_by_auditor",
+            "auditor_blocked",
+            "institutional_auditor_blocked",
+            "auditor_institucional_bloqueou",
+        ):
+            if _is_truthy(source.get(key)):
+                reasons.append("auditor_blocked")
+
+        status = _state(source.get("auditor_status") or source.get("status") or source.get("decision_status"))
+        if status in {"blocked", "rejected", "invalid", "critical", "high_risk", "do_not_trade"}:
+            reasons.append("auditor_blocked")
+
+        conflict_level = _state(source.get("conflict_level") or source.get("institutional_conflict_level"))
+        if conflict_level in {"high", "critical", "severe"}:
+            reasons.append("institutional_conflict")
+
+    if _is_truthy(row.get("institutional_conflict")):
+        reasons.append("institutional_conflict")
+
+    return list(dict.fromkeys(reasons))
+
+
+def _snapshot_guard(row: Dict[str, Any]) -> List[str]:
+    reasons: List[str] = []
+
+    if row.get("snapshot_valid") is False or _is_truthy(row.get("snapshot_invalid")):
+        reasons.append("snapshot_invalid")
+
+    snapshot_status = _state(row.get("snapshot_status") or row.get("snapshot_data_status"))
+    if snapshot_status in _BLOCKED_STATUSES or snapshot_status in {"invalid", "stale", "failed"}:
+        reasons.append("snapshot_invalid")
+
+    source = _state(row.get("source") or row.get("snapshot_source"))
+    if source in {
+        "stale_fallback",
+        "last_good_stale",
+        "exception_fallback",
+        "provider_failed",
+        "provider_error",
+        "cache_miss",
+    }:
+        reasons.append("snapshot_invalid")
+
+    return list(dict.fromkeys(reasons))
+
+
+def _radar_guard(row: Dict[str, Any]) -> List[str]:
+    reasons: List[str] = []
+    radar = _nested_dict(row, "radar", "institutional_radar")
+
+    for source in (row, radar):
+        for key in ("blocked_by_radar", "radar_blocked", "radar_invalid", "radar_invalido"):
+            if _is_truthy(source.get(key)):
+                reasons.append("radar_invalid")
+
+        status = _state(source.get("radar_state") or source.get("radar_status") or source.get("status"))
+        if status in {"invalid", "invalidated", "blocked", "stale", "error", "failed", "provider_failed"}:
+            reasons.append("radar_invalid")
+
+    return list(dict.fromkeys(reasons))
+
+
+def _liquidity_guard(row: Dict[str, Any]) -> List[str]:
+    liquidity_state = _state(
+        row.get("liquidity_map_state")
+        or row.get("liquidity_state")
+        or row.get("liquidity_status")
+    )
+    if liquidity_state in {"thin_liquidity", "low_liquidity", "illiquid", "invalid", "blocked"}:
+        return ["low_liquidity"]
+    if row.get("liquidity_valid") is False or _is_truthy(row.get("low_liquidity")):
+        return ["low_liquidity"]
+    return []
+
+
+def _canonical_no_trade_reason(reason: Any) -> str:
+    reason_text = _reason_suffix(str(reason or "")).lower()
+
+    if (
+        "low_liquidity" in reason_text
+        or "thin_liquidity" in reason_text
+        or "rel_volume_missing" in reason_text
+        or "breakout_without_volume" in reason_text
+        or "without_volume" in reason_text
+    ):
+        return "baixa liquidez"
+    if "price_missing" in reason_text or "no_price" in reason_text:
+        return "preço ausente"
+    if "volume_missing" in reason_text:
+        return "volume ausente"
+    if "auditor" in reason_text:
+        return "auditor bloqueou"
+    if "radar" in reason_text:
+        return "radar inválido"
+    if "snapshot" in reason_text or "stale" in reason_text:
+        return "snapshot inválido"
+    if (
+        "data_quality" in reason_text
+        or "score_only" in reason_text
+        or "provider" in reason_text
+        or "quote_status" in reason_text
+        or "market_data_status" in reason_text
+    ):
+        return "data_quality insuficiente"
+    if (
+        "conflict" in reason_text
+        or "against_flow" in reason_text
+        or "against_smart_money" in reason_text
+        or "buy_in_downtrend" in reason_text
+        or "short_in_bulltrend" in reason_text
+        or "score_buy_vs_final_short" in reason_text
+        or "score_short_vs_final_buy" in reason_text
+        or "strong_score_without_directional_evidence" in reason_text
+    ):
+        return "conflito institucional"
+    if "range" in reason_text or "chop" in reason_text or "lateral" in reason_text:
+        return "mercado lateral"
+    if "trend_confirmation" in reason_text or "vwap_confirmation" in reason_text or "regime_or_trend_missing" in reason_text:
+        return "contexto técnico insuficiente"
+    return "contexto técnico insuficiente"
+
+
+def _no_trade_reasons(blocked: List[str], warnings: List[str]) -> List[str]:
+    raw_reasons = list(blocked or []) + list(warnings or [])
+    if not raw_reasons:
+        return []
+    return list(dict.fromkeys(_canonical_no_trade_reason(reason) for reason in raw_reasons))
+
+
+def _is_do_not_trade_reason(reason: Any) -> bool:
+    canonical = _canonical_no_trade_reason(reason)
+    return canonical in {
+        "preço ausente",
+        "volume ausente",
+        "baixa liquidez",
+        "data_quality insuficiente",
+        "snapshot inválido",
+        "auditor bloqueou",
+        "radar inválido",
+        "conflito institucional",
+    }
+
+
+def _decision_state_for(action: str, decision_ready: bool, blocked: List[str], warnings: List[str]) -> str:
+    action = str(action or "").upper()
+    if decision_ready and action in _READY_STATE_BY_ACTION:
+        return _READY_STATE_BY_ACTION[action]
+    if blocked:
+        return DO_NOT_TRADE_STATE if any(_is_do_not_trade_reason(reason) for reason in blocked) else NO_TRADE_STATE
+    if warnings:
+        return WATCH_STATE
+    if action in {"WATCH", "WATCH_BUY", "WATCH_SHORT"}:
+        return WATCH_STATE
+    return WAIT_STATE
+
+
+def _decision_metadata(action: str, decision_ready: bool, blocked: List[str], warnings: List[str]) -> Dict[str, Any]:
+    state = _decision_state_for(action, decision_ready, blocked, warnings)
+    reasons = [] if decision_ready else _no_trade_reasons(blocked, warnings)
+    return {
+        "decision_state": state,
+        "operational_message": "" if decision_ready else NO_TRADE_MESSAGE,
+        "no_trade_reasons": reasons,
+        "can_trade": bool(decision_ready and state in READY_DECISION_STATES),
+    }
 
 
 def _has_positive_value(row: Dict[str, Any], *keys: str) -> bool:
@@ -549,6 +753,10 @@ def evaluate_trade_coherence(
     has_complete_market_data, data_blockers, data_warnings = _market_data_guard(row)
     decision_conflicts = _detect_decision_conflicts(row, action, bullish=bullish, bearish=bearish)
     entry_context_blockers = _entry_context_guard(row, action)
+    auditor_blockers = _auditor_guard(row)
+    snapshot_blockers = _snapshot_guard(row)
+    radar_blockers = _radar_guard(row)
+    liquidity_blockers = _liquidity_guard(row)
 
     if row.get("data_quality") == "score_only":
         warnings.append("score_only_sem_preco_real")
@@ -560,6 +768,11 @@ def evaluate_trade_coherence(
         blocked.extend(decision_conflicts)
     if action in OPERATIONAL_ACTIONS and entry_context_blockers:
         blocked.extend(entry_context_blockers)
+    if action in OPERATIONAL_ACTIONS:
+        blocked.extend(auditor_blockers)
+        blocked.extend(snapshot_blockers)
+        blocked.extend(radar_blockers)
+        blocked.extend(liquidity_blockers)
 
     if action == "BUY":
         if chart_regime in {"chop", "range"} and not _reversal_exception(row, "long"):
@@ -610,12 +823,25 @@ def evaluate_trade_coherence(
 
     blocked = list(dict.fromkeys(blocked))
     warnings = list(dict.fromkeys(warnings))
+    hard_block_reasons = list(
+        dict.fromkeys(
+            data_blockers
+            + decision_conflicts
+            + entry_context_blockers
+            + auditor_blockers
+            + snapshot_blockers
+            + radar_blockers
+            + liquidity_blockers
+        )
+    )
     hard_block = any(
-        reason in set(data_blockers + decision_conflicts + entry_context_blockers)
+        reason in set(hard_block_reasons)
         for reason in blocked
     )
     final_action = _action_after_block(action, bullish, bearish, row, blocked, hard_block=hard_block)
     instructions = _build_trade_instructions(final_action, row, blocked, warnings)
+    decision_ready = final_action in OPERATIONAL_ACTIONS and not hard_block and not blocked and not warnings
+    metadata = _decision_metadata(final_action, decision_ready, blocked, warnings)
 
     return {
         "proposed_action": action,
@@ -623,7 +849,8 @@ def evaluate_trade_coherence(
         "coherence_status": "blocked" if blocked else "watch" if warnings else "ok",
         "blocked_reasons": blocked,
         "warnings": warnings,
-        "decision_ready": final_action in OPERATIONAL_ACTIONS and not hard_block and not blocked,
+        "decision_ready": decision_ready,
+        **metadata,
         "conflict_detected": bool(decision_conflicts),
         "data_quality_blocked": bool(data_blockers),
         "rules": {
@@ -753,16 +980,32 @@ def _neutralize_operational_decision(
     has_complete_market_data, data_blockers, data_warnings = _market_data_guard(row)
     decision_conflicts = _detect_decision_conflicts(row, action, bullish=bullish, bearish=bearish)
     entry_context_blockers = _entry_context_guard(row, action)
+    auditor_blockers = _auditor_guard(row)
+    snapshot_blockers = _snapshot_guard(row)
+    radar_blockers = _radar_guard(row)
+    liquidity_blockers = _liquidity_guard(row)
     blocked_reasons = list(
         dict.fromkeys(
             list(resolved.get("blocked_reasons") or [])
             + data_blockers
             + decision_conflicts
             + entry_context_blockers
+            + auditor_blockers
+            + snapshot_blockers
+            + radar_blockers
+            + liquidity_blockers
         )
     )
     warnings = list(dict.fromkeys(list(resolved.get("warnings") or []) + data_warnings))
-    hard_block = bool(data_blockers or decision_conflicts or entry_context_blockers)
+    hard_block = bool(
+        data_blockers
+        or decision_conflicts
+        or entry_context_blockers
+        or auditor_blockers
+        or snapshot_blockers
+        or radar_blockers
+        or liquidity_blockers
+    )
 
     if action in OPERATIONAL_ACTIONS and hard_block:
         resolved["signal"] = NO_DECISION_ACTION
@@ -783,12 +1026,21 @@ def _neutralize_operational_decision(
     resolved["decision_ready"] = bool(
         resolved.get("trade_action") in OPERATIONAL_ACTIONS
         and has_complete_market_data
-        and not decision_conflicts
+        and not hard_block
         and not blocked_reasons
+        and not warnings
     )
     resolved["conflict_detected"] = bool(decision_conflicts or resolved.get("conflict_detected"))
     resolved["data_quality_blocked"] = bool(data_blockers)
     resolved["data_quality"] = row.get("data_quality") or ("priced" if has_complete_market_data else "score_only")
+    resolved.update(
+        _decision_metadata(
+            str(resolved.get("trade_action") or action or "").upper(),
+            bool(resolved.get("decision_ready")),
+            blocked_reasons,
+            warnings,
+        )
+    )
     return resolved
 
 
@@ -893,6 +1145,10 @@ def resolve_trade_action(row: Dict[str, Any]) -> Dict[str, Any]:
         "conflicts": conflicts[:6],
         "conflict_detected": bool(coherence.get("conflict_detected")),
         "decision_ready": bool(coherence.get("decision_ready")),
+        "decision_state": coherence.get("decision_state") or WAIT_STATE,
+        "operational_message": coherence.get("operational_message") or "",
+        "no_trade_reasons": coherence.get("no_trade_reasons") or [],
+        "can_trade": bool(coherence.get("can_trade")),
         "data_quality": row.get("data_quality") or ("priced" if not coherence.get("data_quality_blocked") else "score_only"),
         "coherence_status": coherence["coherence_status"],
         "blocked_reasons": coherence["blocked_reasons"],
@@ -924,6 +1180,10 @@ def summarize_trade_decision(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
             "conflict_detected": False,
             "reason": "Sem master score suficiente para consolidar uma decisao.",
             "decision_ready": False,
+            "decision_state": WAIT_STATE,
+            "operational_message": NO_TRADE_MESSAGE,
+            "no_trade_reasons": ["snapshot inválido"],
+            "can_trade": False,
             "data_quality": "score_only",
         }
 
@@ -975,4 +1235,12 @@ def summarize_trade_decision(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     resolved["score"] = round(safe_float(top.get("score"), 0.0), 1)
     if resolved.get("trade_action") not in OPERATIONAL_ACTIONS:
         resolved["decision_ready"] = False
+        resolved.update(
+            _decision_metadata(
+                str(resolved.get("trade_action") or NO_DECISION_ACTION).upper(),
+                False,
+                list(resolved.get("blocked_reasons") or []),
+                list(resolved.get("warnings") or []),
+            )
+        )
     return resolved

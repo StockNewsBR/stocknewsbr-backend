@@ -11,6 +11,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from app.services.snapshot_contract import is_actionable_snapshot_row
 from app.telegram.telegram_alert_formatter import format_signal_alert
 
 logger = logging.getLogger("stocknewsbr.telegram")
@@ -133,6 +134,9 @@ def send_signal_alert(signal: dict, regime=None):
         if not ticker:
             return
 
+        if not is_actionable_snapshot_row(signal):
+            return
+
         with _lock:
 
             if ticker in _sent_signals:
@@ -165,6 +169,9 @@ def send_bulk_alert(signals, regime=None):
         for s in signals:
 
             if not isinstance(s, dict):
+                continue
+
+            if not is_actionable_snapshot_row(s):
                 continue
 
             score = s.get("score")

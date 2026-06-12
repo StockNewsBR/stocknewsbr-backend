@@ -43,6 +43,50 @@ class RuntimeSharedCacheTests(unittest.TestCase):
         self.assertEqual(shared_info["signals"], 1)
         self.assertEqual(shared_last_good["signals"][0]["ticker"], "VALE3")
 
+    def test_snapshot_cache_debounces_identical_disk_writes(self):
+        with TemporaryDirectory() as tmp:
+            cache_file = os.path.join(tmp, "snapshot.json")
+            with patch.dict(os.environ, {"SNAPSHOT_CACHE_FILE": cache_file}):
+                cache = SnapshotCache()
+                cache._disk_write_min_interval_seconds = 60.0
+                payload = {
+                    "signals": [{"ticker": "PETR4", "score": 88.0, "price": 37.5, "volume": 1_000_000}],
+                    "source": "signal_cache",
+                    "stale": False,
+                }
+
+                with patch.object(cache, "_write_to_disk", wraps=cache._write_to_disk) as write_to_disk:
+                    cache.update(payload)
+                    cache.update(payload)
+
+        self.assertEqual(write_to_disk.call_count, 1)
+        self.assertEqual(cache.get()["signals"][0]["ticker"], "PETR4")
+        self.assertEqual(cache.get_last_good()["signals"][0]["ticker"], "PETR4")
+
+    def test_snapshot_cache_writes_immediately_when_payload_changes(self):
+        with TemporaryDirectory() as tmp:
+            cache_file = os.path.join(tmp, "snapshot.json")
+            with patch.dict(os.environ, {"SNAPSHOT_CACHE_FILE": cache_file}):
+                cache = SnapshotCache()
+                cache._disk_write_min_interval_seconds = 60.0
+                first = {
+                    "signals": [{"ticker": "PETR4", "score": 88.0, "price": 37.5, "volume": 1_000_000}],
+                    "source": "signal_cache",
+                    "stale": False,
+                }
+                second = {
+                    "signals": [{"ticker": "VALE3", "score": 91.0, "price": 68.2, "volume": 2_000_000}],
+                    "source": "signal_cache",
+                    "stale": False,
+                }
+
+                with patch.object(cache, "_write_to_disk", wraps=cache._write_to_disk) as write_to_disk:
+                    cache.update(first)
+                    cache.update(second)
+
+        self.assertEqual(write_to_disk.call_count, 2)
+        self.assertEqual(cache.get()["signals"][0]["ticker"], "VALE3")
+
 
 if __name__ == "__main__":
     unittest.main()

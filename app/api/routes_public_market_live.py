@@ -17,8 +17,6 @@ from app.services.public_market_data_service import (
 )
 from app.services.public_news_service import build_public_news_payload
 from app.services.quote_service import classify_quote_payload, is_usable_quote_payload
-from app.system.chart_warmup import request_chart_warmup
-from app.system.quote_warmup import request_quote_warmup
 from app.system.system_metrics import record_cache_access
 
 
@@ -483,13 +481,6 @@ def public_quotes(symbols: str = Query(default="")):
         _resolve_cached_quote(cached_payloads, symbol, chart_quote_cache=chart_quote_cache)
         for symbol in limited_tickers
     ]
-    refresh_tickers = []
-    for symbol, resolved in zip(limited_tickers, items):
-        if _quote_needs_background_refresh(resolved):
-            refresh_tickers.append(symbol)
-    if refresh_tickers:
-        request_quote_warmup(_dedupe_public_symbols(refresh_tickers))
-
     for symbol, resolved in zip(limited_tickers, items):
         record_cache_access(
             "quote",
@@ -571,13 +562,10 @@ def public_market_chart(
         return _empty_chart_payload(response_symbol, chart_interval, "blocked_symbol")
     ohlc = _load_chart_data_fast(ticker, chart_interval)
     if not ohlc:
-        request_chart_warmup(ticker, chart_interval)
         reason = "b3_future_exact_chart_unavailable" if _is_b3_mini_future_symbol(ticker) else "empty_chart"
         return _empty_chart_payload(response_symbol, chart_interval, reason)
 
     is_quote_fallback = _is_quote_fallback_chart(ohlc)
-    if is_quote_fallback:
-        request_chart_warmup(ticker, chart_interval)
     signals = []
     chart_signal = {} if is_quote_fallback else (build_chart_signal_payload(ticker, ohlc, interval=chart_interval) or {})
     if chart_signal:
@@ -611,8 +599,6 @@ def public_market_bundle(
     response_symbol = _response_symbol(ticker)
     cached_payloads = cached_price_payloads(_symbol_aliases(ticker), allow_stale=True)
     quote = _resolve_cached_quote(cached_payloads, ticker)
-    if _quote_needs_background_refresh(quote):
-        request_quote_warmup([ticker])
     record_cache_access("quote", _has_usable_quote_payload(quote), "public_bundle")
 
     return {

@@ -6,8 +6,8 @@ import logging
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from app.cache.snapshot_cache import get_snapshot_info, get_snapshot_signals
 from app.dependencies import require_channel_access
-from app.engine.signal_cache import signal_cache
 
 router = APIRouter(dependencies=[Depends(require_channel_access("app"))])
 
@@ -23,8 +23,8 @@ def get_signals():
 
     try:
 
-        signals = signal_cache.get()
-        cache_info = signal_cache.info()
+        signals = get_snapshot_signals()
+        cache_info = get_snapshot_info()
 
         return {
 

@@ -5,7 +5,6 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
 
-from app.cache.signal_cache import get_signal_info
 from app.cache.snapshot_cache import get_snapshot_info
 from app.dependencies import require_internal_token
 from app.services.media_service import get_media_status
@@ -95,7 +94,6 @@ def system_status():
         "reports_created": metrics["reports_created"],
         "uploads_completed": metrics["uploads_completed"],
         "push_sends": metrics["push_sends"],
-        "signal_cache": get_signal_info(),
         "snapshot_cache": get_snapshot_info(),
         "storage": get_storage_status(),
         "media": get_media_status(),

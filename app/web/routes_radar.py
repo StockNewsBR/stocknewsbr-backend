@@ -5,8 +5,9 @@
 from fastapi import APIRouter, Depends
 import logging
 
+from app.cache.snapshot_cache import get_snapshot_signals
 from app.dependencies import require_channel_access
-from app.cache.signal_cache import signal_cache
+from app.services.snapshot_contract import is_actionable_snapshot_row, snapshot_surface_row
 
 router = APIRouter(
     prefix="/web",
@@ -26,7 +27,7 @@ def get_radar():
 
     try:
 
-        signals = signal_cache.get_all()
+        signals = get_snapshot_signals()
 
         if not signals:
             return []
@@ -37,17 +38,11 @@ def get_radar():
 
             try:
 
-                if s.get("events"):
+                if s.get("events") and is_actionable_snapshot_row(s):
 
-                    radar.append({
-
-                        "ticker": s.get("ticker"),
-
-                        "events": s.get("events"),
-
-                        "score": s.get("score", 0)
-
-                    })
+                    item = snapshot_surface_row(s)
+                    item["score"] = s.get("score", 0)
+                    radar.append(item)
 
             except Exception:
                 continue

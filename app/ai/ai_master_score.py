@@ -124,6 +124,10 @@ def _score_row(row: Dict[str, Any]) -> Dict[str, Any]:
             "bearish_pressure": decision["bearish_pressure"],
             "coherence_status": decision["coherence_status"],
             "decision_ready": decision.get("decision_ready", False),
+            "decision_state": decision.get("decision_state"),
+            "operational_message": decision.get("operational_message"),
+            "no_trade_reasons": decision.get("no_trade_reasons", []),
+            "can_trade": decision.get("can_trade", False),
             "conflict_detected": decision.get("conflict_detected", False),
             "blocked_reasons": decision["blocked_reasons"],
             "warnings": decision["warnings"],
@@ -157,6 +161,10 @@ def _score_row(row: Dict[str, Any]) -> Dict[str, Any]:
     payload["decision_reason"] = decision["reason"]
     payload["decision_conflicts"] = decision["conflicts"]
     payload["decision_ready"] = decision.get("decision_ready", False)
+    payload["decision_state"] = decision.get("decision_state")
+    payload["operational_message"] = decision.get("operational_message")
+    payload["no_trade_reasons"] = decision.get("no_trade_reasons", [])
+    payload["can_trade"] = decision.get("can_trade", False)
     payload["conflict_detected"] = decision.get("conflict_detected", False)
     payload["coherence_status"] = decision["coherence_status"]
     payload["blocked_reasons"] = decision["blocked_reasons"]

@@ -4,17 +4,22 @@
 # =====================================================
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import yfinance as yf
 import pandas as pd
 
-from app.config import SYMBOLS
+from app.ai.ai_radar import run_radar
+from app.cache.snapshot_cache import get_snapshot_signals
 
 logger = logging.getLogger("stocknewsbr.market_radar")
 
-MAX_WORKERS = 8
 MIN_ROWS = 100
+
+
+def _safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def detect_compression(df):
@@ -95,30 +100,33 @@ def detect_compression(df):
         return 0
 
 
+def _normalize_symbol(value):
+    return str(value or "").upper().strip().replace(".SA", "").replace("-USD", "USD")
+
+
 def analyze_symbol(symbol):
 
     try:
+        normalized = _normalize_symbol(symbol)
+        rows = [
+            row
+            for row in get_snapshot_signals()
+            if _normalize_symbol(row.get("ticker") or row.get("symbol")) == normalized
+        ]
 
-        df = yf.download(
-            symbol,
-            period="10d",
-            interval="15m",
-            progress=False,
-            auto_adjust=True,
-            threads=False,
-            timeout=8,
-        )
+        radar_rows = run_radar(rows, limit=1)
 
-        if df is None or len(df) < MIN_ROWS:
+        if not radar_rows:
             return None
 
-        score = detect_compression(df)
+        radar = radar_rows[0]
+        score = _safe_float(radar.get("score") or radar.get("radar_score") or 0)
 
         if score < 60:
             return None
 
         return {
-            "symbol": symbol.replace(".SA", ""),
+            "symbol": normalized,
             "radar_score": score
         }
 
@@ -134,17 +142,18 @@ def build_radar():
     results = []
 
     try:
-
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-
-            futures = [executor.submit(analyze_symbol, s) for s in SYMBOLS]
-
-            for future in as_completed(futures):
-
-                result = future.result()
-
-                if result:
-                    results.append(result)
+        for row in run_radar(get_snapshot_signals(), limit=50):
+            symbol = row.get("ticker") or row.get("symbol")
+            if not symbol:
+                continue
+            results.append(
+                {
+                    "symbol": _normalize_symbol(symbol),
+                    "radar_score": _safe_float(row.get("score") or row.get("radar_score") or 0),
+                    "state": row.get("state"),
+                    "source": "snapshot",
+                }
+            )
 
     except Exception:
 

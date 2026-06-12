@@ -5,8 +5,9 @@
 from fastapi import APIRouter, Depends
 import logging
 
+from app.ai.ai_market_pulse import market_pulse
+from app.cache.snapshot_cache import get_snapshot_signals
 from app.dependencies import require_channel_access
-from app.cache.signal_cache import signal_cache
 
 router = APIRouter(
     prefix="/web",
@@ -26,42 +27,7 @@ def get_market_pulse():
 
     try:
 
-        signals = signal_cache.get_all()
-
-        if not signals:
-            return {}
-
-        bullish = 0
-        bearish = 0
-
-        for s in signals:
-
-            try:
-
-                score = s.get("score", 0)
-
-                if score >= 70:
-                    bullish += 1
-
-                elif score <= 30:
-                    bearish += 1
-
-            except Exception:
-                continue
-
-        total = len(signals)
-
-        if total == 0:
-            return {}
-
-        return {
-
-            "bullish": bullish,
-            "bearish": bearish,
-            "neutral": total - bullish - bearish,
-            "total_signals": total
-
-        }
+        return market_pulse(get_snapshot_signals())
 
     except Exception as e:
 

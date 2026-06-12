@@ -5,7 +5,6 @@ from fastapi import APIRouter
 from app.services.public_ai_tools_service import build_public_ai_tools_payload
 from app.services.public_news_service import build_public_news_payload
 from app.services.quote_service import empty_quote_payload, get_cached_quote_payload, is_usable_quote_payload
-from app.system.quote_warmup import request_quote_warmup
 
 
 router = APIRouter(prefix="/public", tags=["Public Market"])
@@ -77,7 +76,6 @@ def public_quote(symbol: str):
         normalized_payload = {**payload, "symbol": response_symbol}
         if _has_quote_value(payload):
             return normalized_payload
-    request_quote_warmup([query_symbol])
     return empty_quote_payload(response_symbol)
 
 

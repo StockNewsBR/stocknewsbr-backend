@@ -15,6 +15,7 @@ from app.cache.market_data_cache import get_market_data
 from app.cache.snapshot_cache import get_snapshot_info, get_snapshot_signals
 from app.config import SYMBOLS
 from app.dependencies import require_active_plan
+from app.services.snapshot_contract import is_actionable_snapshot_row
 from app.system.system_metrics import current_provider_call_source
 
 logger = logging.getLogger("stocknewsbr.ranking")
@@ -35,6 +36,75 @@ _RANK_CACHE = {
     "timestamp": 0.0,
     "snapshot_signature": "",
 }
+
+_ACTIONABLE_SIGNALS = {"BUY", "SELL", "SHORT", "COVER"}
+_BLOCKED_DATA_QUALITIES = {
+    "score_only",
+    "score only",
+    "missing",
+    "empty",
+    "stale",
+    "no_price",
+    "no-price",
+    "no price",
+    "provider_failed",
+    "provider-failed",
+    "provider failed",
+    "failed",
+    "error",
+    "timeout",
+    "unavailable",
+    "invalid",
+}
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _has_positive_value(row: dict, *keys: str) -> bool:
+    return any(_safe_float(row.get(key)) > 0 for key in keys)
+
+
+def _signal_value(row: dict) -> str:
+    return str(row.get("trade_action") or row.get("signal") or row.get("action") or "").upper().strip()
+
+
+def _has_blocking_reasons(row: dict) -> bool:
+    reasons = row.get("blocked_reasons") or row.get("warnings") or []
+    if isinstance(reasons, str):
+        return bool(reasons.strip())
+    if isinstance(reasons, (list, tuple, set)):
+        return any(str(item).strip() for item in reasons)
+    return bool(reasons)
+
+
+def _is_actionable_snapshot_row(row: dict) -> bool:
+    if _signal_value(row) not in _ACTIONABLE_SIGNALS:
+        return False
+    if row.get("decision_ready") is False:
+        return False
+    if row.get("stale") is True or row.get("is_stale") is True:
+        return False
+    if str(row.get("data_quality") or "").lower().strip() in _BLOCKED_DATA_QUALITIES:
+        return False
+    for status_key in ("quote_status", "status", "provider_status", "market_data_status"):
+        if str(row.get(status_key) or "").lower().strip() in _BLOCKED_DATA_QUALITIES:
+            return False
+    if row.get("provider_failed") is True or row.get("provider_error") is True:
+        return False
+    if _has_blocking_reasons(row):
+        return False
+    if not _has_positive_value(row, "price", "close", "last_price"):
+        return False
+    if not _has_positive_value(row, "volume", "last_volume"):
+        return False
+    return True
 
 
 def calculate_rsi(series: pd.Series, period: int = 14):
@@ -157,6 +227,9 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
         if not isinstance(row, dict):
             continue
 
+        if not is_actionable_snapshot_row(row):
+            continue
+
         symbol = row.get("ticker") or row.get("symbol")
 
         if not symbol:
@@ -169,12 +242,21 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
 
         results.append(
             {
+                "ticker": symbol,
                 "symbol": symbol,
                 "score": score,
                 "trend": row.get("trend"),
                 "rsi": row.get("rsi"),
                 "breakout": bool(row.get("breakout", False)),
                 "price": row.get("price"),
+                "volume": row.get("volume"),
+                "data_quality": row.get("data_quality"),
+                "market_data_updated_at": row.get("market_data_updated_at"),
+                "quote_time": row.get("quote_time"),
+                "provider_timestamp": row.get("provider_timestamp"),
+                "updated_at": row.get("updated_at"),
+                "generated_at": row.get("generated_at"),
+                "snapshot_id": row.get("snapshot_id"),
             }
         )
 
@@ -218,7 +300,7 @@ def _get_symbol_frame(data, symbol):
     return None
 
 
-def generate_ranking(force_refresh: bool = False):
+def generate_ranking(force_refresh: bool = False, allow_external_fetch: bool = False):
     now = time.time()
     snapshot_info = get_snapshot_info()
     snapshot_signature = _snapshot_signature(snapshot_info)
@@ -239,7 +321,11 @@ def generate_ranking(force_refresh: bool = False):
         _RANK_CACHE["snapshot_signature"] = snapshot_signature
         return list(snapshot_results)
 
-    if not ALLOW_NETWORK_FALLBACK or current_provider_call_source() == "http":
+    if (
+        not allow_external_fetch
+        or not ALLOW_NETWORK_FALLBACK
+        or current_provider_call_source() == "http"
+    ):
         _RANK_CACHE["data"] = []
         _RANK_CACHE["timestamp"] = now
         _RANK_CACHE["snapshot_signature"] = snapshot_signature
@@ -274,8 +360,8 @@ def generate_ranking(force_refresh: bool = False):
     return results
 
 
-def get_ranking(force_refresh: bool = False):
-    return generate_ranking(force_refresh=force_refresh)
+def get_ranking(force_refresh: bool = False, allow_external_fetch: bool = False):
+    return generate_ranking(force_refresh=force_refresh, allow_external_fetch=allow_external_fetch)
 
 
 def get_top_ranking(min_score: int = 50, limit: int = 10):

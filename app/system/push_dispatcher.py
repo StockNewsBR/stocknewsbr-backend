@@ -7,6 +7,7 @@ from pathlib import Path
 from app.database import SessionLocal
 from app.models import User
 from app.services.push_service import get_push_token_store, send_push_notification
+from app.services.snapshot_contract import is_actionable_snapshot_row
 
 
 PUSH_DISPATCH_STATE_PATH = Path("data/push_dispatch_state.json")
@@ -41,6 +42,9 @@ def _eligible_signals(signals):
 
     for item in signals or []:
         if not isinstance(item, dict):
+            continue
+
+        if not is_actionable_snapshot_row(item):
             continue
 
         try:
@@ -125,6 +129,13 @@ def dispatch_signal_pushes(signals):
                         "ticker": ticker,
                         "score": str(signal.get("score", "")),
                         "trend": str(signal.get("trend", "")),
+                        "price": str(signal.get("price", "")),
+                        "volume": str(signal.get("volume", "")),
+                        "data_quality": str(signal.get("data_quality", "")),
+                        "decision_state": str(signal.get("decision_state", "")),
+                        "trade_action": str(signal.get("trade_action") or signal.get("signal") or ""),
+                        "market_data_updated_at": str(signal.get("market_data_updated_at", "")),
+                        "snapshot_id": str(signal.get("snapshot_id", "")),
                     },
                     tokens=tokens,
                 )

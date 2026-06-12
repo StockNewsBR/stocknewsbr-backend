@@ -11,6 +11,7 @@ from app.dependencies import require_internal_token
 from app.models import User
 from app.services.access_service import has_channel_access, refresh_user_access
 from app.services.auth_session_service import consume_telegram_link_token
+from app.services.snapshot_contract import actionable_snapshot_rows
 
 logger = logging.getLogger("stocknewsbr.internal")
 
@@ -29,7 +30,8 @@ class TelegramLinkConsumePayload(BaseModel):
 
 @router.get("/opportunities")
 def internal_opportunities(limit: int = 10):
-    signals = get_snapshot_signals(limit=max(1, min(limit, 50)))
+    safe_limit = max(1, min(limit, 50))
+    signals = actionable_snapshot_rows(get_snapshot_signals(), limit=safe_limit)
     return {
         "count": len(signals),
         "signals": signals,

@@ -8,10 +8,10 @@ import logging
 from app.dependencies import require_channel_access
 from app.engine.signal_engine import build_chart_signal_payload
 from app.market.market_data_loader import get_cached_chart_data
-from app.cache.signal_cache import signal_cache
+from app.cache.snapshot_cache import get_snapshot_signals
 from app.services.chart_overlay_service import build_chart_overlays
+from app.services.snapshot_contract import snapshot_surface_row
 from app.api.routes_public_market_live import _load_chart_data_fast as load_chart_data_cache_first
-from app.system.chart_warmup import request_chart_warmup
 from app.system.system_metrics import record_cache_access
 
 router = APIRouter(
@@ -41,7 +41,6 @@ def get_chart(ticker: str, interval: str = "1D"):
         record_cache_access("chart", bool(ohlc), "web_chart")
 
         if not ohlc:
-            request_chart_warmup(ticker, interval)
             return {}
 
 
@@ -53,7 +52,7 @@ def get_chart(ticker: str, interval: str = "1D"):
 
         try:
 
-            all_signals = signal_cache.get_all()
+            all_signals = get_snapshot_signals()
             requested = _normalize_chart_ticker(ticker)
 
             for s in all_signals:
@@ -61,16 +60,7 @@ def get_chart(ticker: str, interval: str = "1D"):
 
                 if source_ticker == requested:
 
-                    signals.append({
-
-                        "score": s.get("score"),
-                        "trend": s.get("trend"),
-                        "breakout": s.get("breakout"),
-                        "signal": s.get("signal"),
-
-                        "events": s.get("events", [])
-
-                    })
+                    signals.append(snapshot_surface_row(s))
 
         except Exception:
             pass

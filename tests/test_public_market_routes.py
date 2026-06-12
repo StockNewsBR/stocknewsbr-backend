@@ -35,13 +35,12 @@ class PublicMarketRouteTests(unittest.TestCase):
             routes_public_market,
             "empty_quote_payload",
             return_value={"symbol": "AAPL", "price": None, "source": "empty"},
-        ), patch.object(routes_public_market, "request_quote_warmup") as warmup:
+        ):
             payload = routes_public_market.public_quote("AAPL")
 
         self.assertEqual(payload["symbol"], "AAPL")
         self.assertEqual(payload["source"], "empty")
         self.assertIsNone(payload["price"])
-        warmup.assert_called_once_with(["AAPL"])
 
     def test_public_quote_rejects_partial_cache_without_price(self):
         with patch.object(
@@ -52,13 +51,12 @@ class PublicMarketRouteTests(unittest.TestCase):
             routes_public_market,
             "empty_quote_payload",
             return_value={"symbol": "F", "price": None, "source": "empty"},
-        ), patch.object(routes_public_market, "request_quote_warmup") as warmup:
+        ):
             payload = routes_public_market.public_quote("F")
 
         self.assertEqual(payload["symbol"], "F")
         self.assertEqual(payload["source"], "empty")
         self.assertIsNone(payload["price"])
-        warmup.assert_called_once_with(["F"])
 
     def test_public_news_returns_service_payload(self):
         with patch.object(
@@ -173,16 +171,12 @@ class PublicMarketRouteTests(unittest.TestCase):
         self.assertEqual(payload["source"], "empty")
         self.assertIsNone(payload["price"])
 
-    def test_live_batch_quote_requests_background_warmup_for_empty_symbols(self):
-        with patch.object(routes_public_market_live, "cached_price_payloads", return_value={}), patch.object(
-            routes_public_market_live,
-            "request_quote_warmup",
-        ) as warmup:
+    def test_live_batch_quote_does_not_request_background_warmup_for_empty_symbols(self):
+        with patch.object(routes_public_market_live, "cached_price_payloads", return_value={}):
             payload = routes_public_market_live.public_quotes("BA")
 
         self.assertEqual(payload["items"][0]["symbol"], "BA")
         self.assertEqual(payload["items"][0]["source"], "empty")
-        warmup.assert_called_once_with(["BA"])
 
     def test_public_chart_accepts_range_query_alias(self):
         ohlc = [{"time": 1, "open": 9.8, "close": 10.0, "high": 11.0, "low": 9.5}]
@@ -225,6 +219,29 @@ class PublicMarketRouteTests(unittest.TestCase):
         self.assertTrue(payload["fallback"])
         self.assertEqual(payload["ohlc"], [])
         self.assertEqual(payload["summary"]["provider_status"], "empty_chart")
+
+    def test_public_bundle_does_not_request_quote_warmup_when_cache_is_empty(self):
+        with patch.object(routes_public_market_live, "cached_price_payloads", return_value={}), patch.object(
+            routes_public_market_live,
+            "public_market_insight",
+            return_value={"symbol": "BA", "status": "empty"},
+        ), patch.object(
+            routes_public_market_live,
+            "public_market_chart",
+            return_value={"ticker": "BA", "ohlc": [], "series": [], "markers": [], "zones": [], "summary": {}},
+        ), patch.object(
+            routes_public_market_live,
+            "build_public_news_payload",
+            return_value={"symbol": "BA", "items": [], "count": 0},
+        ), patch.object(
+            routes_public_market_live,
+            "build_public_ai_tools_payload",
+            return_value={"tools": {}, "source": "snapshot"},
+        ):
+            payload = routes_public_market_live.public_market_bundle("BA", interval="1D")
+
+        self.assertEqual(payload["symbol"], "BA")
+        self.assertEqual(payload["quote"]["source"], "empty")
 
     def test_public_chart_blocks_synthetic_quote_fallback_for_b3_futures(self):
         with patch.object(routes_public_market_live, "load_public_chart_rows", return_value=[]), patch.object(

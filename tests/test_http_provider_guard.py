@@ -5,6 +5,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 HTTP_ROUTE_DIRS = (ROOT / "app" / "api", ROOT / "app" / "web")
 FORBIDDEN_HTTP_PATTERNS = (
+    "from app.cache.signal_cache",
+    "from app.engine.signal_cache",
     "get_chart_data(",
     "get_price_snapshot(",
     "get_price_snapshots(",
@@ -19,6 +21,9 @@ FORBIDDEN_HTTP_PATTERNS = (
     "yf.Ticker",
     "import yfinance",
     "allow_fetch=True",
+    "request_quote_warmup",
+    "request_chart_warmup",
+    "request_news_warmup",
 )
 
 

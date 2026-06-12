@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends
 
-from app.cache.signal_cache import get_all_signals
+from app.cache.snapshot_cache import get_snapshot_signals
 from app.dependencies import require_channel_access
+from app.services.snapshot_contract import is_actionable_snapshot_row
 
 router = APIRouter(dependencies=[Depends(require_channel_access("app"))])
 
@@ -10,11 +11,11 @@ router = APIRouter(dependencies=[Depends(require_channel_access("app"))])
 def radar():
     data = []
 
-    for row in get_all_signals():
+    for row in get_snapshot_signals():
         if not isinstance(row, dict):
             continue
 
-        if row.get("events"):
+        if row.get("events") and is_actionable_snapshot_row(row):
             data.append(row)
 
     data.sort(key=lambda row: float(row.get("score", 0) or 0), reverse=True)

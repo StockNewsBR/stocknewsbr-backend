@@ -153,7 +153,7 @@ class WorkspaceAiToolsTests(unittest.TestCase):
         self.assertEqual(payload["status"]["snapshot_signals"], 1)
         self.assertIn("market_decision", payload)
 
-    def test_workspace_data_uses_ai_history_when_snapshot_ai_tools_missing(self):
+    def test_workspace_data_does_not_restore_ai_history_when_snapshot_ai_tools_missing(self):
         snapshot_rows = [
             {
                 "ticker": "PETR4",
@@ -286,6 +286,7 @@ class WorkspaceAiToolsTests(unittest.TestCase):
                     ],
                 }
             },
+            create=True,
         ), patch.object(
             workspace_service,
             "persist_ai_alert_history",
@@ -315,19 +316,10 @@ class WorkspaceAiToolsTests(unittest.TestCase):
                 "volatility_squeeze",
             ],
         )
-        self.assertTrue(payload["ai_tools"]["institutional_flow"])
-        self.assertTrue(payload["ai_tools"]["master_score"])
+        self.assertFalse(payload["ai_tools"]["institutional_flow"])
+        self.assertFalse(payload["ai_tools"]["master_score"])
         self.assertIn("market_decision", payload)
         self.assertFalse(payload["market_decision"].get("decision_ready"))
-
-        flow_row = payload["ai_tools"]["institutional_flow"][0]
-        master_row = payload["ai_tools"]["master_score"][0]
-
-        self.assertEqual(flow_row["ticker"], "PETR4")
-        self.assertEqual(flow_row["tool"], "institutional_flow")
-
-        self.assertEqual(master_row["ticker"], "PETR4")
-        self.assertEqual(master_row["tool"], "master_score")
 
     def test_workspace_data_does_not_restore_non_operational_ai_history(self):
         bootstrap = {
@@ -416,6 +408,7 @@ class WorkspaceAiToolsTests(unittest.TestCase):
                     ],
                 }
             },
+            create=True,
         ), patch.object(
             workspace_service,
             "persist_ai_alert_history",

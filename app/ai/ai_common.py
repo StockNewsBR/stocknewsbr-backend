@@ -185,12 +185,12 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def signal_from_score(score: float) -> str:
     if score >= 75:
-        return "BUY"
+        return "WATCH"
     if score >= 55:
         return "WATCH"
     if score <= 25:
-        return "SELL"
-    return "NEUTRAL"
+        return "WATCH"
+    return "WAIT"
 
 
 def confidence_from_inputs(row: Dict[str, Any], extra: float = 0.0) -> int:
@@ -277,12 +277,19 @@ def build_payload(
     if not data_quality:
         data_quality = "priced" if price > 0 and volume > 0 else "score_only"
     reason_text = reason or _reason_from_metrics(tool, state, score, metric_payload)
+    signal = signal_from_score(score)
+    decision_state = "WATCH" if signal == "WATCH" else "WAIT"
     return {
         "ticker": row.get("ticker", "UNKNOWN"),
         "name": row.get("name", row.get("ticker", "UNKNOWN")),
         "tool": tool,
         "score": score,
-        "signal": signal_from_score(score),
+        "signal": signal,
+        "decision_state": decision_state,
+        "decision_ready": False,
+        "can_trade": False,
+        "operational_message": "⚠️ NÃO OPERAR AGORA",
+        "no_trade_reasons": ["contexto técnico insuficiente"],
         "state": state,
         "confidence": confidence_from_inputs(row),
         "price": round(price, 4),

@@ -2,6 +2,7 @@ import threading
 import time
 import json
 import os
+import hashlib
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
@@ -33,6 +34,17 @@ _STALE_SOURCES = {
     "empty",
     "exception",
 }
+_TOP_LEVEL_SIGNATURE_VOLATILE_KEYS = {"generated_at", "updated_at"}
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return max(0.0, float(os.getenv(name, str(default)) or default))
+    except (TypeError, ValueError):
+        return default
+
+
+SNAPSHOT_DISK_WRITE_MIN_INTERVAL_SECONDS = _env_float("SNAPSHOT_DISK_WRITE_MIN_INTERVAL_SECONDS", 1.0)
 
 
 class SnapshotCache:
@@ -42,6 +54,10 @@ class SnapshotCache:
         self._last_good_payload: Dict[str, Any] = self._empty_payload()
         self._last_good_timestamp: float = 0.0
         self._disk_mtime: float = 0.0
+        self._last_disk_write_at: float = 0.0
+        self._last_disk_signature: str = ""
+        self._last_good_signature: str = ""
+        self._disk_write_min_interval_seconds = SNAPSHOT_DISK_WRITE_MIN_INTERVAL_SECONDS
         self._lock = threading.RLock()
         self._storage_path = _project_runtime_path("SNAPSHOT_CACHE_FILE", "runtime/cache/snapshot.json")
 
@@ -193,8 +209,27 @@ class SnapshotCache:
             temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             temp_path.replace(self._storage_path)
             self._disk_mtime = self._storage_path.stat().st_mtime
+            return True
         except Exception:
-            pass
+            return False
+
+    def _payload_signature(self, payload: Dict[str, Any]) -> str:
+        stable_payload = {
+            key: value
+            for key, value in payload.items()
+            if key not in _TOP_LEVEL_SIGNATURE_VOLATILE_KEYS
+        }
+        try:
+            serialized = json.dumps(
+                stable_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+        except Exception:
+            serialized = repr(stable_payload)
+        return hashlib.sha1(serialized.encode("utf-8", errors="replace")).hexdigest()
 
     def _load_from_disk_if_needed(self):
         try:
@@ -218,21 +253,38 @@ class SnapshotCache:
                 self._last_good_payload = last_good_payload
                 self._last_good_timestamp = last_good_timestamp
                 self._disk_mtime = file_mtime
+                self._last_disk_write_at = file_mtime
+                self._last_disk_signature = self._payload_signature(payload)
+                self._last_good_signature = self._payload_signature(last_good_payload)
         except Exception:
             pass
 
     def update(self, data: Any):
         normalized = self._normalize_payload(data)
+        now = time.time()
+        normalized["updated_at"] = now
+        normalized.setdefault("generated_at", now)
+        signature = self._payload_signature(normalized)
 
         with self._lock:
             self._payload = normalized
-            self._timestamp = time.time()
-            self._payload["updated_at"] = self._timestamp
-            self._payload.setdefault("generated_at", self._timestamp)
+            self._timestamp = now
             if self._is_promotable_last_good(self._payload):
-                self._last_good_payload = self._clone_payload(self._payload)
+                if signature != self._last_good_signature:
+                    self._last_good_payload = self._clone_payload(self._payload)
+                    self._last_good_signature = signature
+                else:
+                    self._last_good_payload["updated_at"] = self._payload.get("updated_at")
+                    self._last_good_payload["generated_at"] = self._payload.get("generated_at")
                 self._last_good_timestamp = self._timestamp
-            self._write_to_disk()
+            should_write = (
+                not self._last_disk_write_at
+                or signature != self._last_disk_signature
+                or now - self._last_disk_write_at >= self._disk_write_min_interval_seconds
+            )
+            if should_write and self._write_to_disk():
+                self._last_disk_write_at = now
+                self._last_disk_signature = signature
 
         update_cache_timestamp(self._timestamp)
 
@@ -327,6 +379,9 @@ class SnapshotCache:
             self._last_good_payload = self._empty_payload()
             self._last_good_timestamp = 0.0
             self._disk_mtime = 0.0
+            self._last_disk_write_at = 0.0
+            self._last_disk_signature = ""
+            self._last_good_signature = ""
         try:
             if self._storage_path.exists():
                 self._storage_path.unlink()

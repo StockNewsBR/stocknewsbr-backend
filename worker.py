@@ -130,17 +130,19 @@ def worker_loop(stop_event: threading.Event):
                     signals = safe_run_engine()
 
                     snapshot_start = time.perf_counter()
+                    snapshot_payload = {}
                     try:
-                        generate_market_snapshot(signals, reuse_last_good_on_empty=True)
+                        snapshot_payload = generate_market_snapshot(signals, reuse_last_good_on_empty=True) or {}
                         record_worker_stage_duration("snapshot", time.perf_counter() - snapshot_start, success=True)
                     except Exception:
                         record_worker_stage_duration("snapshot", time.perf_counter() - snapshot_start, success=False)
                         logger.exception("Snapshot update error")
 
-                    if signals:
+                    snapshot_signals = snapshot_payload.get("signals", []) if isinstance(snapshot_payload, dict) else []
+                    if snapshot_signals:
                         push_start = time.perf_counter()
                         try:
-                            dispatch_signal_pushes(signals)
+                            dispatch_signal_pushes(snapshot_signals)
                             record_worker_stage_duration("push_dispatch", time.perf_counter() - push_start, success=True)
                         except Exception:
                             record_worker_stage_duration("push_dispatch", time.perf_counter() - push_start, success=False)

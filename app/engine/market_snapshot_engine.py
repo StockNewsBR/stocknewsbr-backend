@@ -14,6 +14,7 @@ from app.cache.snapshot_cache import get_last_good_snapshot, get_snapshot, updat
 from app.data.warm_data_pool import get_market_pool
 from app.engine.engine_orchestrator import run_engine
 from app.engine.indicators.vector_indicator_engine import compute_rsi
+from app.services.snapshot_contract import is_actionable_snapshot_row as _contract_is_actionable_snapshot_row
 from app.services.signal_history import store_signals
 from app.system.system_metrics import record_signal_quality_coverage
 
@@ -122,38 +123,7 @@ def _has_blocking_reasons(row) -> bool:
 
 
 def _is_actionable_snapshot_row(row) -> bool:
-    if not isinstance(row, dict):
-        return False
-
-    if _snapshot_signal_value(row) not in _ACTIONABLE_SIGNALS:
-        return False
-
-    if row.get("decision_ready") is False:
-        return False
-
-    if row.get("stale") is True or row.get("is_stale") is True:
-        return False
-
-    if str(row.get("data_quality") or "").lower().strip() in _BLOCKED_DATA_QUALITIES:
-        return False
-
-    for status_key in ("quote_status", "status", "provider_status", "market_data_status"):
-        if str(row.get(status_key) or "").lower().strip() in _BLOCKED_DATA_QUALITIES:
-            return False
-
-    if row.get("provider_failed") is True or row.get("provider_error") is True:
-        return False
-
-    if _has_blocking_reasons(row):
-        return False
-
-    if not _has_positive_value(row, "price", "close", "last_price"):
-        return False
-
-    if not _has_positive_value(row, "volume", "last_volume"):
-        return False
-
-    return True
+    return _contract_is_actionable_snapshot_row(row)
 
 
 def _apply_data_quality(row):

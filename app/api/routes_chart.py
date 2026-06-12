@@ -2,14 +2,14 @@ import logging
 
 from fastapi import APIRouter, Depends
 
-from app.cache.signal_cache import signal_cache
+from app.cache.snapshot_cache import get_snapshot_signals
 from app.dependencies import require_any_channel_access
 from app.engine.signal_engine import build_chart_signal_payload
 from app.market.market_data_loader import get_cached_chart_data
 from app.models import User
 from app.services.chart_overlay_service import build_chart_overlays
+from app.services.snapshot_contract import snapshot_surface_row
 from app.api.routes_public_market_live import _load_chart_data_fast as load_chart_data_cache_first
-from app.system.chart_warmup import request_chart_warmup
 from app.system.system_metrics import record_cache_access
 
 
@@ -38,7 +38,6 @@ def chart(
         data = _load_chart_data_fast(ticker, interval)
 
         if not data:
-            request_chart_warmup(ticker, interval)
             return {
                 "symbol": ticker,
                 "ticker": ticker,
@@ -56,23 +55,15 @@ def chart(
         signals = []
 
         try:
-            for row in signal_cache.get_all():
+            for row in get_snapshot_signals():
                 source_ticker = _normalize_chart_ticker(row.get("ticker") or row.get("symbol"))
 
                 if source_ticker != requested:
                     continue
 
-                signals.append(
-                    {
-                        "score": row.get("score"),
-                        "trend": row.get("trend"),
-                        "breakout": row.get("breakout"),
-                        "signal": row.get("signal"),
-                        "events": row.get("events", []),
-                    }
-                )
+                signals.append(snapshot_surface_row(row))
         except Exception:
-            logger.exception("App chart failed to read signal cache")
+            logger.exception("App chart failed to read snapshot cache")
 
         chart_signal = build_chart_signal_payload(ticker, data, interval=interval)
 

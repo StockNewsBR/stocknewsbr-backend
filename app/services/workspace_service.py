@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 
 from app.Frontend.layout import get_layout
 from app.cache.snapshot_cache import get_snapshot
-from app.services.ai_alert_history_service import get_ai_alert_history_snapshot, persist_ai_alert_history
+from app.services.ai_alert_history_service import persist_ai_alert_history
 from app.services.help_center_service import get_help_center_blueprint
 from app.services.legal_service import get_public_bootstrap
 from app.services.media_service import get_media_status
@@ -168,17 +168,15 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
     ai_outputs = _coerce_ai_outputs(snapshot.get("ai_tools"))
     market_decision = snapshot.get("decision") if isinstance(snapshot, dict) else {}
 
-    if not _has_operational_ai_outputs(ai_outputs):
-        history_payload = get_ai_alert_history_snapshot()
-        history_outputs = _coerce_ai_outputs(history_payload.get("tools") if isinstance(history_payload, dict) else {})
-        if _has_operational_ai_outputs(history_outputs):
-            ai_outputs = history_outputs
-
     if not isinstance(market_decision, dict) or not market_decision:
         market_decision = {
             "trade_action": "NO_DECISION",
             "trade_direction": "flat",
             "decision_ready": False,
+            "decision_state": "WAIT",
+            "operational_message": "⚠️ NÃO OPERAR AGORA",
+            "no_trade_reasons": ["snapshot inválido"],
+            "can_trade": False,
             "data_quality": "score_only",
             "reason": "Snapshot ainda sem decisao consolidada pronta.",
         }

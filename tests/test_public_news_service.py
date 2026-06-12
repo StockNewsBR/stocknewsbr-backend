@@ -11,7 +11,11 @@ class PublicNewsServiceTests(unittest.TestCase):
             {"id": "2", "ticker": "GM", "title": "GM update"},
         ]
 
-        with patch.object(public_news_service, "get_symbol_news", return_value=fetched_items), patch.object(
+        with patch.object(public_news_service, "get_cached_symbol_news", return_value=[]), patch.object(
+            public_news_service,
+            "get_symbol_news",
+            return_value=fetched_items,
+        ), patch.object(
             public_news_service,
             "get_news_cached_report",
             return_value={"status": "ok"},
@@ -20,7 +24,7 @@ class PublicNewsServiceTests(unittest.TestCase):
             "get_news_cache_info",
             return_value={"status": "warm", "provider_status": "ok", "provider": "yfinance"},
         ):
-            payload = public_news_service.build_public_news_payload("F", limit=6, source="public")
+            payload = public_news_service.build_public_news_payload("F", limit=6, source="public", allow_fetch=True)
 
         self.assertEqual(payload["symbol"], "F")
         self.assertEqual(payload["count"], 1)
@@ -29,7 +33,7 @@ class PublicNewsServiceTests(unittest.TestCase):
         self.assertFalse(payload["scope"]["mixed_ticker_allowed"])
 
     def test_empty_news_state_is_explicit_and_does_not_reuse_other_ticker(self):
-        with patch.object(
+        with patch.object(public_news_service, "get_cached_symbol_news", return_value=[]), patch.object(
             public_news_service,
             "get_symbol_news",
             return_value=[{"id": "1", "ticker": "AAPL", "title": "Apple update"}],
@@ -42,7 +46,7 @@ class PublicNewsServiceTests(unittest.TestCase):
             "get_news_cache_info",
             return_value={"status": "empty", "provider_status": "empty_response", "provider": "yfinance"},
         ):
-            payload = public_news_service.build_public_news_payload("PETR4", limit=6)
+            payload = public_news_service.build_public_news_payload("PETR4", limit=6, allow_fetch=True)
 
         self.assertEqual(payload["symbol"], "PETR4")
         self.assertEqual(payload["status"], "empty")
@@ -51,7 +55,11 @@ class PublicNewsServiceTests(unittest.TestCase):
         self.assertEqual(payload["scope"]["filtered_out"], 1)
 
     def test_provider_error_is_exposed(self):
-        with patch.object(public_news_service, "get_symbol_news", return_value=[]), patch.object(
+        with patch.object(public_news_service, "get_cached_symbol_news", return_value=[]), patch.object(
+            public_news_service,
+            "get_symbol_news",
+            return_value=[],
+        ), patch.object(
             public_news_service,
             "get_news_cached_report",
             return_value={"status": "empty"},
@@ -65,14 +73,17 @@ class PublicNewsServiceTests(unittest.TestCase):
                 "provider": "yfinance",
             },
         ):
-            payload = public_news_service.build_public_news_payload("AAPL", limit=6)
+            payload = public_news_service.build_public_news_payload("AAPL", limit=6, allow_fetch=True)
 
         self.assertEqual(payload["status"], "provider_error")
         self.assertEqual(payload["state"]["provider_error"], "timeout")
         self.assertIn("timeout", payload["message"])
 
-    def test_cache_only_payload_requests_background_warmup_when_empty(self):
+    def test_cache_only_payload_does_not_fetch_or_request_background_warmup_when_empty(self):
         with patch.object(public_news_service, "get_cached_symbol_news", return_value=[]), patch.object(
+            public_news_service,
+            "get_symbol_news",
+        ) as get_symbol_news, patch.object(
             public_news_service,
             "get_news_cached_report",
             return_value={"status": "empty"},
@@ -80,11 +91,11 @@ class PublicNewsServiceTests(unittest.TestCase):
             public_news_service,
             "get_news_cache_info",
             return_value={"status": "cold", "provider_status": "not_checked", "provider": "yfinance"},
-        ), patch.object(public_news_service, "request_news_warmup") as warmup:
+        ):
             payload = public_news_service.build_public_news_payload("F", limit=6, allow_fetch=False)
 
         self.assertEqual(payload["count"], 0)
-        warmup.assert_called_once_with("F", 6)
+        get_symbol_news.assert_not_called()
 
     def test_dedupes_repeated_ticker_news_cards(self):
         fetched_items = [
@@ -93,7 +104,11 @@ class PublicNewsServiceTests(unittest.TestCase):
             {"id": "3", "ticker": "BBDC4", "title": "Guidance em BBDC4"},
         ]
 
-        with patch.object(public_news_service, "get_symbol_news", return_value=fetched_items), patch.object(
+        with patch.object(public_news_service, "get_cached_symbol_news", return_value=[]), patch.object(
+            public_news_service,
+            "get_symbol_news",
+            return_value=fetched_items,
+        ), patch.object(
             public_news_service,
             "get_news_cached_report",
             return_value={"status": "ok"},
@@ -102,7 +117,7 @@ class PublicNewsServiceTests(unittest.TestCase):
             "get_news_cache_info",
             return_value={"status": "warm", "provider_status": "ok", "provider": "yfinance"},
         ):
-            payload = public_news_service.build_public_news_payload("BBDC4", limit=6)
+            payload = public_news_service.build_public_news_payload("BBDC4", limit=6, allow_fetch=True)
 
         self.assertEqual(payload["count"], 2)
         self.assertEqual(payload["scope"]["duplicates_removed"], 1)
@@ -114,7 +129,11 @@ class PublicNewsServiceTests(unittest.TestCase):
             {"id": "2", "ticker": "", "title": "Finance sector update", "entities": ["Financials"]},
         ]
 
-        with patch.object(public_news_service, "get_symbol_news", return_value=fetched_items), patch.object(
+        with patch.object(public_news_service, "get_cached_symbol_news", return_value=[]), patch.object(
+            public_news_service,
+            "get_symbol_news",
+            return_value=fetched_items,
+        ), patch.object(
             public_news_service,
             "get_news_cached_report",
             return_value={"status": "ok"},
@@ -123,7 +142,7 @@ class PublicNewsServiceTests(unittest.TestCase):
             "get_news_cache_info",
             return_value={"status": "warm", "provider_status": "ok", "provider": "yfinance"},
         ):
-            payload = public_news_service.build_public_news_payload("F", limit=6)
+            payload = public_news_service.build_public_news_payload("F", limit=6, allow_fetch=True)
 
         self.assertEqual(payload["symbol"], "F")
         self.assertEqual(payload["count"], 1)

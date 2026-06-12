@@ -7,7 +7,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.cache.signal_cache import get_all_signals
+from app.cache.snapshot_cache import get_snapshot_signals
 from app.dependencies import require_active_plan
 from app.services.quote_service import get_cached_quote_payload
 
@@ -98,7 +98,7 @@ def get_top_movers(current_user=Depends(require_active_plan)):
     del current_user
 
     try:
-        signals = get_all_signals()
+        signals = get_snapshot_signals()
         movers = []
 
         for row in signals:
@@ -131,7 +131,7 @@ def get_market_radar(current_user=Depends(require_active_plan)):
     del current_user
 
     try:
-        signals = get_all_signals()
+        signals = get_snapshot_signals()
         buckets = {
             "momentum": [],
             "liquidity_sweep": [],
