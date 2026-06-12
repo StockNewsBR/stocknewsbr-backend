@@ -106,6 +106,9 @@ Atualizado em: 2026-06-12
 - Missao 23 - Engine Final de Decisao fechada em 2026-06-12: o sistema agora consolida a conclusao operacional final sem criar sinais novos nem reimplementar contratos anteriores.
 - O contrato de Decisao Final propaga `final_decision`, `final_decision_score`, `final_decision_summary`, `final_decision_reason`, `final_decision_blocks` e `final_decision_confidence` no snapshot, workspace, Ranking, Radar e insight publico.
 - `operational_status=BLOCKED`, `audit_status=BLOCKED` ou `decision_ready=False` forcam `🔴 NÃO OPERAR AGORA`, preservando motivos em `final_decision_blocks`.
+- Missao 24A - Telegram Institucional fechada em 2026-06-12: Telegram virou consumidor dos contratos finais, sem gerar sinal, recalcular score ou promover oportunidade propria.
+- O Telegram agora bloqueia `operational_status=BLOCKED`, `audit_status=BLOCKED`, `decision_ready=False`, `radar_no_trade_now=True` e `final_decision=🔴 NÃO OPERAR AGORA`; somente envia alertas criticos, altos ou medios.
+- O contrato operacional do Telegram inclui `telegram_alert_fingerprint`, cooldown configuravel, resumo de ate 3 linhas, priorizacao critico > alto > medio, metricas, health de observabilidade e historico administrativo no workspace.
 
 ## Validado
 
@@ -187,6 +190,12 @@ Atualizado em: 2026-06-12
 - `venv\Scripts\python.exe -m unittest discover -s tests`: 313 testes OK; Yahoo Finance imprimiu avisos externos conhecidos para aliases invalidos/delistados.
 - `npm exec -- tsc --noEmit --incremental false` em `apps\web`: OK.
 - `git diff --check`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
+- `venv\Scripts\python.exe -m py_compile app\telegram\telegram_alert_engine.py app\telegram\telegram_alert_formatter.py app\system\system_metrics.py app\system\observability_engine.py app\api\routes_system.py app\services\workspace_service.py worker.py tests\test_telegram_institutional.py`: OK.
+- `venv\Scripts\python.exe -m unittest tests.test_telegram_institutional`: 9 testes OK cobrindo alerta critico, alto, medio, bloqueios, deduplicacao, cooldown, resumo, workspace e metricas.
+- `venv\Scripts\python.exe -m unittest tests.test_institutional_auditor`: 9 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_single_snapshot_source`: 15 testes OK; Yahoo Finance imprimiu avisos externos conhecidos para aliases invalidos/delistados.
+- `venv\Scripts\python.exe -m unittest tests.test_observability_institutional`: 3 testes OK.
+- `venv\Scripts\python.exe -m unittest discover tests`: 322 testes OK; Yahoo Finance imprimiu avisos externos conhecidos para aliases invalidos/delistados.
 - `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 113 testes OK.
 - `npm run build` em `apps/web`: build OK apos UX do grafico, tooltips e modos Guiado/Trader/Pro.
 - Browser interno em `http://127.0.0.1:3000/panel/F`: modos Guiado/Trader/Pro validados com `Leitura atual`, `Direcao operacional`, `Confirmacao necessaria`, `Invalidacao` e `Risco`.
@@ -320,6 +329,7 @@ Atualizado em: 2026-06-12
 - Arquivos alterados nesta retomada da Missao 13: `app/ai/strategic_panel.py`, `app/engine/market_snapshot_engine.py`, `app/services/workspace_service.py`, `app/services/snapshot_contract.py`, `app/services/ranking.py`, `app/ai/ai_market_radar.py`, `app/cache/snapshot_cache.py`, `app/api/routes_public_market_live.py`, `apps/web/lib/types.ts`, `apps/web/components/workspace-shell.tsx`, `apps/mobile/app/(tabs)/index.tsx`, `tests/test_strategic_panel.py` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada da Missao 22: `app/ai/institutional_priority.py`, `app/engine/market_snapshot_engine.py`, `app/cache/snapshot_cache.py`, `app/services/snapshot_contract.py`, `app/services/ranking.py`, `app/services/workspace_service.py`, `app/ai/ai_market_radar.py`, `app/api/routes_public_market_live.py`, `app/api/market_routes.py`, `app/api/routes_radar.py`, `app/web/routes_radar.py`, `app/system/system_metrics.py`, `apps/web/lib/types.ts`, `tests/test_institutional_priority.py` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada da Missao 23: `app/ai/final_decision.py`, `app/engine/market_snapshot_engine.py`, `app/cache/snapshot_cache.py`, `app/services/snapshot_contract.py`, `app/services/ranking.py`, `app/services/workspace_service.py`, `app/ai/ai_market_radar.py`, `app/api/routes_public_market_live.py`, `app/api/market_routes.py`, `app/api/routes_radar.py`, `app/web/routes_radar.py`, `app/system/system_metrics.py`, `apps/web/lib/types.ts`, `tests/test_final_decision.py` e `PROJECT_STATUS.md`.
+- Arquivos alterados nesta retomada da Missao 24A: `app/telegram/telegram_alert_engine.py`, `app/telegram/telegram_alert_formatter.py`, `app/system/system_metrics.py`, `app/system/observability_engine.py`, `app/api/routes_system.py`, `app/services/workspace_service.py`, `app/core/settings.py`, `worker.py`, `tests/test_telegram_institutional.py` e `PROJECT_STATUS.md`.
 - Testes/smokes registrados: `npm run typecheck` em `apps/mobile`; `$env:REQUIRE_MOBILE_DEVICE='1'; npm run smoke:mobile`; `npm run export:android`.
 - Testes/smokes registrados nesta retomada: validacao do `venv` Python 3.11.9 e dependencias; unittest focado de `signal_cache`/snapshot/worker; unittest discover completo com 133 testes OK.
 - Testes/smokes registrados nesta retomada da engine/futuros/root web: unittest focado com 35 testes OK, unittest completo com 139 testes OK, `npm run build`, `start_all_local`, smoke API futures, smoke visual B3/USA e browser real da raiz.
@@ -404,13 +414,14 @@ Atualizado em: 2026-06-12
 - Etapa 16 / Missao 21 esta 100% concluida no escopo de Conviccao Institucional: contrato proprio, niveis de conviccao, fatores, conflitos, propagacao no snapshot/workspace/ranking/radar/Score Mestre/Painel/API e metricas de media/alta/baixa/conflitos.
 - Etapa 17 / Missao 22 esta 100% concluida no escopo de Prioridade Institucional: contrato proprio, niveis de prioridade, rank relativo, fatores, resumo, propagacao no snapshot/workspace/ranking/radar/API e metricas por prioridade.
 - Etapa 18 / Missao 23 esta 100% concluida no escopo de Decisao Final: contrato proprio, conclusoes operacionais finais, blocos, razao, confianca, propagacao no snapshot/workspace/ranking/radar/API e metricas por decisao.
+- Etapa 19 / Missao 24A esta 100% concluida no escopo de Telegram Institucional: Telegram consome Decisao Final, Prioridade, Conviccao, Operacional, Auditor e Score Mestre, com bloqueios, deduplicacao, cooldown, metricas e historico administrativo no workspace.
 - Reexecutar smoke completo apos qualquer mudanca em provider/cache/chart/news, worker ou nas abas IA.
 - Se for criar commit, usar o MinGit por caminho absoluto enquanto o Codex nao recarregar PATH.
 - Separar refatoracoes institucionais maiores em commits pequenos por area: data/api, ai, web, tests.
 - Proxima melhoria de produto: codigo ja liga preco/volume real ao `signal_cache` via `warm_market_pool` e passou nos testes com o `venv` Python 3.11.9; acompanhar proximo ciclo real do worker com dados de mercado para confirmar auditoria IA `approved` em producao.
 - Proxima melhoria de trading: forward test local por ticker/regime foi implementado sobre o replay deterministico, com contagem de regime barra a barra, metricas por regime de entrada e status de overtrading lateral; proximo passo e alimentar com barras reais capturadas em producao/forward log e revisar resultado por ativo, horario e regime.
 - Missao 8 esta fechada no escopo solicitado; nao iniciar Missao 9 ou posteriores sem pedido explicito.
-- Missao 23 esta fechada no escopo solicitado; nao iniciar Missao 24A sem pedido explicito.
+- Missao 24A esta fechada no escopo solicitado; nao iniciar Missao 25, 26 ou 27 sem pedido explicito.
 - Proxima melhoria de trading 1D: aplicar `compare_replay_scenarios()` aos cenarios dos prints antigos (`ITUB4`, `AAPL`, `PETR4`, `PLTR`) assim que as mesmas barras forem carregadas, comparando trades perdidos, exits cedo e reducao de `Watch` sem depender de provider externo durante a analise.
 - Proxima melhoria de dados B3: se o produto exigir leilao/pre-abertura antes de 10:00, integrar provider que entregue esse feed; o chart atual nao inventa barras antes da primeira barra recebida.
 - Proxima melhoria de dados futuros B3: substituir `reference_proxy` por feed oficial do contrato `WIN`/`WDO` vigente antes de usar esses numeros para execucao real.

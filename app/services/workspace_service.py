@@ -24,6 +24,7 @@ from app.services.workspace_layout_service import get_user_workspace_layout
 from app.social.posts import get_posts
 from app.api import routes_system
 from app.system.system_metrics import get_metrics_snapshot
+from app.telegram.telegram_alert_engine import get_telegram_alert_history, get_telegram_health
 
 
 def _tab_routes() -> Dict[str, str]:
@@ -248,6 +249,14 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
     media_status = get_media_status()
     push_status = get_push_status()
     observability = routes_system.observability_dashboard()
+    telegram_alert_history = get_telegram_alert_history(limit=30)
+    telegram_alerts = {
+        "health": get_telegram_health(),
+        "latest": telegram_alert_history[:20],
+        "sent": [item for item in telegram_alert_history if item.get("status") == "sent"][:10],
+        "blocked": [item for item in telegram_alert_history if item.get("status") == "blocked"][:10],
+        "discarded": [item for item in telegram_alert_history if item.get("status") in {"discarded", "deduplicated", "cooldown"}][:10],
+    }
     layout = get_user_workspace_layout(user_id or 0)
     saved_order = layout.get("tabs", [])
     pinned_ticker = layout.get("pinned_ticker", "PETR4")
@@ -299,6 +308,7 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "media": media_status,
         "push": push_status,
         "observability": observability,
+        "telegram_alerts": telegram_alerts,
         "pricing": bootstrap["pricing"],
         "launch_roadmap": bootstrap["launch_roadmap"],
         "ai_modules": bootstrap["ai_modules"],

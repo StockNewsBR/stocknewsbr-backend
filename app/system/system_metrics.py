@@ -105,6 +105,18 @@ _final_decision_metrics = {
     "no_trade": 0,
     "updated_at": 0.0,
 }
+_telegram_alert_metrics = {
+    "sent": 0,
+    "blocked": 0,
+    "discarded": 0,
+    "deduplicated": 0,
+    "cooldown": 0,
+    "errors": 0,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "updated_at": 0.0,
+}
 
 
 def _quantile(sorted_values, quantile: float) -> float:
@@ -542,6 +554,22 @@ def get_final_decision_metrics_snapshot():
         return dict(_final_decision_metrics)
 
 
+def record_telegram_alert_metric(event: str, alert_level: str | None = None):
+    metric = str(event or "").strip().lower()
+    level = str(alert_level or "").strip().lower()
+    with _lock:
+        if metric in _telegram_alert_metrics:
+            _telegram_alert_metrics[metric] = int(_telegram_alert_metrics.get(metric, 0) or 0) + 1
+        if metric == "sent" and level in {"critical", "high", "medium"}:
+            _telegram_alert_metrics[level] = int(_telegram_alert_metrics.get(level, 0) or 0) + 1
+        _telegram_alert_metrics["updated_at"] = time.time()
+
+
+def get_telegram_alert_metrics_snapshot():
+    with _lock:
+        return dict(_telegram_alert_metrics)
+
+
 def get_performance_metrics_snapshot():
     with _lock:
         http_metrics = {}
@@ -630,6 +658,7 @@ def get_performance_metrics_snapshot():
         institutional_conviction = dict(_institutional_conviction_metrics)
         institutional_priority = dict(_institutional_priority_metrics)
         final_decision = dict(_final_decision_metrics)
+        telegram_alerts = dict(_telegram_alert_metrics)
 
         repeated_failures = sorted(
             (
@@ -662,6 +691,7 @@ def get_performance_metrics_snapshot():
         "institutional_conviction": institutional_conviction,
         "institutional_priority": institutional_priority,
         "final_decision": final_decision,
+        "telegram_alerts": telegram_alerts,
         "provider_symbol_failures": repeated_failures,
     }
 
@@ -784,6 +814,12 @@ def format_prometheus_metrics() -> str:
     final_metrics = performance.get("final_decision", {})
     for field in ("confirmed", "forming", "observe", "wait", "no_trade"):
         lines.append('final_decision_total{decision="%s"} %s' % (_label_value(field), int(final_metrics.get(field, 0))))
+
+    telegram_metrics = performance.get("telegram_alerts", {})
+    for field in ("sent", "blocked", "discarded", "deduplicated", "cooldown", "errors"):
+        lines.append('telegram_alert_events_total{event="%s"} %s' % (_label_value(field), int(telegram_metrics.get(field, 0))))
+    for field in ("critical", "high", "medium"):
+        lines.append('telegram_alerts_total{level="%s"} %s' % (_label_value(field), int(telegram_metrics.get(field, 0))))
 
     for item in performance.get("provider_symbol_failures", []):
         lines.append(

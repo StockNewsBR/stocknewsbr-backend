@@ -163,6 +163,18 @@ class Settings:
         minimum=1
     )
 
+    TELEGRAM_ALERT_COOLDOWN_SECONDS: int = to_int(
+        os.getenv("TELEGRAM_ALERT_COOLDOWN_SECONDS", 1800),
+        1800,
+        minimum=60
+    )
+
+    TELEGRAM_MAX_ALERTS_PER_BATCH: int = to_int(
+        os.getenv("TELEGRAM_MAX_ALERTS_PER_BATCH", 5),
+        5,
+        minimum=1
+    )
+
     # -------------------------------------------------
     # DATABASE
     # -------------------------------------------------

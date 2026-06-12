@@ -16,6 +16,7 @@ from app.social.moderation import get_moderation_summary
 from app.system.ai_tab_audit import get_ai_tab_audit_history, get_ai_tab_audit_report, run_ai_tab_audit
 from app.system.observability_engine import build_observability_dashboard, get_metrics, record_observability_event
 from app.system.system_metrics import format_prometheus_metrics, get_metrics_snapshot, get_performance_metrics_snapshot
+from app.telegram.telegram_alert_engine import get_telegram_health
 
 router = APIRouter(
     prefix="/system",
@@ -149,6 +150,7 @@ def observability_report():
     metrics = get_metrics()
     status_metrics = get_metrics_snapshot()
     performance_metrics = get_performance_metrics_snapshot()
+    telegram_health = get_telegram_health()
     dashboard = build_observability_dashboard(
         snapshot={
             "signals": status_metrics.get("signals_generated", 0),
@@ -168,7 +170,7 @@ def observability_report():
         },
         ranking={"status": "HEALTHY" if get_ranking() else "DEGRADED", "eligible": len(get_ranking() or []), "discarded": 0, "blocked": 0},
         radar={"status": "HEALTHY", "generated": status_metrics.get("signals_generated", 0), "filtered": 0, "blocked": 0},
-        telegram={"status": "HEALTHY" if get_push_status().get("android_ready") else "DEGRADED", "sent": int(get_push_status().get("registered_tokens", 0) or 0), "blocked": 0, "discarded": 0, "errors": 0},
+        telegram=telegram_health,
         system_status={"status": "HEALTHY"},
     )
     return {
@@ -202,6 +204,7 @@ def engine_observability():
 
 @router.get("/observability/dashboard")
 def observability_dashboard():
+    telegram_health = get_telegram_health()
     dashboard = build_observability_dashboard(
         snapshot=get_snapshot_info(),
         ai_worker=get_ai_worker_report(),
@@ -226,13 +229,7 @@ def observability_dashboard():
             "filtered": 0,
             "blocked": 0,
         },
-        telegram={
-            "status": "HEALTHY" if get_push_status().get("android_ready") else "DEGRADED",
-            "sent": get_push_status().get("android_ready", 0),
-            "blocked": 0,
-            "discarded": 0,
-            "errors": 0,
-        },
+        telegram=telegram_health,
         system_status={"status": "HEALTHY"},
     )
     if dashboard.get("system_status") == "CRITICAL":

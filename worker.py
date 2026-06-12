@@ -13,6 +13,7 @@ from app.system.push_dispatcher import dispatch_signal_pushes
 from app.system.news_warmup import warm_news_once
 from app.system.chart_warmup import warm_charts_once
 from app.system.quote_warmup import warm_quotes_once
+from app.telegram.telegram_alert_engine import send_bulk_alert
 from app.system.system_metrics import (
     increment_engine_cycles,
     provider_call_context,
@@ -147,6 +148,14 @@ def worker_loop(stop_event: threading.Event):
                         except Exception:
                             record_worker_stage_duration("push_dispatch", time.perf_counter() - push_start, success=False)
                             logger.exception("Push dispatch error")
+
+                        telegram_start = time.perf_counter()
+                        try:
+                            send_bulk_alert(snapshot_signals)
+                            record_worker_stage_duration("telegram_dispatch", time.perf_counter() - telegram_start, success=True)
+                        except Exception:
+                            record_worker_stage_duration("telegram_dispatch", time.perf_counter() - telegram_start, success=False)
+                            logger.exception("Telegram dispatch error")
 
                     if int(time.time()) % QUOTE_PREWARM_INTERVAL == 0:
                         _prewarm_public_quotes()
