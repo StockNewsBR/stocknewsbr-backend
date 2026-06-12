@@ -176,13 +176,13 @@ class SnapshotCache:
                 for key, value in ai_tools.items()
                 if isinstance(value, list)
             }
-        for key in ("master_score", "strategic_panel"):
+        for key in ("master_score", "strategic_panel", "historical_confidence"):
             if isinstance(payload.get(key), dict):
                 cloned[key] = dict(payload.get(key, {}))
-        for key in ("master_scores", "strategic_panels", "institutional_radar", "institutional_ranking"):
+        for key in ("master_scores", "strategic_panels", "institutional_radar", "institutional_ranking", "historical_confidences", "operational_rules", "institutional_convictions", "institutional_priorities", "final_decisions"):
             if isinstance(payload.get(key), list):
                 cloned[key] = [dict(row) for row in payload.get(key, []) if isinstance(row, dict)]
-        for key in ("radar_metrics", "ranking_metrics"):
+        for key in ("radar_metrics", "ranking_metrics", "historical_confidence_metrics", "operational_rules_metrics", "conviction_metrics", "priority_metrics", "final_decision_metrics"):
             if isinstance(payload.get(key), dict):
                 cloned[key] = dict(payload.get(key, {}))
         return cloned

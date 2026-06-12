@@ -65,6 +65,46 @@ _institutional_ranking_metrics = {
     "top_ranking": 0,
     "updated_at": 0.0,
 }
+_historical_confidence_metrics = {
+    "signals": 0,
+    "average_confidence_score": 0.0,
+    "average_sample_size": 0.0,
+    "signals_without_sample": 0,
+    "aggregate_win_rate": 0.0,
+    "by_ticker": {},
+    "updated_at": 0.0,
+}
+_operational_rules_metrics = {
+    "ready": 0,
+    "caution": 0,
+    "blocked": 0,
+    "top_blocks": {},
+    "top_warnings": {},
+    "updated_at": 0.0,
+}
+_institutional_conviction_metrics = {
+    "signals": 0,
+    "average_conviction": 0.0,
+    "high_conviction": 0,
+    "low_conviction": 0,
+    "conflicts_detected": 0,
+    "updated_at": 0.0,
+}
+_institutional_priority_metrics = {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "updated_at": 0.0,
+}
+_final_decision_metrics = {
+    "confirmed": 0,
+    "forming": 0,
+    "observe": 0,
+    "wait": 0,
+    "no_trade": 0,
+    "updated_at": 0.0,
+}
 
 
 def _quantile(sorted_values, quantile: float) -> float:
@@ -402,6 +442,106 @@ def get_institutional_ranking_metrics_snapshot():
         return dict(_institutional_ranking_metrics)
 
 
+def record_historical_confidence_metrics(metrics: dict | None):
+    safe = metrics if isinstance(metrics, dict) else {}
+    with _lock:
+        _historical_confidence_metrics.update(
+            {
+                "signals": int(safe.get("signals", 0) or 0),
+                "average_confidence_score": round(float(safe.get("average_confidence_score", 0.0) or 0.0), 2),
+                "average_sample_size": round(float(safe.get("average_sample_size", 0.0) or 0.0), 2),
+                "signals_without_sample": int(safe.get("signals_without_sample", 0) or 0),
+                "aggregate_win_rate": round(float(safe.get("aggregate_win_rate", 0.0) or 0.0), 2),
+                "by_ticker": dict(safe.get("by_ticker", {}) if isinstance(safe.get("by_ticker"), dict) else {}),
+                "updated_at": time.time(),
+            }
+        )
+
+
+def get_historical_confidence_metrics_snapshot():
+    with _lock:
+        return dict(_historical_confidence_metrics)
+
+
+def record_operational_rules_metrics(metrics: dict | None):
+    safe = metrics if isinstance(metrics, dict) else {}
+    with _lock:
+        _operational_rules_metrics.update(
+            {
+                "ready": int(safe.get("ready", 0) or 0),
+                "caution": int(safe.get("caution", 0) or 0),
+                "blocked": int(safe.get("blocked", 0) or 0),
+                "top_blocks": dict(safe.get("top_blocks", {}) if isinstance(safe.get("top_blocks"), dict) else {}),
+                "top_warnings": dict(safe.get("top_warnings", {}) if isinstance(safe.get("top_warnings"), dict) else {}),
+                "updated_at": time.time(),
+            }
+        )
+
+
+def get_operational_rules_metrics_snapshot():
+    with _lock:
+        return dict(_operational_rules_metrics)
+
+
+def record_institutional_conviction_metrics(metrics: dict | None):
+    safe = metrics if isinstance(metrics, dict) else {}
+    with _lock:
+        _institutional_conviction_metrics.update(
+            {
+                "signals": int(safe.get("signals", 0) or 0),
+                "average_conviction": round(float(safe.get("average_conviction", 0.0) or 0.0), 2),
+                "high_conviction": int(safe.get("high_conviction", 0) or 0),
+                "low_conviction": int(safe.get("low_conviction", 0) or 0),
+                "conflicts_detected": int(safe.get("conflicts_detected", 0) or 0),
+                "updated_at": time.time(),
+            }
+        )
+
+
+def get_institutional_conviction_metrics_snapshot():
+    with _lock:
+        return dict(_institutional_conviction_metrics)
+
+
+def record_institutional_priority_metrics(metrics: dict | None):
+    safe = metrics if isinstance(metrics, dict) else {}
+    with _lock:
+        _institutional_priority_metrics.update(
+            {
+                "critical": int(safe.get("critical", 0) or 0),
+                "high": int(safe.get("high", 0) or 0),
+                "medium": int(safe.get("medium", 0) or 0),
+                "low": int(safe.get("low", 0) or 0),
+                "updated_at": time.time(),
+            }
+        )
+
+
+def get_institutional_priority_metrics_snapshot():
+    with _lock:
+        return dict(_institutional_priority_metrics)
+
+
+def record_final_decision_metrics(metrics: dict | None):
+    safe = metrics if isinstance(metrics, dict) else {}
+    with _lock:
+        _final_decision_metrics.update(
+            {
+                "confirmed": int(safe.get("confirmed", 0) or 0),
+                "forming": int(safe.get("forming", 0) or 0),
+                "observe": int(safe.get("observe", 0) or 0),
+                "wait": int(safe.get("wait", 0) or 0),
+                "no_trade": int(safe.get("no_trade", 0) or 0),
+                "updated_at": time.time(),
+            }
+        )
+
+
+def get_final_decision_metrics_snapshot():
+    with _lock:
+        return dict(_final_decision_metrics)
+
+
 def get_performance_metrics_snapshot():
     with _lock:
         http_metrics = {}
@@ -485,6 +625,11 @@ def get_performance_metrics_snapshot():
         }
         institutional_radar = dict(_institutional_radar_metrics)
         institutional_ranking = dict(_institutional_ranking_metrics)
+        historical_confidence = dict(_historical_confidence_metrics)
+        operational_rules = dict(_operational_rules_metrics)
+        institutional_conviction = dict(_institutional_conviction_metrics)
+        institutional_priority = dict(_institutional_priority_metrics)
+        final_decision = dict(_final_decision_metrics)
 
         repeated_failures = sorted(
             (
@@ -512,6 +657,11 @@ def get_performance_metrics_snapshot():
         "signal_quality_coverage": signal_quality,
         "institutional_radar": institutional_radar,
         "institutional_ranking": institutional_ranking,
+        "historical_confidence": historical_confidence,
+        "operational_rules": operational_rules,
+        "institutional_conviction": institutional_conviction,
+        "institutional_priority": institutional_priority,
+        "final_decision": final_decision,
         "provider_symbol_failures": repeated_failures,
     }
 
@@ -606,6 +756,34 @@ def format_prometheus_metrics() -> str:
     ranking_metrics = performance.get("institutional_ranking", {})
     for field in ("eligible", "excluded", "promoted", "top_ranking"):
         lines.append('institutional_ranking_opportunities_total{state="%s"} %s' % (_label_value(field), int(ranking_metrics.get(field, 0))))
+
+    historical_metrics = performance.get("historical_confidence", {})
+    lines.append("historical_confidence_average_score %s" % float(historical_metrics.get("average_confidence_score", 0.0)))
+    lines.append("historical_confidence_average_sample_size %s" % float(historical_metrics.get("average_sample_size", 0.0)))
+    lines.append("historical_confidence_without_sample_total %s" % int(historical_metrics.get("signals_without_sample", 0)))
+    lines.append("historical_confidence_aggregate_win_rate %s" % float(historical_metrics.get("aggregate_win_rate", 0.0)))
+
+    operational_metrics = performance.get("operational_rules", {})
+    for field in ("ready", "caution", "blocked"):
+        lines.append('operational_rules_signals_total{status="%s"} %s' % (_label_value(field), int(operational_metrics.get(field, 0))))
+    for reason, count in operational_metrics.get("top_blocks", {}).items():
+        lines.append('operational_rules_reasons_total{kind="block",reason="%s"} %s' % (_label_value(reason), int(count or 0)))
+    for reason, count in operational_metrics.get("top_warnings", {}).items():
+        lines.append('operational_rules_reasons_total{kind="warning",reason="%s"} %s' % (_label_value(reason), int(count or 0)))
+
+    conviction_metrics = performance.get("institutional_conviction", {})
+    lines.append("institutional_conviction_average_score %s" % float(conviction_metrics.get("average_conviction", 0.0)))
+    lines.append("institutional_conviction_high_total %s" % int(conviction_metrics.get("high_conviction", 0)))
+    lines.append("institutional_conviction_low_total %s" % int(conviction_metrics.get("low_conviction", 0)))
+    lines.append("institutional_conviction_conflicts_total %s" % int(conviction_metrics.get("conflicts_detected", 0)))
+
+    priority_metrics = performance.get("institutional_priority", {})
+    for field in ("critical", "high", "medium", "low"):
+        lines.append('institutional_priority_total{level="%s"} %s' % (_label_value(field), int(priority_metrics.get(field, 0))))
+
+    final_metrics = performance.get("final_decision", {})
+    for field in ("confirmed", "forming", "observe", "wait", "no_trade"):
+        lines.append('final_decision_total{decision="%s"} %s' % (_label_value(field), int(final_metrics.get(field, 0))))
 
     for item in performance.get("provider_symbol_failures", []):
         lines.append(

@@ -7,6 +7,8 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.ai.final_decision import ensure_final_decision_rows
+from app.ai.institutional_priority import ensure_institutional_priority_rows
 from app.ai.institutional_radar import ensure_institutional_radar_rows, institutional_radar_items
 from app.cache.snapshot_cache import get_snapshot_signals
 from app.dependencies import require_active_plan
@@ -135,7 +137,7 @@ def get_market_radar(current_user=Depends(require_active_plan)):
     try:
         raw_signals = get_snapshot_signals()
         has_radar_contract = any(isinstance(row, dict) and ("radar_prioritization_score" in row or "radar_priority_score" in row) for row in raw_signals)
-        signals = ensure_institutional_radar_rows(raw_signals)
+        signals = ensure_final_decision_rows(ensure_institutional_priority_rows(ensure_institutional_radar_rows(raw_signals)))
         radar_signals = institutional_radar_items(signals, limit=50)
         if not radar_signals and not has_radar_contract:
             radar_signals = [row for row in signals if is_actionable_snapshot_row(row)]

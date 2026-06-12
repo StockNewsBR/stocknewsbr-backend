@@ -5,6 +5,8 @@
 from fastapi import APIRouter, Depends
 import logging
 
+from app.ai.final_decision import ensure_final_decision_rows
+from app.ai.institutional_priority import ensure_institutional_priority_rows
 from app.ai.institutional_radar import ensure_institutional_radar_rows, institutional_radar_items
 from app.cache.snapshot_cache import get_snapshot_signals
 from app.dependencies import require_channel_access
@@ -35,7 +37,7 @@ def get_radar():
 
         radar = []
 
-        enriched_signals = ensure_institutional_radar_rows(signals)
+        enriched_signals = ensure_final_decision_rows(ensure_institutional_priority_rows(ensure_institutional_radar_rows(signals)))
         for s in institutional_radar_items(enriched_signals, limit=50):
 
             try:

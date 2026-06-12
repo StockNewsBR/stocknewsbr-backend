@@ -94,6 +94,18 @@ Atualizado em: 2026-06-12
 - O contrato do Radar propaga `radar_prioritization_score`, `radar_priority_score`, `radar_priority`, `radar_level`, `radar_reason`, `radar_summary`, `radar_no_trade_now` e `radar_blocked_reasons` no snapshot, workspace e APIs.
 - Missao 18 - Ranking de Oportunidades Institucional fechada em 2026-06-12: o Ranking agora consome Auditor Institucional, Score Mestre, Painel Estrategico, Radar Institucional, Market Pulse, Risk IA, Data Quality e Decision Ready para listar apenas oportunidades elegiveis.
 - O contrato do Ranking propaga `ranking_opportunity_score`, `ranking_classification`, `ranking_reason`, `ranking_summary`, `ranking_eligible` e `ranking_excluded_reasons` no snapshot, workspace, service de ranking e insight publico.
+- Missao 19 - Confianca Historica fechada em 2026-06-12: o sistema agora calcula evidência historica separada do Score Mestre para responder se leituras parecidas costumam funcionar para o ativo.
+- O contrato de Confianca Historica propaga `historical_confidence_score`, `historical_confidence_label`, `historical_sample_size`, `historical_win_rate`, `historical_context_match`, `historical_reason` e `historical_warning` no snapshot, workspace, Ranking, Radar, Score Mestre, Painel Estrategico e insight publico.
+- Missao 20 - Regras Operacionais Institucionais fechada em 2026-06-12: o Motor de Regras Operacionais agora valida se as condicoes minimas para operar existem mesmo quando ha oportunidade institucional.
+- O contrato operacional propaga `operational_status`, `operational_ready`, `operational_score`, `operational_blocks`, `operational_warnings` e `operational_summary` no snapshot, workspace, Ranking, Radar, Score Mestre, Painel Estrategico e insight publico.
+- Missao 21 - Motor de Conviccao Institucional fechada em 2026-06-12: o sistema agora mede a forca da evidencia institucional por tras da leitura sem substituir score, auditoria ou regras operacionais.
+- O contrato de Conviccao Institucional propaga `conviction_score`, `conviction_level`, `conviction_summary`, `conviction_factors` e `conviction_conflicts` no snapshot, workspace, Ranking, Radar, Score Mestre, Painel Estrategico e insight publico.
+- Missao 22 - Motor de Prioridade Institucional fechada em 2026-06-12: o sistema agora ordena a fila de atencao entre oportunidades validas sem substituir Radar, Ranking, Conviccao ou Regras Operacionais.
+- O contrato de Prioridade Institucional propaga `priority_score`, `priority_level`, `priority_rank`, `priority_summary` e `priority_factors` no snapshot, workspace, Ranking, Radar e insight publico.
+- `operational_status=BLOCKED` sempre forca prioridade baixa, sem `priority_rank`, preservando bloqueios operacionais e impedindo promocao indevida.
+- Missao 23 - Engine Final de Decisao fechada em 2026-06-12: o sistema agora consolida a conclusao operacional final sem criar sinais novos nem reimplementar contratos anteriores.
+- O contrato de Decisao Final propaga `final_decision`, `final_decision_score`, `final_decision_summary`, `final_decision_reason`, `final_decision_blocks` e `final_decision_confidence` no snapshot, workspace, Ranking, Radar e insight publico.
+- `operational_status=BLOCKED`, `audit_status=BLOCKED` ou `decision_ready=False` forcam `🔴 NÃO OPERAR AGORA`, preservando motivos em `final_decision_blocks`.
 
 ## Validado
 
@@ -145,6 +157,36 @@ Atualizado em: 2026-06-12
 - `venv\Scripts\python.exe -m unittest tests.test_institutional_ranking tests.test_institutional_radar tests.test_ranking_service tests.test_master_score_institutional tests.test_strategic_panel tests.test_single_snapshot_source tests.test_workspace_ai_tools`: 66 testes OK.
 - `venv\Scripts\python.exe -m unittest discover -s tests`: 281 testes OK.
 - `npm exec -- tsc --noEmit --incremental false` em `apps\web`: OK.
+- `venv\Scripts\python.exe -m py_compile app\ai\historical_confidence.py app\engine\market_snapshot_engine.py app\cache\snapshot_cache.py app\services\snapshot_contract.py app\services\ranking.py app\services\workspace_service.py app\api\routes_public_market_live.py app\ai\ai_market_radar.py app\system\system_metrics.py tests\test_historical_confidence.py`: OK.
+- `venv\Scripts\python.exe -m unittest tests.test_historical_confidence`: 7 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_historical_confidence tests.test_institutional_ranking tests.test_institutional_radar tests.test_master_score_institutional tests.test_strategic_panel tests.test_single_snapshot_source tests.test_workspace_ai_tools`: 65 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_ranking_service tests.test_system_health`: 12 testes OK.
+- `venv\Scripts\python.exe -m unittest discover -s tests`: 288 testes OK.
+- `npm exec -- tsc --noEmit --incremental false` em `apps\web`: OK.
+- `venv\Scripts\python.exe -m py_compile app\ai\operational_rules.py app\engine\market_snapshot_engine.py app\cache\snapshot_cache.py app\services\snapshot_contract.py app\services\ranking.py app\services\workspace_service.py app\api\routes_public_market_live.py app\ai\ai_market_radar.py app\system\system_metrics.py tests\test_operational_rules.py`: OK.
+- `venv\Scripts\python.exe -m unittest tests.test_operational_rules`: 6 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_operational_rules tests.test_historical_confidence tests.test_institutional_ranking tests.test_institutional_radar tests.test_master_score_institutional tests.test_strategic_panel tests.test_single_snapshot_source tests.test_workspace_ai_tools`: 71 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_ranking_service tests.test_system_health`: 12 testes OK.
+- `venv\Scripts\python.exe -m unittest discover -s tests`: 294 testes OK.
+- `npm exec -- tsc --noEmit --incremental false` em `apps\web`: OK.
+- `venv\Scripts\python.exe -m py_compile app\ai\institutional_conviction.py app\engine\market_snapshot_engine.py app\cache\snapshot_cache.py app\services\snapshot_contract.py app\services\ranking.py app\services\workspace_service.py app\api\routes_public_market_live.py app\ai\ai_market_radar.py app\system\system_metrics.py tests\test_institutional_conviction.py`: OK.
+- `venv\Scripts\python.exe -m unittest tests.test_institutional_conviction`: 6 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_institutional_conviction tests.test_operational_rules tests.test_historical_confidence tests.test_institutional_ranking tests.test_institutional_radar tests.test_master_score_institutional tests.test_strategic_panel tests.test_single_snapshot_source tests.test_workspace_ai_tools`: 77 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_ranking_service tests.test_system_health`: 12 testes OK.
+- `venv\Scripts\python.exe -m unittest discover -s tests`: 300 testes OK.
+- `npm exec -- tsc --noEmit --incremental false` em `apps\web`: OK.
+- `venv\Scripts\python.exe -m py_compile app\ai\institutional_priority.py app\ai\ai_market_radar.py app\api\routes_public_market_live.py app\api\market_routes.py app\api\routes_radar.py app\web\routes_radar.py app\engine\market_snapshot_engine.py app\services\ranking.py app\services\workspace_service.py app\services\snapshot_contract.py app\cache\snapshot_cache.py app\system\system_metrics.py tests\test_institutional_priority.py`: OK.
+- `venv\Scripts\python.exe -m unittest tests.test_institutional_priority`: 7 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_historical_confidence tests.test_operational_rules tests.test_institutional_conviction tests.test_institutional_priority tests.test_institutional_ranking tests.test_institutional_radar tests.test_ranking_service tests.test_system_health`: 57 testes OK.
+- `venv\Scripts\python.exe -m unittest discover -s tests`: 307 testes OK; Yahoo Finance imprimiu avisos externos conhecidos para aliases invalidos/delistados.
+- `npm exec -- tsc --noEmit --incremental false` em `apps\web`: OK.
+- `git diff --check`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
+- `venv\Scripts\python.exe -m py_compile app\ai\final_decision.py app\engine\market_snapshot_engine.py app\cache\snapshot_cache.py app\services\snapshot_contract.py app\services\ranking.py app\services\workspace_service.py app\ai\ai_market_radar.py app\api\routes_public_market_live.py app\api\market_routes.py app\api\routes_radar.py app\web\routes_radar.py app\system\system_metrics.py tests\test_final_decision.py`: OK.
+- `venv\Scripts\python.exe -m unittest tests.test_final_decision`: 6 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_final_decision tests.test_institutional_priority tests.test_institutional_conviction tests.test_operational_rules tests.test_historical_confidence tests.test_institutional_ranking tests.test_institutional_radar tests.test_ranking_service tests.test_system_health`: 63 testes OK.
+- `venv\Scripts\python.exe -m unittest discover -s tests`: 313 testes OK; Yahoo Finance imprimiu avisos externos conhecidos para aliases invalidos/delistados.
+- `npm exec -- tsc --noEmit --incremental false` em `apps\web`: OK.
+- `git diff --check`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
 - `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 113 testes OK.
 - `npm run build` em `apps/web`: build OK apos UX do grafico, tooltips e modos Guiado/Trader/Pro.
 - Browser interno em `http://127.0.0.1:3000/panel/F`: modos Guiado/Trader/Pro validados com `Leitura atual`, `Direcao operacional`, `Confirmacao necessaria`, `Invalidacao` e `Risco`.
@@ -276,6 +318,8 @@ Atualizado em: 2026-06-12
 - Arquivos alterados nesta retomada da Missao 8: `app/services/snapshot_contract.py`, `app/ai/ai_market_pulse.py`, `app/cache/snapshot_cache.py`, `app/engine/market_snapshot_engine.py`, `app/api/market_routes.py`, `tests/test_market_pulse_actionable.py`, `tests/test_single_snapshot_source.py` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada da Missao 12: `app/ai/ai_master_score.py`, `app/engine/market_snapshot_engine.py`, `app/services/snapshot_contract.py`, `app/services/ranking.py`, `app/ai/ai_market_radar.py`, `app/system/push_dispatcher.py`, `app/telegram/telegram_alert_formatter.py`, `app/telegram/telegram_alert_engine.py`, `app/api/routes_public_market_live.py`, `app/api/market_routes.py`, `app/api/routes_radar.py`, `app/web/routes_radar.py`, `app/engine/signal_engine.py`, `app/cache/snapshot_cache.py`, `app/services/workspace_service.py`, `apps/web/lib/types.ts`, `tests/test_master_score_institutional.py` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada da Missao 13: `app/ai/strategic_panel.py`, `app/engine/market_snapshot_engine.py`, `app/services/workspace_service.py`, `app/services/snapshot_contract.py`, `app/services/ranking.py`, `app/ai/ai_market_radar.py`, `app/cache/snapshot_cache.py`, `app/api/routes_public_market_live.py`, `apps/web/lib/types.ts`, `apps/web/components/workspace-shell.tsx`, `apps/mobile/app/(tabs)/index.tsx`, `tests/test_strategic_panel.py` e `PROJECT_STATUS.md`.
+- Arquivos alterados nesta retomada da Missao 22: `app/ai/institutional_priority.py`, `app/engine/market_snapshot_engine.py`, `app/cache/snapshot_cache.py`, `app/services/snapshot_contract.py`, `app/services/ranking.py`, `app/services/workspace_service.py`, `app/ai/ai_market_radar.py`, `app/api/routes_public_market_live.py`, `app/api/market_routes.py`, `app/api/routes_radar.py`, `app/web/routes_radar.py`, `app/system/system_metrics.py`, `apps/web/lib/types.ts`, `tests/test_institutional_priority.py` e `PROJECT_STATUS.md`.
+- Arquivos alterados nesta retomada da Missao 23: `app/ai/final_decision.py`, `app/engine/market_snapshot_engine.py`, `app/cache/snapshot_cache.py`, `app/services/snapshot_contract.py`, `app/services/ranking.py`, `app/services/workspace_service.py`, `app/ai/ai_market_radar.py`, `app/api/routes_public_market_live.py`, `app/api/market_routes.py`, `app/api/routes_radar.py`, `app/web/routes_radar.py`, `app/system/system_metrics.py`, `apps/web/lib/types.ts`, `tests/test_final_decision.py` e `PROJECT_STATUS.md`.
 - Testes/smokes registrados: `npm run typecheck` em `apps/mobile`; `$env:REQUIRE_MOBILE_DEVICE='1'; npm run smoke:mobile`; `npm run export:android`.
 - Testes/smokes registrados nesta retomada: validacao do `venv` Python 3.11.9 e dependencias; unittest focado de `signal_cache`/snapshot/worker; unittest discover completo com 133 testes OK.
 - Testes/smokes registrados nesta retomada da engine/futuros/root web: unittest focado com 35 testes OK, unittest completo com 139 testes OK, `npm run build`, `start_all_local`, smoke API futures, smoke visual B3/USA e browser real da raiz.
@@ -324,6 +368,16 @@ Atualizado em: 2026-06-12
 - Missao 17: a rota legada `/market/radar` preserva fallback para snapshots antigos sem contrato de Radar, mas snapshots novos devem usar `radar_prioritization_score` como criterio principal.
 - Missao 18: o Ranking Institucional usa `ranking_opportunity_score` para ordenacao e mantem `score` como compatibilidade visual/legada com Score Mestre nas respostas do service.
 - Missao 18: ativos bloqueados pelo Auditor, Painel, Radar, data quality ruim, `decision_ready=False` ou risco critico ficam fora do ranking operacional, mas preservam motivos em `ranking_excluded_reasons` para auditoria/admin.
+- Missao 19: Confianca Historica e evidencia estatistica separada, nao permissao operacional; amostra insuficiente sempre fica rotulada como `Amostra Insuficiente` e nao deve ser usada como promessa de resultado.
+- Missao 19: quando nao houver historico com outcome mensuravel, o score historico fica 0 e o aviso explica a falta de amostra; a qualidade melhora conforme o sistema alimente registros reais de resultado por ativo/contexto.
+- Missao 20: Regras Operacionais sao a ultima camada de protecao e podem bloquear score alto quando faltar `decision_ready`, qualidade de dados, risco aceitavel ou permissao do Auditor/Radar/Painel.
+- Missao 20: `operational_status=CAUTION` nao e permissao plena; indica que ha oportunidade, mas faltam confirmacoes como confianca, consenso, amostra historica ou market pulse favoravel.
+- Missao 21: Conviccao Institucional mede alinhamento de evidencias; conviccao alta continua informativa e nao destrava `operational_status=BLOCKED`.
+- Missao 21: conflitos entre IAs especialistas, Market Pulse, risco, consenso e historico reduzem conviccao mesmo quando score bruto ou historico parecerem fortes.
+- Missao 22: Prioridade Institucional organiza atencao, nao autoriza trade; bloqueios operacionais continuam mandatorios mesmo quando `priority_score` seria alto.
+- Missao 22: `priority_rank` existe apenas entre ativos elegiveis; ativos bloqueados preservam `priority_level=⚪ BAIXA` e motivos para auditoria.
+- Missao 23: Decisao Final e sintese operacional e nao cria BUY/SELL; ela transforma contratos anteriores em conclusao de produto para leitura final.
+- Missao 23: `final_decision=🟢 OPORTUNIDADE CONFIRMADA` exige alinhamento forte; cenarios com score alto, mas sem prioridade/conviccao/radar/ranking coerentes, ficam em formacao, observacao ou aguardo.
 - Rodar `npm run build` enquanto `next dev` esta vivo pode corromper o manifesto `.next`; o `start_all_local.ps1` agora limpa esse cache ao reiniciar em modo dev.
 - A validacao visual de 2026-05-18 usa dados atuais do provider, nao os OHLC exatos dos prints antigos; para provar melhora nos mesmos candles dos prints, carregar replay/backtest com aquele dataset.
 - `ITUB4` em 2026-05-18 veio com sessao parcial curta; o short saiu com `coherence_status=watch` e risco medio porque ainda exigia confirmacao de breakdown em range.
@@ -345,13 +399,18 @@ Atualizado em: 2026-06-12
 - Etapa 11 / Missao 16 esta 100% concluida no escopo de observabilidade: health center, providers, error center e painel administrativo foram expostos sem mexer na logica operacional.
 - Etapa 12 / Missao 17 esta 100% concluida no escopo do Radar Institucional: Radar prioriza oportunidades auditadas, gera razao/resumo, propaga contrato no snapshot/workspace/API e registra metricas de gerados/promovidos/descartados/bloqueados.
 - Etapa 13 / Missao 18 esta 100% concluida no escopo do Ranking Institucional: Ranking lista oportunidades elegiveis, gera score/razao/resumo/classificacao, propaga contrato no snapshot/workspace/API e registra metricas de elegiveis/excluidas/promovidas/top ranking.
+- Etapa 14 / Missao 19 esta 100% concluida no escopo de Confianca Historica: contrato proprio, tratamento de amostra insuficiente, propagacao no snapshot/workspace/ranking/radar/Score Mestre/Painel/API e metricas de confianca/media de amostra/win rate agregado.
+- Etapa 15 / Missao 20 esta 100% concluida no escopo de Regras Operacionais: contrato proprio, READY/CAUTION/BLOCKED, bloqueios, avisos, score operacional, propagacao no snapshot/workspace/ranking/radar/Score Mestre/Painel/API e metricas por status/motivo.
+- Etapa 16 / Missao 21 esta 100% concluida no escopo de Conviccao Institucional: contrato proprio, niveis de conviccao, fatores, conflitos, propagacao no snapshot/workspace/ranking/radar/Score Mestre/Painel/API e metricas de media/alta/baixa/conflitos.
+- Etapa 17 / Missao 22 esta 100% concluida no escopo de Prioridade Institucional: contrato proprio, niveis de prioridade, rank relativo, fatores, resumo, propagacao no snapshot/workspace/ranking/radar/API e metricas por prioridade.
+- Etapa 18 / Missao 23 esta 100% concluida no escopo de Decisao Final: contrato proprio, conclusoes operacionais finais, blocos, razao, confianca, propagacao no snapshot/workspace/ranking/radar/API e metricas por decisao.
 - Reexecutar smoke completo apos qualquer mudanca em provider/cache/chart/news, worker ou nas abas IA.
 - Se for criar commit, usar o MinGit por caminho absoluto enquanto o Codex nao recarregar PATH.
 - Separar refatoracoes institucionais maiores em commits pequenos por area: data/api, ai, web, tests.
 - Proxima melhoria de produto: codigo ja liga preco/volume real ao `signal_cache` via `warm_market_pool` e passou nos testes com o `venv` Python 3.11.9; acompanhar proximo ciclo real do worker com dados de mercado para confirmar auditoria IA `approved` em producao.
 - Proxima melhoria de trading: forward test local por ticker/regime foi implementado sobre o replay deterministico, com contagem de regime barra a barra, metricas por regime de entrada e status de overtrading lateral; proximo passo e alimentar com barras reais capturadas em producao/forward log e revisar resultado por ativo, horario e regime.
 - Missao 8 esta fechada no escopo solicitado; nao iniciar Missao 9 ou posteriores sem pedido explicito.
-- Missao 18 esta fechada no escopo solicitado; nao iniciar Missao 19, Missao 20 ou Missao 24A sem pedido explicito.
+- Missao 23 esta fechada no escopo solicitado; nao iniciar Missao 24A sem pedido explicito.
 - Proxima melhoria de trading 1D: aplicar `compare_replay_scenarios()` aos cenarios dos prints antigos (`ITUB4`, `AAPL`, `PETR4`, `PLTR`) assim que as mesmas barras forem carregadas, comparando trades perdidos, exits cedo e reducao de `Watch` sem depender de provider externo durante a analise.
 - Proxima melhoria de dados B3: se o produto exigir leilao/pre-abertura antes de 10:00, integrar provider que entregue esse feed; o chart atual nao inventa barras antes da primeira barra recebida.
 - Proxima melhoria de dados futuros B3: substituir `reference_proxy` por feed oficial do contrato `WIN`/`WDO` vigente antes de usar esses numeros para execucao real.

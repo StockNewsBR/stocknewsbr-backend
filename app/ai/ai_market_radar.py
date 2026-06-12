@@ -8,7 +8,11 @@ import logging
 import pandas as pd
 
 from app.ai.ai_radar import run_radar
+from app.ai.final_decision import ensure_final_decision_rows
+from app.ai.institutional_conviction import ensure_institutional_conviction_rows
+from app.ai.institutional_priority import ensure_institutional_priority_rows
 from app.ai.institutional_radar import enrich_institutional_radar_rows, institutional_radar_items
+from app.ai.operational_rules import ensure_operational_rules_rows
 from app.cache.snapshot_cache import get_snapshot_signals
 from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score, is_actionable_snapshot_row
 
@@ -125,6 +129,7 @@ def analyze_symbol(symbol):
         radar = radar_rows[0]
         score = _safe_float(radar.get("score") or radar.get("radar_score") or 0)
         source = rows[0] if rows else {}
+        source = ensure_final_decision_rows(ensure_institutional_priority_rows([source]))[0] if source else {}
 
         if score < 60:
             return None
@@ -144,6 +149,35 @@ def analyze_symbol(symbol):
             "strategic_panel": source.get("strategic_panel") if isinstance(source.get("strategic_panel"), dict) else {},
             "strategic_panel_summary": source.get("strategic_panel_summary") or "",
             "recommended_action": source.get("recommended_action"),
+            "historical_confidence_score": source.get("historical_confidence_score"),
+            "historical_confidence_label": source.get("historical_confidence_label"),
+            "historical_sample_size": source.get("historical_sample_size"),
+            "historical_win_rate": source.get("historical_win_rate"),
+            "historical_context_match": source.get("historical_context_match"),
+            "historical_reason": source.get("historical_reason"),
+            "historical_warning": source.get("historical_warning"),
+            "operational_status": source.get("operational_status"),
+            "operational_ready": source.get("operational_ready"),
+            "operational_score": source.get("operational_score"),
+            "operational_blocks": source.get("operational_blocks") or [],
+            "operational_warnings": source.get("operational_warnings") or [],
+            "operational_summary": source.get("operational_summary"),
+            "conviction_score": source.get("conviction_score"),
+            "conviction_level": source.get("conviction_level"),
+            "conviction_summary": source.get("conviction_summary"),
+            "conviction_factors": source.get("conviction_factors") or [],
+            "conviction_conflicts": source.get("conviction_conflicts") or [],
+            "priority_score": source.get("priority_score"),
+            "priority_level": source.get("priority_level"),
+            "priority_rank": source.get("priority_rank"),
+            "priority_summary": source.get("priority_summary"),
+            "priority_factors": source.get("priority_factors") or [],
+            "final_decision": source.get("final_decision"),
+            "final_decision_score": source.get("final_decision_score"),
+            "final_decision_summary": source.get("final_decision_summary"),
+            "final_decision_reason": source.get("final_decision_reason"),
+            "final_decision_blocks": source.get("final_decision_blocks") or [],
+            "final_decision_confidence": source.get("final_decision_confidence"),
         }
 
     except Exception:
@@ -159,7 +193,10 @@ def build_radar():
 
     try:
         snapshot_rows = [row for row in get_snapshot_signals() if isinstance(row, dict)]
+        snapshot_rows = ensure_institutional_conviction_rows(ensure_operational_rules_rows(snapshot_rows))
         enriched_rows, _metrics = enrich_institutional_radar_rows(snapshot_rows, record_metrics=True)
+        enriched_rows = ensure_institutional_priority_rows(enriched_rows)
+        enriched_rows = ensure_final_decision_rows(enriched_rows)
         actionable_rows = [
             row
             for row in institutional_radar_items(enriched_rows, limit=50)
@@ -198,6 +235,35 @@ def build_radar():
                     "strategic_panel": source.get("strategic_panel") if isinstance(source.get("strategic_panel"), dict) else {},
                     "strategic_panel_summary": source.get("strategic_panel_summary") or "",
                     "recommended_action": source.get("recommended_action"),
+                    "historical_confidence_score": source.get("historical_confidence_score"),
+                    "historical_confidence_label": source.get("historical_confidence_label"),
+                    "historical_sample_size": source.get("historical_sample_size"),
+                    "historical_win_rate": source.get("historical_win_rate"),
+                    "historical_context_match": source.get("historical_context_match"),
+                    "historical_reason": source.get("historical_reason"),
+                    "historical_warning": source.get("historical_warning"),
+                    "operational_status": source.get("operational_status"),
+                    "operational_ready": source.get("operational_ready"),
+                    "operational_score": source.get("operational_score"),
+                    "operational_blocks": source.get("operational_blocks") or [],
+                    "operational_warnings": source.get("operational_warnings") or [],
+                    "operational_summary": source.get("operational_summary"),
+                    "conviction_score": source.get("conviction_score"),
+                    "conviction_level": source.get("conviction_level"),
+                    "conviction_summary": source.get("conviction_summary"),
+                    "conviction_factors": source.get("conviction_factors") or [],
+                    "conviction_conflicts": source.get("conviction_conflicts") or [],
+                    "priority_score": source.get("priority_score"),
+                    "priority_level": source.get("priority_level"),
+                    "priority_rank": source.get("priority_rank"),
+                    "priority_summary": source.get("priority_summary"),
+                    "priority_factors": source.get("priority_factors") or [],
+                    "final_decision": source.get("final_decision"),
+                    "final_decision_score": source.get("final_decision_score"),
+                    "final_decision_summary": source.get("final_decision_summary"),
+                    "final_decision_reason": source.get("final_decision_reason"),
+                    "final_decision_blocks": source.get("final_decision_blocks") or [],
+                    "final_decision_confidence": source.get("final_decision_confidence"),
                     "state": row.get("state"),
                     "source": row.get("source") or "snapshot",
                     "data_quality": coerce_data_quality(row),

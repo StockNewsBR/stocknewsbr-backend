@@ -11,7 +11,12 @@ import time
 
 from fastapi import APIRouter, Depends
 
+from app.ai.final_decision import ensure_final_decision_rows
+from app.ai.historical_confidence import ensure_historical_confidence_rows
+from app.ai.institutional_conviction import ensure_institutional_conviction_rows
+from app.ai.institutional_priority import ensure_institutional_priority_rows
 from app.ai.institutional_ranking import ensure_institutional_ranking_rows, institutional_ranking_items
+from app.ai.operational_rules import ensure_operational_rules_rows
 from app.cache.market_data_cache import get_market_data
 from app.cache.snapshot_cache import get_snapshot_info, get_snapshot_signals
 from app.config import SYMBOLS
@@ -223,7 +228,15 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
         return []
 
     snapshot_rows = get_snapshot_signals()
-    enriched_rows = ensure_institutional_ranking_rows(snapshot_rows)
+    enriched_rows = ensure_final_decision_rows(
+        ensure_institutional_priority_rows(
+            ensure_institutional_conviction_rows(
+                ensure_operational_rules_rows(
+                    ensure_historical_confidence_rows(ensure_institutional_ranking_rows(snapshot_rows))
+                )
+            )
+        )
+    )
     has_ranking_contract = any(isinstance(row, dict) and "ranking_opportunity_score" in row for row in enriched_rows)
     ranking_rows = institutional_ranking_items(enriched_rows, limit=200)
     if not ranking_rows and not has_ranking_contract:
@@ -278,6 +291,35 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
                 "strategic_panel": row.get("strategic_panel") if isinstance(row.get("strategic_panel"), dict) else {},
                 "strategic_panel_summary": row.get("strategic_panel_summary") or "",
                 "recommended_action": row.get("recommended_action"),
+                "historical_confidence_score": row.get("historical_confidence_score"),
+                "historical_confidence_label": row.get("historical_confidence_label"),
+                "historical_sample_size": row.get("historical_sample_size"),
+                "historical_win_rate": row.get("historical_win_rate"),
+                "historical_context_match": row.get("historical_context_match"),
+                "historical_reason": row.get("historical_reason"),
+                "historical_warning": row.get("historical_warning"),
+                "operational_status": row.get("operational_status"),
+                "operational_ready": row.get("operational_ready"),
+                "operational_score": row.get("operational_score"),
+                "operational_blocks": row.get("operational_blocks") or [],
+                "operational_warnings": row.get("operational_warnings") or [],
+                "operational_summary": row.get("operational_summary"),
+                "conviction_score": row.get("conviction_score"),
+                "conviction_level": row.get("conviction_level"),
+                "conviction_summary": row.get("conviction_summary"),
+                "conviction_factors": row.get("conviction_factors") or [],
+                "conviction_conflicts": row.get("conviction_conflicts") or [],
+                "priority_score": row.get("priority_score"),
+                "priority_level": row.get("priority_level"),
+                "priority_rank": row.get("priority_rank"),
+                "priority_summary": row.get("priority_summary"),
+                "priority_factors": row.get("priority_factors") or [],
+                "final_decision": row.get("final_decision"),
+                "final_decision_score": row.get("final_decision_score"),
+                "final_decision_summary": row.get("final_decision_summary"),
+                "final_decision_reason": row.get("final_decision_reason"),
+                "final_decision_blocks": row.get("final_decision_blocks") or [],
+                "final_decision_confidence": row.get("final_decision_confidence"),
                 "radar_prioritization_score": row.get("radar_prioritization_score"),
                 "radar_priority_score": row.get("radar_priority_score"),
                 "radar_priority": row.get("radar_priority"),

@@ -4,8 +4,13 @@ from typing import Any, Dict, List
 
 from app.Frontend.layout import get_layout
 from app.cache.snapshot_cache import get_snapshot
+from app.ai.final_decision import ensure_final_decision_rows, final_decision_items
+from app.ai.historical_confidence import ensure_historical_confidence_rows, historical_confidence_items
+from app.ai.institutional_conviction import conviction_items, ensure_institutional_conviction_rows
+from app.ai.institutional_priority import ensure_institutional_priority_rows, priority_items
 from app.ai.institutional_radar import ensure_institutional_radar_rows, institutional_radar_items
 from app.ai.institutional_ranking import ensure_institutional_ranking_rows, institutional_ranking_items
+from app.ai.operational_rules import ensure_operational_rules_rows
 from app.services.ai_alert_history_service import persist_ai_alert_history
 from app.ai.ai_specialists import OFFICIAL_AI_TOOL_KEYS
 from app.services.help_center_service import get_help_center_blueprint
@@ -142,16 +147,39 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
         market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
     )
+    snapshot_signals = ensure_institutional_ranking_rows(
+        snapshot_signals,
+        ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
+        market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
+    )
+    snapshot_signals = ensure_historical_confidence_rows(snapshot_signals)
+    snapshot_signals = ensure_operational_rules_rows(
+        snapshot_signals,
+        ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
+        market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
+    )
+    snapshot_signals = ensure_institutional_conviction_rows(
+        snapshot_signals,
+        ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
+        market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
+    )
+    snapshot_signals = ensure_institutional_priority_rows(
+        snapshot_signals,
+        ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
+        market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
+    )
+    snapshot_signals = ensure_final_decision_rows(
+        snapshot_signals,
+        ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
+        market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
+    )
     actionable_signals = [row for row in snapshot_signals if is_actionable_snapshot_row(row)]
     radar_signals = institutional_radar_items(actionable_signals, limit=50)
-    ranking_signals = institutional_ranking_items(
-        ensure_institutional_ranking_rows(
-            snapshot_signals,
-            ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
-            market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
-        ),
-        limit=200,
-    )
+    ranking_signals = institutional_ranking_items(snapshot_signals, limit=200)
+    historical_confidence_rows = historical_confidence_items(snapshot_signals, limit=200)
+    conviction_rows = conviction_items(snapshot_signals, limit=200)
+    priority_rows = priority_items(snapshot_signals, limit=200)
+    final_decision_rows = final_decision_items(snapshot_signals, limit=200)
     blocked_signals = [
         row
         for row in snapshot_signals
@@ -180,6 +208,17 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "radar_metrics": snapshot.get("radar_metrics") if isinstance(snapshot.get("radar_metrics"), dict) else {},
         "institutional_ranking": snapshot.get("institutional_ranking") if isinstance(snapshot.get("institutional_ranking"), list) else ranking_signals[:20],
         "ranking_metrics": snapshot.get("ranking_metrics") if isinstance(snapshot.get("ranking_metrics"), dict) else {},
+        "historical_confidence": snapshot.get("historical_confidence") if isinstance(snapshot.get("historical_confidence"), dict) else (historical_confidence_rows[0] if historical_confidence_rows else {}),
+        "historical_confidences": snapshot.get("historical_confidences") if isinstance(snapshot.get("historical_confidences"), list) else historical_confidence_rows[:20],
+        "historical_confidence_metrics": snapshot.get("historical_confidence_metrics") if isinstance(snapshot.get("historical_confidence_metrics"), dict) else {},
+        "operational_rules": snapshot.get("operational_rules") if isinstance(snapshot.get("operational_rules"), list) else snapshot_signals[:20],
+        "operational_rules_metrics": snapshot.get("operational_rules_metrics") if isinstance(snapshot.get("operational_rules_metrics"), dict) else {},
+        "institutional_convictions": snapshot.get("institutional_convictions") if isinstance(snapshot.get("institutional_convictions"), list) else conviction_rows[:20],
+        "conviction_metrics": snapshot.get("conviction_metrics") if isinstance(snapshot.get("conviction_metrics"), dict) else {},
+        "institutional_priorities": snapshot.get("institutional_priorities") if isinstance(snapshot.get("institutional_priorities"), list) else priority_rows[:20],
+        "priority_metrics": snapshot.get("priority_metrics") if isinstance(snapshot.get("priority_metrics"), dict) else {},
+        "final_decisions": snapshot.get("final_decisions") if isinstance(snapshot.get("final_decisions"), list) else final_decision_rows[:20],
+        "final_decision_metrics": snapshot.get("final_decision_metrics") if isinstance(snapshot.get("final_decision_metrics"), dict) else {},
         "symbol_count": len(symbol_snapshots),
     }
     data_status = market_snapshot["data_status"] if isinstance(market_snapshot.get("data_status"), dict) else {}
@@ -241,6 +280,12 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "top_signals": top_signals,
         "institutional_radar": radar_signals[:20],
         "institutional_ranking": ranking_signals[:20],
+        "historical_confidence": market_snapshot["historical_confidence"],
+        "historical_confidences": historical_confidence_rows[:20],
+        "operational_rules": market_snapshot["operational_rules"],
+        "institutional_convictions": conviction_rows[:20],
+        "institutional_priorities": priority_rows[:20],
+        "final_decisions": final_decision_rows[:20],
         "ranking": ranking,
         "blocked_signals": blocked_signals[:50],
         "symbol_snapshots": symbol_snapshots,

@@ -10,6 +10,26 @@ import pandas as pd
 from app.ai.feature_hub import build_ai_payload_bundle
 from app.ai.ai_market_pulse import market_pulse as build_market_pulse
 from app.ai.ai_master_score import apply_master_scores_by_ticker, run_master_score
+from app.ai.final_decision import enrich_final_decision_rows, final_decision_items
+from app.ai.historical_confidence import (
+    apply_historical_confidence_by_ticker,
+    enrich_historical_confidence_rows,
+    historical_confidence_items,
+)
+from app.ai.institutional_conviction import (
+    apply_conviction_by_ticker,
+    conviction_items,
+    enrich_institutional_conviction_rows,
+)
+from app.ai.institutional_priority import (
+    apply_priority_by_ticker,
+    enrich_institutional_priority_rows,
+    priority_items,
+)
+from app.ai.operational_rules import (
+    apply_operational_rules_by_ticker,
+    enrich_operational_rules_rows,
+)
 from app.ai.institutional_radar import enrich_institutional_radar_rows, institutional_radar_items
 from app.ai.institutional_ranking import enrich_institutional_ranking_rows, institutional_ranking_items
 from app.ai.strategic_panel import apply_strategic_panels_by_ticker, build_strategic_panels
@@ -446,7 +466,41 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         ai_tools=ai_tools,
         market_pulse=final_market_pulse,
     )
+    normalized, historical_confidence_metrics = enrich_historical_confidence_rows(normalized)
+    master_score_rows = apply_historical_confidence_by_ticker(master_score_rows, normalized)
+    strategic_panel_rows = apply_historical_confidence_by_ticker(strategic_panel_rows, normalized)
+    normalized, operational_rules_metrics = enrich_operational_rules_rows(
+        normalized,
+        ai_tools=ai_tools,
+        market_pulse=final_market_pulse,
+    )
+    master_score_rows = apply_operational_rules_by_ticker(master_score_rows, normalized)
+    strategic_panel_rows = apply_operational_rules_by_ticker(strategic_panel_rows, normalized)
+    normalized, conviction_metrics = enrich_institutional_conviction_rows(
+        normalized,
+        ai_tools=ai_tools,
+        market_pulse=final_market_pulse,
+    )
+    master_score_rows = apply_conviction_by_ticker(master_score_rows, normalized)
+    strategic_panel_rows = apply_conviction_by_ticker(strategic_panel_rows, normalized)
+    normalized, priority_metrics = enrich_institutional_priority_rows(
+        normalized,
+        ai_tools=ai_tools,
+        market_pulse=final_market_pulse,
+    )
+    master_score_rows = apply_priority_by_ticker(master_score_rows, normalized)
+    strategic_panel_rows = apply_priority_by_ticker(strategic_panel_rows, normalized)
+    normalized, final_decision_metrics = enrich_final_decision_rows(
+        normalized,
+        ai_tools=ai_tools,
+        market_pulse=final_market_pulse,
+    )
     institutional_ranking = institutional_ranking_items(normalized, limit=AI_OUTPUT_LIMIT)
+    institutional_radar = institutional_radar_items(normalized, limit=AI_OUTPUT_LIMIT)
+    historical_confidences = historical_confidence_items(normalized, limit=AI_OUTPUT_LIMIT)
+    institutional_convictions = conviction_items(normalized, limit=AI_OUTPUT_LIMIT)
+    institutional_priorities = priority_items(normalized, limit=AI_OUTPUT_LIMIT)
+    final_decisions = final_decision_items(normalized, limit=AI_OUTPUT_LIMIT)
     normalized.sort(key=_safe_master_score, reverse=True)
     record_signal_quality_coverage(normalized, source=f"snapshot:{source}")
 
@@ -496,6 +550,24 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         "ranking_excluded": ranking_metrics["excluded"],
         "ranking_promoted": ranking_metrics["promoted"],
         "ranking_top": ranking_metrics["top_ranking"],
+        "historical_confidence_average": historical_confidence_metrics["average_confidence_score"],
+        "historical_confidence_without_sample": historical_confidence_metrics["signals_without_sample"],
+        "operational_ready": operational_rules_metrics["ready"],
+        "operational_caution": operational_rules_metrics["caution"],
+        "operational_blocked": operational_rules_metrics["blocked"],
+        "conviction_average": conviction_metrics["average_conviction"],
+        "conviction_high": conviction_metrics["high_conviction"],
+        "conviction_low": conviction_metrics["low_conviction"],
+        "conviction_conflicts": conviction_metrics["conflicts_detected"],
+        "priority_critical": priority_metrics["critical"],
+        "priority_high": priority_metrics["high"],
+        "priority_medium": priority_metrics["medium"],
+        "priority_low": priority_metrics["low"],
+        "final_decision_confirmed": final_decision_metrics["confirmed"],
+        "final_decision_forming": final_decision_metrics["forming"],
+        "final_decision_observe": final_decision_metrics["observe"],
+        "final_decision_wait": final_decision_metrics["wait"],
+        "final_decision_no_trade": final_decision_metrics["no_trade"],
     }
     auditor_summary = summarize_audits(normalized)
 
@@ -522,6 +594,17 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         "radar_metrics": radar_metrics,
         "institutional_ranking": institutional_ranking,
         "ranking_metrics": ranking_metrics,
+        "historical_confidences": historical_confidences,
+        "historical_confidence": historical_confidences[0] if historical_confidences else {},
+        "historical_confidence_metrics": historical_confidence_metrics,
+        "operational_rules": normalized[:AI_OUTPUT_LIMIT],
+        "operational_rules_metrics": operational_rules_metrics,
+        "institutional_convictions": institutional_convictions,
+        "conviction_metrics": conviction_metrics,
+        "institutional_priorities": institutional_priorities,
+        "priority_metrics": priority_metrics,
+        "final_decisions": final_decisions,
+        "final_decision_metrics": final_decision_metrics,
         "symbol_snapshots": {
             str(row.get("symbol") or row.get("ticker") or "").upper(): row
             for row in normalized[:200]
@@ -537,6 +620,11 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             "strategic_panel_contract": "ten_second_institutional_read",
             "institutional_radar_contract": "mission_17_prioritized_attention",
             "institutional_ranking_contract": "mission_18_opportunity_quality",
+            "historical_confidence_contract": "mission_19_contextual_evidence",
+            "operational_rules_contract": "mission_20_minimum_trade_conditions",
+            "institutional_conviction_contract": "mission_21_evidence_alignment",
+            "institutional_priority_contract": "mission_22_attention_queue",
+            "final_decision_contract": "mission_23_operational_conclusion",
             "internal_engine_keys": ai_bundle.get("internal_engine_keys", []) if isinstance(ai_bundle, dict) else [],
         },
         "decision": decision,
@@ -572,6 +660,24 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             "ranking_excluded": ranking_metrics["excluded"],
             "ranking_promoted": ranking_metrics["promoted"],
             "ranking_top": ranking_metrics["top_ranking"],
+            "historical_confidence_average": historical_confidence_metrics["average_confidence_score"],
+            "historical_confidence_without_sample": historical_confidence_metrics["signals_without_sample"],
+            "operational_ready": operational_rules_metrics["ready"],
+            "operational_caution": operational_rules_metrics["caution"],
+            "operational_blocked": operational_rules_metrics["blocked"],
+            "conviction_average": conviction_metrics["average_conviction"],
+            "conviction_high": conviction_metrics["high_conviction"],
+            "conviction_low": conviction_metrics["low_conviction"],
+            "conviction_conflicts": conviction_metrics["conflicts_detected"],
+            "priority_critical": priority_metrics["critical"],
+            "priority_high": priority_metrics["high"],
+            "priority_medium": priority_metrics["medium"],
+            "priority_low": priority_metrics["low"],
+            "final_decision_confirmed": final_decision_metrics["confirmed"],
+            "final_decision_forming": final_decision_metrics["forming"],
+            "final_decision_observe": final_decision_metrics["observe"],
+            "final_decision_wait": final_decision_metrics["wait"],
+            "final_decision_no_trade": final_decision_metrics["no_trade"],
         },
     }
 
