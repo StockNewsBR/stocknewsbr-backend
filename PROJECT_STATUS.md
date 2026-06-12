@@ -86,6 +86,8 @@ Atualizado em: 2026-06-12
 - Painel Estrategico consome somente contratos existentes de Score Mestre, Auditor Institucional e Risk IA; nao cria nova IA, novo score operacional nem sinal BUY/SELL.
 - O contrato do painel entrega blocos de Score Mestre, Auditor, Risco, Direcao Provavel e Acao Recomendada, mais `why`, `opinion_change_conditions`, `no_trade_now` e motivos de bloqueio.
 - Acao recomendada fica limitada a `OBSERVAR`, `AGUARDAR`, `OPORTUNIDADE EM FORMACAO`, `OPORTUNIDADE CONFIRMADA` e `NAO OPERAR AGORA`; Auditor/Score Mestre `BLOCKED` forcam `NAO OPERAR AGORA`.
+- Missao 15 - Frontend Comercial fechada em 2026-06-12: o frontend comercial agora apresenta proposta de valor, diferenciais, fluxo, planos, trial, CTA, FAQ e prova social sem alterar a logica de trading.
+- A homepage comercial foi reposicionada para leitura rapida e conversao, consumindo apenas contratos e metricas ja existentes, sem criar novas analises ou indicadores.
 
 ## Validado
 
@@ -118,6 +120,11 @@ Atualizado em: 2026-06-12
 - `run_ai_worker_cycle()` revalidado apos Etapa 4: `tools_ready=11`, `required_fields_ok=True`, `trade_action=BUY`, `coherence_status=ok`, `risk_level=baixo`, `trigger_present=True`, `invalidation_present=True`, `risk_present=True`, `blocked_reasons=[]`, `warnings=[]`; status geral ainda `warning` por dado externo/cache sem preco real em alguns caminhos.
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_all_local.ps1`: API pelo `venv` Python 3.11.9, web em `127.0.0.1:3000`, smoke API OK e `/panel/F` com status 200.
 - `venv\Scripts\python.exe -m unittest tests.test_chart_overlay_service tests.test_trend_breakout_signal_engine`: 10 testes OK.
+- `venv\Scripts\python.exe -m py_compile app\Frontend\marketing_site.py tests\test_marketing_site.py`: OK.
+- `venv\Scripts\python.exe -m unittest tests.test_marketing_site`: 2 testes OK.
+- `venv\Scripts\python.exe -m unittest discover -s tests`: 259 testes OK.
+- `npm exec -- tsc --noEmit --incremental false` em `apps\web`: OK.
+- `npm run typecheck` em `apps\mobile`: OK.
 - `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 113 testes OK.
 - `npm run build` em `apps/web`: build OK apos UX do grafico, tooltips e modos Guiado/Trader/Pro.
 - Browser interno em `http://127.0.0.1:3000/panel/F`: modos Guiado/Trader/Pro validados com `Leitura atual`, `Direcao operacional`, `Confirmacao necessaria`, `Invalidacao` e `Risco`.
@@ -310,6 +317,7 @@ Atualizado em: 2026-06-12
 - Etapa 7 esta 100% concluida: smoke Playwright multi-ticker/dark-light/troca de ticker/IA tabs/anti-clone, USA/BR, PETR4/USA sem textos PT, screenshot de UI, smoke de falha de provider de news e stage/commit da etapa atual registrados.
 - Etapa 8 esta 100% concluida: trial 30/14, pricing BR/USA, refund 7 dias, downgrade para Basico, Stripe sandbox, acesso web/app/telegram, referral antifraude, recompensa a cada 3, badges e ranking `Indicacoes`/`Referrals` validados.
 - Etapa 9 esta 100% concluida no codigo/app: app mobile abre ativo por rota de ticker, grafico e utilizavel com ranges/candles/zonas/marcadores, login/plano refletem BR/USA, smoke com emulador passou e Google Play esta preparado por EAS/App Bundle.
+- Etapa 10 / Missao 15 esta 100% concluida no escopo comercial: homepage, diferenciais, como funciona, planos, trial, CTA, prova social, help e FAQ foram ajustados para conversao sem mexer na logica de trading.
 - Reexecutar smoke completo apos qualquer mudanca em provider/cache/chart/news, worker ou nas abas IA.
 - Se for criar commit, usar o MinGit por caminho absoluto enquanto o Codex nao recarregar PATH.
 - Separar refatoracoes institucionais maiores em commits pequenos por area: data/api, ai, web, tests.
@@ -317,6 +325,7 @@ Atualizado em: 2026-06-12
 - Proxima melhoria de trading: forward test local por ticker/regime foi implementado sobre o replay deterministico, com contagem de regime barra a barra, metricas por regime de entrada e status de overtrading lateral; proximo passo e alimentar com barras reais capturadas em producao/forward log e revisar resultado por ativo, horario e regime.
 - Missao 8 esta fechada no escopo solicitado; nao iniciar Missao 9 ou posteriores sem pedido explicito.
 - Missao 13 esta fechada no escopo solicitado; nao iniciar Missao 17, Missao 18 ou Missao 24A sem pedido explicito.
+- Missao 15 esta fechada no escopo solicitado; nao iniciar Missao 16, Missao 17 ou Missao 24A sem pedido explicito.
 - Proxima melhoria de trading 1D: aplicar `compare_replay_scenarios()` aos cenarios dos prints antigos (`ITUB4`, `AAPL`, `PETR4`, `PLTR`) assim que as mesmas barras forem carregadas, comparando trades perdidos, exits cedo e reducao de `Watch` sem depender de provider externo durante a analise.
 - Proxima melhoria de dados B3: se o produto exigir leilao/pre-abertura antes de 10:00, integrar provider que entregue esse feed; o chart atual nao inventa barras antes da primeira barra recebida.
 - Proxima melhoria de dados futuros B3: substituir `reference_proxy` por feed oficial do contrato `WIN`/`WDO` vigente antes de usar esses numeros para execucao real.
