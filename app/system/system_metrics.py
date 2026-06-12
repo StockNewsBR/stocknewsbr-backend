@@ -58,6 +58,13 @@ _institutional_radar_metrics = {
     "blocked": 0,
     "updated_at": 0.0,
 }
+_institutional_ranking_metrics = {
+    "eligible": 0,
+    "excluded": 0,
+    "promoted": 0,
+    "top_ranking": 0,
+    "updated_at": 0.0,
+}
 
 
 def _quantile(sorted_values, quantile: float) -> float:
@@ -376,6 +383,25 @@ def get_institutional_radar_metrics_snapshot():
         return dict(_institutional_radar_metrics)
 
 
+def record_institutional_ranking_metrics(metrics: dict | None):
+    safe = metrics if isinstance(metrics, dict) else {}
+    with _lock:
+        _institutional_ranking_metrics.update(
+            {
+                "eligible": int(safe.get("eligible", 0) or 0),
+                "excluded": int(safe.get("excluded", 0) or 0),
+                "promoted": int(safe.get("promoted", 0) or 0),
+                "top_ranking": int(safe.get("top_ranking", 0) or 0),
+                "updated_at": time.time(),
+            }
+        )
+
+
+def get_institutional_ranking_metrics_snapshot():
+    with _lock:
+        return dict(_institutional_ranking_metrics)
+
+
 def get_performance_metrics_snapshot():
     with _lock:
         http_metrics = {}
@@ -458,6 +484,7 @@ def get_performance_metrics_snapshot():
             for source, entry in _signal_quality_coverage.items()
         }
         institutional_radar = dict(_institutional_radar_metrics)
+        institutional_ranking = dict(_institutional_ranking_metrics)
 
         repeated_failures = sorted(
             (
@@ -484,6 +511,7 @@ def get_performance_metrics_snapshot():
         "worker_stage_seconds": worker_metrics,
         "signal_quality_coverage": signal_quality,
         "institutional_radar": institutional_radar,
+        "institutional_ranking": institutional_ranking,
         "provider_symbol_failures": repeated_failures,
     }
 
@@ -574,6 +602,10 @@ def format_prometheus_metrics() -> str:
     radar_metrics = performance.get("institutional_radar", {})
     for field in ("generated", "promoted", "discarded", "blocked"):
         lines.append('institutional_radar_signals_total{state="%s"} %s' % (_label_value(field), int(radar_metrics.get(field, 0))))
+
+    ranking_metrics = performance.get("institutional_ranking", {})
+    for field in ("eligible", "excluded", "promoted", "top_ranking"):
+        lines.append('institutional_ranking_opportunities_total{state="%s"} %s' % (_label_value(field), int(ranking_metrics.get(field, 0))))
 
     for item in performance.get("provider_symbol_failures", []):
         lines.append(

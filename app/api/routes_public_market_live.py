@@ -127,6 +127,12 @@ def _snapshot_master_context(symbol: str) -> dict:
         "radar_summary": row.get("radar_summary"),
         "radar_no_trade_now": bool(row.get("radar_no_trade_now")),
         "radar_blocked_reasons": row.get("radar_blocked_reasons") or [],
+        "ranking_opportunity_score": row.get("ranking_opportunity_score"),
+        "ranking_classification": row.get("ranking_classification"),
+        "ranking_reason": row.get("ranking_reason"),
+        "ranking_summary": row.get("ranking_summary"),
+        "ranking_eligible": row.get("ranking_eligible"),
+        "ranking_excluded_reasons": row.get("ranking_excluded_reasons") or [],
     }
 
 

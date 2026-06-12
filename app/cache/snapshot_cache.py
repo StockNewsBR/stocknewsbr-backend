@@ -179,11 +179,12 @@ class SnapshotCache:
         for key in ("master_score", "strategic_panel"):
             if isinstance(payload.get(key), dict):
                 cloned[key] = dict(payload.get(key, {}))
-        for key in ("master_scores", "strategic_panels", "institutional_radar"):
+        for key in ("master_scores", "strategic_panels", "institutional_radar", "institutional_ranking"):
             if isinstance(payload.get(key), list):
                 cloned[key] = [dict(row) for row in payload.get(key, []) if isinstance(row, dict)]
-        if isinstance(payload.get("radar_metrics"), dict):
-            cloned["radar_metrics"] = dict(payload.get("radar_metrics", {}))
+        for key in ("radar_metrics", "ranking_metrics"):
+            if isinstance(payload.get(key), dict):
+                cloned[key] = dict(payload.get(key, {}))
         return cloned
 
     def _ensure_storage_dir(self):

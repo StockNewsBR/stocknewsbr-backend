@@ -70,6 +70,12 @@ export type RankingRow = {
   strategic_panel?: StrategicPanel | null;
   strategic_panel_summary?: string | null;
   recommended_action?: string | null;
+  ranking_opportunity_score?: number | null;
+  ranking_classification?: string | null;
+  ranking_reason?: string | null;
+  ranking_summary?: string | null;
+  ranking_eligible?: boolean | null;
+  ranking_excluded_reasons?: string[] | null;
   radar_score?: number | null;
   radar_prioritization_score?: number | null;
   radar_priority_score?: number | null;
@@ -134,6 +140,12 @@ export type SignalRow = {
   strategic_panel?: StrategicPanel | null;
   strategic_panel_summary?: string | null;
   recommended_action?: string | null;
+  ranking_opportunity_score?: number | null;
+  ranking_classification?: string | null;
+  ranking_reason?: string | null;
+  ranking_summary?: string | null;
+  ranking_eligible?: boolean | null;
+  ranking_excluded_reasons?: string[] | null;
   radar_score?: number | null;
   radar_prioritization_score?: number | null;
   radar_priority_score?: number | null;
@@ -201,6 +213,8 @@ export type WorkspaceMarketSnapshot = {
   strategic_panel_summary?: string;
   institutional_radar?: SignalRow[];
   radar_metrics?: Record<string, number>;
+  institutional_ranking?: SignalRow[];
+  ranking_metrics?: Record<string, number>;
   symbol_count?: number;
 };
 
@@ -436,6 +450,7 @@ export type WorkspaceData = {
   tabs: WorkspaceTab[];
   top_signals: SignalRow[];
   institutional_radar?: SignalRow[];
+  institutional_ranking?: SignalRow[];
   ranking: RankingRow[];
   blocked_signals?: SignalRow[];
   symbol_snapshots?: Record<string, WorkspaceSymbolSnapshot>;

@@ -11,6 +11,7 @@ import time
 
 from fastapi import APIRouter, Depends
 
+from app.ai.institutional_ranking import ensure_institutional_ranking_rows, institutional_ranking_items
 from app.cache.market_data_cache import get_market_data
 from app.cache.snapshot_cache import get_snapshot_info, get_snapshot_signals
 from app.config import SYMBOLS
@@ -221,9 +222,16 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
     if age_seconds is not None and age_seconds > SNAPSHOT_MAX_AGE:
         return []
 
+    snapshot_rows = get_snapshot_signals()
+    enriched_rows = ensure_institutional_ranking_rows(snapshot_rows)
+    has_ranking_contract = any(isinstance(row, dict) and "ranking_opportunity_score" in row for row in enriched_rows)
+    ranking_rows = institutional_ranking_items(enriched_rows, limit=200)
+    if not ranking_rows and not has_ranking_contract:
+        ranking_rows = [row for row in enriched_rows if is_actionable_snapshot_row(row)]
+
     results = []
 
-    for row in get_snapshot_signals():
+    for row in ranking_rows:
         if not isinstance(row, dict):
             continue
 
@@ -236,16 +244,26 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
             continue
 
         try:
-            score = float(row.get("master_score", row.get("score", 0)) or 0)
+            ranking_score = float(row.get("ranking_opportunity_score", row.get("master_score", row.get("score", 0))) or 0)
         except Exception:
-            score = 0.0
+            ranking_score = 0.0
+        try:
+            display_score = float(row.get("master_score", row.get("score", 0)) or 0)
+        except Exception:
+            display_score = ranking_score
 
         results.append(
             {
                 "ticker": symbol,
                 "symbol": symbol,
-                "score": score,
+                "score": display_score,
                 "source_score": row.get("score"),
+                "ranking_opportunity_score": row.get("ranking_opportunity_score", ranking_score),
+                "ranking_classification": row.get("ranking_classification"),
+                "ranking_reason": row.get("ranking_reason"),
+                "ranking_summary": row.get("ranking_summary"),
+                "ranking_eligible": row.get("ranking_eligible"),
+                "ranking_excluded_reasons": row.get("ranking_excluded_reasons") or [],
                 "master_score": row.get("master_score"),
                 "master_direction": row.get("master_direction"),
                 "master_conviction": row.get("master_conviction"),
@@ -260,6 +278,14 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
                 "strategic_panel": row.get("strategic_panel") if isinstance(row.get("strategic_panel"), dict) else {},
                 "strategic_panel_summary": row.get("strategic_panel_summary") or "",
                 "recommended_action": row.get("recommended_action"),
+                "radar_prioritization_score": row.get("radar_prioritization_score"),
+                "radar_priority_score": row.get("radar_priority_score"),
+                "radar_priority": row.get("radar_priority"),
+                "radar_level": row.get("radar_level"),
+                "radar_reason": row.get("radar_reason"),
+                "radar_summary": row.get("radar_summary"),
+                "radar_no_trade_now": bool(row.get("radar_no_trade_now")),
+                "radar_blocked_reasons": row.get("radar_blocked_reasons") or [],
                 "trend": row.get("trend"),
                 "rsi": row.get("rsi"),
                 "breakout": bool(row.get("breakout", False)),
@@ -290,7 +316,7 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
             }
         )
 
-    results.sort(key=lambda item: item["score"], reverse=True)
+    results.sort(key=lambda item: item.get("ranking_opportunity_score") or item["score"], reverse=True)
     return results
 
 
