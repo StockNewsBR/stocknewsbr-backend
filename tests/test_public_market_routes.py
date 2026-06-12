@@ -85,14 +85,14 @@ class PublicMarketRouteTests(unittest.TestCase):
             return_value={
                 "reset_key": "2026-05-18",
                 "max_rows_per_tool": 20,
-                "tools": {"heat_map": [{"ticker": "F", "detected_at": "2026-05-18T12:30:00+00:00"}]},
+                "tools": {"flow": [{"ticker": "F", "detected_at": "2026-05-18T12:30:00+00:00"}]},
             },
         ):
             payload = routes_public_market.public_ai_tools()
 
         self.assertEqual(payload["reset_key"], "2026-05-18")
         self.assertEqual(payload["max_rows_per_tool"], 20)
-        self.assertEqual(payload["tools"]["heat_map"][0]["ticker"], "F")
+        self.assertEqual(payload["tools"]["flow"][0]["ticker"], "F")
 
     def test_public_bundle_uses_cached_snapshot_payloads(self):
         with patch.object(
@@ -114,7 +114,7 @@ class PublicMarketRouteTests(unittest.TestCase):
         ), patch.object(
             routes_public_market_live,
             "build_public_ai_tools_payload",
-            return_value={"tools": {"master_score": []}, "source": "snapshot"},
+            return_value={"tools": {"risk": []}, "source": "snapshot"},
         ):
             payload = routes_public_market_live.public_market_bundle("F", interval="1D")
 

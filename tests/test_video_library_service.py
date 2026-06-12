@@ -20,14 +20,14 @@ class VideoLibraryServiceTests(unittest.TestCase):
         self.tempdir.cleanup()
 
     def test_marks_video_as_available_when_file_exists(self):
-        target = video_library_service.VIDEO_OUTPUT_DIR / "heat-map.mp4"
+        target = video_library_service.VIDEO_OUTPUT_DIR / "flow.mp4"
         target.write_bytes(b"")
 
-        entry = video_library_service.get_help_video_entry("heat-map")
+        entry = video_library_service.get_help_video_entry("flow")
 
         self.assertTrue(entry["video_ready"])
         self.assertEqual(entry["status"], "available")
-        self.assertEqual(entry["public_url"], "/media/help-videos/heat-map.mp4")
+        self.assertEqual(entry["public_url"], "/media/help-videos/flow.mp4")
 
     def test_library_reports_planned_when_files_are_missing(self):
         payload = video_library_service.get_help_video_library()

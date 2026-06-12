@@ -7,6 +7,7 @@ import worker
 from app.cache.snapshot_cache import SnapshotCache
 from app.api import market_routes, routes_chart
 from app.services import public_ai_tools_service, ranking
+from app.ai.ai_specialists import OFFICIAL_AI_TOOL_KEYS
 from app.system import push_dispatcher
 from app.telegram import telegram_alert_engine
 from app.web import routes_chart as web_chart
@@ -48,10 +49,12 @@ class SingleSnapshotSourceTests(unittest.TestCase):
 
     def test_public_ai_tools_use_operational_snapshot_tools(self):
         tools = public_ai_tools_service._empty_tools()
-        tools["master_score"] = [
+        self.assertEqual(sorted(tools.keys()), sorted(OFFICIAL_AI_TOOL_KEYS))
+        self.assertNotIn("master_score", tools)
+        tools["risk"] = [
             {
                 "ticker": "PETR4",
-                "tool": "master_score",
+                "tool": "risk",
                 "score": 88.0,
                 "signal": "BUY",
                 "price": 37.5,
@@ -68,7 +71,7 @@ class SingleSnapshotSourceTests(unittest.TestCase):
             payload = public_ai_tools_service.build_public_ai_tools_payload()
 
         self.assertEqual(payload["source"], "snapshot")
-        self.assertEqual(payload["tools"]["master_score"][0]["ticker"], "PETR4")
+        self.assertEqual(payload["tools"]["risk"][0]["ticker"], "PETR4")
 
     def test_public_ai_tools_service_has_no_quote_or_history_fallback(self):
         text = (ROOT / "app" / "services" / "public_ai_tools_service.py").read_text(encoding="utf-8")

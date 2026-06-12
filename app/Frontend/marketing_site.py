@@ -186,7 +186,7 @@ a {{ color:inherit; text-decoration:none; }}
       <div class="hero-card hero-main">
         <span class="eyebrow">Google App + Web + Telegram</span>
         <h1>Ferramenta institucional para traders que querem IA, comunidade e execucao no mesmo lugar.</h1>
-        <p>StockNewsBR junta radar, heat map, ticker rooms, grafico com overlays de compra e venda, polls semanais, feed social e alertas em um ecossistema premium desenhado para o trader brasileiro.</p>
+        <p>StockNewsBR junta Score Mestre, Ranking de Oportunidades, Radar Institucional, 9 IAs especialistas, ticker rooms, grafico com overlays de compra e venda, polls semanais, feed social e alertas em um ecossistema premium desenhado para o trader brasileiro.</p>
         <div class="cta-row">
           <a class="cta primary" href="/public/pricing">Assinar Premium</a>
           <a class="cta secondary" href="/site/workspace">Explorar o website</a>

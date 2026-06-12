@@ -51,7 +51,12 @@ def _is_operational_row(row: dict[str, Any]) -> bool:
         or metrics.get("dataQuality")
         or ""
     ).lower()
-    if "score_only" in quality or "missing" in quality or "empty" in quality:
+    provider_status = str(row.get("provider_status") or metrics.get("provider_status") or "").lower()
+    if any(term in quality for term in ("score_only", "missing", "empty", "stale", "invalid", "failed", "error")):
+        return False
+    if any(term in provider_status for term in ("failed", "error", "timeout", "unavailable")):
+        return False
+    if row.get("stale") is True or row.get("is_stale") is True or row.get("provider_error"):
         return False
     return _positive_number(row.get("price") or metrics.get("price")) is not None and _positive_number(row.get("volume") or metrics.get("volume")) is not None
 

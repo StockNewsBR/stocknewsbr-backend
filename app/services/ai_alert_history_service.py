@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 from zoneinfo import ZoneInfo
 
+from app.ai.ai_specialists import OFFICIAL_AI_TOOL_KEYS
+
 
 AI_ALERT_HISTORY_PATH = Path("runtime/ai_alerts/history.json")
 AI_ALERT_MAX_ROWS_PER_TOOL = 20
@@ -17,19 +19,7 @@ try:
 except Exception:
     AI_ALERT_TZ = timezone(timedelta(hours=-3), "America/Sao_Paulo")
 
-AI_TOOL_KEYS = (
-    "heat_map",
-    "radar",
-    "breakout_probability",
-    "institutional_flow",
-    "smart_money",
-    "accumulation",
-    "volatility_squeeze",
-    "liquidity_sweep",
-    "liquidity_map",
-    "market_regime",
-    "master_score",
-)
+AI_TOOL_KEYS = OFFICIAL_AI_TOOL_KEYS
 
 _history_lock = threading.RLock()
 

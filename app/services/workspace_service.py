@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 from app.Frontend.layout import get_layout
 from app.cache.snapshot_cache import get_snapshot
 from app.services.ai_alert_history_service import persist_ai_alert_history
+from app.ai.ai_specialists import OFFICIAL_AI_TOOL_KEYS
 from app.services.help_center_service import get_help_center_blueprint
 from app.services.legal_service import get_public_bootstrap
 from app.services.media_service import get_media_status
@@ -19,17 +20,15 @@ from app.system.system_metrics import get_metrics_snapshot
 def _tab_routes() -> Dict[str, str]:
     return {
         "home": "/web/workspace/data",
-        "heatmap": "/web/workspace/data",
-        "radar": "/web/workspace/data",
-        "breakout-probability": "/web/workspace/data",
-        "volatility-squeeze": "/web/workspace/data",
-        "institutional-flow": "/web/workspace/data",
+        "flow": "/web/workspace/data",
+        "liquidity": "/web/workspace/data",
+        "trend": "/web/workspace/data",
+        "momentum": "/web/workspace/data",
         "smart-money": "/web/workspace/data",
-        "accumulation": "/web/workspace/data",
-        "liquidity-sweep": "/web/workspace/data",
-        "liquidity-map": "/web/workspace/data",
-        "market-regime": "/web/workspace/data",
-        "master-score": "/web/workspace/data",
+        "risk": "/web/workspace/data",
+        "news-ia": "/web/workspace/data",
+        "macro": "/web/workspace/data",
+        "regime": "/web/workspace/data",
         "grafico": "/web/chart/PETR4",
         "ticker-rooms": "/web/workspace/data",
         "education": "/web/help-center",
@@ -43,19 +42,7 @@ def _safe_rows(value: Any) -> List[Dict[str, Any]]:
 
 
 def _empty_ai_outputs() -> Dict[str, List[Dict[str, Any]]]:
-    return {
-        "heat_map": [],
-        "radar": [],
-        "breakout_probability": [],
-        "institutional_flow": [],
-        "smart_money": [],
-        "accumulation": [],
-        "volatility_squeeze": [],
-        "liquidity_sweep": [],
-        "liquidity_map": [],
-        "market_regime": [],
-        "master_score": [],
-    }
+    return {key: [] for key in OFFICIAL_AI_TOOL_KEYS}
 
 def _coerce_ai_outputs(value: Any) -> Dict[str, List[Dict[str, Any]]]:
     outputs = _empty_ai_outputs()

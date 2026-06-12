@@ -124,20 +124,31 @@ export type AiToolRow = {
   detected_at?: string;
   last_seen_at?: string;
   active?: boolean;
+  decision_state?: string | null;
+  decision_ready?: boolean | null;
+  can_trade?: boolean | null;
+  operational_message?: string | null;
+  no_trade_reasons?: string[] | null;
+  blocked_signals?: string[] | null;
+  blocked_by_auditor?: boolean | null;
+  official_ai?: boolean | null;
+  internal_engines?: string[] | null;
+  risk_score?: number | null;
+  risk_summary?: string | null;
+  risk_blocks?: string[] | null;
+  no_trade_reason?: string | null;
 };
 
 export type WorkspaceAiTools = {
-  heat_map: AiToolRow[];
-  radar: AiToolRow[];
-  breakout_probability: AiToolRow[];
-  institutional_flow: AiToolRow[];
+  flow: AiToolRow[];
+  liquidity: AiToolRow[];
+  trend: AiToolRow[];
+  momentum: AiToolRow[];
   smart_money: AiToolRow[];
-  accumulation: AiToolRow[];
-  volatility_squeeze: AiToolRow[];
-  liquidity_sweep: AiToolRow[];
-  liquidity_map: AiToolRow[];
-  market_regime: AiToolRow[];
-  master_score: AiToolRow[];
+  risk: AiToolRow[];
+  news: AiToolRow[];
+  macro: AiToolRow[];
+  regime: AiToolRow[];
 };
 
 export type PublicAiToolsPayload = {
@@ -508,7 +519,9 @@ export type QuotePayload = {
   high?: number;
   low?: number;
   source?: string;
+  data_quality?: string | null;
   quote_status?: "valid" | "partial" | "empty" | "stale" | string;
+  status?: string | null;
   stale?: boolean;
   market_data_updated_at?: string | number | null;
   quote_time?: string | number | null;

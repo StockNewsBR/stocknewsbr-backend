@@ -4,6 +4,7 @@ from unittest.mock import patch
 from app.engine import market_snapshot_engine
 from app.engine.market_snapshot_engine import build_snapshot_payload
 from app.cache.snapshot_cache import SnapshotCache
+from app.ai.ai_specialists import OFFICIAL_AI_TOOL_KEYS
 
 
 class MarketSnapshotAiToolsTests(unittest.TestCase):
@@ -52,42 +53,35 @@ class MarketSnapshotAiToolsTests(unittest.TestCase):
         self.assertIn("ai_tools", payload)
         self.assertEqual(
             sorted(payload["ai_tools"].keys()),
-            [
-                "accumulation",
-                "breakout_probability",
-                "heat_map",
-                "institutional_flow",
-                "liquidity_map",
-                "liquidity_sweep",
-                "market_regime",
-                "master_score",
-                "radar",
-                "smart_money",
-                "volatility_squeeze",
-            ],
+            sorted(OFFICIAL_AI_TOOL_KEYS),
         )
-        self.assertTrue(payload["ai_tools"]["institutional_flow"])
-        self.assertTrue(payload["ai_tools"]["master_score"])
-        self.assertTrue(payload["ai_tools"]["heat_map"])
-        self.assertTrue(payload["ai_tools"]["radar"])
-        self.assertTrue(payload["ai_tools"]["breakout_probability"])
+        self.assertTrue(payload["ai_tools"]["flow"])
+        self.assertTrue(payload["ai_tools"]["liquidity"])
+        self.assertTrue(payload["ai_tools"]["trend"])
+        self.assertTrue(payload["ai_tools"]["momentum"])
         self.assertTrue(payload["ai_tools"]["smart_money"])
-        self.assertTrue(payload["ai_tools"]["liquidity_sweep"])
-        self.assertTrue(payload["ai_tools"]["market_regime"])
+        self.assertTrue(payload["ai_tools"]["risk"])
+        self.assertTrue(payload["ai_tools"]["news"])
+        self.assertTrue(payload["ai_tools"]["macro"])
+        self.assertTrue(payload["ai_tools"]["regime"])
+        self.assertNotIn("master_score", payload["ai_tools"])
+        self.assertEqual(payload["ai_architecture"]["official_ai_count"], 9)
+        self.assertEqual(payload["ai_architecture"]["trend_ia_decision"], "dedicated")
+        self.assertFalse(payload["ai_architecture"]["master_score_exposed_as_ai"])
         self.assertIn("decision", payload)
         self.assertEqual(payload["decision"]["trade_action"], "NO_DECISION")
         self.assertFalse(payload["decision"]["decision_ready"])
         self.assertTrue(payload["decision"].get("blocked_reasons"))
 
-        flow_row = payload["ai_tools"]["institutional_flow"][0]
-        master_row = payload["ai_tools"]["master_score"][0]
-        radar_row = payload["ai_tools"]["radar"][0]
+        flow_row = payload["ai_tools"]["flow"][0]
+        risk_row = payload["ai_tools"]["risk"][0]
+        momentum_row = payload["ai_tools"]["momentum"][0]
 
         self.assertEqual(flow_row["ticker"], "PETR4")
-        self.assertEqual(master_row["ticker"], "PETR4")
-        self.assertEqual(master_row["tool"], "master_score")
-        self.assertIn(master_row["signal"], {"BUY", "SELL", "SHORT", "COVER", "NO_DECISION"})
-        for row in (flow_row, master_row, radar_row):
+        self.assertEqual(risk_row["ticker"], "PETR4")
+        self.assertEqual(risk_row["tool"], "risk")
+        self.assertIn("risk_score", risk_row)
+        for row in (flow_row, risk_row, momentum_row):
             for field in ("detected_at", "trigger", "invalidation", "invalidacao", "metrics", "reason", "news_context"):
                 self.assertIn(field, row)
 
@@ -127,9 +121,9 @@ class MarketSnapshotAiToolsTests(unittest.TestCase):
 
         signal_row = payload["signals"][0]
         symbol_row = payload["symbol_snapshots"]["PETR4"]
-        master_row = payload["ai_tools"]["master_score"][0]
+        risk_row = payload["ai_tools"]["risk"][0]
 
-        for row in (signal_row, symbol_row, master_row):
+        for row in (signal_row, symbol_row, risk_row):
             self.assertEqual(row["ticker"], "PETR4")
             self.assertAlmostEqual(float(row["price"]), 37.5)
             self.assertEqual(int(row["volume"]), 1_250_000)
@@ -139,9 +133,9 @@ class MarketSnapshotAiToolsTests(unittest.TestCase):
             self.assertAlmostEqual(float(row["macd"]), 0.12)
             self.assertEqual(row["data_quality"], "cached")
 
-        self.assertEqual(master_row["market_data_updated_at"], market_time)
-        self.assertEqual(master_row["found_at"], market_time)
-        self.assertEqual(master_row["detected_at"], market_time)
+        self.assertEqual(risk_row["market_data_updated_at"], market_time)
+        self.assertEqual(risk_row["found_at"], market_time)
+        self.assertEqual(risk_row["detected_at"], market_time)
 
     def test_generate_market_snapshot_reuses_last_good_snapshot_when_engine_is_empty(self):
         last_good = {
@@ -244,7 +238,8 @@ class MarketSnapshotAiToolsTests(unittest.TestCase):
         self.assertEqual(last_good.get("source"), "signal_cache")
         self.assertFalse(last_good.get("stale"))
         self.assertIn("ai_tools", last_good)
-        self.assertTrue(last_good["ai_tools"].get("master_score"))
+        self.assertTrue(last_good["ai_tools"].get("risk"))
+        self.assertNotIn("master_score", last_good["ai_tools"])
 
     def test_snapshot_payload_without_ai_rows_keeps_no_decision(self):
         payload = build_snapshot_payload([], source="empty", stale=True)

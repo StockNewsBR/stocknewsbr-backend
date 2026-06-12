@@ -30,22 +30,45 @@ def _find_ai_row(tool_rows, symbol: str):
     return None
 
 
+def _metric_ai_row(row: Dict[str, Any] | None, score_key: str, state_key: str) -> Dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+
+    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+    output = dict(row)
+    output["score"] = metrics.get(score_key, row.get("score"))
+    output["state"] = metrics.get(state_key, row.get("state"))
+    return output
+
+
 def _build_ai_context_from_snapshot(symbol: str) -> Dict[str, Any]:
     snapshot = get_snapshot()
     ai_tools = snapshot.get("ai_tools", {}) if isinstance(snapshot, dict) else {}
     by_ticker = get_snapshot_by_ticker()
     normalized = _normalize_symbol(symbol)
+    official_flow = _find_ai_row(ai_tools.get("flow", []), normalized)
+    official_liquidity = _find_ai_row(ai_tools.get("liquidity", []), normalized)
+    official_momentum = _find_ai_row(ai_tools.get("momentum", []), normalized)
+    official_smart_money = _find_ai_row(ai_tools.get("smart_money", []), normalized)
+    official_regime = _find_ai_row(ai_tools.get("regime", []), normalized)
 
     context = {
-        "heat_map": _find_ai_row(ai_tools.get("heat_map", []), normalized),
-        "breakout_probability": _find_ai_row(ai_tools.get("breakout_probability", []), normalized),
-        "institutional_flow": _find_ai_row(ai_tools.get("institutional_flow", []), normalized),
+        "heat_map": _find_ai_row(ai_tools.get("heat_map", []), normalized)
+        or _metric_ai_row(official_momentum, "heat_map_score", "heat_map_state"),
+        "breakout_probability": _find_ai_row(ai_tools.get("breakout_probability", []), normalized)
+        or _metric_ai_row(official_momentum, "breakout_probability_score", "breakout_probability_state"),
+        "institutional_flow": _find_ai_row(ai_tools.get("institutional_flow", []), normalized)
+        or _metric_ai_row(official_flow, "flow_score", "flow_state"),
         "smart_money": _find_ai_row(ai_tools.get("smart_money", []), normalized),
-        "accumulation": _find_ai_row(ai_tools.get("accumulation", []), normalized),
+        "accumulation": _find_ai_row(ai_tools.get("accumulation", []), normalized)
+        or _metric_ai_row(official_smart_money, "accumulation_score", "accumulation_state"),
         "volatility_squeeze": _find_ai_row(ai_tools.get("volatility_squeeze", []), normalized),
-        "liquidity_sweep": _find_ai_row(ai_tools.get("liquidity_sweep", []), normalized),
-        "liquidity_map": _find_ai_row(ai_tools.get("liquidity_map", []), normalized),
-        "market_regime": _find_ai_row(ai_tools.get("market_regime", []), normalized),
+        "liquidity_sweep": _find_ai_row(ai_tools.get("liquidity_sweep", []), normalized)
+        or _metric_ai_row(official_liquidity, "liquidity_sweep_score", "liquidity_sweep_state"),
+        "liquidity_map": _find_ai_row(ai_tools.get("liquidity_map", []), normalized)
+        or _metric_ai_row(official_liquidity, "liquidity_map_score", "liquidity_map_state"),
+        "market_regime": _find_ai_row(ai_tools.get("market_regime", []), normalized)
+        or _metric_ai_row(official_regime, "regime_score", "regime_state"),
         "master_score": _find_ai_row(ai_tools.get("master_score", []), normalized),
     }
 

@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, List
 
 from app.ai.ai_common import signal_from_score
 from app.ai.feature_hub import build_ai_tool_payload
+from app.ai.ai_specialists import OFFICIAL_AI_TOOL_KEYS
 from app.cache.snapshot_cache import get_snapshot
 
 AI_TAB_AUDIT_DIR = Path("runtime/ai_tabs")
@@ -18,19 +19,7 @@ AI_TAB_AUDIT_EXPORT_DIR = AI_TAB_AUDIT_DIR / "exports"
 AI_TAB_AUDIT_DATASET_DIR = AI_TAB_AUDIT_DIR / "datasets"
 AI_TAB_AUDIT_HISTORY_DIR = AI_TAB_AUDIT_DIR / "history"
 AI_TAB_AUDIT_HISTORY_LIMIT = 48
-EXPECTED_TOOLS = [
-    "heat_map",
-    "radar",
-    "breakout_probability",
-    "institutional_flow",
-    "smart_money",
-    "accumulation",
-    "volatility_squeeze",
-    "liquidity_sweep",
-    "liquidity_map",
-    "market_regime",
-    "master_score",
-]
+EXPECTED_TOOLS = list(OFFICIAL_AI_TOOL_KEYS)
 REQUIRED_FIELDS = [
     "ticker",
     "detected_at",
@@ -175,17 +164,15 @@ def _infer_scenario(snapshot: Dict[str, Any], rows: Iterable[Dict[str, Any]]) ->
 def _expected_rows_for_context(tool: str, asset_class: str, scenario: str) -> int:
     base = SCENARIO_EXPECTED_ROWS.get(scenario, 2)
     tool_weight = {
-        "heat_map": 1,
-        "radar": 2,
-        "breakout_probability": 2,
-        "institutional_flow": 2,
+        "flow": 2,
+        "liquidity": 2,
+        "trend": 1,
+        "momentum": 2,
         "smart_money": 2,
-        "accumulation": 2,
-        "volatility_squeeze": 2,
-        "liquidity_sweep": 2,
-        "liquidity_map": 2,
-        "market_regime": 1,
-        "master_score": 1,
+        "risk": 1,
+        "news": 1,
+        "macro": 1,
+        "regime": 1,
     }.get(tool, 1)
     asset_adjustment = {
         "crypto": 0,
@@ -529,62 +516,67 @@ def _is_state_consistent(tool: str, row: Dict[str, Any]) -> bool:
     state = str(row.get("state") or "").strip().lower()
     metrics = row.get("metrics") or {}
 
-    if tool == "heat_map":
-        if state == "strong_buying":
-            return score >= 65
-        if state == "strong_selling":
-            return score <= 35
-        if state == "mixed":
-            return 35 < score < 65
-    elif tool == "radar":
-        if state == "momentum_ignition":
-            return score >= 78
-        if state == "fast_move":
-            return 58 <= score < 78
-        if state == "early_radar":
-            return 38 <= score < 58
-        if state == "quiet":
-            return score < 38
-    elif tool == "breakout_probability":
-        if state == "ready_to_break":
+    if tool == "flow":
+        if state == "institutional_buying":
             return score >= 75
-        if state == "building_pressure":
+        if state == "institutional_interest":
             return 55 <= score < 75
-        if state == "not_ready":
+        if state == "distribution_risk":
+            return score <= 25
+        if state == "monitoring":
+            return 25 < score < 55
+    elif tool == "liquidity":
+        if state == "liquidity_trap":
+            return score >= 55
+        if state == "liquidity_zone":
+            return score >= 45
+        if state == "thin_liquidity":
+            return score <= 45
+        if state == "liquidity_monitoring":
+            return True
+    elif tool == "trend":
+        if state in {"uptrend_structure", "downtrend_structure"}:
+            return score >= 55
+        if state == "structure_mixed":
+            return score < 70
+        if state == "trend_pending":
+            return score <= 55
+    elif tool == "momentum":
+        if state == "momentum_expansion":
+            return score >= 55
+        if state == "bearish_momentum":
+            return True
+        if state == "momentum_watch":
+            return 55 <= score < 78
+        if state == "momentum_quiet":
             return score < 55
-    elif tool in {"institutional_flow", "accumulation", "liquidity_map"}:
-        if state in {"institutional_buying", "accumulation", "liquidity_hotspot"}:
-            return score >= 75
-        if state in {"institutional_interest", "early_accumulation", "liquidity_zone"}:
-            return 55 <= score < 75
-        if state in {"distribution_risk", "distribution_or_weak", "thin_liquidity"}:
-            return score <= 25
-        if state == "monitoring":
-            return 25 < score < 55
     elif tool == "smart_money":
-        if state == "smart_money_active":
-            return score >= 72
-        if state == "smart_money_interest":
-            return 50 <= score < 72
-        if state == "retail_noise":
-            return score < 50
-    elif tool == "volatility_squeeze":
-        if state == "squeeze_ready":
-            return score >= 75
-        if state == "compression":
-            return 55 <= score < 75
-        if state == "already_expanded":
-            return score <= 25
-        if state == "monitoring":
-            return 25 < score < 55
-    elif tool == "liquidity_sweep":
-        if state == "liquidity_sweep_detected":
-            return score >= 70
-        if state == "sweep_watch":
-            return 48 <= score < 70
-        if state == "no_sweep":
-            return score < 48
-    elif tool == "market_regime":
+        if state in {"institutional_accumulation", "possible_manipulation"}:
+            return score >= 55
+        if state == "institutional_distribution":
+            return score <= 45
+        if state in {"institutional_defense", "smart_money_neutral"}:
+            return True
+    elif tool == "risk":
+        if state == "critical_risk":
+            return score >= 85
+        if state == "high_risk":
+            return 70 <= score < 85
+        if state == "medium_risk":
+            return 45 <= score < 70
+        if state == "low_risk":
+            return score < 45
+    elif tool == "news":
+        if state == "news_available":
+            return True
+        if state in {"news_provider_failed", "news_empty", "news_not_linked"}:
+            return score <= 35
+    elif tool == "macro":
+        if state == "macro_context_available":
+            return score >= 35
+        if state in {"macro_news_only", "macro_unavailable"}:
+            return score <= 40
+    elif tool == "regime":
         trend_strength = float(metrics.get("trend_strength", 0) or 0)
         volatility_score = float(metrics.get("volatility_score", 0) or 0)
         momentum = float(metrics.get("momentum", 0) or 0)
@@ -596,15 +588,6 @@ def _is_state_consistent(tool: str, row: Dict[str, Any]) -> bool:
             return trend_strength >= 60 and momentum < 0
         if state == "range":
             return not (volatility_score >= 72 or trend_strength >= 60)
-    elif tool == "master_score":
-        if state == "high_conviction":
-            return score >= 85
-        if state == "tradable":
-            return 70 <= score < 85
-        if state == "neutral_setup":
-            return 50 <= score < 70
-        if state == "weak_setup":
-            return score < 50
 
     return True
 

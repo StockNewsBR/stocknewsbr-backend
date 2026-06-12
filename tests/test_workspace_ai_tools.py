@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from app.services import workspace_service
+from app.ai.ai_specialists import OFFICIAL_AI_TOOL_KEYS
 
 
 class WorkspaceAiToolsTests(unittest.TestCase):
@@ -27,16 +28,13 @@ class WorkspaceAiToolsTests(unittest.TestCase):
             }
         ]
         snapshot_ai_tools = {
-            "heat_map": [],
-            "radar": [],
-            "breakout_probability": [],
-            "institutional_flow": [
+            "flow": [
                 {
                     "ticker": "PETR4",
                     "name": "Petrobras",
-                    "tool": "institutional_flow",
+                    "tool": "flow",
                     "score": 84.0,
-                    "signal": "BUY",
+                    "signal": "WATCH",
                     "state": "institutional_buying",
                     "confidence": 92,
                     "price": 37.5,
@@ -54,13 +52,14 @@ class WorkspaceAiToolsTests(unittest.TestCase):
                     "updated_at": "2026-04-06T10:00:00+00:00",
                 }
             ],
+            "liquidity": [],
+            "trend": [],
+            "momentum": [],
             "smart_money": [],
-            "accumulation": [],
-            "volatility_squeeze": [],
-            "liquidity_sweep": [],
-            "liquidity_map": [],
-            "market_regime": [],
-            "master_score": [],
+            "risk": [],
+            "news": [],
+            "macro": [],
+            "regime": [],
         }
         ranking_rows = [
             {
@@ -74,7 +73,7 @@ class WorkspaceAiToolsTests(unittest.TestCase):
             "brand": "StockNewsBR",
             "pricing": {"trial_days": 90, "premium_monthly": {"price_brl": 49}},
             "launch_roadmap": {"current": "web", "next": "app"},
-            "ai_modules": ["IA Institutional Flow", "IA Master Score"],
+            "ai_modules": ["Flow IA", "Risk IA"],
             "social_features": {"feed": True},
         }
         metrics = {
@@ -118,18 +117,15 @@ class WorkspaceAiToolsTests(unittest.TestCase):
         ), patch.object(
             workspace_service,
             "get_user_workspace_layout",
-            return_value={"tabs": ["home", "institutional-flow", "master-score"], "pinned_ticker": "PETR4", "opened_popouts": []},
+            return_value={"tabs": ["home", "flow", "risk"], "pinned_ticker": "PETR4", "opened_popouts": []},
         ), patch.object(
             workspace_service,
             "get_layout",
             return_value={
                 "tabs": [
                     {"id": "home", "title": "Home"},
-                    {"id": "institutional-flow", "title": "Institutional Flow"},
-                    {"id": "volatility-squeeze", "title": "Squeeze"},
-                    {"id": "accumulation", "title": "Accumulation"},
-                    {"id": "liquidity-map", "title": "Liquidity Map"},
-                    {"id": "master-score", "title": "Master Score"},
+                    {"id": "flow", "title": "Flow IA"},
+                    {"id": "risk", "title": "Risk IA"},
                 ]
             },
         ), patch.object(
@@ -186,7 +182,7 @@ class WorkspaceAiToolsTests(unittest.TestCase):
             "brand": "StockNewsBR",
             "pricing": {"trial_days": 90, "premium_monthly": {"price_brl": 49}},
             "launch_roadmap": {"current": "web", "next": "app"},
-            "ai_modules": ["IA Institutional Flow", "IA Master Score"],
+            "ai_modules": ["Flow IA", "Risk IA"],
             "social_features": {"feed": True},
         }
         metrics = {
@@ -230,18 +226,15 @@ class WorkspaceAiToolsTests(unittest.TestCase):
         ), patch.object(
             workspace_service,
             "get_user_workspace_layout",
-            return_value={"tabs": ["home", "institutional-flow", "master-score"], "pinned_ticker": "PETR4", "opened_popouts": []},
+            return_value={"tabs": ["home", "flow", "risk"], "pinned_ticker": "PETR4", "opened_popouts": []},
         ), patch.object(
             workspace_service,
             "get_layout",
             return_value={
                 "tabs": [
                     {"id": "home", "title": "Home"},
-                    {"id": "institutional-flow", "title": "Institutional Flow"},
-                    {"id": "volatility-squeeze", "title": "Squeeze"},
-                    {"id": "accumulation", "title": "Accumulation"},
-                    {"id": "liquidity-map", "title": "Liquidity Map"},
-                    {"id": "master-score", "title": "Master Score"},
+                    {"id": "flow", "title": "Flow IA"},
+                    {"id": "risk", "title": "Risk IA"},
                 ]
             },
         ), patch.object(
@@ -253,37 +246,25 @@ class WorkspaceAiToolsTests(unittest.TestCase):
             "get_ai_alert_history_snapshot",
             return_value={
                 "tools": {
-                    "heat_map": [],
-                    "radar": [],
-                    "breakout_probability": [],
-                    "institutional_flow": [
+                    "flow": [
                         {
                             "ticker": "PETR4",
-                            "tool": "institutional_flow",
+                            "tool": "flow",
                             "score": 84.0,
-                            "signal": "BUY",
+                            "signal": "WATCH",
                             "price": 37.5,
                             "volume": 1250000,
                             "data_quality": "priced",
                         }
                     ],
+                    "liquidity": [],
+                    "trend": [],
+                    "momentum": [],
                     "smart_money": [],
-                    "accumulation": [],
-                    "volatility_squeeze": [],
-                    "liquidity_sweep": [],
-                    "liquidity_map": [],
-                    "market_regime": [],
-                    "master_score": [
-                        {
-                            "ticker": "PETR4",
-                            "tool": "master_score",
-                            "score": 88.0,
-                            "signal": "BUY",
-                            "price": 37.5,
-                            "volume": 1250000,
-                            "data_quality": "priced",
-                        }
-                    ],
+                    "risk": [],
+                    "news": [],
+                    "macro": [],
+                    "regime": [],
                 }
             },
             create=True,
@@ -302,22 +283,10 @@ class WorkspaceAiToolsTests(unittest.TestCase):
         self.assertIn("ai_tools", payload)
         self.assertEqual(
             sorted(payload["ai_tools"].keys()),
-            [
-                "accumulation",
-                "breakout_probability",
-                "heat_map",
-                "institutional_flow",
-                "liquidity_map",
-                "liquidity_sweep",
-                "market_regime",
-                "master_score",
-                "radar",
-                "smart_money",
-                "volatility_squeeze",
-            ],
+            sorted(OFFICIAL_AI_TOOL_KEYS),
         )
-        self.assertFalse(payload["ai_tools"]["institutional_flow"])
-        self.assertFalse(payload["ai_tools"]["master_score"])
+        self.assertFalse(payload["ai_tools"]["flow"])
+        self.assertFalse(payload["ai_tools"]["risk"])
         self.assertIn("market_decision", payload)
         self.assertFalse(payload["market_decision"].get("decision_ready"))
 
@@ -326,7 +295,7 @@ class WorkspaceAiToolsTests(unittest.TestCase):
             "brand": "StockNewsBR",
             "pricing": {"trial_days": 90, "premium_monthly": {"price_brl": 49}},
             "launch_roadmap": {"current": "web", "next": "app"},
-            "ai_modules": ["IA Master Score"],
+            "ai_modules": ["Risk IA"],
             "social_features": {"feed": True},
         }
         metrics = {
@@ -384,28 +353,26 @@ class WorkspaceAiToolsTests(unittest.TestCase):
             "get_ai_alert_history_snapshot",
             return_value={
                 "tools": {
-                    "heat_map": [],
-                    "radar": [],
-                    "breakout_probability": [],
-                    "institutional_flow": [],
+                    "flow": [],
+                    "liquidity": [],
+                    "trend": [],
+                    "momentum": [],
                     "smart_money": [],
-                    "accumulation": [],
-                    "volatility_squeeze": [],
-                    "liquidity_sweep": [],
-                    "liquidity_map": [],
-                    "market_regime": [],
-                    "master_score": [
+                    "risk": [
                         {
                             "ticker": "PETR4",
-                            "tool": "master_score",
+                            "tool": "risk",
                             "score": 91.0,
-                            "signal": "BUY",
+                            "signal": "WATCH",
                             "price": 0,
                             "volume": 0,
                             "data_quality": "score_only",
                             "decision_ready": False,
                         }
                     ],
+                    "news": [],
+                    "macro": [],
+                    "regime": [],
                 }
             },
             create=True,
@@ -416,7 +383,7 @@ class WorkspaceAiToolsTests(unittest.TestCase):
         ):
             payload = workspace_service.get_workspace_data(user_id=7, channel="web")
 
-        self.assertFalse(payload["ai_tools"]["master_score"])
+        self.assertFalse(payload["ai_tools"]["risk"])
 
     def test_workspace_cards_and_ranking_prefer_snapshot_rows(self):
         snapshot_rows = [
@@ -446,22 +413,17 @@ class WorkspaceAiToolsTests(unittest.TestCase):
             }
         ]
         snapshot_ai_tools = {
-            "heat_map": [],
-            "radar": [],
-            "breakout_probability": [],
-            "institutional_flow": [],
+            "flow": [],
+            "liquidity": [],
+            "trend": [],
+            "momentum": [],
             "smart_money": [],
-            "accumulation": [],
-            "volatility_squeeze": [],
-            "liquidity_sweep": [],
-            "liquidity_map": [],
-            "market_regime": [],
-            "master_score": [
+            "risk": [
                 {
                     "ticker": "PETR4",
-                    "tool": "master_score",
+                    "tool": "risk",
                     "score": 88.0,
-                    "signal": "BUY",
+                    "signal": "WATCH",
                     "price": 37.5,
                     "volume": 1_250_000,
                     "rsi": 58.0,
@@ -474,7 +436,7 @@ class WorkspaceAiToolsTests(unittest.TestCase):
             "brand": "StockNewsBR",
             "pricing": {"trial_days": 90, "premium_monthly": {"price_brl": 49}},
             "launch_roadmap": {"current": "web", "next": "app"},
-            "ai_modules": ["IA Master Score"],
+            "ai_modules": ["Risk IA"],
             "social_features": {"feed": True},
         }
 

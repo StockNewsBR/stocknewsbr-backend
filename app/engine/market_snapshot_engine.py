@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from app.ai.feature_hub import build_ai_tool_payload
+from app.ai.feature_hub import build_ai_payload_bundle
 from app.ai.trade_decision import summarize_trade_decision
 from app.cache.signal_cache import get_all_signals
 from app.cache.snapshot_cache import get_last_good_snapshot, get_snapshot, update_snapshot
@@ -403,17 +403,21 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
     }
     ai_input_rows = normalized[:AI_INPUT_LIMIT]
 
+    ai_bundle: dict[str, object] = {}
     try:
-        ai_tools = build_ai_tool_payload(
+        ai_bundle = build_ai_payload_bundle(
             top_signals=ai_input_rows,
             ranking=ai_input_rows,
             limit=AI_OUTPUT_LIMIT,
         )
+        ai_tools = ai_bundle.get("ai_tools") if isinstance(ai_bundle, dict) else {}
+        master_score_rows = ai_bundle.get("master_score") if isinstance(ai_bundle, dict) else []
     except Exception:
         logger.exception("Snapshot AI payload build failed")
         ai_tools = {}
+        master_score_rows = []
 
-    decision = summarize_trade_decision(ai_tools.get("master_score", []))
+    decision = summarize_trade_decision(master_score_rows)
     logger.info(
         "Snapshot decision | action=%s | confidence=%.1f | regime=%s | source=%s | stale=%s",
         decision.get("trade_action"),
@@ -433,6 +437,13 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             if row.get("symbol") or row.get("ticker")
         },
         "ai_tools": ai_tools,
+        "ai_architecture": {
+            "version": "v4_mission_10",
+            "official_ai_count": 9,
+            "trend_ia_decision": "dedicated",
+            "master_score_exposed_as_ai": False,
+            "internal_engine_keys": ai_bundle.get("internal_engine_keys", []) if isinstance(ai_bundle, dict) else [],
+        },
         "decision": decision,
         "generated_at": generated_at,
         "market_snapshot_interval_seconds": MARKET_SNAPSHOT_INTERVAL_SECONDS,

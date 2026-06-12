@@ -191,34 +191,30 @@ type ReferralLeaderboardPayload = {
 };
 
 const AI_TOOL_TAB_MAP = {
-  "heat-map": "heat_map",
-  radar: "radar",
-  "breakout-probability": "breakout_probability",
-  "volatility-squeeze": "volatility_squeeze",
-  "institutional-flow": "institutional_flow",
+  flow: "flow",
+  liquidity: "liquidity",
+  trend: "trend",
+  momentum: "momentum",
   "smart-money": "smart_money",
-  accumulation: "accumulation",
-  "liquidity-sweep": "liquidity_sweep",
-  "liquidity-map": "liquidity_map",
-  "market-regime": "market_regime",
-  "master-score": "master_score",
+  risk: "risk",
+  "news-ia": "news",
+  macro: "macro",
+  regime: "regime",
 } as const;
 
 const TAB_META: Record<string, { label: string; short: string }> = {
   grafico: { label: "📈 Gráfico IA / Rede Social", short: "Gráfico/Rede Social" },
   news: { label: "📰 Notícias", short: "Notícias" },
   busca: { label: "🔎 Busca", short: "Busca" },
-  "heat-map": { label: "🗺 Mapa de Calor", short: "Mapa" },
-  radar: { label: "⚡ Radar", short: "Radar" },
-  "breakout-probability": { label: "🎯 Breakout", short: "Breakout" },
-  "volatility-squeeze": { label: "🟣 Squeeze", short: "Squeeze" },
-  "institutional-flow": { label: "🏦 Fluxo Institucional", short: "Fluxo" },
+  flow: { label: "🏦 Flow IA", short: "Flow" },
+  liquidity: { label: "🧲 Liquidity IA", short: "Liquidez" },
+  trend: { label: "📈 Trend IA", short: "Trend" },
+  momentum: { label: "⚡ Momentum IA", short: "Momentum" },
   "smart-money": { label: "💼 Dinheiro Inteligente", short: "Smart" },
-  accumulation: { label: "📦 Acumulação", short: "Acumulação" },
-  "liquidity-sweep": { label: "🧲 Varredura de Liquidez", short: "Varredura" },
-  "liquidity-map": { label: "🧭 Mapa de Liquidez", short: "Liquidez" },
-  "market-regime": { label: "📊 Regime de Mercado", short: "Regime" },
-  "master-score": { label: "⭐ Score Mestre", short: "Score Mestre" },
+  risk: { label: "⚠️ Risk IA", short: "Risco" },
+  "news-ia": { label: "📰 News IA", short: "News IA" },
+  macro: { label: "🌎 Macro IA", short: "Macro" },
+  regime: { label: "📊 Regime IA", short: "Regime" },
   referrals: { label: "🤝 Indicações", short: "Indicações" },
   education: { label: "🎓 Ajuda ao Trader", short: "Ajuda ao Trader" },
 };
@@ -227,17 +223,15 @@ const TAB_META_EN: Record<string, { label: string; short: string }> = {
   grafico: { label: "📈 AI Chart / Social Network", short: "Chart/Social" },
   news: { label: "📰 News", short: "News" },
   busca: { label: "🔎 Search", short: "Search" },
-  "heat-map": { label: "🗺 Heat Map", short: "Heat Map" },
-  radar: { label: "⚡ Radar", short: "Radar" },
-  "breakout-probability": { label: "🎯 Breakout", short: "Breakout" },
-  "volatility-squeeze": { label: "🟣 Squeeze", short: "Squeeze" },
-  "institutional-flow": { label: "🏦 Institutional Flow", short: "Flow" },
+  flow: { label: "🏦 Flow AI", short: "Flow" },
+  liquidity: { label: "🧲 Liquidity AI", short: "Liquidity" },
+  trend: { label: "📈 Trend AI", short: "Trend" },
+  momentum: { label: "⚡ Momentum AI", short: "Momentum" },
   "smart-money": { label: "💼 Smart Money", short: "Smart" },
-  accumulation: { label: "📦 Accumulation", short: "Accumulation" },
-  "liquidity-sweep": { label: "🧲 Liquidity Sweep", short: "Sweep" },
-  "liquidity-map": { label: "🧭 Liquidity Map", short: "Liquidity Map" },
-  "market-regime": { label: "📊 Market Regime", short: "Regime" },
-  "master-score": { label: "⭐ Master Score", short: "Master Score" },
+  risk: { label: "⚠️ Risk AI", short: "Risk" },
+  "news-ia": { label: "📰 News AI", short: "News AI" },
+  macro: { label: "🌎 Macro AI", short: "Macro" },
+  regime: { label: "📊 Regime AI", short: "Regime" },
   referrals: { label: "🤝 Referrals", short: "Referrals" },
   education: { label: "🎓 Trader Help", short: "Help" },
 };
@@ -297,17 +291,15 @@ const VISIBLE_WORKSPACE_PERSONAS: WorkspacePersona[] = ["guiado"];
 const TOP_TAB_TEXT: Record<string, string> = {
   grafico: "Gráfico IA / Rede Social",
   news: "Notícias",
-  "heat-map": "Mapa de Calor",
-  radar: "Radar",
-  "breakout-probability": "Breakout",
-  "volatility-squeeze": "Squeeze",
-  "institutional-flow": "Fluxo",
+  flow: "Flow IA",
+  liquidity: "Liquidity IA",
+  trend: "Trend IA",
+  momentum: "Momentum IA",
   "smart-money": "Smart Money",
-  accumulation: "Acumulação",
-  "liquidity-sweep": "Varredura",
-  "liquidity-map": "Mapa de Liquidez",
-  "market-regime": "Regime",
-  "master-score": "Score Mestre",
+  risk: "Risk IA",
+  "news-ia": "News IA",
+  macro: "Macro IA",
+  regime: "Regime IA",
   referrals: "Indicações",
   education: "Ajuda ao Trader",
 };
@@ -315,17 +307,15 @@ const TOP_TAB_TEXT: Record<string, string> = {
 const TOP_TAB_TEXT_EN: Record<string, string> = {
   grafico: "AI Chart / Social",
   news: "News",
-  "heat-map": "Heat Map",
-  radar: "Radar",
-  "breakout-probability": "Breakout",
-  "volatility-squeeze": "Squeeze",
-  "institutional-flow": "Flow",
+  flow: "Flow AI",
+  liquidity: "Liquidity AI",
+  trend: "Trend AI",
+  momentum: "Momentum AI",
   "smart-money": "Smart Money",
-  accumulation: "Accumulation",
-  "liquidity-sweep": "Sweep",
-  "liquidity-map": "Liquidity Map",
-  "market-regime": "Regime",
-  "master-score": "Master Score",
+  risk: "Risk AI",
+  "news-ia": "News AI",
+  macro: "Macro AI",
+  regime: "Regime AI",
   referrals: "Referrals",
   education: "Help",
 };
@@ -333,54 +323,48 @@ const TOP_TAB_TEXT_EN: Record<string, string> = {
 const TAB_ORDER = [
   "grafico",
   "news",
-  "master-score",
-  "heat-map",
-  "radar",
-  "breakout-probability",
-  "volatility-squeeze",
-  "institutional-flow",
+  "flow",
+  "liquidity",
+  "trend",
+  "momentum",
   "smart-money",
-  "accumulation",
-  "liquidity-sweep",
-  "liquidity-map",
-  "market-regime",
+  "risk",
+  "news-ia",
+  "macro",
+  "regime",
   "referrals",
   "education",
 ];
 
 const TOP_BAR_TAB_IDS = TAB_ORDER.filter((id) => id !== "busca");
-const SIMPLE_TOP_TAB_IDS = new Set(["grafico", "news", "master-score", "referrals", "education"]);
+const SIMPLE_TOP_TAB_IDS = new Set(["grafico", "news", "referrals", "education"]);
 const WORKSPACE_MODE_STORAGE_KEY = "stocknewsbr.workspace_mode";
 const DETACHABLE_IA_TABS = new Set([
   "grafico",
-  "heat-map",
-  "radar",
-  "breakout-probability",
-  "volatility-squeeze",
-  "institutional-flow",
+  "flow",
+  "liquidity",
+  "trend",
+  "momentum",
   "smart-money",
-  "accumulation",
-  "liquidity-sweep",
-  "liquidity-map",
-  "market-regime",
-  "master-score",
+  "risk",
+  "news-ia",
+  "macro",
+  "regime",
 ]);
 
 const FALLBACK_TABS: WorkspaceTab[] = [
   { id: "grafico", title: "Gráfico IA / Rede Social" },
   { id: "news", title: "Notícias" },
-  { id: "master-score", title: "Score Mestre" },
   { id: "busca", title: "Busca" },
-  { id: "heat-map", title: "Mapa de Calor" },
-  { id: "radar", title: "Radar" },
-  { id: "breakout-probability", title: "Breakout" },
-  { id: "volatility-squeeze", title: "Squeeze" },
-  { id: "institutional-flow", title: "Fluxo Institucional" },
+  { id: "flow", title: "Flow IA" },
+  { id: "liquidity", title: "Liquidity IA" },
+  { id: "trend", title: "Trend IA" },
+  { id: "momentum", title: "Momentum IA" },
   { id: "smart-money", title: "Dinheiro Inteligente" },
-  { id: "accumulation", title: "Acumulação" },
-  { id: "liquidity-sweep", title: "Varredura de Liquidez" },
-  { id: "liquidity-map", title: "Mapa de Liquidez" },
-  { id: "market-regime", title: "Regime de Mercado" },
+  { id: "risk", title: "Risk IA" },
+  { id: "news-ia", title: "News IA" },
+  { id: "macro", title: "Macro IA" },
+  { id: "regime", title: "Regime IA" },
   { id: "referrals", title: "Indicações" },
   { id: "education", title: "Ajuda ao Trader" },
 ];
@@ -548,32 +532,30 @@ const FIXED_TAPE_SYMBOLS = [
 
 const HELP_MANUAL_ITEMS = [
   "📈 Gráfico IA → exibe sinais no gráfico: COMPRA, VENDA A DESCOBERTO ou ⚠ encerrar posição.",
-  "⭐ AI Score Mestre → pontuação geral da oportunidade (90 = forte, 70 = moderada, <50 = fraca). Revê todas as IAs e gera o Score Mestre.",
-  "🧠 AI Heat Map → mostra ativos mais fortes (🟢 compra) e mais fracos (🔴 venda).",
-  "⚡ AI Radar → detecta ativos que começaram a se mover com velocidade.",
-  "🎯 AI Probabilidade de Breakout → indica rompimento de resistências importantes.",
-  "🟣 AI Compressão de Volatilidade → alerta quando o mercado está quieto e pode explodir.",
-  "🏦 AI Fluxo Institucional → identifica entrada de grandes investidores.",
-  "💰 AI Dinheiro Inteligente → revela sinais dos grandes players antes de movimentos fortes.",
-  "🏛 AI Acumulação → detecta compras discretas de instituições.",
-  "🧲 AI Varredura de Liquidez → mostra rompimentos falsos para buscar liquidez.",
-  "🧭 AI Mapa de Liquidez → indica onde há concentração de stops e liquidez.",
-  "📊 AI Regime de Mercado → classifica o mercado: 📈 alta, 📉 baixa ou ➡ lateral.",
+  "⭐ Score Mestre → sistema operacional da decisão: consolida as 9 IAs, auditoria, dados e risco.",
+  "🏦 Flow IA → lê fluxo institucional, agressão e pressão compradora ou vendedora.",
+  "🧲 Liquidity IA → consolida zonas de liquidez, sweeps, traps e invalidação.",
+  "📈 Trend IA → avalia direção predominante e estrutura de mercado.",
+  "⚡ Momentum IA → consolida aceleração, rompimento e força relativa em uma leitura só.",
+  "💰 Smart Money IA → combina flow, acumulação e absorção sem duplicar confirmação.",
+  "⚠ Risk IA → responde se vale operar, por que não operar e quais bloqueios existem.",
+  "📰 News IA → trata notícia como contexto, com relevância, confiança e provider status.",
+  "🌎 Macro IA → separa macro real de macro derivado apenas de notícia.",
+  "📊 Regime IA → classifica lateralidade, tendência e volatilidade do ambiente.",
 ];
 
 const HELP_MANUAL_ITEMS_EN = [
   "📈 AI Chart / Social Network → displays BUY LONG, CLOSE LONG, SELL SHORT or CLOSE SHORT markers.",
-  "⭐ AI Master Score → consolidated opportunity score (90 = strong, 70 = moderate, <50 = weak). It reviews all AIs and generates the Master Score.",
-  "🧠 AI Heat Map → shows the strongest assets (🟢 buy) and weakest assets (🔴 sell).",
-  "⚡ AI Radar → detects assets that started moving with speed.",
-  "🎯 AI Breakout Probability → highlights important resistance breakouts.",
-  "🟣 AI Volatility Squeeze → warns when the market is quiet and may expand.",
-  "🏦 AI Institutional Flow → identifies large investor participation.",
-  "💰 AI Smart Money → reveals large-player signals before stronger moves.",
-  "🏛 AI Accumulation → detects discreet institutional buying.",
-  "🧲 AI Liquidity Sweep → flags false breakouts used to seek liquidity.",
-  "🧭 AI Liquidity Map → shows where stops and liquidity are concentrated.",
-  "📊 AI Market Regime → classifies the market: 📈 uptrend, 📉 downtrend or ➡ range.",
+  "⭐ Master Score → operating system for the decision: consolidates 9 AIs, audit, data and risk.",
+  "🏦 Flow AI → reads institutional flow, aggression and buy/sell pressure.",
+  "🧲 Liquidity AI → consolidates liquidity zones, sweeps, traps and invalidation.",
+  "📈 Trend AI → reads dominant direction and market structure.",
+  "⚡ Momentum AI → consolidates acceleration, breakout and relative strength into one read.",
+  "💰 Smart Money AI → combines flow, accumulation and absorption without duplicate confirmation.",
+  "⚠ Risk AI → answers whether to trade, why not to trade and which blocks exist.",
+  "📰 News AI → treats news as context, with relevance, confidence and provider status.",
+  "🌎 Macro AI → separates real macro from macro inferred only from news.",
+  "📊 Regime AI → classifies range, trend and volatility.",
 ];
 
 const EDUCATIONAL_HELP_SECTIONS = [
@@ -689,7 +671,7 @@ const INSTITUTIONAL_SECTIONS = [
     title: "📦 Descrição do produto",
     body: [
       "O produto principal nasce no app Google Play e libera experiência integrada entre app, website e Telegram conforme o plano do usuário.",
-      "As superfícies atuais incluem gráfico com IA, heat map, radar, breakout probability, institutional flow, smart money, accumulation, liquidity sweep, liquidity map, market regime, master score, comunidade e ajuda educacional.",
+      "As superfícies atuais incluem Score Mestre, Ranking de Oportunidades, Radar Institucional, Risk IA, 9 IAs especialistas oficiais, gráfico, comunidade e ajuda educacional.",
     ],
   },
   {
@@ -832,7 +814,7 @@ const INSTITUTIONAL_SECTIONS_EN = [
     title: "📦 Product description",
     body: [
       "The main product starts with the Google Play app and unlocks an integrated experience across app, website and Telegram according to the user's plan.",
-      "Current surfaces include AI chart, heat map, radar, breakout probability, institutional flow, smart money, accumulation, liquidity sweep, liquidity map, market regime, master score, community and educational help.",
+      "Current surfaces include Master Score, Opportunity Ranking, Institutional Radar, Risk AI, 9 official specialist AIs, chart, community and educational help.",
     ],
   },
   {
@@ -1038,118 +1020,98 @@ const COMPANY_HINTS: Record<string, string> = {
 };
 
 const TOOL_COPY: Record<string, { title: string; description: string; explanation: string }> = {
-  "heat-map": {
-    title: "🗺 Mapa de Calor",
-    description: "Mostra quais ativos estão mais fortes ou mais fracos no mercado.",
-    explanation: "🟢 Verde = força compradora. 🔴 Vermelho = pressão vendedora. Exemplo: se PETR4 aparece bem verde, o ativo está ganhando força agora.",
+  flow: {
+    title: "🏦 Flow IA",
+    description: "Lê fluxo institucional, agressão e pressão compradora ou vendedora.",
+    explanation: "Mostra interesse institucional, mas não libera operação sem decision ready, dados válidos e risco controlado.",
   },
-  radar: {
-    title: "⚡ Radar",
-    description: "Detecta ativos que começaram a se movimentar rapidamente no mercado.",
-    explanation: "Funciona como um radar para encontrar oportunidades antes da maioria dos traders perceber.",
+  liquidity: {
+    title: "🧲 Liquidity IA",
+    description: "Consolida zonas de liquidez, sweeps, traps e invalidação.",
+    explanation: "Une varredura e mapa de liquidez em uma leitura só, evitando duplicidade visual.",
   },
-  "breakout-probability": {
-    title: "🎯 Breakout",
-    description: "Identifica quando um ativo está próximo de romper uma resistência importante.",
-    explanation: "Breakout significa que o preço pode iniciar uma tendência forte. Exemplo: se romper uma faixa lateral com volume, a probabilidade sobe.",
+  trend: {
+    title: "📈 Trend IA",
+    description: "Avalia direção predominante e estrutura de mercado.",
+    explanation: "Trend IA é dedicada: tendência fica separada de regime, momentum e score.",
   },
-  "volatility-squeeze": {
-    title: "🟣 Squeeze",
-    description: "Detecta momentos em que a volatilidade do mercado está muito comprimida.",
-    explanation: "Depois de muita compressão costuma vir expansão forte. A leitura busca exatamente esse ponto.",
-  },
-  "institutional-flow": {
-    title: "🏦 Fluxo Institucional",
-    description: "Identifica quando investidores institucionais estão entrando no mercado.",
-    explanation: "Instituições movem muito volume e muitas vezes iniciam movimentos importantes antes do varejo perceber.",
+  momentum: {
+    title: "⚡ Momentum IA",
+    description: "Consolida radar, breakout e heat map em uma leitura de aceleração.",
+    explanation: "Momentum mostra força e exaustão, mas continua não acionável quando a decisão operacional não está pronta.",
   },
   "smart-money": {
-    title: "💼 Dinheiro Inteligente",
-    description: "Busca sinais de movimentação de grandes players antes de movimentos importantes no mercado.",
-    explanation: "É a leitura do dinheiro inteligente: absorção, deslocamento e volume anormal.",
+    title: "💼 Smart Money IA",
+    description: "Lê atuação institucional combinando flow, acumulação e absorção.",
+    explanation: "Evita mostrar Flow, Smart Money e Accumulation como três confirmações independentes.",
   },
-  accumulation: {
-    title: "📦 Acumulação",
-    description: "Detecta quando um ativo está sendo acumulado lentamente por grandes investidores.",
-    explanation: "A acumulação costuma acontecer com preço estável e volume subindo aos poucos, sem chamar tanta atenção do mercado.",
+  risk: {
+    title: "⚠️ Risk IA",
+    description: "Mostra risco operacional, bloqueios, Can Trade e motivo de não operar.",
+    explanation: "Score alto com dado ruim, liquidez fraca ou conflito continua bloqueado.",
   },
-  "liquidity-sweep": {
-    title: "🧲 Varredura de Liquidez",
-    description: "Detecta quando o mercado busca liquidez antes de mudar de direção.",
-    explanation: "É quando o preço varre stops, busca liquidez e depois reage na direção contrária.",
+  "news-ia": {
+    title: "📰 News IA",
+    description: "Mostra estado da notícia, relevância, confiança, impacto e provider status.",
+    explanation: "Notícia é contexto. Não vira compra ou venda isolada.",
   },
-  "liquidity-map": {
-    title: "🧭 Mapa de Liquidez",
-    description: "Mostra onde existe maior concentração de liquidez no mercado.",
-    explanation: "Esses pontos costumam atrair o preço e ajudam o trader a entender onde a reação pode acontecer.",
+  macro: {
+    title: "🌎 Macro IA",
+    description: "Separa macro real de macro derivado apenas de notícias.",
+    explanation: "Macro-news não é apresentado como macro quantitativo.",
   },
-  "market-regime": {
-    title: "📊 Regime de Mercado",
-    description: "Mostra qual é o tipo de mercado atual.",
-    explanation: "Identifica se o mercado está em tendência de alta, tendência de baixa ou lateral, para o trader usar a ferramenta certa no cenário certo.",
-  },
-  "master-score": {
-    title: "⭐ Score Mestre",
-    description: "É a pontuação geral do sistema.",
-    explanation: "Combina regime, fluxo, liquidez, timing e risco para classificar oportunidades. Score alto = oportunidade mais forte.",
+  regime: {
+    title: "📊 Regime IA",
+    description: "Classifica contexto de mercado: tendência, lateralidade e volatilidade.",
+    explanation: "Regime orienta o cenário, mas não substitui Risk IA nem decisão operacional.",
   },
 };
 
 const TOOL_COPY_EN: Record<string, { title: string; description: string; explanation: string }> = {
-  "heat-map": {
-    title: "🗺 Heat Map",
-    description: "Shows which assets are stronger or weaker in the market.",
-    explanation: "🟢 Green = buying strength. 🔴 Red = selling pressure. If PETR4 appears strongly green, the asset is gaining strength now.",
+  flow: {
+    title: "🏦 Flow AI",
+    description: "Reads institutional flow, aggression and buying or selling pressure.",
+    explanation: "Shows institutional interest, but never makes a trade actionable without decision readiness and valid data.",
   },
-  radar: {
-    title: "⚡ Radar",
-    description: "Detects assets that started moving quickly.",
-    explanation: "Works as a radar for opportunities before most traders notice the move.",
+  liquidity: {
+    title: "🧲 Liquidity AI",
+    description: "Consolidates liquidity zones, sweeps, traps and invalidation.",
+    explanation: "Combines sweep and liquidity map into one read to avoid duplicate confidence.",
   },
-  "breakout-probability": {
-    title: "🎯 Breakout",
-    description: "Identifies when an asset is close to breaking important resistance.",
-    explanation: "Breakout means price may start a stronger trend. If range breaks with volume, probability improves.",
+  trend: {
+    title: "📈 Trend AI",
+    description: "Reads dominant direction and market structure.",
+    explanation: "Trend AI is dedicated: trend is separate from regime, momentum and score.",
   },
-  "volatility-squeeze": {
-    title: "🟣 Squeeze",
-    description: "Detects moments when market volatility is highly compressed.",
-    explanation: "After strong compression, expansion often follows. This read looks for that point.",
-  },
-  "institutional-flow": {
-    title: "🏦 Institutional Flow",
-    description: "Identifies when institutional investors may be entering the market.",
-    explanation: "Institutions move large volume and often start important moves before retail notices.",
+  momentum: {
+    title: "⚡ Momentum AI",
+    description: "Consolidates radar, breakout and heat map into one acceleration read.",
+    explanation: "Momentum shows acceleration and exhaustion, but remains non-actionable when decision readiness is false.",
   },
   "smart-money": {
-    title: "💼 Smart Money",
-    description: "Looks for large-player movement before important market moves.",
-    explanation: "It reads smart money through absorption, displacement and abnormal volume.",
+    title: "💼 Smart Money AI",
+    description: "Reads institutional activity using flow, accumulation and absorption.",
+    explanation: "Prevents Flow, Smart Money and Accumulation from appearing as three independent confirmations.",
   },
-  accumulation: {
-    title: "📦 Accumulation",
-    description: "Detects when an asset may be slowly accumulated by large investors.",
-    explanation: "Accumulation often appears as stable price with gradually rising volume.",
+  risk: {
+    title: "⚠️ Risk AI",
+    description: "Shows operational risk, blocks, Can Trade and No Trade Reason.",
+    explanation: "High score with bad data, weak liquidity or conflict stays blocked.",
   },
-  "liquidity-sweep": {
-    title: "🧲 Liquidity Sweep",
-    description: "Detects when the market seeks liquidity before changing direction.",
-    explanation: "Price sweeps stops, takes liquidity and then reacts in the opposite direction.",
+  "news-ia": {
+    title: "📰 News AI",
+    description: "Shows news state, relevance, confidence, impact and provider status.",
+    explanation: "News is context. It is never a standalone buy or sell trigger.",
   },
-  "liquidity-map": {
-    title: "🧭 Liquidity Map",
-    description: "Shows where liquidity is more concentrated in the market.",
-    explanation: "These zones often attract price and help the trader understand where reaction can happen.",
+  macro: {
+    title: "🌎 Macro AI",
+    description: "Separates real macro context from macro inferred only from news.",
+    explanation: "Macro-news is not presented as quantitative macro.",
   },
-  "market-regime": {
-    title: "📊 Market Regime",
-    description: "Shows the current market environment.",
-    explanation: "Identifies uptrend, downtrend or range so the trader uses the right tool for the right scenario.",
-  },
-  "master-score": {
-    title: "⭐ Master Score",
-    description: "The system's consolidated score.",
-    explanation: "Combines regime, flow, liquidity, timing and risk to classify opportunities. Higher score means stronger opportunity.",
+  regime: {
+    title: "📊 Regime AI",
+    description: "Classifies market context: trend, range and volatility.",
+    explanation: "Regime guides the scenario but does not replace Risk AI or operational decision.",
   },
 };
 
@@ -1955,25 +1917,22 @@ function symbolFamilyKey(symbol?: string | null) {
 
 function categoryQuotaForTab(tabId: string): Record<string, number> {
   switch (tabId) {
-    case "radar":
-      return { B3: 9, BDR: 4, USA: 5, Crypto: 2 };
-    case "breakout-probability":
-      return { B3: 13, BDR: 4, USA: 3, Crypto: 1 };
-    case "volatility-squeeze":
-      return { B3: 15, BDR: 3, USA: 2, Crypto: 1 };
-    case "institutional-flow":
+    case "flow":
       return { B3: 15, BDR: 3, USA: 2, Crypto: 0 };
+    case "liquidity":
+      return { B3: 11, BDR: 4, USA: 4, Crypto: 1 };
+    case "trend":
+      return { B3: 13, BDR: 3, USA: 4, Crypto: 1 };
+    case "momentum":
+      return { B3: 9, BDR: 4, USA: 5, Crypto: 2 };
     case "smart-money":
       return { B3: 10, BDR: 5, USA: 5, Crypto: 1 };
-    case "accumulation":
-      return { B3: 16, BDR: 2, USA: 2, Crypto: 0 };
-    case "liquidity-sweep":
-      return { B3: 11, BDR: 4, USA: 4, Crypto: 1 };
-    case "liquidity-map":
-      return { B3: 12, BDR: 4, USA: 4, Crypto: 0 };
-    case "market-regime":
-      return { B3: 13, BDR: 3, USA: 4, Crypto: 1 };
-    case "master-score":
+    case "risk":
+      return { B3: 12, BDR: 4, USA: 4, Crypto: 2 };
+    case "news-ia":
+    case "macro":
+      return { B3: 10, BDR: 4, USA: 5, Crypto: 2 };
+    case "regime":
       return { B3: 11, BDR: 4, USA: 4, Crypto: 1 };
     default:
       return { B3: 12, BDR: 4, USA: 4, Crypto: 2 };
@@ -2655,17 +2614,15 @@ type AiDealRule = {
 };
 
 const AI_DEAL_RULES: Record<string, AiDealRule> = {
-  heat_map: { high: 65, low: 35, states: ["strong_buying", "strong_selling"] },
-  radar: { high: 58, states: ["momentum_ignition", "fast_move"] },
-  breakout_probability: { high: 55, states: ["ready_to_break", "building_pressure"] },
-  volatility_squeeze: { high: 55, low: 25, states: ["squeeze_ready", "compression", "already_expanded"] },
-  institutional_flow: { high: 55, low: 25, states: ["institutional_buying", "institutional_interest", "distribution_risk"] },
-  smart_money: { high: 50, states: ["smart_money_active", "smart_money_interest"] },
-  accumulation: { high: 55, low: 25, states: ["accumulation", "early_accumulation", "distribution_or_weak"] },
-  liquidity_sweep: { high: 48, states: ["liquidity_sweep_detected", "sweep_watch"] },
-  liquidity_map: { high: 55, low: 25, states: ["liquidity_hotspot", "liquidity_zone", "thin_liquidity"] },
-  market_regime: { high: 60, states: ["bull_trend", "bear_trend", "high_volatility"] },
-  master_score: { high: 70, states: ["high_conviction", "tradable"] },
+  flow: { high: 55, low: 25, states: ["institutional_buying", "institutional_interest", "distribution_risk"] },
+  liquidity: { high: 55, states: ["liquidity_trap", "liquidity_zone", "thin_liquidity"] },
+  trend: { high: 55, states: ["uptrend_structure", "downtrend_structure"] },
+  momentum: { high: 55, states: ["momentum_expansion", "bearish_momentum", "momentum_watch"] },
+  smart_money: { high: 55, states: ["institutional_accumulation", "institutional_defense", "possible_manipulation"] },
+  risk: { high: 70, states: ["high_risk", "critical_risk"] },
+  news: { high: 50, states: ["news_available"] },
+  macro: { high: 35, states: ["macro_context_available", "macro_news_only"] },
+  regime: { high: 60, states: ["bull_trend", "bear_trend", "high_volatility"] },
 };
 
 function isAiDealFinding(row?: Partial<AiToolRow> | null) {
@@ -2677,7 +2634,7 @@ function isAiDealFinding(row?: Partial<AiToolRow> | null) {
   const score = firstFiniteNumber(rawRow.score ?? rawRow.metrics?.score ?? rawRow.metrics?.composite_score);
   const rule = AI_DEAL_RULES[tool] || { high: 60 };
 
-  if (tool === "master_score") {
+  if (tool === "risk") {
     if (rawRow.decision_ready === false || rawRow.conflict_detected === true) return false;
     if (["BUY", "SELL", "SHORT", "COVER"].includes(signal)) return true;
   }
@@ -3423,7 +3380,7 @@ function currentFiveMinuteBucket() {
 function defaultAiToolSoundSettings() {
   const defaults: Record<string, boolean> = {};
   Object.values(AI_TOOL_TAB_MAP).forEach((toolKey) => {
-    defaults[toolKey] = toolKey === "master_score";
+    defaults[toolKey] = toolKey === "risk";
   });
   return defaults;
 }
@@ -3445,7 +3402,7 @@ function parseAiToolSoundSettings(value?: string | null) {
 function aiToolSoundEnabled(settings: Record<string, boolean>, toolKey?: string | null) {
   if (!toolKey) return false;
   if (typeof settings[toolKey] === "boolean") return settings[toolKey];
-  return toolKey === "master_score";
+  return toolKey === "risk";
 }
 
 function decisionToneFromText(...values: Array<unknown>): DecisionTone {
@@ -4534,27 +4491,22 @@ function scoreToolCandidateForTab(
   const diversityBonus = ((symbolSeed + lensSeed * 7) % 17) / 17;
 
   switch (tabId) {
-    case "heat-map":
-      return absChange * 4 + score * 0.55 + rvol * 1.1 + (bullish ? 0.8 : bearish ? 0.6 : 0) + b3LensBonus * 0.35 + diversityBonus * 0.35;
-    case "radar":
-      return absChange * 6.2 + Math.max(0, rvol - 1) * 3.4 + volumeScore * 0.65 + adx * 0.04 + (isCrypto ? -0.6 : 0.25) + diversityBonus * 0.75;
-    case "breakout-probability":
-      return (bullish ? 4.5 : -4) + Math.max(0, change) * 3.7 + adx * 0.14 + rvol * 1.05 + score * 0.5 + equityLensBonus * 0.35 + diversityBonus * 0.5;
-    case "volatility-squeeze":
-      return stable * 4.9 + Math.max(0, 55 - rsiExtreme) * 0.07 + Math.max(0, 2 - atr) * 1.25 + Math.max(0, 1.3 - rvol) * 0.85 + score * 0.2 + equityLensBonus * 0.35 + diversityBonus * 0.65;
-    case "institutional-flow":
+    case "flow":
       return volumeScore * 2.6 + Math.max(0, rvol - 1) * 3.1 + absChange * 0.65 + score * 0.35 + institutionalCategoryBonus + diversityBonus * 0.45;
+    case "liquidity":
+      return stable * 3.2 + atr * 2.25 + rsiExtreme * 0.11 + Math.max(0, 2.2 - Math.abs(rvol - 1.2)) * 1.35 + score * 0.22 + liquidityCategoryBonus * 0.55 + diversityBonus * 1.9;
+    case "trend":
+      return adx * 0.24 + score * 0.62 + rsiExtreme * 0.08 + absChange * 1.1 + volumeScore * 0.25 + diversityBonus * 0.4;
+    case "momentum":
+      return absChange * 6.2 + Math.max(0, rvol - 1) * 3.4 + volumeScore * 0.65 + adx * 0.04 + (isCrypto ? -0.6 : 0.25) + diversityBonus * 0.75;
     case "smart-money":
       return score * 1.18 + stable * 1.9 + Math.max(0, rvol - 1) * 1.35 + adx * 0.05 + (mildBullish ? 1.6 : mildBearish ? 0.7 : 0) + smartMoneyCategoryBonus + diversityBonus * 0.6;
-    case "accumulation":
-      return (mildBullish ? 3.4 : bearish ? -2.4 : 0.7) + stable * 3.4 + Math.max(0, rvol - 0.8) * 1.25 + score * 0.42 + accumulationCategoryBonus + diversityBonus * 0.7;
-    case "liquidity-sweep":
-      return absChange * 3.1 + atr * 2.35 + rsiExtreme * 0.09 + Math.max(0, rvol - 1) * 1.15 + adx * 0.035 + equityLensBonus * 0.55 + diversityBonus * 0.8;
-    case "liquidity-map":
-      return stable * 3.2 + atr * 2.25 + rsiExtreme * 0.11 + Math.max(0, 2.2 - Math.abs(rvol - 1.2)) * 1.35 + score * 0.22 + liquidityCategoryBonus * 0.55 + diversityBonus * 1.9;
-    case "market-regime":
-      return adx * 0.24 + score * 0.62 + rsiExtreme * 0.08 + absChange * 1.1 + volumeScore * 0.25 + diversityBonus * 0.4;
-    case "master-score":
+    case "risk":
+      return score * 1.2 + rsiExtreme * 0.08 + Math.max(0, 1 - rvol) * 2.2 + diversityBonus * 0.25;
+    case "news-ia":
+    case "macro":
+      return score * 0.7 + absChange * 0.8 + diversityBonus * 0.7;
+    case "regime":
       return score * 1.7 + rvol * 0.85 + adx * 0.08 + absChange * 1.2 + volumeScore * 0.35 + diversityBonus * 0.25;
     default:
       return score;
@@ -4586,40 +4538,33 @@ function buildToolLensMetrics(input: {
   const volumeImpulse = Math.max(0, rvol - 1);
 
   switch (input.tabId) {
-    case "heat-map":
-      return {
-        forca_relativa: Number((change * 8 + score * 6 + volumeImpulse * 12).toFixed(1)),
-        variacao_pct: Number(change.toFixed(2)),
-        rvol: Number(rvol.toFixed(2)),
-        lado: bullish ? "forte comprador" : bearish ? "fraco/vendedor" : "misto",
-      };
-    case "radar":
-      return {
-        aceleracao: Number((absChange * 10 + volumeImpulse * 20).toFixed(1)),
-        momentum: Number((change * 1.4).toFixed(2)),
-        rvol: Number(rvol.toFixed(2)),
-        movimento_anormal: absChange >= 0.35 || rvol >= 1.4,
-      };
-    case "breakout-probability":
-      return {
-        pressao_rompimento: Number((Math.max(0, change) * 12 + adx * 0.7 + volumeImpulse * 16).toFixed(1)),
-        adx: Number(adx.toFixed(1)),
-        rvol: Number(rvol.toFixed(2)),
-        risco_falso_rompimento: Number((Math.max(0, atrPct * 9 - volumeImpulse * 6)).toFixed(1)),
-      };
-    case "volatility-squeeze":
-      return {
-        compressao: Number(compression.toFixed(1)),
-        atr_pct: Number(atrPct.toFixed(2)),
-        rsi: Number(rsi.toFixed(1)),
-        gatilho: compression >= 55 ? "squeeze armado" : "sem compressao limpa",
-      };
-    case "institutional-flow":
+    case "flow":
       return {
         volume_proxy: Number((volumeImpulse * 100).toFixed(1)),
         agressao_proxy: Number((Math.abs(change) * rvol * 8).toFixed(1)),
         rvol: Number(rvol.toFixed(2)),
         confirmacao_preco: bullish ? "deslocamento comprador" : bearish ? "pressao vendedora" : "neutro",
+      };
+    case "liquidity":
+      return {
+        liquidez: Number((volumeImpulse * 30 + atrPct * 9 + score * 5).toFixed(1)),
+        sweep_risk: Number((atrPct * 12 + absChange * 8 + volumeImpulse * 9).toFixed(1)),
+        zona_stop: bullish ? "acima da resistencia" : bearish ? "abaixo do suporte" : "bordas do range",
+        atr_pct: Number(atrPct.toFixed(2)),
+      };
+    case "trend":
+      return {
+        tendencia: bullish ? "alta" : bearish ? "baixa" : "lateral",
+        adx: Number(adx.toFixed(1)),
+        rsi: Number(rsi.toFixed(1)),
+        estrutura: adx >= 22 ? "direcional" : "indefinida",
+      };
+    case "momentum":
+      return {
+        aceleracao: Number((absChange * 10 + volumeImpulse * 20).toFixed(1)),
+        momentum: Number((change * 1.4).toFixed(2)),
+        rvol: Number(rvol.toFixed(2)),
+        movimento_anormal: absChange >= 0.35 || rvol >= 1.4,
       };
     case "smart-money":
       return {
@@ -4628,40 +4573,32 @@ function buildToolLensMetrics(input: {
         adx: Number(adx.toFixed(1)),
         rvol: Number(rvol.toFixed(2)),
       };
-    case "accumulation":
+    case "risk":
       return {
-        absorcao: Number((Math.max(0, 1.1 - absChange) * 45 + volumeImpulse * 18).toFixed(1)),
-        estabilidade: Number(Math.max(0, 100 - absChange * 35).toFixed(1)),
+        risco: Number((score * 10).toFixed(1)),
         rvol: Number(rvol.toFixed(2)),
-        leitura: bullish && absChange < 1.2 ? "compra discreta" : "acumulacao nao confirmada",
+        dados: rvol > 0 ? "com volume" : "sem volume suficiente",
+        decisao: "nao operar sem can_trade",
       };
-    case "liquidity-sweep":
+    case "news-ia":
       return {
-        sweep_risk: Number((atrPct * 12 + absChange * 8 + volumeImpulse * 9).toFixed(1)),
-        atr_pct: Number(atrPct.toFixed(2)),
-        range_proxy: Number((absChange + atrPct).toFixed(2)),
-        reacao: absChange >= 0.5 ? "varrida possivel" : "aguardar varrida",
+        relevancia: Number((score * 10).toFixed(1)),
+        impacto: bullish ? "positivo" : bearish ? "negativo" : "neutro",
+        provider: "snapshot",
+        uso: "contexto",
       };
-    case "liquidity-map":
+    case "macro":
       return {
-        liquidez: Number((volumeImpulse * 30 + atrPct * 9 + score * 5).toFixed(1)),
-        zona_stop: bullish ? "acima da resistencia" : bearish ? "abaixo do suporte" : "bordas do range",
-        volume_proxy: Number((volumeImpulse * 100).toFixed(1)),
-        atr_pct: Number(atrPct.toFixed(2)),
+        contexto_macro: "derivado do snapshot",
+        score_contexto: Number((score * 10).toFixed(1)),
+        quantitativo: false,
       };
-    case "market-regime":
+    case "regime":
       return {
         regime: adx >= 22 ? (bullish ? "tendencia de alta" : bearish ? "tendencia de baixa" : "trend indefinido") : "lateral",
         adx: Number(adx.toFixed(1)),
         rsi: Number(rsi.toFixed(1)),
-        tendencia: bullish ? "alta" : bearish ? "baixa" : "lateral",
-      };
-    case "master-score":
-      return {
-        score_composto: Number((score * 10).toFixed(1)),
-        confirmacoes: Number((Number(bullish || bearish) + Number(rvol >= 1.2) + Number(adx >= 18) + Number(absChange >= 0.25)).toFixed(0)),
-        classificacao: score >= 7 ? "forte" : score >= 5 ? "moderada" : "fraca",
-        divergencia: bearish && score >= 7 ? "risco direcional" : "controlada",
+        volatilidade: Number(atrPct.toFixed(2)),
       };
     default:
       return {
@@ -4792,6 +4729,7 @@ function buildPublicToolNarrative(input: {
   const biasText = humanizeMachineLabel(input.trend || (input.changePct != null && input.changePct >= 0 ? "alta" : "baixa"));
   const strongMove = Math.abs(Number(input.changePct || 0)) >= 0.35;
   const isBullish = Number(input.changePct || 0) > 0 || String(input.trend || "").toLowerCase().includes("alta");
+  const isBearish = Number(input.changePct || 0) < 0 || String(input.trend || "").toLowerCase().includes("baixa");
   const signal = isBullish ? "BUY" : "SELL";
   const side = isBullish ? "compra" : "venda";
   const oppositeSide = isBullish ? "venda" : "compra";
@@ -4814,51 +4752,43 @@ function buildPublicToolNarrative(input: {
   };
 
   switch (input.tabId) {
-    case "heat-map":
-      return {
-        ...base,
-        state: isBullish ? "força compradora" : "pressão vendedora",
-        ai_comment: `${input.symbol} no mapa de força: ${signature}; variação ${changeText}, volume ${volumeText}, bias ${biasText}. Direção tática: ${side}.`,
-        trigger: `Mapa só autoriza ${side} se o ativo mantiver força relativa com RVOL ${rvolText} e romper ${executionLevel}.`,
-        invalidation: scoreInvalidation,
-      };
-    case "radar":
-      return {
-        ...base,
-        state: strongMove ? "movimento ativo" : "radar inicial",
-        ai_comment: `${input.symbol} no radar: ${signature}; aceleração ${changeText}, volume ${volumeText}. Direção preferida: ${side}.`,
-        trigger: strongMove
-          ? `Entrar só se o próximo candle continuar ${direction}, RVOL ficar perto/acima de ${rvolText} e ADX não perder força.`
-          : `Aguardar nova aceleração; com Score ${scoreText}, ${side} ainda exige expansão de preço e volume.`,
-        invalidation: `Sai do radar se velocidade cair, RVOL ficar abaixo de 1.00 ou candle forte de ${oppositeSide} devolver o movimento.`,
-      };
-    case "breakout-probability":
-      return {
-        ...base,
-        state: isBullish ? "testando resistência" : "rompimento negado",
-        ai_comment: `${input.symbol} em probabilidade de rompimento: ${signature}; preço ${priceText}, ${changeText}, bias ${biasText}. Plano: ${side} com confirmação.`,
-        trigger: isBullish
-          ? `Comprar apenas acima da resistência/máxima com RVOL ${rvolText} crescente; Score ${scoreText} define tamanho da convicção.`
-          : `Vender/evitar compra se perder suporte com ${volumeCondition}; Score ${scoreText} pede confirmação extra.`,
-        invalidation: isBullish
-          ? `Invalida se romper e fechar abaixo da resistência ou se RVOL cair antes da continuação.`
-          : `Invalida a venda se recuperar suporte com volume comprador e ADX ${adxText} virar a favor.`,
-      };
-    case "volatility-squeeze":
-      return {
-        ...base,
-        state: strongMove ? "expansão de volatilidade" : "compressão/espera",
-        ai_comment: `${input.symbol} em ${strongMove ? "expansão" : "compressão"}: ${signature}; movimento ${changeText}, volume ${volumeText}.`,
-        trigger: `Sair da compressão ${direction} com candle amplo, ${volumeCondition} e ATR ${atrText}; antes disso é espera.`,
-        invalidation: `Invalida se continuar lateral, ATR não expandir ou rompimento voltar para dentro do range.`,
-      };
-    case "institutional-flow":
+    case "flow":
       return {
         ...base,
         state: input.volume && input.volume > 1_000_000 ? "fluxo relevante" : "fluxo em observação",
-        ai_comment: `${input.symbol} em fluxo institucional: ${signature}; volume ${volumeText}, variação ${changeText}. Direção de fluxo: ${side}.`,
+        ai_comment: `${input.symbol} em Flow IA: ${signature}; volume ${volumeText}, variação ${changeText}. Direção de fluxo: ${side}.`,
         trigger: `Executar ${side} só se RVOL sustentar ${rvolText} ou maior junto com deslocamento ${direction}.`,
         invalidation: `Desconsiderar se volume vier sem deslocamento, com pavio contra a tese ou absorção de ${oppositeSide}.`,
+      };
+    case "liquidity":
+      return {
+        ...base,
+        state: "zonas e traps de liquidez",
+        ai_comment: `${input.symbol} em Liquidity IA: ${signature}; use bordas do range para planejar ${side} só com reação confirmada.`,
+        trigger: `Aguardar toque na zona, sweep ou trap confirmado com RVOL ${rvolText}; liquidez é alerta, não entrada automática.`,
+        invalidation: `Zona perde força após rompimento limpo com volume ou ATR ${atrText} expandindo contra a tese.`,
+      };
+    case "trend":
+      return {
+        ...base,
+        state: isBullish ? "estrutura de alta" : isBearish ? "estrutura de baixa" : "estrutura indefinida",
+        ai_comment: `${input.symbol} em Trend IA: ${signature}; RSI ${rsiText}, movimento ${changeText}. Direção estrutural: ${side}.`,
+        trigger: isBullish
+          ? `Priorizar compras apenas se estrutura, VWAP e RVOL ${rvolText} confirmarem.`
+          : `Priorizar defesa/venda/tamanho menor até recuperar estrutura; Score ${scoreText} não autoriza compra isolada.`,
+        invalidation: isBullish
+          ? `Invalida se perder VWAP, fundo relevante ou volume comprador.`
+          : `Invalida a baixa se recuperar estrutura com volume comprador e ADX ${adxText} virar a favor.`,
+      };
+    case "momentum":
+      return {
+        ...base,
+        state: strongMove ? "momentum ativo" : "momentum inicial",
+        ai_comment: `${input.symbol} em Momentum IA: ${signature}; aceleração ${changeText}, volume ${volumeText}. Direção preferida: ${side}.`,
+        trigger: strongMove
+          ? `Entrar só se o próximo candle continuar ${direction}, RVOL ficar perto/acima de ${rvolText} e ADX não perder força.`
+          : `Aguardar nova aceleração; com Score ${scoreText}, ${side} ainda exige expansão de preço e volume.`,
+        invalidation: `Perde momentum se velocidade cair, RVOL ficar abaixo de 1.00 ou candle forte de ${oppositeSide} devolver o movimento.`,
       };
     case "smart-money":
       return {
@@ -4868,49 +4798,37 @@ function buildPublicToolNarrative(input: {
         trigger: `Confirmar ${side} com rompimento limpo ou pullback defendido; Score ${scoreText} exige que a defesa apareça no tape.`,
         invalidation: `Falha se preço romper contra a tese com RVOL de ${oppositeSide}, perder VWAP ou absorção sumir.`,
       };
-    case "accumulation":
+    case "risk":
       return {
         ...base,
-        state: isBullish && !strongMove ? "acumulação discreta" : "acumulação não confirmada",
-        ai_comment: `${input.symbol} em acumulação: ${signature}; preço ${changeText}, volume ${volumeText}; leitura favorece entrada gradual, não perseguição.`,
-        trigger: `Comprar em pullback curto se preço estabilizar e RVOL subir acima de ${Math.max(1, rvolValue || 1).toFixed(2)} sem candle vendedor forte.`,
-        invalidation: `Perde leitura se virar queda forte, gap sem sustentação ou volume vendedor romper suporte.`,
+        state: scoreValue >= 7 ? "risco elevado" : "risco monitorado",
+        ai_comment: `${input.symbol} em Risk IA: ${signature}; preço ${priceText}, volume ${volumeText}. Resultado: não operar sem Can Trade.`,
+        trigger: `Liberar somente se dados, liquidez, auditor e decision ready confirmarem ${side}.`,
+        invalidation: `Qualquer bloqueio de liquidez, dado ruim, conflito institucional ou auditor bloqueado invalida operação.`,
       };
-    case "liquidity-sweep":
+    case "news-ia":
       return {
         ...base,
-        state: "caça liquidez",
-        ai_comment: `${input.symbol} em varredura: ${signature}; preço ${priceText}. Procurar stop hunt antes da reação ${direction}.`,
-        trigger: `Varrer liquidez, falhar no rompimento e reagir rápido para ${side}; ${volatilityCondition}.`,
-        invalidation: `Não operar se a varrida virar tendência contínua contra a reversão esperada ou RVOL confirmar ${oppositeSide}.`,
+        state: "contexto de notícia",
+        ai_comment: `${input.symbol} em News IA: ${signature}; notícia é contexto e precisa de confirmação no preço.`,
+        trigger: `Usar notícia só junto com preço, volume e fluxo confirmando ${side}.`,
+        invalidation: `Notícia perde peso se estiver stale, sem provider confiável ou sem relação direta com o ticker.`,
       };
-    case "liquidity-map":
+    case "macro":
       return {
         ...base,
-        state: "zonas de liquidez",
-        ai_comment: `${input.symbol} no mapa de liquidez: ${signature}; use bordas do range para planejar ${side} só com reação confirmada.`,
-        trigger: `Aguardar toque na zona e reação ${direction} com RVOL ${rvolText}; zona é alerta, não entrada automática.`,
-        invalidation: `Zona perde força após muitos testes sem reação, rompimento limpo com volume ou ATR ${atrText} expandindo contra a tese.`,
+        state: "contexto macro",
+        ai_comment: `${input.symbol} em Macro IA: ${signature}; macro-news não é macro quantitativo.`,
+        trigger: `Usar macro como filtro apenas quando houver fonte real ou evento macro claro.`,
+        invalidation: `Sem fonte macro real, a leitura permanece contexto de baixo peso.`,
       };
-    case "market-regime":
+    case "regime":
       return {
         ...base,
         state: isBullish ? "regime de alta" : "regime de baixa/lateral",
-        ai_comment: `${input.symbol} em regime ${biasText}: ${signature}; RSI ${rsiText}, movimento ${changeText}. Operação preferida: ${side}.`,
-        trigger: isBullish
-          ? `Priorizar compras em pullback/rompimento se ADX ${adxText} e RVOL ${rvolText} confirmarem.`
-          : `Priorizar defesa/venda/tamanho menor até recuperar estrutura; Score ${scoreText} não autoriza compra isolada.`,
+        ai_comment: `${input.symbol} em Regime IA: ${signature}; RSI ${rsiText}, movimento ${changeText}. Contexto preferido: ${side}.`,
+        trigger: `Regime ajuda a tese se ADX ${adxText}, RVOL ${rvolText} e volatilidade forem coerentes.`,
         invalidation: `Regime muda se preço cruzar zona chave com volume e mantiver fechamento contrário por mais de um candle.`,
-      };
-    case "master-score":
-      return {
-        ...base,
-        state: scoreValue >= 7 ? "oportunidade forte" : scoreValue >= 5 ? "oportunidade moderada" : "oportunidade fraca",
-        ai_comment: `${input.symbol} no Score Mestre: ${signature}; preço ${changeText}, volume ${volumeText}, RSI ${rsiText}, bias ${biasText}. Direção final: ${side}.`,
-        trigger: `Executar somente quando Score ${scoreText}, preço, RVOL ${rvolText} e regime confirmarem ${side} no mesmo candle.`,
-        invalidation: scoreValue >= 5
-          ? `Baixar prioridade se Score perder força, volume divergir ou outra IA principal apontar direção oposta.`
-          : `Perde leitura se preço e volume não confirmarem a tese, fluxo virar contra o sinal ou outra IA principal apontar direção oposta.`,
       };
     default:
       return base;
@@ -7804,6 +7722,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           changePct: (row as any).changePct != null ? Number((row as any).changePct) : null,
           rsi: (row as any).rsi != null ? Number((row as any).rsi) : null,
           volume: (row as any).volume != null ? Number((row as any).volume) : null,
+          data_quality: (row as any).data_quality ?? null,
+          quote_status: (row as any).quote_status ?? null,
+          status: (row as any).status ?? null,
           timestamp: normalizeAlertEpoch((row as any).timestamp ?? (row as any).detected_at ?? (row as any).market_data_updated_at ?? (row as any).quote_time ?? (row as any).provider_timestamp ?? (row as any).created_at),
         };
       }),
@@ -7822,6 +7743,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           changePct: displayQuote?.change_pct ?? null,
           rsi: firstValidRsiNumber(currentRanking?.rsi),
           volume: displayQuote?.volume ?? null,
+          data_quality: (currentRanking as any)?.data_quality ?? displayQuote?.data_quality ?? null,
+          quote_status: displayQuote?.quote_status ?? null,
+          status: displayQuote?.status ?? null,
           timestamp: null,
         };
         return { ...fallback, id: `${fallback.symbol}-${index}` };
@@ -8302,7 +8226,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         ...(workspace?.ai_tools?.[key] || []),
         ...(publicAiTools?.tools?.[key] || []),
       ]).filter(sameTicker);
-    const flowCard = resolveFlowCard(toolRows(["institutional_flow", "smart_money", "accumulation"]), appLocale);
+    const flowCard = resolveFlowCard(toolRows(["flow", "smart_money"]), appLocale);
     const flowTone = flowCard.tone;
     const baseTone = trendTone !== "neutral"
       ? trendTone
@@ -9199,36 +9123,32 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const copySource = isUsLocale ? TOOL_COPY_EN : TOOL_COPY;
     const copy = copySource[currentTab] || { title, description, explanation: "" };
     const tabLensPt: Record<string, string> = {
-      "heat-map": "Lente: força relativa por movimento e preço.",
-      radar: "Lente: aceleração recente e mudança de ritmo.",
-      "breakout-probability": "Lente: proximidade de rompimento e espaço para expansão.",
-      "volatility-squeeze": "Lente: compressão de volatilidade e provável expansão.",
-      "institutional-flow": "Lente: fluxo de instituições e volume anormal.",
+      flow: "Lente: fluxo institucional e agressão compradora/vendedora.",
+      liquidity: "Lente: zonas de liquidez, sweeps, traps e invalidação.",
+      trend: "Lente: direção predominante e estrutura de mercado.",
+      momentum: "Lente: aceleração, força e exaustão.",
       "smart-money": "Lente: dinheiro inteligente e deslocamento pré-movimento.",
-      accumulation: "Lente: acumulação gradual e estabilidade de preço.",
-      "liquidity-sweep": "Lente: varredura de liquidez e reação pós-stop.",
-      "liquidity-map": "Lente: concentração de liquidez, stops e reação possível.",
-      "market-regime": "Lente: regime atual do mercado e contexto operacional.",
-      "master-score": "Lente: força geral consolidada da oportunidade.",
+      risk: "Lente: risco operacional, bloqueios e Can Trade.",
+      "news-ia": "Lente: notícias como contexto, relevância e provider status.",
+      macro: "Lente: macro real separado de macro-news.",
+      regime: "Lente: regime atual, lateralidade e volatilidade.",
     };
     const tabLensEn: Record<string, string> = {
-      "heat-map": "Lens: relative strength by movement and price.",
-      radar: "Lens: recent acceleration and rhythm change.",
-      "breakout-probability": "Lens: breakout proximity and expansion room.",
-      "volatility-squeeze": "Lens: volatility compression and likely expansion.",
-      "institutional-flow": "Lens: institutional flow and abnormal volume.",
+      flow: "Lens: institutional flow and buy/sell aggression.",
+      liquidity: "Lens: liquidity zones, sweeps, traps and invalidation.",
+      trend: "Lens: dominant direction and market structure.",
+      momentum: "Lens: acceleration, strength and exhaustion.",
       "smart-money": "Lens: smart money and pre-move displacement.",
-      accumulation: "Lens: gradual accumulation and price stability.",
-      "liquidity-sweep": "Lens: liquidity sweep and post-stop reaction.",
-      "liquidity-map": "Lens: liquidity concentration, stops and possible reaction.",
-      "market-regime": "Lens: current market regime and operating context.",
-      "master-score": "Lens: consolidated opportunity strength.",
+      risk: "Lens: operational risk, blocks and Can Trade.",
+      "news-ia": "Lens: news context, relevance and provider status.",
+      macro: "Lens: real macro separated from macro-news.",
+      regime: "Lens: current regime, range and volatility.",
     };
     const lens = (isUsLocale ? tabLensEn : tabLensPt)[currentTab] || "";
 
     if (currentAiKey) {
       const currentAiSoundEnabled = aiToolSoundEnabled(aiToolSoundSettings, currentAiKey);
-      const aiSoundLocked = proModeLocked && currentAiKey !== "master_score";
+      const aiSoundLocked = proModeLocked && currentAiKey !== "risk";
       return (
         <section id={`panel-${currentTab}`} className="snbr-tool-shell">
           <div className="snbr-tool-head">
@@ -9311,7 +9231,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                         <div className="snbr-asset-box-head">
                           <strong>{item.ticker}</strong>
                           <span className={cx("snbr-side-badge", scoreClass(item.score))}>
-                            {currentTab === "heat-map" ? <i className={cx("snbr-score-dot", tone)} aria-hidden="true" /> : null}
+                            {currentTab === "flow" ? <i className={cx("snbr-score-dot", tone)} aria-hidden="true" /> : null}
                             Score {item.score.toFixed(1)}
                           </span>
                         </div>
@@ -9467,7 +9387,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                     <div className="snbr-asset-box-head">
                       <strong>{item.symbol}</strong>
                       <span className={cx("snbr-side-badge", scoreClass(item.score))}>
-                        {currentTab === "heat-map" ? <i className={cx("snbr-score-dot", tone)} aria-hidden="true" /> : null}
+                        {currentTab === "flow" ? <i className={cx("snbr-score-dot", tone)} aria-hidden="true" /> : null}
                         Score {item.score != null ? item.score.toFixed(1) : "n/a"}
                       </span>
                     </div>
@@ -9840,17 +9760,15 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     if (currentTab === "grafico") return renderGrafico();
     if (currentTab === "news") return renderNews();
     if (currentTab === "busca") return renderSearchTab();
-    if (currentTab === "heat-map") return renderToolTab(TOOL_COPY["heat-map"].title, TOOL_COPY["heat-map"].description);
-    if (currentTab === "radar") return renderToolTab(TOOL_COPY.radar.title, TOOL_COPY.radar.description);
-    if (currentTab === "breakout-probability") return renderToolTab(TOOL_COPY["breakout-probability"].title, TOOL_COPY["breakout-probability"].description);
-    if (currentTab === "volatility-squeeze") return renderToolTab(TOOL_COPY["volatility-squeeze"].title, TOOL_COPY["volatility-squeeze"].description);
-    if (currentTab === "institutional-flow") return renderToolTab(TOOL_COPY["institutional-flow"].title, TOOL_COPY["institutional-flow"].description);
+    if (currentTab === "flow") return renderToolTab(TOOL_COPY.flow.title, TOOL_COPY.flow.description);
+    if (currentTab === "liquidity") return renderToolTab(TOOL_COPY.liquidity.title, TOOL_COPY.liquidity.description);
+    if (currentTab === "trend") return renderToolTab(TOOL_COPY.trend.title, TOOL_COPY.trend.description);
+    if (currentTab === "momentum") return renderToolTab(TOOL_COPY.momentum.title, TOOL_COPY.momentum.description);
     if (currentTab === "smart-money") return renderToolTab(TOOL_COPY["smart-money"].title, TOOL_COPY["smart-money"].description);
-    if (currentTab === "accumulation") return renderToolTab(TOOL_COPY.accumulation.title, TOOL_COPY.accumulation.description);
-    if (currentTab === "liquidity-sweep") return renderToolTab(TOOL_COPY["liquidity-sweep"].title, TOOL_COPY["liquidity-sweep"].description);
-    if (currentTab === "liquidity-map") return renderToolTab(TOOL_COPY["liquidity-map"].title, TOOL_COPY["liquidity-map"].description);
-    if (currentTab === "market-regime") return renderToolTab(TOOL_COPY["market-regime"].title, TOOL_COPY["market-regime"].description);
-    if (currentTab === "master-score") return renderToolTab(TOOL_COPY["master-score"].title, TOOL_COPY["master-score"].description);
+    if (currentTab === "risk") return renderToolTab(TOOL_COPY.risk.title, TOOL_COPY.risk.description);
+    if (currentTab === "news-ia") return renderToolTab(TOOL_COPY["news-ia"].title, TOOL_COPY["news-ia"].description);
+    if (currentTab === "macro") return renderToolTab(TOOL_COPY.macro.title, TOOL_COPY.macro.description);
+    if (currentTab === "regime") return renderToolTab(TOOL_COPY.regime.title, TOOL_COPY.regime.description);
     if (currentTab === "referrals") return renderReferrals();
     if (currentTab === "education") return renderEducation();
     return renderGrafico();

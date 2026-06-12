@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from app.ai.feature_hub import build_ai_tool_payload
+from app.ai.ai_specialists import OFFICIAL_AI_TOOL_KEYS
 from app.engine.market_snapshot_engine import build_snapshot_payload
 from app.system import ai_worker
 
@@ -67,19 +68,7 @@ class AiInstitutionalBackendTests(unittest.TestCase):
 
         self.assertEqual(
             sorted(ai_tools.keys()),
-            [
-                "accumulation",
-                "breakout_probability",
-                "heat_map",
-                "institutional_flow",
-                "liquidity_map",
-                "liquidity_sweep",
-                "market_regime",
-                "master_score",
-                "radar",
-                "smart_money",
-                "volatility_squeeze",
-            ],
+            sorted(OFFICIAL_AI_TOOL_KEYS),
         )
 
         signatures = {}
@@ -93,8 +82,10 @@ class AiInstitutionalBackendTests(unittest.TestCase):
 
         cloned = [tools for tools in signatures.values() if len(tools) > 1]
         self.assertEqual(cloned, [])
-        self.assertIn("component_scores", ai_tools["master_score"][0]["metrics"])
-        self.assertIn("weights", ai_tools["master_score"][0]["metrics"])
+        self.assertNotIn("master_score", ai_tools)
+        self.assertIn("flow_score", ai_tools["smart_money"][0]["metrics"])
+        self.assertIn("risk_score", ai_tools["risk"][0]["metrics"])
+        self.assertTrue(all(row.get("official_ai") is True for rows in ai_tools.values() for row in rows[:3]))
 
     def test_worker_generates_ai_tools_each_cycle_and_persists_history(self):
         rows = _institutional_rows()
@@ -173,7 +164,7 @@ class AiInstitutionalBackendTests(unittest.TestCase):
         persist_history.assert_called_once()
         update_snapshot.assert_called_once()
         self.assertTrue(report["ai_tools"]["required_fields_ok"])
-        self.assertEqual(report["ai_tools"]["tools_ready"], 11)
+        self.assertEqual(report["ai_tools"]["tools_ready"], 9)
         self.assertTrue(all(count > 0 for count in report["ai_tools"]["counts"].values()))
 
 

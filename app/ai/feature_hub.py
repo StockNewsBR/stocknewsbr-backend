@@ -13,6 +13,7 @@ from app.ai.ai_master_score import run_master_score
 from app.ai.ai_radar import run_radar
 from app.ai.ai_smart_money import run_smart_money
 from app.ai.ai_squeeze import run_squeeze
+from app.ai.ai_specialists import build_official_ai_outputs
 
 
 def safe_float(value: Any, default: float = 0.0) -> float:
@@ -443,7 +444,7 @@ def _add_cross_section_features(rows: List[Dict[str, Any]]) -> List[Dict[str, An
     return enriched
 
 
-def build_ai_outputs_from_feature_rows(
+def build_internal_ai_outputs_from_feature_rows(
     feature_rows: Iterable[Dict[str, Any]],
     limit: int = 20,
 ) -> Dict[str, List[Dict[str, Any]]]:
@@ -554,12 +555,40 @@ def build_ai_outputs_from_feature_rows(
     return outputs
 
 
+def build_ai_outputs_from_feature_rows(
+    feature_rows: Iterable[Dict[str, Any]],
+    limit: int = 20,
+) -> Dict[str, List[Dict[str, Any]]]:
+    safe_feature_rows = [
+        row for row in feature_rows or [] if isinstance(row, dict) and row.get("ticker")
+    ]
+    internal_outputs = build_internal_ai_outputs_from_feature_rows(safe_feature_rows, limit=limit)
+    return build_official_ai_outputs(safe_feature_rows, internal_outputs, limit=limit)
+
+
+def build_ai_payload_bundle(
+    top_signals: Iterable[Dict[str, Any]],
+    ranking: Iterable[Dict[str, Any]],
+    limit: int = 20,
+) -> Dict[str, Any]:
+    feature_rows = build_feature_hub(top_signals=top_signals, ranking=ranking)
+    internal_outputs = build_internal_ai_outputs_from_feature_rows(feature_rows, limit=limit)
+    return {
+        "ai_tools": build_official_ai_outputs(feature_rows, internal_outputs, limit=limit),
+        "master_score": internal_outputs.get("master_score", []),
+        "internal_engine_keys": [
+            key for key, rows in internal_outputs.items() if rows
+        ],
+    }
+
+
 def build_ai_tool_payload(
     top_signals: Iterable[Dict[str, Any]],
     ranking: Iterable[Dict[str, Any]],
     limit: int = 20,
 ) -> Dict[str, List[Dict[str, Any]]]:
-    return build_ai_outputs_from_feature_rows(
-        build_feature_hub(top_signals=top_signals, ranking=ranking),
+    return build_ai_payload_bundle(
+        top_signals=top_signals,
+        ranking=ranking,
         limit=limit,
-    )
+    )["ai_tools"]

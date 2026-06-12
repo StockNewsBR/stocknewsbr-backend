@@ -7,7 +7,7 @@ from app.system.ai_tab_audit import _asset_class_for_ticker, get_ai_tab_audit_hi
 
 
 class AiTabAuditTests(unittest.TestCase):
-    def _snapshot_with_tool(self, *, score=82, state="strong_buying", confidence=90, ai_comment=None, trigger=None, invalidation=None):
+    def _snapshot_with_tool(self, *, score=82, state="institutional_buying", confidence=90, ai_comment=None, trigger=None, invalidation=None):
         return {
             "signals": [
                 {
@@ -17,12 +17,12 @@ class AiTabAuditTests(unittest.TestCase):
                 }
             ],
             "ai_tools": {
-                "heat_map": [
+                "flow": [
                     {
                         "ticker": "PETR4",
                         "name": "Petrobras PN",
                         "score": score,
-                        "signal": "BUY" if score >= 70 else "NEUTRAL",
+                        "signal": "WATCH" if score >= 55 else "WAIT",
                         "state": state,
                         "ai_comment": ai_comment or "Fluxo comprador acima da media e sustentado por volume.",
                         "trigger": trigger or "Manter acima da VWAP com volume relativo forte.",
@@ -41,9 +41,9 @@ class AiTabAuditTests(unittest.TestCase):
 
         self.assertEqual(report["overall_status"], "degraded")
         self.assertEqual(report["coverage"]["tools_present"], 0)
-        self.assertIn("heat_map", report["tabs"])
-        self.assertEqual(report["tabs"]["heat_map"]["status"], "empty")
-        self.assertEqual(report["tabs"]["heat_map"]["approval_status"], "blocked")
+        self.assertIn("flow", report["tabs"])
+        self.assertEqual(report["tabs"]["flow"]["status"], "empty")
+        self.assertEqual(report["tabs"]["flow"]["approval_status"], "blocked")
         self.assertIn("benchmark", report)
         self.assertIn("qa_checklists", report)
         self.assertIn("comparisons", report)
@@ -51,7 +51,7 @@ class AiTabAuditTests(unittest.TestCase):
     def test_flags_state_score_mismatch(self):
         snapshot = self._snapshot_with_tool(
             score=82,
-            state="strong_selling",
+            state="distribution_risk",
             ai_comment="x",
             trigger="x",
             invalidation="x",
@@ -60,14 +60,14 @@ class AiTabAuditTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             with patch("app.system.ai_tab_audit.AI_TAB_AUDIT_DIR", Path(tmp)), patch("app.system.ai_tab_audit._history", []), patch("app.system.ai_tab_audit._last_report", {}):
                 report = run_ai_tab_audit(snapshot=snapshot)
-        findings = report["tabs"]["heat_map"]["findings"]
+        findings = report["tabs"]["flow"]["findings"]
 
         self.assertTrue(any(item["code"] == "state_score_mismatch" for item in findings))
-        self.assertIn(report["tabs"]["heat_map"]["status"], {"warning", "degraded"})
+        self.assertIn(report["tabs"]["flow"]["status"], {"warning", "degraded"})
         self.assertTrue(any(item["code"] == "weak_ai_comment" for item in findings))
         self.assertTrue(any(item["code"] == "weak_trigger" for item in findings))
         self.assertTrue(any(item["code"] == "weak_invalidation" for item in findings))
-        self.assertIn(report["tabs"]["heat_map"]["approval_status"], {"watch", "blocked"})
+        self.assertIn(report["tabs"]["flow"]["approval_status"], {"watch", "blocked"})
 
     def test_builds_formal_quality_matrix_and_checklist(self):
         snapshot = self._snapshot_with_tool()
@@ -75,7 +75,7 @@ class AiTabAuditTests(unittest.TestCase):
             with patch("app.system.ai_tab_audit.AI_TAB_AUDIT_DIR", Path(tmp)), patch("app.system.ai_tab_audit._history", []), patch("app.system.ai_tab_audit._last_report", {}):
                 report = run_ai_tab_audit(snapshot=snapshot)
 
-        tool = report["tabs"]["heat_map"]
+        tool = report["tabs"]["flow"]
         self.assertIn("benchmark_score", tool)
         self.assertIn("quality_matrix", tool)
         self.assertIn("qa_checklist", tool)
@@ -93,8 +93,8 @@ class AiTabAuditTests(unittest.TestCase):
                 second = run_ai_tab_audit(snapshot=second_snapshot)
                 history = get_ai_tab_audit_history(limit=2)
 
-        comparison = second["tabs"]["heat_map"]["comparison"]
-        self.assertEqual(first["tabs"]["heat_map"]["comparison"]["status"], "first_run")
+        comparison = second["tabs"]["flow"]["comparison"]
+        self.assertEqual(first["tabs"]["flow"]["comparison"]["status"], "first_run")
         self.assertIn(comparison["status"], {"stable", "watch", "drift"})
         self.assertIn("score_delta", comparison)
         self.assertGreaterEqual(len(history), 2)
@@ -107,11 +107,11 @@ class AiTabAuditTests(unittest.TestCase):
             invalidation="x",
         )
         with TemporaryDirectory() as tmp:
-            with patch("app.system.ai_tab_audit.AI_TAB_AUDIT_DIR", Path(tmp)), patch("app.system.ai_tab_audit.AI_TAB_AUDIT_EXPORT_DIR", Path(tmp) / "exports"), patch("app.system.ai_tab_audit.AI_TAB_AUDIT_DATASET_DIR", Path(tmp) / "datasets"), patch("app.system.ai_tab_audit.AI_TAB_AUDIT_HISTORY_DIR", Path(tmp) / "history"), patch("app.system.ai_tab_audit._history", []), patch("app.system.ai_tab_audit._last_report", {}), patch("app.system.ai_tab_audit._build_benchmark_summary", return_value={"overall_approval": "approved", "approved_tools": 10, "watch_tools": 0, "blocked_tools": 0, "avg_benchmark_score": 90.0}):
+            with patch("app.system.ai_tab_audit.AI_TAB_AUDIT_DIR", Path(tmp)), patch("app.system.ai_tab_audit.AI_TAB_AUDIT_EXPORT_DIR", Path(tmp) / "exports"), patch("app.system.ai_tab_audit.AI_TAB_AUDIT_DATASET_DIR", Path(tmp) / "datasets"), patch("app.system.ai_tab_audit.AI_TAB_AUDIT_HISTORY_DIR", Path(tmp) / "history"), patch("app.system.ai_tab_audit._history", []), patch("app.system.ai_tab_audit._last_report", {}), patch("app.system.ai_tab_audit._build_benchmark_summary", return_value={"overall_approval": "approved", "approved_tools": 9, "watch_tools": 0, "blocked_tools": 0, "avg_benchmark_score": 90.0}):
                 report = run_ai_tab_audit(snapshot=snapshot)
 
         self.assertEqual(report["benchmark"]["overall_approval"], "approved")
-        self.assertEqual(report["tabs"]["heat_map"]["status"], "warning")
+        self.assertEqual(report["tabs"]["flow"]["status"], "warning")
         self.assertEqual(report["overall_status"], "warning")
         self.assertFalse(report["release_decision"]["go_live"])
 
