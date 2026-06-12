@@ -17,6 +17,7 @@ from app.telegram.telegram_alert_engine import send_bulk_alert
 from app.system.system_metrics import (
     increment_engine_cycles,
     provider_call_context,
+    record_worker_generation_metric,
     record_worker_stage_duration,
     set_assets_scanned,
     set_scan_time,
@@ -134,8 +135,15 @@ def worker_loop(stop_event: threading.Event):
                     snapshot_payload = {}
                     try:
                         snapshot_payload = generate_market_snapshot(signals, reuse_last_good_on_empty=True) or {}
+                        snapshot_payload = snapshot_payload if isinstance(snapshot_payload, dict) else {}
+                        snapshot_signals = snapshot_payload.get("signals", [])
+                        snapshot_runtime = snapshot_payload.get("snapshot_runtime") if isinstance(snapshot_payload.get("snapshot_runtime"), dict) else {}
+                        snapshot_status = str(snapshot_runtime.get("status") or snapshot_payload.get("snapshot_runtime_status", "")).upper()
+                        generation_success = bool(snapshot_signals) and snapshot_status != "CRITICAL"
+                        record_worker_generation_metric(generation_success)
                         record_worker_stage_duration("snapshot", time.perf_counter() - snapshot_start, success=True)
                     except Exception:
+                        record_worker_generation_metric(False)
                         record_worker_stage_duration("snapshot", time.perf_counter() - snapshot_start, success=False)
                         logger.exception("Snapshot update error")
 

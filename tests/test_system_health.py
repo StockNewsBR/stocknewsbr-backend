@@ -30,7 +30,7 @@ class SystemHealthRouteTests(unittest.TestCase):
         ), patch.object(
             routes_system,
             "get_snapshot_info",
-            return_value={"signals": 8, "timestamp": 1713866400.0, "age_seconds": 12, "has_signals": True, "is_empty": False},
+            return_value={"signals": 8, "timestamp": 1713866400.0, "age_seconds": 12, "has_signals": True, "is_empty": False, "source": "engine", "stale": False},
         ), patch.object(
             routes_system,
             "get_poll_store_summary",
@@ -71,7 +71,7 @@ class SystemHealthRouteTests(unittest.TestCase):
         ):
             health = routes_system.system_health()
 
-        self.assertEqual(health["status"], "degraded")
+        self.assertEqual(health["status"], "critical")
 
     def test_metrics_include_signal_quality_coverage(self):
         record_signal_quality_coverage(

@@ -50,6 +50,13 @@ _external_provider_calls = {}
 _external_provider_symbol_calls = {}
 _external_provider_failures = {}
 _worker_stage_timings = {}
+_worker_runtime_metrics = {
+    "worker_generation_success": 0,
+    "worker_generation_failure": 0,
+    "snapshot_write_success": 0,
+    "snapshot_write_failure": 0,
+    "updated_at": 0.0,
+}
 _signal_quality_coverage = {}
 _institutional_auditor_metrics = {
     "approved": 0,
@@ -406,6 +413,25 @@ def record_worker_stage_duration(stage: str, duration_seconds: float, success: b
         entry["max_seconds"] = max(float(entry.get("max_seconds", 0.0)), duration)
         if not success:
             entry["errors"] += 1
+
+
+def record_worker_generation_metric(success: bool):
+    key = "worker_generation_success" if success else "worker_generation_failure"
+    with _lock:
+        _worker_runtime_metrics[key] += 1
+        _worker_runtime_metrics["updated_at"] = time.time()
+
+
+def record_snapshot_write_metric(success: bool):
+    key = "snapshot_write_success" if success else "snapshot_write_failure"
+    with _lock:
+        _worker_runtime_metrics[key] += 1
+        _worker_runtime_metrics["updated_at"] = time.time()
+
+
+def get_worker_runtime_metrics_snapshot():
+    with _lock:
+        return dict(_worker_runtime_metrics)
 
 
 def _positive_number(value) -> bool:
@@ -796,6 +822,7 @@ def get_performance_metrics_snapshot():
         telegram_alerts = dict(_telegram_alert_metrics)
         institutional_consistency = dict(_institutional_consistency_metrics)
         institutional_metrics = _institutional_metrics_snapshot_locked()
+        worker_runtime = dict(_worker_runtime_metrics)
 
         repeated_failures = sorted(
             (
@@ -820,6 +847,7 @@ def get_performance_metrics_snapshot():
         "external_provider_call_total": provider_metrics,
         "external_provider_symbol_call_total": provider_symbol_metrics,
         "worker_stage_seconds": worker_metrics,
+        "worker_runtime": worker_runtime,
         "signal_quality_coverage": signal_quality,
         "institutional_auditor": institutional_auditor,
         "master_score": master_score,
@@ -911,6 +939,10 @@ def format_prometheus_metrics() -> str:
         lines.append('worker_stage_seconds{stage="%s",stat="last"} %s' % (_label_value(stage), float(item.get("last_seconds", 0.0))))
         lines.append('worker_stage_seconds{stage="%s",stat="avg"} %s' % (_label_value(stage), float(item.get("avg_seconds", 0.0))))
         lines.append('worker_stage_errors_total{stage="%s"} %s' % (_label_value(stage), int(item.get("errors", 0))))
+
+    worker_runtime = performance.get("worker_runtime", {})
+    for field in ("worker_generation_success", "worker_generation_failure", "snapshot_write_success", "snapshot_write_failure"):
+        lines.append("worker_runtime_%s_total %s" % (_label_value(field), int(worker_runtime.get(field, 0))))
 
     for source, item in performance.get("signal_quality_coverage", {}).items():
         lines.append('signal_quality_rows_total{source="%s"} %s' % (_label_value(source), int(item.get("total", 0))))
@@ -1123,5 +1155,6 @@ def get_metrics_snapshot():
             "final_decision": institutional_metrics["final_decision"],
             "telegram_alerts": institutional_metrics["telegram_alerts"],
             "institutional_consistency": institutional_metrics["institutional_consistency"],
+            "worker_runtime": dict(_worker_runtime_metrics),
             "institutional_metrics": institutional_metrics,
         }

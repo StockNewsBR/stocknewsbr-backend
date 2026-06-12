@@ -11,6 +11,7 @@ from app.services.media_service import get_media_status
 from app.services.ranking import get_ranking
 from app.services.poll_service import get_poll_store_summary
 from app.services.push_service import get_push_status
+from app.services.snapshot_runtime_status import evaluate_go_live_ready, evaluate_snapshot_runtime_status
 from app.services.storage_service import get_storage_status
 from app.social.moderation import get_moderation_summary
 from app.system.ai_tab_audit import get_ai_tab_audit_history, get_ai_tab_audit_report, run_ai_tab_audit
@@ -53,6 +54,13 @@ def _derive_health_status(
     snapshot_has_signals = bool(snapshot.get("has_signals", False))
     snapshot_source = str((ai_worker.get("snapshot_health") or {}).get("source") or "").lower()
     current_week_polls = int(polls.get("current_week_polls") or 0)
+    snapshot_runtime = snapshot.get("snapshot_runtime") if isinstance(snapshot.get("snapshot_runtime"), dict) else evaluate_snapshot_runtime_status(snapshot)
+    snapshot_runtime_status = str(snapshot.get("snapshot_runtime_status") or snapshot_runtime.get("status") or "").upper()
+
+    if snapshot_runtime_status == "CRITICAL":
+        return "critical"
+    if snapshot_runtime_status == "DEGRADED":
+        return "degraded"
 
     if worker_status == "degraded" or audit_status == "degraded":
         return "degraded"
@@ -81,6 +89,9 @@ def _derive_health_status(
 @router.get("/status")
 def system_status():
     metrics = get_metrics_snapshot()
+    snapshot_info = get_snapshot_info()
+    snapshot_runtime = snapshot_info.get("snapshot_runtime") if isinstance(snapshot_info.get("snapshot_runtime"), dict) else evaluate_snapshot_runtime_status(snapshot_info)
+    go_live = evaluate_go_live_ready(snapshot_runtime, worker_status="running" if metrics.get("workers", 0) else "idle", observability_status=snapshot_runtime.get("status"))
 
     return {
         "engine_cycles": metrics["engine_cycles"],
@@ -107,7 +118,13 @@ def system_status():
         "institutional_ranking": metrics.get("institutional_ranking", {}),
         "final_decision": metrics.get("final_decision", {}),
         "telegram_alerts": metrics.get("telegram_alerts", {}),
-        "snapshot_cache": get_snapshot_info(),
+        "worker_runtime": metrics.get("worker_runtime", {}),
+        "snapshot_cache": snapshot_info,
+        "snapshot_runtime_status": snapshot_runtime.get("status"),
+        "snapshot_runtime": snapshot_runtime,
+        "fallback_active": bool(snapshot_runtime.get("fallback_active")),
+        "go_live_ready": bool(go_live.get("go_live_ready")),
+        "go_live": go_live,
         "storage": get_storage_status(),
         "media": get_media_status(),
         "push": get_push_status(),
@@ -140,9 +157,12 @@ def system_metrics_text():
 @router.get("/readiness")
 def system_readiness():
     status_metrics = get_metrics_snapshot()
+    snapshot_info = get_snapshot_info()
+    snapshot_runtime = snapshot_info.get("snapshot_runtime") if isinstance(snapshot_info.get("snapshot_runtime"), dict) else evaluate_snapshot_runtime_status(snapshot_info)
     storage = get_storage_status()
     media = get_media_status()
     push = get_push_status()
+    go_live = evaluate_go_live_ready(snapshot_runtime, worker_status="running" if status_metrics.get("workers", 0) else "idle", observability_status=snapshot_runtime.get("status"))
 
     return {
         "api_ready": True,
@@ -152,6 +172,10 @@ def system_readiness():
         "push_apple_ready": push["apple_ready"],
         "cache_age": status_metrics["cache_age"],
         "workers": status_metrics["workers"],
+        "snapshot_runtime_status": snapshot_runtime.get("status"),
+        "snapshot_runtime": snapshot_runtime,
+        "fallback_active": bool(snapshot_runtime.get("fallback_active")),
+        "go_live_ready": bool(go_live.get("go_live_ready")),
         "moderation": get_moderation_summary(),
     }
 
@@ -161,15 +185,10 @@ def observability_report():
     metrics = get_metrics()
     status_metrics = get_metrics_snapshot()
     performance_metrics = get_performance_metrics_snapshot()
+    snapshot_info = get_snapshot_info()
     telegram_health = get_telegram_health()
     dashboard = build_observability_dashboard(
-        snapshot={
-            "signals": status_metrics.get("signals_generated", 0),
-            "invalid": status_metrics.get("http_errors", 0),
-            "discarded": 0,
-            "blocked": 0,
-            "master_scores": [],
-        },
+        snapshot=snapshot_info,
         ai_worker=get_ai_worker_report(),
         ai_tabs=get_ai_tab_audit_report(),
         polls=get_poll_store_summary(),
@@ -197,6 +216,8 @@ def observability_report():
         "push_sends": status_metrics["push_sends"],
         "moderation": get_moderation_summary(),
         "performance": performance_metrics,
+        "snapshot_runtime_status": dashboard.get("snapshot_runtime_status"),
+        "go_live_ready": dashboard.get("go_live_ready"),
         "dashboard": dashboard,
     }
 
@@ -283,15 +304,26 @@ def system_health():
     snapshot = get_snapshot_info()
     polls = get_poll_store_summary()
     status = _derive_health_status(snapshot, ai_worker, ai_tabs, polls)
+    snapshot_runtime = snapshot.get("snapshot_runtime") if isinstance(snapshot.get("snapshot_runtime"), dict) else evaluate_snapshot_runtime_status(snapshot)
+    go_live = evaluate_go_live_ready(snapshot_runtime, worker_status=ai_worker.get("status"), observability_status=status.upper())
 
     return {
         "status": status,
+        "go_live_ready": bool(go_live.get("go_live_ready")),
+        "go_live": go_live,
         "snapshot": {
             "signals": snapshot.get("signals", 0),
             "timestamp": snapshot.get("timestamp"),
             "age_seconds": snapshot.get("age_seconds"),
             "has_signals": snapshot.get("has_signals", False),
             "is_empty": snapshot.get("is_empty", True),
+            "source": snapshot.get("source"),
+            "stale": snapshot.get("stale"),
+            "snapshot_runtime_status": snapshot.get("snapshot_runtime_status"),
+            "snapshot_runtime": snapshot.get("snapshot_runtime"),
+            "fallback_active": snapshot.get("fallback_active", False),
+            "last_good_signals": snapshot.get("last_good_signals", 0),
+            "last_good_timestamp": snapshot.get("last_good_timestamp"),
         },
         "worker": {
             "status": ai_worker.get("status", "idle"),

@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 from app.services.snapshot_contract import summarize_snapshot_rows
-from app.system.system_metrics import record_cache_lookup, update_cache_timestamp
+from app.services.snapshot_runtime_status import evaluate_snapshot_runtime_status
+from app.system.system_metrics import record_cache_lookup, record_snapshot_write_metric, update_cache_timestamp
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _TEST_RUNTIME_ROOT: Path | None = None
@@ -116,6 +117,8 @@ class SnapshotCache:
         return {
             "signals": [],
             "leaders": [],
+            "source": "empty",
+            "stale": True,
             "stats": {
                 "total_signals": 0,
                 "bullish": 0,
@@ -340,9 +343,12 @@ class SnapshotCache:
                 or signature != self._last_disk_signature
                 or now - self._last_disk_write_at >= self._disk_write_min_interval_seconds
             )
-            if should_write and self._write_to_disk():
-                self._last_disk_write_at = now
-                self._last_disk_signature = signature
+            if should_write:
+                write_ok = self._write_to_disk()
+                record_snapshot_write_metric(write_ok)
+                if write_ok:
+                    self._last_disk_write_at = now
+                    self._last_disk_signature = signature
 
         update_cache_timestamp(self._timestamp)
 
@@ -404,8 +410,11 @@ class SnapshotCache:
         with self._lock:
             timestamp = self._timestamp or None
             signal_count = len(self._payload.get("signals", []))
+            payload = self._clone_payload(self._payload)
             last_good_timestamp = self._last_good_timestamp or None
             last_good_signals = len(self._last_good_payload.get("signals", []))
+            last_good_source = self._last_good_payload.get("source")
+            last_good_generated_at = self._last_good_payload.get("generated_at")
 
         age_seconds = None
 
@@ -417,15 +426,37 @@ class SnapshotCache:
         if last_good_timestamp:
             last_good_age_seconds = max(0, int(time.time() - last_good_timestamp))
 
+        runtime_snapshot = {
+            **payload,
+            "timestamp": timestamp,
+            "age_seconds": age_seconds,
+            "last_good_signals": last_good_signals,
+            "last_good_timestamp": last_good_timestamp,
+        }
+        runtime_status = evaluate_snapshot_runtime_status(runtime_snapshot)
         info = {
             "signals": signal_count,
             "timestamp": timestamp,
             "age_seconds": age_seconds,
             "has_signals": signal_count > 0,
             "is_empty": signal_count == 0,
+            "source": payload.get("source"),
+            "stale": bool(payload.get("stale")),
+            "snapshot_runtime_status": runtime_status["status"],
+            "snapshot_runtime": runtime_status,
+            "fallback_active": bool(runtime_status.get("fallback_active")),
             "last_good_signals": last_good_signals,
             "last_good_timestamp": last_good_timestamp,
             "last_good_age_seconds": last_good_age_seconds,
+            "last_good_available": last_good_signals > 0,
+            "last_good_snapshot": {
+                "signals": last_good_signals,
+                "timestamp": last_good_timestamp,
+                "age_seconds": last_good_age_seconds,
+                "source": last_good_source,
+                "generated_at": last_good_generated_at,
+                "available": last_good_signals > 0,
+            },
         }
         record_cache_lookup("snapshot_info", time.perf_counter() - start, signal_count)
         return info

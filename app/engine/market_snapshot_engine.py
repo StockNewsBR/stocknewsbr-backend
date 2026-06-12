@@ -49,6 +49,7 @@ from app.services.snapshot_contract import is_actionable_snapshot_row as _contra
 from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score
 from app.services.snapshot_contract import summarize_snapshot_rows
 from app.services.institutional_consistency_audit import audit_institutional_consistency
+from app.services.snapshot_runtime_status import attach_snapshot_runtime_status
 from app.services.signal_history import store_signals
 from app.system.system_metrics import (
     record_institutional_auditor_metrics,
@@ -592,7 +593,7 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         stale,
     )
 
-    return {
+    payload = {
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
         "signals": normalized[:200],
         "leaders": normalized[:20],
@@ -697,6 +698,7 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             "institutional_consistency_issues": consistency_audit["issue_count"],
         },
     }
+    return attach_snapshot_runtime_status(payload)
 
 
 def _get_last_good_signals():
@@ -767,4 +769,6 @@ def generate_market_snapshot(signals=None, reuse_last_good_on_empty: bool = True
             update_snapshot(payload)
             return payload
 
-        return build_snapshot_payload([], source="exception", stale=True)
+        payload = build_snapshot_payload([], source="exception", stale=True)
+        update_snapshot(payload)
+        return payload

@@ -8,6 +8,13 @@ import threading
 from collections import deque, Counter
 from typing import Dict, Any, Iterable
 
+from app.services.snapshot_runtime_status import (
+    SNAPSHOT_RUNTIME_CRITICAL,
+    SNAPSHOT_RUNTIME_DEGRADED,
+    evaluate_go_live_ready,
+    evaluate_snapshot_runtime_status,
+)
+
 try:
     import psutil
 except Exception:  # pragma: no cover - optional dependency fallback
@@ -194,14 +201,21 @@ def build_observability_dashboard(
     provider_total = sum(provider_status_counts.values()) or 1
     provider_health = _health_status_from_ratio(provider_ok / provider_total, healthy_threshold=0.66, degraded_threshold=0.33)
 
+    snapshot_runtime = evaluate_snapshot_runtime_status(snapshot)
     snapshot_health = {
-        "signals_generated": snapshot.get("signals", 0),
+        "signals_generated": snapshot_runtime.get("signals", 0),
         "invalid": snapshot.get("invalid", 0),
         "discarded": snapshot.get("discarded", 0),
         "blocked": snapshot.get("blocked", 0),
-        "status": "HEALTHY"
-        if int(snapshot.get("invalid", 0) or 0) == 0 and int(snapshot.get("blocked", 0) or 0) == 0
-        else "DEGRADED",
+        "source": snapshot_runtime.get("source"),
+        "stale": bool(snapshot_runtime.get("stale")),
+        "fallback_active": bool(snapshot_runtime.get("fallback_active")),
+        "age_seconds": snapshot_runtime.get("age_seconds"),
+        "timestamp": snapshot_runtime.get("timestamp") or snapshot.get("timestamp"),
+        "last_good_signals": snapshot.get("last_good_signals", snapshot_runtime.get("last_good_signals", 0)),
+        "last_good_timestamp": snapshot.get("last_good_timestamp", snapshot_runtime.get("last_good_timestamp")),
+        "reasons": list(snapshot_runtime.get("reasons") or []),
+        "status": snapshot_runtime["status"],
     }
     auditor_counts = _count_status([{"status": ai_tabs.get("overall_status")}])
     score_counts = Counter(str(item.get("direction") or "NEUTRAL").upper() for item in (snapshot.get("master_scores") or []) if isinstance(item, dict))
@@ -215,10 +229,19 @@ def build_observability_dashboard(
 
     error_groups = Counter(str(item.get("kind") or "unknown") for item in recent_errors)
     system_status_value = str(system_status.get("status") or "HEALTHY").upper()
-    if provider_health == "CRITICAL" or snapshot_health["status"] == "DEGRADED" and int(snapshot.get("blocked", 0) or 0) > int(snapshot.get("signals", 0) or 0):
+    if provider_health == "CRITICAL" or snapshot_health["status"] == SNAPSHOT_RUNTIME_CRITICAL or (
+        snapshot_health["status"] == SNAPSHOT_RUNTIME_DEGRADED
+        and int(snapshot.get("blocked", 0) or 0) > int(snapshot_runtime.get("signals", 0) or 0)
+    ):
         system_status_value = "CRITICAL"
-    elif provider_health == "DEGRADED" or str(ai_worker.get("status") or "").lower() == "warning":
+    elif provider_health == "DEGRADED" or snapshot_health["status"] == SNAPSHOT_RUNTIME_DEGRADED or str(ai_worker.get("status") or "").lower() == "warning":
         system_status_value = "DEGRADED"
+
+    go_live = evaluate_go_live_ready(
+        snapshot_runtime,
+        worker_status=ai_worker.get("status"),
+        observability_status=system_status_value,
+    )
 
     return {
         "system_status": system_status_value,
@@ -228,6 +251,26 @@ def build_observability_dashboard(
             "counts": dict(provider_status_counts),
         },
         "snapshot_health": snapshot_health,
+        "snapshot_runtime_status": snapshot_runtime["status"],
+        "snapshot_runtime": snapshot_runtime,
+        "fallback_active": bool(snapshot_runtime.get("fallback_active")),
+        "go_live_ready": bool(go_live.get("go_live_ready")),
+        "go_live": go_live,
+        "operational_dashboard": {
+            "snapshot_status": snapshot_runtime["status"],
+            "worker_status": ai_worker.get("status", "idle"),
+            "last_good_snapshot": snapshot.get("last_good_snapshot")
+            if isinstance(snapshot.get("last_good_snapshot"), dict)
+            else {
+                "signals": snapshot.get("last_good_signals", 0),
+                "timestamp": snapshot.get("last_good_timestamp"),
+                "available": int(snapshot.get("last_good_signals", 0) or 0) > 0,
+            },
+            "last_good_timestamp": snapshot.get("last_good_timestamp"),
+            "signals_generated": snapshot_runtime.get("signals", 0),
+            "fallback_active": bool(snapshot_runtime.get("fallback_active")),
+            "go_live_ready": bool(go_live.get("go_live_ready")),
+        },
         "auditor_health": {
             "status": str(ai_tabs.get("overall_status") or "IDLE").upper(),
             "counts": dict(auditor_counts),
@@ -281,6 +324,7 @@ def build_observability_dashboard(
             {"kind": "radar", "message": "radar sem sinais", "severity": "warning"} if int(radar.get("generated", 0) or 0) == 0 else None,
             {"kind": "ranking", "message": "ranking vazio", "severity": "warning"} if int(ranking.get("eligible", 0) or 0) == 0 else None,
             {"kind": "telegram", "message": "telegram parado", "severity": "warning"} if int(telegram.get("sent", 0) or 0) == 0 else None,
-            {"kind": "snapshot", "message": "snapshot inválido", "severity": "warning"} if snapshot_health["status"] == "DEGRADED" else None,
+            {"kind": "snapshot", "message": "snapshot crítico", "severity": "critical"} if snapshot_health["status"] == SNAPSHOT_RUNTIME_CRITICAL else None,
+            {"kind": "snapshot", "message": "snapshot degradado", "severity": "warning"} if snapshot_health["status"] == SNAPSHOT_RUNTIME_DEGRADED else None,
         ],
     }

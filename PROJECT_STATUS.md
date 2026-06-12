@@ -113,6 +113,10 @@ Atualizado em: 2026-06-12
 - O snapshot raiz passou a carregar os contratos institucionais completos em formato singular/plural, incluindo Conviccao, Prioridade, Decisao Final e auditoria de consistencia sem alterar decisoes.
 - Workspace, dashboard e observabilidade agora exibem bloqueios operacionais com motivo explicito, metricas institucionais agregadas e inconsistencias auditadas.
 - A promocao de Ranking/Radar passa por `is_actionable_snapshot_row`, impedindo que linhas `BLOCKED` subam para surfaces promocionais, top_signals, Telegram ou push.
+- Missao 24C - Go-Live Snapshot & Worker Validation fechada em 2026-06-12: snapshot vazio agora e `CRITICAL`, nunca `HEALTHY`, e o runtime expoe `snapshot_runtime_status`, `fallback_active` e `go_live_ready`.
+- `SnapshotCache` passou a rastrear `last_good_snapshot`, `last_good_timestamp`, `last_good_signals` e metricas de escrita, preservando fallback institucional sem inventar sinais.
+- Worker registra sucesso/falha de geracao e escrita do snapshot; observabilidade, dashboard, workspace e APIs publicas consomem o status real do snapshot e bloqueiam go-live quando o cache esta vazio/degradado.
+- `/public/market/ai-tools` usa `last_good_snapshot` somente quando houver ferramentas operacionais reais e marca `using_fallback=true`; se nao houver base valida, retorna `snapshot_unavailable` sem derivar dados paralelos.
 
 ## Validado
 
@@ -207,6 +211,13 @@ Atualizado em: 2026-06-12
 - `npm exec -- tsc --noEmit --incremental false` em `apps\web`: OK.
 - `git diff --check`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
 - Verificacao de `runtime/cache/snapshot.json`: nenhum ticker/symbol/snapshot_id sintetico `BLOCKED`, `WATCH1`, `TEST`, `FAKE` ou `MOCK` apos a suite completa.
+- `venv\Scripts\python.exe -m py_compile app\services\snapshot_runtime_status.py app\system\system_metrics.py app\cache\snapshot_cache.py app\engine\market_snapshot_engine.py worker.py app\system\observability_engine.py app\api\routes_system.py app\services\workspace_service.py app\services\public_ai_tools_service.py tests\test_mission_24c_go_live_runtime.py tests\test_single_snapshot_source.py tests\test_system_health.py`: OK.
+- `venv\Scripts\python.exe -m unittest tests.test_mission_24c_go_live_runtime tests.test_system_health tests.test_single_snapshot_source tests.test_observability_institutional tests.test_mission_24b_hardening`: 36 testes OK.
+- `venv\Scripts\python.exe -m unittest discover -s tests`: 336 testes OK; Yahoo Finance imprimiu avisos externos conhecidos para aliases invalidos/delistados.
+- `npm exec -- tsc --noEmit --incremental false` em `apps\web`: OK.
+- `npm run typecheck` em `apps\mobile`: OK.
+- `git diff --check`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
+- Verificacao de `runtime/cache/snapshot.json`: nenhum `BLOCKED`, `WATCH1`, `TEST`, `FAKE` ou `MOCK` apos a suite completa.
 - `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 113 testes OK.
 - `npm run build` em `apps/web`: build OK apos UX do grafico, tooltips e modos Guiado/Trader/Pro.
 - Browser interno em `http://127.0.0.1:3000/panel/F`: modos Guiado/Trader/Pro validados com `Leitura atual`, `Direcao operacional`, `Confirmacao necessaria`, `Invalidacao` e `Risco`.

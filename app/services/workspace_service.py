@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from app.Frontend.layout import get_layout
-from app.cache.snapshot_cache import get_snapshot
+from app.cache.snapshot_cache import get_snapshot, get_snapshot_info
 from app.ai.final_decision import ensure_final_decision_rows, final_decision_items
 from app.ai.historical_confidence import ensure_historical_confidence_rows, historical_confidence_items
 from app.ai.institutional_conviction import conviction_items, ensure_institutional_conviction_rows
@@ -19,6 +19,7 @@ from app.services.media_service import get_media_status
 from app.services.push_service import get_push_status
 from app.services.ranking import get_ranking
 from app.services.snapshot_contract import is_actionable_snapshot_row, is_blocked_snapshot_row
+from app.services.snapshot_runtime_status import evaluate_go_live_ready, evaluate_snapshot_runtime_status
 from app.services.ticker_room_service import list_room_messages
 from app.services.workspace_layout_service import get_user_workspace_layout
 from app.social.posts import get_posts
@@ -201,6 +202,18 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
     snapshot = get_snapshot()
     if not isinstance(snapshot, dict):
         snapshot = {}
+    snapshot_info = get_snapshot_info()
+    if not isinstance(snapshot_info, dict):
+        snapshot_info = {}
+    snapshot_runtime_input = {**snapshot_info, **snapshot}
+    snapshot_runtime_input.setdefault("timestamp", snapshot_info.get("timestamp") or snapshot.get("updated_at"))
+    snapshot_runtime_input.setdefault("last_good_signals", snapshot_info.get("last_good_signals", 0))
+    snapshot_runtime_input.setdefault("last_good_timestamp", snapshot_info.get("last_good_timestamp"))
+    snapshot_runtime = (
+        snapshot_info.get("snapshot_runtime")
+        if isinstance(snapshot_info.get("snapshot_runtime"), dict)
+        else evaluate_snapshot_runtime_status(snapshot_runtime_input)
+    )
     snapshot_signals = ensure_institutional_radar_rows(
         _safe_rows(snapshot.get("signals")),
         ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
@@ -255,6 +268,12 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "generated_at": snapshot.get("generated_at"),
         "source": snapshot.get("source"),
         "stale": bool(snapshot.get("stale")),
+        "snapshot_runtime_status": snapshot_runtime.get("status"),
+        "snapshot_runtime": snapshot_runtime,
+        "fallback_active": bool(snapshot_runtime.get("fallback_active")),
+        "last_good_snapshot": snapshot_info.get("last_good_snapshot") if isinstance(snapshot_info.get("last_good_snapshot"), dict) else {},
+        "last_good_timestamp": snapshot_info.get("last_good_timestamp"),
+        "last_good_signals": snapshot_info.get("last_good_signals", 0),
         "market_snapshot_interval_seconds": snapshot.get("market_snapshot_interval_seconds"),
         "ai_snapshot_interval_seconds": snapshot.get("ai_snapshot_interval_seconds"),
         "stats": snapshot.get("stats") if isinstance(snapshot.get("stats"), dict) else {},
@@ -316,6 +335,17 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
     media_status = get_media_status()
     push_status = get_push_status()
     observability = routes_system.observability_dashboard()
+    observability_dashboard = observability if isinstance(observability, dict) else {}
+    observed_runtime = observability_dashboard.get("snapshot_runtime") if isinstance(observability_dashboard.get("snapshot_runtime"), dict) else snapshot_runtime
+    go_live = (
+        observability_dashboard.get("go_live")
+        if isinstance(observability_dashboard.get("go_live"), dict)
+        else evaluate_go_live_ready(
+            observed_runtime,
+            worker_status=(observability_dashboard.get("operational_dashboard") or {}).get("worker_status"),
+            observability_status=observability_dashboard.get("system_status"),
+        )
+    )
     telegram_alert_history = get_telegram_alert_history(limit=30)
     telegram_alerts = {
         "health": get_telegram_health(),
@@ -370,6 +400,11 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "blocked_signals": blocked_signals[:50],
         "symbol_snapshots": symbol_snapshots,
         "market_snapshot": market_snapshot,
+        "snapshot_runtime_status": snapshot_runtime.get("status"),
+        "snapshot_runtime": snapshot_runtime,
+        "fallback_active": bool(snapshot_runtime.get("fallback_active")),
+        "go_live_ready": bool(go_live.get("go_live_ready")),
+        "go_live": go_live,
         "featured_posts": featured_posts,
         "ticker_room_preview": {
             "symbol": pinned_ticker,
@@ -397,6 +432,11 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
             "snapshot_generated_at": market_snapshot.get("generated_at"),
             "snapshot_source": market_snapshot.get("source"),
             "snapshot_stale": market_snapshot.get("stale"),
+            "snapshot_runtime_status": snapshot_runtime.get("status"),
+            "fallback_active": bool(snapshot_runtime.get("fallback_active")),
+            "last_good_signals": snapshot_info.get("last_good_signals", 0),
+            "last_good_timestamp": snapshot_info.get("last_good_timestamp"),
+            "go_live_ready": bool(go_live.get("go_live_ready")),
             "snapshot_actionable": data_status.get("actionable", 0),
             "snapshot_priced": data_status.get("priced", 0),
             "snapshot_score_only": data_status.get("score_only", 0),

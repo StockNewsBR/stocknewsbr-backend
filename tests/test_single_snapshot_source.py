@@ -41,7 +41,7 @@ class SingleSnapshotSourceTests(unittest.TestCase):
             public_ai_tools_service,
             "get_snapshot",
             return_value={"generated_at": "2026-06-11T10:00:00+00:00", "ai_tools": {}},
-        ):
+        ), patch.object(public_ai_tools_service, "get_last_good_snapshot", return_value={}):
             payload = public_ai_tools_service.build_public_ai_tools_payload(["PETR4"])
 
         self.assertEqual(payload["source"], "snapshot_unavailable")

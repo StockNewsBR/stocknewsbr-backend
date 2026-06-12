@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.cache.snapshot_cache import get_snapshot
+from app.cache.snapshot_cache import get_last_good_snapshot, get_snapshot
 from app.services.ai_alert_history_service import (
     AI_ALERT_MAX_ROWS_PER_TOOL,
     AI_ALERT_RESET_HOUR,
@@ -82,7 +82,26 @@ def build_public_ai_tools_payload(extra_symbols: list[Any] | None = None) -> dic
             "reset_hour": AI_ALERT_RESET_HOUR,
             "timezone": str(AI_ALERT_TZ),
             "source": "snapshot",
+            "using_fallback": False,
             "tools": tools,
+        }
+
+    last_good_snapshot = get_last_good_snapshot()
+    fallback_tools = _snapshot_tools(last_good_snapshot if isinstance(last_good_snapshot, dict) else {})
+    if _has_operational_tools(fallback_tools):
+        return {
+            "reset_key": get_ai_alert_reset_key(),
+            "updated_at": (
+                last_good_snapshot.get("updated_at")
+                or last_good_snapshot.get("generated_at")
+                or last_good_snapshot.get("last_good_timestamp")
+            ) if isinstance(last_good_snapshot, dict) else updated_at,
+            "max_rows_per_tool": AI_ALERT_MAX_ROWS_PER_TOOL,
+            "reset_hour": AI_ALERT_RESET_HOUR,
+            "timezone": str(AI_ALERT_TZ),
+            "source": "last_good_snapshot",
+            "using_fallback": True,
+            "tools": fallback_tools,
         }
 
     return {
@@ -92,5 +111,6 @@ def build_public_ai_tools_payload(extra_symbols: list[Any] | None = None) -> dic
         "reset_hour": AI_ALERT_RESET_HOUR,
         "timezone": str(AI_ALERT_TZ),
         "source": "snapshot_unavailable",
+        "using_fallback": False,
         "tools": _empty_tools(),
     }
