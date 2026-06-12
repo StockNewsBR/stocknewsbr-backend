@@ -9,6 +9,7 @@ import pandas as pd
 
 from app.ai.ai_radar import run_radar
 from app.cache.snapshot_cache import get_snapshot_signals
+from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score
 
 logger = logging.getLogger("stocknewsbr.market_radar")
 
@@ -151,7 +152,14 @@ def build_radar():
                     "symbol": _normalize_symbol(symbol),
                     "radar_score": _safe_float(row.get("score") or row.get("radar_score") or 0),
                     "state": row.get("state"),
-                    "source": "snapshot",
+                    "source": row.get("source") or "snapshot",
+                    "data_quality": coerce_data_quality(row),
+                    "data_quality_label": data_quality_label(coerce_data_quality(row)),
+                    "data_quality_score": data_quality_score(coerce_data_quality(row)),
+                    "last_updated": row.get("last_updated") or row.get("updated_at") or row.get("generated_at"),
+                    "is_stale": bool(row.get("stale") is True or row.get("is_stale") is True or coerce_data_quality(row) == "stale"),
+                    "fallback_used": bool(row.get("fallback_used")),
+                    "provider_error": row.get("provider_error"),
                 }
             )
 

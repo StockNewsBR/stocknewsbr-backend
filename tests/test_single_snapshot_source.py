@@ -4,12 +4,14 @@ import unittest
 from unittest.mock import patch
 
 import worker
+from app.cache.snapshot_cache import SnapshotCache
 from app.api import routes_chart
 from app.services import public_ai_tools_service, ranking
 from app.system import push_dispatcher
 from app.telegram import telegram_alert_engine
 from app.web import routes_chart as web_chart
 from app.web import routes_radar as web_radar
+from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -160,7 +162,7 @@ class SingleSnapshotSourceTests(unittest.TestCase):
 
         self.assertEqual(payload[0]["price"], row["price"])
         self.assertEqual(payload[0]["volume"], row["volume"])
-        self.assertEqual(payload[0]["data_quality"], row["data_quality"])
+        self.assertEqual(payload[0]["data_quality"], "real_time")
         self.assertEqual(payload[0]["market_data_updated_at"], row["market_data_updated_at"])
         self.assertEqual(payload[0]["snapshot_id"], row["snapshot_id"])
 
@@ -264,6 +266,28 @@ class SingleSnapshotSourceTests(unittest.TestCase):
         self.assertEqual(data["trade_action"], row["trade_action"])
         self.assertEqual(data["market_data_updated_at"], row["market_data_updated_at"])
         self.assertEqual(data["snapshot_id"], row["snapshot_id"])
+
+    def test_data_quality_contract_normalizes_quality_and_labels(self):
+        self.assertEqual(coerce_data_quality({"data_quality": "priced", "source": "snapshot"}), "cached")
+        self.assertEqual(coerce_data_quality({"data_quality": "score_only"}), "score_only")
+        self.assertEqual(coerce_data_quality({"data_quality": "stale", "stale": True}), "stale")
+        self.assertEqual(coerce_data_quality({"data_quality": "empty"}), "empty")
+        self.assertEqual(coerce_data_quality({"provider_error": "timeout"}), "invalid")
+        self.assertEqual(data_quality_label("cached"), "Dados Confiáveis")
+        self.assertEqual(data_quality_label("score_only"), "Dados Parciais")
+        self.assertEqual(data_quality_label("stale"), "Dados Limitados")
+        self.assertGreater(data_quality_score("cached"), data_quality_score("score_only"))
+        self.assertGreater(data_quality_score("score_only"), data_quality_score("stale"))
+
+    def test_snapshot_cache_preserves_good_payload_when_empty_update_arrives(self):
+        cache = SnapshotCache()
+        cache.update({"signals": [_actionable_row("PETR4")]})
+        first = cache.get()
+        cache.update({"signals": [], "source": "empty", "stale": True})
+        second = cache.get()
+
+        self.assertTrue(first["signals"])
+        self.assertEqual(second["signals"][0]["ticker"], "PETR4")
 
 
 if __name__ == "__main__":

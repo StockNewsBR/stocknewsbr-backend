@@ -15,6 +15,7 @@ from app.data.warm_data_pool import get_market_pool
 from app.engine.engine_orchestrator import run_engine
 from app.engine.indicators.vector_indicator_engine import compute_rsi
 from app.services.snapshot_contract import is_actionable_snapshot_row as _contract_is_actionable_snapshot_row
+from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score
 from app.services.signal_history import store_signals
 from app.system.system_metrics import record_signal_quality_coverage
 
@@ -129,9 +130,16 @@ def _is_actionable_snapshot_row(row) -> bool:
 def _apply_data_quality(row):
     item = dict(row)
     if _has_positive_value(item, "price", "close", "last_price") and _has_positive_value(item, "volume", "last_volume"):
-        item["data_quality"] = item.get("data_quality") or "priced"
+        item["data_quality"] = coerce_data_quality(item)
     else:
         item["data_quality"] = "score_only"
+    item["data_quality_label"] = data_quality_label(item["data_quality"])
+    item["data_quality_score"] = data_quality_score(item["data_quality"])
+    item["last_updated"] = item.get("last_updated") or item.get("market_data_updated_at") or item.get("updated_at") or item.get("generated_at")
+    item["is_stale"] = bool(item.get("stale") is True or item.get("is_stale") is True or item["data_quality"] == "stale")
+    item["fallback_used"] = bool(item.get("fallback_used"))
+    item["provider_error"] = item.get("provider_error")
+    item["source"] = item.get("source") or "snapshot"
     return item
 
 

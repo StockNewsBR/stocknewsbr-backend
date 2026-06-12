@@ -261,6 +261,10 @@ class SnapshotCache:
 
     def update(self, data: Any):
         normalized = self._normalize_payload(data)
+        if not normalized.get("signals") and self._payload.get("signals"):
+            # Preserve the last good live payload when an empty update arrives.
+            # This keeps transient provider gaps from blanking the shared cache.
+            return
         now = time.time()
         normalized["updated_at"] = now
         normalized.setdefault("generated_at", now)

@@ -15,7 +15,7 @@ from app.cache.market_data_cache import get_market_data
 from app.cache.snapshot_cache import get_snapshot_info, get_snapshot_signals
 from app.config import SYMBOLS
 from app.dependencies import require_active_plan
-from app.services.snapshot_contract import is_actionable_snapshot_row
+from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score, is_actionable_snapshot_row
 from app.system.system_metrics import current_provider_call_source
 
 logger = logging.getLogger("stocknewsbr.ranking")
@@ -250,13 +250,20 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
                 "breakout": bool(row.get("breakout", False)),
                 "price": row.get("price"),
                 "volume": row.get("volume"),
-                "data_quality": row.get("data_quality"),
+                "data_quality": coerce_data_quality(row),
+                "data_quality_label": data_quality_label(coerce_data_quality(row)),
+                "data_quality_score": data_quality_score(coerce_data_quality(row)),
                 "market_data_updated_at": row.get("market_data_updated_at"),
+                "last_updated": row.get("last_updated") or row.get("updated_at") or row.get("generated_at"),
                 "quote_time": row.get("quote_time"),
                 "provider_timestamp": row.get("provider_timestamp"),
                 "updated_at": row.get("updated_at"),
                 "generated_at": row.get("generated_at"),
                 "snapshot_id": row.get("snapshot_id"),
+                "is_stale": bool(row.get("stale") is True or row.get("is_stale") is True or coerce_data_quality(row) == "stale"),
+                "fallback_used": bool(row.get("fallback_used")),
+                "provider_error": row.get("provider_error"),
+                "source": row.get("source") or "snapshot",
             }
         )
 

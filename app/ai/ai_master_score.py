@@ -4,6 +4,7 @@ from typing import Any, Dict, Iterable, List
 
 from app.ai.ai_common import build_payload, top_n
 from app.ai.trade_decision import resolve_trade_action
+from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score
 
 
 def _base_score(row: Dict[str, Any]) -> float:
@@ -105,6 +106,9 @@ def _score_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "subscore_count": len(valid_components),
         "base_score": round(_base_score(row), 1),
         "master_label": label,
+        "data_quality": coerce_data_quality(row),
+        "data_quality_label": data_quality_label(coerce_data_quality(row)),
+        "data_quality_score": data_quality_score(coerce_data_quality(row)),
         "component_scores": {key: round(value, 1) for key, value in valid_components.items()},
         "weights": weights,
         "strongest_components": [key for key, _ in strongest],
@@ -173,6 +177,14 @@ def _score_row(row: Dict[str, Any]) -> Dict[str, Any]:
     payload["risk"] = decision["risk"]
     payload["risk_level"] = decision["risk_level"]
     payload["market_regime_state"] = decision["market_regime_state"]
+    payload["data_quality"] = coerce_data_quality(row)
+    payload["data_quality_label"] = data_quality_label(payload["data_quality"])
+    payload["data_quality_score"] = data_quality_score(payload["data_quality"])
+    payload["last_updated"] = row.get("last_updated") or row.get("updated_at") or row.get("generated_at")
+    payload["is_stale"] = bool(row.get("stale") is True or row.get("is_stale") is True or payload["data_quality"] == "stale")
+    payload["fallback_used"] = bool(row.get("fallback_used"))
+    payload["provider_error"] = row.get("provider_error")
+    payload["source"] = row.get("source") or "snapshot"
     return payload
 
 

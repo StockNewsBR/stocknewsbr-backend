@@ -2438,6 +2438,46 @@ function firstPositiveFiniteNumber(...values: Array<unknown>) {
   return null;
 }
 
+const DATA_QUALITY_LABELS: Record<string, string> = {
+  real_time: "Dados Confiáveis",
+  cached: "Dados Confiáveis",
+  stale: "Dados Limitados",
+  empty: "Dados Limitados",
+  invalid: "Dados Limitados",
+  score_only: "Dados Parciais",
+};
+
+function normalizeDataQuality(value: unknown) {
+  const normalized = normalizeUiText(String(value ?? ""));
+  if (["real_time", "cached", "stale", "empty", "invalid", "score_only"].includes(normalized)) return normalized;
+  if (["priced", "valid", "fresh", "ok", "real", "snapshot", "market_cache"].includes(normalized)) return "cached";
+  if (["partial", "limited"].includes(normalized)) return "score_only";
+  if (["missing", "no_price", "no price", "sem preco", "sem preço", "unavailable"].includes(normalized)) return "empty";
+  if (["error", "failed", "timeout", "provider_failed", "provider failed", "invalid"].includes(normalized)) return "invalid";
+  return normalized || "empty";
+}
+
+function dataQualityLabel(value: unknown) {
+  return DATA_QUALITY_LABELS[normalizeDataQuality(value)] || "Dados Limitados";
+}
+
+function dataQualityScore(value: unknown) {
+  switch (normalizeDataQuality(value)) {
+    case "real_time":
+      return 100;
+    case "cached":
+      return 88;
+    case "score_only":
+      return 52;
+    case "stale":
+      return 35;
+    case "empty":
+      return 12;
+    default:
+      return 0;
+  }
+}
+
 type CanonicalSnapshotRow = Partial<RankingRow & SignalRow & AiToolRow> & Record<string, unknown>;
 
 function snapshotNumber(row: CanonicalSnapshotRow | null | undefined, ...keys: string[]) {
@@ -2480,38 +2520,13 @@ function snapshotTimestamp(row: CanonicalSnapshotRow | null | undefined) {
 
 function snapshotHasCoreData(row: CanonicalSnapshotRow | null | undefined) {
   if (!row) return false;
-  const dataQuality = normalizeUiText(
-    [
-      row.data_quality,
-      row.quote_status,
-      (row as any).status,
-      (row as any).provider_status,
-      (row as any).market_data_status,
-    ]
-      .filter(Boolean)
-      .join(" "),
+  const dataQuality = normalizeDataQuality(
+    row.data_quality || row.quote_status || (row as any).status || (row as any).provider_status || (row as any).market_data_status,
   );
-  const badQuality =
-    dataQuality.includes("score_only") ||
-    dataQuality.includes("score only") ||
-    dataQuality.includes("missing") ||
-    dataQuality.includes("empty") ||
-    dataQuality.includes("stale") ||
-    dataQuality.includes("no_price") ||
-    dataQuality.includes("no price") ||
-    dataQuality.includes("sem preco") ||
-    dataQuality.includes("sem preço") ||
-    dataQuality.includes("provider_failed") ||
-    dataQuality.includes("provider failed") ||
-    dataQuality.includes("failed") ||
-    dataQuality.includes("error") ||
-    dataQuality.includes("timeout") ||
-    dataQuality.includes("unavailable") ||
-    dataQuality.includes("invalid");
-  if (badQuality || (row as any).stale === true || (row as any).is_stale === true) return false;
+  if (["score_only", "missing", "empty", "stale", "invalid"].includes(dataQuality)) return false;
+  if ((row as any).stale === true || (row as any).is_stale === true) return false;
   if ((row as any).provider_failed === true || (row as any).provider_error) return false;
   return (
-    !badQuality &&
     snapshotPositiveNumber(row, "price", "close", "last_price") != null &&
     snapshotPositiveNumber(row, "volume", "last_volume") != null
   );
@@ -2621,11 +2636,7 @@ function aiToolDataQuality(row?: Partial<AiToolRow> | null) {
   const rawRow = (row || {}) as any;
   const metrics = rawRow.metrics;
   const direct = rawRow.data_quality ?? rawRow.dataQuality ?? metrics?.data_quality ?? metrics?.dataQuality;
-  const text = String(direct ?? (typeof metrics === "string" ? metrics : "")).toLowerCase();
-  if (text.includes("score_only")) return "score_only";
-  if (text.includes("empty") || text.includes("missing")) return "missing";
-  if (text.includes("real") || text.includes("confirmed")) return "real";
-  return String(direct || "").trim().toLowerCase();
+  return normalizeDataQuality(direct ?? (typeof metrics === "string" ? metrics : ""));
 }
 
 function isOperationalAiFinding(row?: Partial<AiToolRow> | null) {
@@ -9402,7 +9413,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           ) : (
             <div className="snbr-empty-thread">
               <strong>{isUsLocale ? "No operational read with confirmed price and volume." : "Sem leitura operacional com preço e volume confirmados."}</strong>
-              <p>{isUsLocale ? "Score-only or zero-volume rows are kept as context, but they are not counted as findings." : "Linhas score_only ou com volume zerado ficam apenas como contexto; não contam como achado."}</p>
+              <p>{isUsLocale ? "Confident, partial and limited data are shown explicitly; weak rows do not count as findings." : "Contextos confiáveis, parciais e limitados são mostrados explicitamente; linhas fracas não contam como achado."}</p>
             </div>
           )}
         </section>
@@ -9460,6 +9471,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                         Score {item.score != null ? item.score.toFixed(1) : "n/a"}
                       </span>
                     </div>
+                    <span className={cx("snbr-data-quality-badge", `snbr-data-quality-${normalizeDataQuality(item.data_quality || item.quote_status || item.status)}`)}>
+                      {dataQualityLabel(item.data_quality || item.quote_status || item.status)}
+                      <small> • {dataQualityScore(item.data_quality || item.quote_status || item.status)}</small>
+                    </span>
                     <span>{item.label}</span>
                     <div className="snbr-asset-box-stats">
                       <div>

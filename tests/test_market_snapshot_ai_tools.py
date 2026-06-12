@@ -117,7 +117,7 @@ class MarketSnapshotAiToolsTests(unittest.TestCase):
                 "kc_width": 0.05,
                 "momentum": 1.2,
                 "change_pct": 1.6,
-                "data_quality": "priced",
+                "data_quality": "cached",
                 "market_data_updated_at": market_time,
                 "last_bar_at": market_time,
             }
@@ -137,7 +137,7 @@ class MarketSnapshotAiToolsTests(unittest.TestCase):
             self.assertAlmostEqual(float(row["vwap"]), 37.2)
             self.assertAlmostEqual(float(row["rsi"]), 58.0)
             self.assertAlmostEqual(float(row["macd"]), 0.12)
-            self.assertEqual(row["data_quality"], "priced")
+            self.assertEqual(row["data_quality"], "cached")
 
         self.assertEqual(master_row["market_data_updated_at"], market_time)
         self.assertEqual(master_row["found_at"], market_time)

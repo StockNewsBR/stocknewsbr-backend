@@ -3,6 +3,18 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
+from app.services.snapshot_contract import (
+    QUALITY_CACHED,
+    QUALITY_EMPTY,
+    QUALITY_INVALID,
+    QUALITY_REAL_TIME,
+    QUALITY_SCORE_ONLY,
+    QUALITY_STALE,
+    coerce_data_quality,
+    data_quality_label,
+    data_quality_score,
+)
+
 
 def safe_float(value: Any, default: float = 0.0) -> float:
     try:
@@ -160,6 +172,11 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
         )
     )
 
+    data_quality = coerce_data_quality(row)
+    is_stale = bool(row.get("stale") is True or row.get("is_stale") is True or data_quality == QUALITY_STALE)
+    fallback_used = bool(row.get("fallback_used"))
+    provider_error = row.get("provider_error")
+    last_updated = row.get("last_updated") or row.get("updated_at") or row.get("generated_at") or market_timestamp(row)
     return {
         **row,
         "ticker": get_symbol(row),
@@ -180,6 +197,14 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "kc_width": kc_width,
         "momentum": momentum,
         "change_pct": change_pct,
+        "data_quality": data_quality,
+        "data_quality_label": data_quality_label(data_quality),
+        "data_quality_score": data_quality_score(data_quality),
+        "last_updated": last_updated,
+        "is_stale": is_stale,
+        "fallback_used": fallback_used,
+        "provider_error": provider_error,
+        "source": row.get("source") or ("market_snapshot" if data_quality in {QUALITY_REAL_TIME, QUALITY_CACHED} else "snapshot"),
     }
 
 
@@ -273,9 +298,11 @@ def build_payload(
     detected_time = coerce_iso(deal_timestamp(row), fallback=market_time)
     price = safe_float(row.get("price"))
     volume = safe_float(row.get("volume"))
-    data_quality = str(row.get("data_quality") or row.get("quote_status") or "").strip().lower()
-    if not data_quality:
-        data_quality = "priced" if price > 0 and volume > 0 else "score_only"
+    data_quality = coerce_data_quality(row)
+    if data_quality in {QUALITY_EMPTY, QUALITY_INVALID} and price > 0 and volume > 0:
+        data_quality = QUALITY_CACHED
+    if data_quality == QUALITY_SCORE_ONLY and price > 0 and volume > 0 and row.get("source") in {"market", "real_time", "realtime"}:
+        data_quality = QUALITY_REAL_TIME
     reason_text = reason or _reason_from_metrics(tool, state, score, metric_payload)
     signal = signal_from_score(score)
     decision_state = "WATCH" if signal == "WATCH" else "WAIT"
@@ -305,9 +332,16 @@ def build_payload(
         "adx": round(safe_float(row.get("adx", 15.0)), 2),
         "atr_pct": round(safe_float(row.get("atr_pct", 1.0)), 2),
         "data_quality": data_quality,
+        "data_quality_label": data_quality_label(data_quality),
+        "data_quality_score": data_quality_score(data_quality),
         "quote_status": row.get("quote_status") or data_quality,
         "market_data_updated_at": market_time,
         "last_bar_at": coerce_iso(row.get("last_bar_at"), fallback=market_time),
+        "last_updated": coerce_iso(row.get("last_updated") or row.get("updated_at"), fallback=market_time),
+        "is_stale": bool(row.get("stale") is True or row.get("is_stale") is True or data_quality == QUALITY_STALE),
+        "fallback_used": bool(row.get("fallback_used")),
+        "provider_error": row.get("provider_error"),
+        "source": row.get("source") or ("market_snapshot" if data_quality in {QUALITY_REAL_TIME, QUALITY_CACHED} else "snapshot"),
         "metrics": metric_payload,
         "ai_comment": ai_comment,
         "trigger": trigger,
