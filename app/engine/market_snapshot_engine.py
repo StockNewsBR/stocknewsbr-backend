@@ -10,6 +10,7 @@ import pandas as pd
 from app.ai.feature_hub import build_ai_payload_bundle
 from app.ai.ai_market_pulse import market_pulse as build_market_pulse
 from app.ai.ai_master_score import apply_master_scores_by_ticker, run_master_score
+from app.ai.strategic_panel import apply_strategic_panels_by_ticker, build_strategic_panels
 from app.ai.institutional_auditor import (
     apply_audit_to_ai_tools,
     audit_index,
@@ -424,6 +425,13 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
     )
     normalized = apply_master_scores_by_ticker(normalized, master_score_rows)
     ai_tools = _apply_master_scores_to_ai_tools(ai_tools, master_score_rows)
+    strategic_panel_rows = build_strategic_panels(
+        master_score_rows,
+        ai_tools=ai_tools,
+        limit=AI_OUTPUT_LIMIT,
+    )
+    master_score_rows = apply_strategic_panels_by_ticker(master_score_rows, strategic_panel_rows)
+    normalized = apply_strategic_panels_by_ticker(normalized, strategic_panel_rows)
     normalized.sort(key=_safe_master_score, reverse=True)
     record_signal_quality_coverage(normalized, source=f"snapshot:{source}")
 
@@ -485,6 +493,9 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         "leaders": normalized[:20],
         "master_scores": master_score_rows,
         "master_score": master_score_rows[0] if master_score_rows else {},
+        "strategic_panels": strategic_panel_rows,
+        "strategic_panel": strategic_panel_rows[0] if strategic_panel_rows else {},
+        "strategic_panel_summary": strategic_panel_rows[0].get("strategic_panel_summary") if strategic_panel_rows else "",
         "symbol_snapshots": {
             str(row.get("symbol") or row.get("ticker") or "").upper(): row
             for row in normalized[:200]
@@ -492,11 +503,12 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         },
         "ai_tools": ai_tools,
         "ai_architecture": {
-            "version": "v4_mission_12",
+            "version": "v4_mission_13",
             "official_ai_count": 9,
             "trend_ia_decision": "dedicated",
             "master_score_exposed_as_ai": False,
             "master_score_contract": "institutional_synthesis",
+            "strategic_panel_contract": "ten_second_institutional_read",
             "internal_engine_keys": ai_bundle.get("internal_engine_keys", []) if isinstance(ai_bundle, dict) else [],
         },
         "decision": decision,

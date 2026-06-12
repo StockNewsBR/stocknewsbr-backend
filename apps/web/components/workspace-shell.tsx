@@ -68,6 +68,7 @@ import type {
   QuotePayload,
   RankingRow,
   SignalRow,
+  StrategicPanel,
   TelegramLinkSessionResponse,
   UserAccess,
   WorkspaceData,
@@ -3353,12 +3354,139 @@ type StrategicConclusion = {
   basis: string[];
   tone: DecisionTone;
   stamp: string;
+  source?: "strategic_panel" | "client_fallback";
   sections?: Array<{
     title: string;
     body?: string;
     items?: string[];
   }>;
 };
+
+function strategicPanelText(value: unknown, fallback = "") {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function strategicPanelTone(panel?: StrategicPanel | null): DecisionTone {
+  const action = strategicPanelText(panel?.recommended_action).toUpperCase();
+  const direction = strategicPanelText(panel?.probable_direction_block?.direction).toUpperCase();
+  const risk = strategicPanelText(panel?.risk_block?.level).toLowerCase();
+  if (panel?.no_trade_now || action.includes("NÃO OPERAR") || action.includes("NAO OPERAR")) return "bearish";
+  if (risk.includes("alto") || action.includes("AGUARDAR")) return "watch";
+  if (direction === "BULLISH") return "bullish";
+  if (direction === "BEARISH") return "bearish";
+  return "watch";
+}
+
+function strategicPanelDecisionCards(panel: StrategicPanel, locale: AppLocale): EssentialDecisionCard[] {
+  const isEnglish = locale === "en-US";
+  const score = firstFiniteNumber((panel.master_score_block as any)?.score);
+  const direction = strategicPanelText(panel.probable_direction_block?.visual_label || panel.probable_direction_block?.label, isEnglish ? "Neutral" : "Neutra");
+  const action = strategicPanelText(panel.recommended_action, isEnglish ? "WAIT" : "AGUARDAR");
+  const audit = strategicPanelText(panel.auditor_block?.visual_status, isEnglish ? "Attention" : "Atenção");
+  const risk = strategicPanelText(panel.risk_block?.visual_level || panel.risk_block?.level, isEnglish ? "Moderate" : "Moderado");
+  const conviction = strategicPanelText((panel.master_score_block as any)?.conviction_visual || (panel.master_score_block as any)?.conviction, isEnglish ? "Low conviction" : "Convicção baixa");
+  const confidence = strategicPanelText((panel.master_score_block as any)?.confidence_visual || (panel.master_score_block as any)?.confidence, isEnglish ? "Low confidence" : "Confiança baixa");
+  const tone = strategicPanelTone(panel);
+  const riskTone: DecisionTone = /alto|high/i.test(risk) ? "bearish" : /baixo|low/i.test(risk) ? "bullish" : "watch";
+  return [
+    {
+      label: isEnglish ? "Master Score" : "Score Mestre",
+      value: score != null ? score.toFixed(0) : "n/a",
+      tone: score != null && score >= 80 ? "bullish" : score != null && score < 60 ? "watch" : tone,
+      meta: `${conviction} | ${confidence}`,
+      meter: score != null ? clampNumber(score, 0, 100) : null,
+    },
+    {
+      label: isEnglish ? "Likely Direction" : "Direção provável",
+      value: direction,
+      tone,
+    },
+    {
+      label: isEnglish ? "Recommended Action" : "Ação recomendada",
+      value: action,
+      tone: action.includes("NÃO OPERAR") || action.includes("NAO OPERAR") ? "bearish" : action.includes("AGUARDAR") ? "watch" : tone,
+    },
+    {
+      label: isEnglish ? "Institutional Auditor" : "Auditor Institucional",
+      value: audit,
+      tone: audit.includes("BLOQUEADO") ? "bearish" : audit.includes("ATENÇÃO") ? "watch" : "bullish",
+      meta: strategicPanelText(panel.auditor_block?.summary),
+    },
+    {
+      label: isEnglish ? "Risk" : "Risco",
+      value: risk,
+      tone: riskTone,
+    },
+    {
+      label: isEnglish ? "Conviction" : "Convicção",
+      value: conviction,
+      tone,
+      meta: confidence,
+    },
+  ];
+}
+
+function strategicConclusionFromPanel(panel: StrategicPanel, locale: AppLocale): StrategicConclusion {
+  const isEnglish = locale === "en-US";
+  const tone = strategicPanelTone(panel);
+  const whyItems = Array.isArray(panel.why)
+    ? panel.why.map((item) => strategicPanelText(item?.label)).filter(Boolean)
+    : [];
+  const changeConditions = Array.isArray(panel.opinion_change_conditions)
+    ? panel.opinion_change_conditions.map((item) => strategicPanelText(item)).filter(Boolean)
+    : [];
+  const noTradeReasons = Array.isArray(panel.no_trade_reasons)
+    ? panel.no_trade_reasons.map((item) => strategicPanelText(item)).filter(Boolean)
+    : [];
+  const action = strategicPanelText(panel.recommended_action, isEnglish ? "WAIT" : "AGUARDAR");
+  const summary = strategicPanelText(panel.strategic_panel_summary, strategicPanelText(panel.master_score_block?.title, isEnglish ? "Strategic read unavailable." : "Leitura estratégica indisponível."));
+  const basis = [
+    ...(whyItems.length ? whyItems : [summary]),
+    strategicPanelText(panel.auditor_block?.summary),
+    strategicPanelText(panel.risk_block?.visual_level || panel.risk_block?.level),
+  ].filter(Boolean);
+  const sections = [
+    { title: isEnglish ? "Current Scenario" : "Cenário Atual", body: summary },
+    { title: isEnglish ? "Why?" : "Por quê?", items: whyItems },
+    ...(panel.no_trade_now ? [{ title: isEnglish ? "Do Not Trade Now" : "Não operar agora", items: noTradeReasons.length ? noTradeReasons : [summary] }] : []),
+    { title: isEnglish ? "What Would Change My Mind?" : "O que mudaria minha opinião?", items: changeConditions },
+  ].filter((section) => section.body || section.items?.length);
+  return {
+    headline: summary,
+    focus: action,
+    basis,
+    tone,
+    stamp: new Date().toLocaleTimeString(isEnglish ? "en-US" : "pt-BR", { hour: "2-digit", minute: "2-digit" }),
+    source: "strategic_panel",
+    sections,
+  };
+}
+
+function operationalDecisionFromPanel(panel: StrategicPanel, locale: AppLocale): OperationalDecision {
+  const isEnglish = locale === "en-US";
+  const tone = strategicPanelTone(panel);
+  const score = firstFiniteNumber((panel.master_score_block as any)?.score);
+  const action = strategicPanelText(panel.recommended_action, isEnglish ? "WAIT" : "AGUARDAR");
+  const confidence = strategicPanelText((panel.master_score_block as any)?.confidence, isEnglish ? "Low" : "Baixa");
+  const reasons = Array.isArray(panel.no_trade_reasons) && panel.no_trade_reasons.length
+    ? panel.no_trade_reasons
+    : Array.isArray(panel.why)
+      ? panel.why.map((item) => strategicPanelText(item?.label)).filter(Boolean).slice(0, 3)
+      : [];
+  const conditions = Array.isArray(panel.opinion_change_conditions) ? panel.opinion_change_conditions.slice(0, 4) : [];
+  return {
+    action,
+    tone,
+    confidence: score != null ? clampNumber(score, 0, 100) : null,
+    confidenceLabel: confidence,
+    bias: strategicPanelText(panel.probable_direction_block?.visual_label || panel.probable_direction_block?.label, isEnglish ? "Neutral" : "Neutra"),
+    risk: strategicPanelText(panel.risk_block?.visual_level || panel.risk_block?.level, isEnglish ? "Moderate" : "Moderado"),
+    reasons: reasons.length ? reasons : [strategicPanelText(panel.strategic_panel_summary, isEnglish ? "Strategic panel still has limited context." : "Painel estratégico ainda com contexto limitado.")],
+    levels: conditions.length
+      ? conditions.map((condition, index) => ({ label: index === 0 ? (isEnglish ? "Opinion changes if" : "Muda opinião se") : `${index + 1}`, value: condition }))
+      : [{ label: isEnglish ? "Invalidation" : "Invalidação", value: isEnglish ? "Wait for a clearer snapshot." : "Aguardar snapshot mais claro." }],
+  };
+}
 
 type OperationalDecisionLevel = {
   label: string;
@@ -4012,6 +4140,9 @@ function buildStrategicConclusion(input: {
 }
 
 function strategicSectionsForRender(conclusion: StrategicConclusion, locale: AppLocale, symbol: string) {
+  if (conclusion.source === "strategic_panel" && conclusion.sections?.length) {
+    return conclusion.sections;
+  }
   const isEnglish = locale === "en-US";
   const assetLabel = normalizeSymbol(symbol) || (isEnglish ? "the asset" : "o ativo");
   const basisText = conclusion.basis.join(" | ");
@@ -7183,6 +7314,21 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     >;
     return candidates.find(snapshotHasCoreData) || candidates.find(Boolean) || null;
   }, [currentRanking, currentTopSignal, workspaceSymbolSnapshot]);
+  const currentStrategicPanel = useMemo<StrategicPanel | null>(() => {
+    const candidates = [
+      currentSnapshotRow?.strategic_panel,
+      currentRanking?.strategic_panel,
+      currentTopSignal?.strategic_panel,
+      workspace?.strategic_panel,
+    ];
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate !== "object") continue;
+      const panel = candidate as StrategicPanel;
+      const panelSymbol = normalizeSymbol(String(panel.symbol || panel.ticker || ""));
+      if (!panelSymbol || panelSymbol === selectedTicker) return panel;
+    }
+    return null;
+  }, [currentRanking?.strategic_panel, currentSnapshotRow?.strategic_panel, currentTopSignal?.strategic_panel, selectedTicker, workspace?.strategic_panel]);
   const snapshotQuote = useMemo(
     () => snapshotQuoteFromRow(selectedTicker, currentSnapshotRow),
     [currentSnapshotRow, selectedTicker],
@@ -8214,6 +8360,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const priceMovementLabel = marketSessionLabel(selectedTicker, appLocale);
   const hasPriceMovement = priceMovementValue != null || priceMovementPercent != null;
   const essentialDecisionCards = useMemo<EssentialDecisionCard[]>(() => {
+    if (currentStrategicPanel) {
+      return strategicPanelDecisionCards(currentStrategicPanel, appLocale);
+    }
     const rawScoreValue = effectiveAiScore != null && Number.isFinite(Number(effectiveAiScore))
       ? Number(effectiveAiScore)
       : numericRankingScore != null
@@ -8281,6 +8430,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     ];
   }, [
     appLocale,
+    currentStrategicPanel,
     currentRanking?.rsi,
     derivedPublicInsight?.rsi,
     derivedPublicInsight?.signal,
@@ -8297,6 +8447,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     workspace?.ai_tools,
   ]);
   const strategicConclusion = useMemo(() => {
+    if (currentStrategicPanel) {
+      return strategicConclusionFromPanel(currentStrategicPanel, appLocale);
+    }
     const hasCoreData = Boolean(displayQuoteHasCoreData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
     const scoreValue = hasCoreData && effectiveAiScore != null && Number.isFinite(Number(effectiveAiScore))
       ? Number(effectiveAiScore)
@@ -8339,6 +8492,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     });
   }, [
     appLocale,
+    currentStrategicPanel,
     currentRanking?.rel_volume,
     currentRanking?.rsi,
     currentRanking?.trend,
@@ -8362,6 +8516,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     [appLocale, selectedTicker, strategicConclusion],
   );
   const operationalDecision = useMemo(() => {
+    if (currentStrategicPanel) {
+      return operationalDecisionFromPanel(currentStrategicPanel, appLocale);
+    }
     const hasCoreData = Boolean(displayQuoteHasCoreData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
     return buildOperationalDecision({
       locale: appLocale,
@@ -8372,6 +8529,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     });
   }, [
     appLocale,
+    currentStrategicPanel,
     displayQuote?.price,
     displayQuoteHasCoreData,
     essentialDecisionCards,

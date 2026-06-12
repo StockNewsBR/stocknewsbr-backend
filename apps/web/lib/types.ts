@@ -8,6 +8,50 @@ export type WorkspaceTab = {
   monitor_ready?: boolean;
 };
 
+export type StrategicPanelBlock = Record<string, unknown> & {
+  title?: string;
+};
+
+export type StrategicPanelWhyItem = {
+  tool?: string;
+  label?: string;
+  source?: string;
+  reason?: string;
+};
+
+export type StrategicPanel = {
+  ticker?: string;
+  symbol?: string;
+  strategic_panel_version?: string;
+  master_score_block?: StrategicPanelBlock;
+  auditor_block?: StrategicPanelBlock;
+  risk_block?: StrategicPanelBlock & {
+    level?: string;
+    visual_level?: string;
+    source?: string;
+    score?: number | null;
+    summary?: string | null;
+  };
+  probable_direction_block?: StrategicPanelBlock & {
+    direction?: string;
+    label?: string;
+    visual_label?: string;
+  };
+  recommended_action_block?: StrategicPanelBlock & {
+    action?: string;
+    no_trade_now?: boolean;
+    reasons?: string[];
+  };
+  recommended_action?: string;
+  strategic_panel_summary?: string;
+  why?: StrategicPanelWhyItem[];
+  opinion_change_conditions?: string[];
+  no_trade_now?: boolean;
+  no_trade_reasons?: string[];
+  source_contracts?: string[];
+  blocks?: StrategicPanelBlock[];
+};
+
 export type RankingRow = {
   symbol: string;
   score: number;
@@ -23,6 +67,9 @@ export type RankingRow = {
   master_visual_status?: string | null;
   master_visual_label?: string | null;
   opinion_change_conditions?: string[] | null;
+  strategic_panel?: StrategicPanel | null;
+  strategic_panel_summary?: string | null;
+  recommended_action?: string | null;
   trend?: string | null;
   rsi?: number | string | null;
   rel_volume?: number | string | null;
@@ -74,6 +121,9 @@ export type SignalRow = {
   master_visual_status?: string | null;
   master_visual_label?: string | null;
   opinion_change_conditions?: string[] | null;
+  strategic_panel?: StrategicPanel | null;
+  strategic_panel_summary?: string | null;
+  recommended_action?: string | null;
   trend?: string | null;
   breakout?: boolean;
   price?: number | null;
@@ -126,6 +176,9 @@ export type WorkspaceMarketSnapshot = {
   institutional_auditor?: Record<string, unknown>;
   master_score?: Record<string, unknown>;
   master_scores?: Record<string, unknown>[];
+  strategic_panel?: StrategicPanel;
+  strategic_panels?: StrategicPanel[];
+  strategic_panel_summary?: string;
   symbol_count?: number;
 };
 
@@ -315,6 +368,9 @@ export type WorkspaceData = {
   institutional_auditor?: Record<string, unknown>;
   master_score?: Record<string, unknown>;
   master_scores?: Record<string, unknown>[];
+  strategic_panel?: StrategicPanel;
+  strategic_panels?: StrategicPanel[];
+  strategic_panel_summary?: string;
   ai_tools: WorkspaceAiTools;
   featured_posts: FeedPost[];
   ticker_room_preview: {
@@ -614,6 +670,9 @@ export type PublicInsightPayload = {
   master_risk?: string | null;
   master_status?: string | null;
   opinion_change_conditions?: string[] | null;
+  strategic_panel?: StrategicPanel | null;
+  strategic_panel_summary?: string | null;
+  recommended_action?: string | null;
   rsi?: number | null;
   rel_volume?: number | null;
   trend_bias?: string | null;

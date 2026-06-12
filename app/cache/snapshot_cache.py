@@ -176,6 +176,12 @@ class SnapshotCache:
                 for key, value in ai_tools.items()
                 if isinstance(value, list)
             }
+        for key in ("master_score", "strategic_panel"):
+            if isinstance(payload.get(key), dict):
+                cloned[key] = dict(payload.get(key, {}))
+        for key in ("master_scores", "strategic_panels"):
+            if isinstance(payload.get(key), list):
+                cloned[key] = [dict(row) for row in payload.get(key, []) if isinstance(row, dict)]
         return cloned
 
     def _ensure_storage_dir(self):

@@ -116,6 +116,9 @@ def _snapshot_master_context(symbol: str) -> dict:
         "master_risk": row.get("master_risk"),
         "master_status": row.get("master_status"),
         "opinion_change_conditions": row.get("opinion_change_conditions") or [],
+        "strategic_panel": row.get("strategic_panel") if isinstance(row.get("strategic_panel"), dict) else {},
+        "strategic_panel_summary": row.get("strategic_panel_summary") or "",
+        "recommended_action": row.get("recommended_action"),
     }
 
 

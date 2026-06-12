@@ -82,6 +82,10 @@ Atualizado em: 2026-06-12
 - Score Mestre consome diretamente o Auditor: `BLOCKED` no Auditor vira `master_status=BLOCKED`, score limitado, decisao operacional bloqueada e mensagem `NAO OPERAR AGORA`.
 - Score alto isolado, news isolada, momentum isolado ou flow isolado nao promovem direcao bullish/bearish; a direcao exige contexto institucional entre fluxo/liquidez/tendencia/smart money/regime.
 - Snapshot, workspace, ranking, radar, Telegram, push, chart context e insight publico passam a carregar ou respeitar Score Mestre; ranking/radar ordenam por `master_score` quando disponivel.
+- Missao 13 - Painel Estrategico fechada em 2026-06-12: snapshot, workspace, web, mobile, ranking/radar e insight publico passam a expor `strategic_panel` e `strategic_panel_summary`.
+- Painel Estrategico consome somente contratos existentes de Score Mestre, Auditor Institucional e Risk IA; nao cria nova IA, novo score operacional nem sinal BUY/SELL.
+- O contrato do painel entrega blocos de Score Mestre, Auditor, Risco, Direcao Provavel e Acao Recomendada, mais `why`, `opinion_change_conditions`, `no_trade_now` e motivos de bloqueio.
+- Acao recomendada fica limitada a `OBSERVAR`, `AGUARDAR`, `OPORTUNIDADE EM FORMACAO`, `OPORTUNIDADE CONFIRMADA` e `NAO OPERAR AGORA`; Auditor/Score Mestre `BLOCKED` forcam `NAO OPERAR AGORA`.
 
 ## Validado
 
@@ -220,6 +224,12 @@ Atualizado em: 2026-06-12
 - `venv\Scripts\python.exe -m unittest discover -s tests`: 248 testes OK; Yahoo Finance imprimiu avisos externos conhecidos para aliases invalidos/delistados.
 - `npm exec -- tsc --noEmit --incremental false` em `apps/web`: OK.
 - `git diff --check`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
+- `venv\Scripts\python.exe -m py_compile app\ai\strategic_panel.py app\engine\market_snapshot_engine.py app\services\workspace_service.py app\services\snapshot_contract.py app\services\ranking.py app\ai\ai_market_radar.py app\cache\snapshot_cache.py app\api\routes_public_market_live.py tests\test_strategic_panel.py`: OK em 2026-06-12.
+- `venv\Scripts\python.exe -m unittest tests.test_strategic_panel`: 8 testes OK cobrindo bullish forte, bearish forte, neutro, auditor approved/caution/blocked, risco alto/baixo, nao operar agora, resumo, snapshot, workspace e insight publico.
+- `venv\Scripts\python.exe -m unittest tests.test_strategic_panel tests.test_master_score_institutional tests.test_institutional_auditor tests.test_market_snapshot_ai_tools tests.test_workspace_ai_tools tests.test_ranking_service tests.test_single_snapshot_source`: 62 testes OK; Yahoo Finance imprimiu avisos externos conhecidos sem quebrar a suite.
+- `venv\Scripts\python.exe -m unittest discover -s tests`: 257 testes OK; Yahoo Finance imprimiu avisos externos conhecidos para aliases invalidos/delistados.
+- `npm exec -- tsc --noEmit --incremental false` em `apps/web`: OK.
+- `npm run typecheck` em `apps/mobile`: OK.
 
 ## Controle da Etapa Atual
 
@@ -238,6 +248,7 @@ Atualizado em: 2026-06-12
 - Arquivos alterados nesta retomada da analise comparativa 1D: `app/portfolio/backtest_engine.py`, `tests/test_backtest_engine.py` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada da Missao 8: `app/services/snapshot_contract.py`, `app/ai/ai_market_pulse.py`, `app/cache/snapshot_cache.py`, `app/engine/market_snapshot_engine.py`, `app/api/market_routes.py`, `tests/test_market_pulse_actionable.py`, `tests/test_single_snapshot_source.py` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada da Missao 12: `app/ai/ai_master_score.py`, `app/engine/market_snapshot_engine.py`, `app/services/snapshot_contract.py`, `app/services/ranking.py`, `app/ai/ai_market_radar.py`, `app/system/push_dispatcher.py`, `app/telegram/telegram_alert_formatter.py`, `app/telegram/telegram_alert_engine.py`, `app/api/routes_public_market_live.py`, `app/api/market_routes.py`, `app/api/routes_radar.py`, `app/web/routes_radar.py`, `app/engine/signal_engine.py`, `app/cache/snapshot_cache.py`, `app/services/workspace_service.py`, `apps/web/lib/types.ts`, `tests/test_master_score_institutional.py` e `PROJECT_STATUS.md`.
+- Arquivos alterados nesta retomada da Missao 13: `app/ai/strategic_panel.py`, `app/engine/market_snapshot_engine.py`, `app/services/workspace_service.py`, `app/services/snapshot_contract.py`, `app/services/ranking.py`, `app/ai/ai_market_radar.py`, `app/cache/snapshot_cache.py`, `app/api/routes_public_market_live.py`, `apps/web/lib/types.ts`, `apps/web/components/workspace-shell.tsx`, `apps/mobile/app/(tabs)/index.tsx`, `tests/test_strategic_panel.py` e `PROJECT_STATUS.md`.
 - Testes/smokes registrados: `npm run typecheck` em `apps/mobile`; `$env:REQUIRE_MOBILE_DEVICE='1'; npm run smoke:mobile`; `npm run export:android`.
 - Testes/smokes registrados nesta retomada: validacao do `venv` Python 3.11.9 e dependencias; unittest focado de `signal_cache`/snapshot/worker; unittest discover completo com 133 testes OK.
 - Testes/smokes registrados nesta retomada da engine/futuros/root web: unittest focado com 35 testes OK, unittest completo com 139 testes OK, `npm run build`, `start_all_local`, smoke API futures, smoke visual B3/USA e browser real da raiz.
@@ -280,6 +291,8 @@ Atualizado em: 2026-06-12
 - Missao 8: os campos institucionais estao prontos no backend/snapshot/Market Pulse; se alguma tela externa ainda ler somente `stats.bullish`/`stats.bearish`, ela recebera contagem acionavel, mas a exibicao comercial ideal deve migrar para `bullish_candidates` vs `actionable_bullish` para nao parecer otimista com bloqueio.
 - Missao 12: o Score Mestre ficou deliberadamente conservador; pode reduzir sinais acionaveis quando houver consenso baixo, direcao neutra ou contexto institucional incompleto mesmo com score bruto alto.
 - Missao 12: `master_status` segue o Auditor, enquanto conflitos de contexto podem tornar o sinal nao acionavel por `master_score_context_not_confirmed`; a UI deve diferenciar status do Auditor de direcao/conviccao do Score Mestre.
+- Missao 13: o Painel Estrategico herda o conservadorismo do Score Mestre e do Auditor; em contexto incompleto pode recomendar `OBSERVAR`, `AGUARDAR` ou `NAO OPERAR AGORA` mesmo com score bruto alto.
+- Missao 13: `strategic_panel_summary` e `why` sao sinteses curtas; detalhes completos continuam nos contratos de Score Mestre, Auditor e IAs especialistas.
 - Rodar `npm run build` enquanto `next dev` esta vivo pode corromper o manifesto `.next`; o `start_all_local.ps1` agora limpa esse cache ao reiniciar em modo dev.
 - A validacao visual de 2026-05-18 usa dados atuais do provider, nao os OHLC exatos dos prints antigos; para provar melhora nos mesmos candles dos prints, carregar replay/backtest com aquele dataset.
 - `ITUB4` em 2026-05-18 veio com sessao parcial curta; o short saiu com `coherence_status=watch` e risco medio porque ainda exigia confirmacao de breakdown em range.
@@ -303,7 +316,7 @@ Atualizado em: 2026-06-12
 - Proxima melhoria de produto: codigo ja liga preco/volume real ao `signal_cache` via `warm_market_pool` e passou nos testes com o `venv` Python 3.11.9; acompanhar proximo ciclo real do worker com dados de mercado para confirmar auditoria IA `approved` em producao.
 - Proxima melhoria de trading: forward test local por ticker/regime foi implementado sobre o replay deterministico, com contagem de regime barra a barra, metricas por regime de entrada e status de overtrading lateral; proximo passo e alimentar com barras reais capturadas em producao/forward log e revisar resultado por ativo, horario e regime.
 - Missao 8 esta fechada no escopo solicitado; nao iniciar Missao 9 ou posteriores sem pedido explicito.
-- Missao 12 esta fechada no escopo solicitado; nao iniciar Missao 13, Missao 17, Missao 18 ou Missao 24A sem pedido explicito.
+- Missao 13 esta fechada no escopo solicitado; nao iniciar Missao 17, Missao 18 ou Missao 24A sem pedido explicito.
 - Proxima melhoria de trading 1D: aplicar `compare_replay_scenarios()` aos cenarios dos prints antigos (`ITUB4`, `AAPL`, `PETR4`, `PLTR`) assim que as mesmas barras forem carregadas, comparando trades perdidos, exits cedo e reducao de `Watch` sem depender de provider externo durante a analise.
 - Proxima melhoria de dados B3: se o produto exigir leilao/pre-abertura antes de 10:00, integrar provider que entregue esse feed; o chart atual nao inventa barras antes da primeira barra recebida.
 - Proxima melhoria de dados futuros B3: substituir `reference_proxy` por feed oficial do contrato `WIN`/`WDO` vigente antes de usar esses numeros para execucao real.

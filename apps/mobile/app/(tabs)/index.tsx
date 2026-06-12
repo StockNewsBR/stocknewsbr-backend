@@ -52,6 +52,15 @@ export default function HomeTab() {
   const topSignals = Array.isArray(workspace?.top_signals) ? workspace.top_signals : [];
   const ranking = Array.isArray(workspace?.ranking) ? workspace.ranking : [];
   const featuredPosts = Array.isArray(workspace?.featured_posts) ? workspace.featured_posts : [];
+  const strategicPanel = workspace?.strategic_panel && typeof workspace.strategic_panel === "object" ? workspace.strategic_panel : null;
+  const strategicAction = strategicPanel?.recommended_action || strategicPanel?.recommended_action_block?.action || "AGUARDAR";
+  const strategicRisk = strategicPanel?.risk_block?.visual_level || strategicPanel?.risk_block?.level || "Risco indisponivel";
+  const strategicDirection = strategicPanel?.probable_direction_block?.visual_label || strategicPanel?.probable_direction_block?.label || "Neutra";
+  const strategicScore = strategicPanel?.master_score_block?.score;
+  const strategicWhy = Array.isArray(strategicPanel?.why) ? strategicPanel.why.slice(0, 4) : [];
+  const strategicChangeConditions = Array.isArray(strategicPanel?.opinion_change_conditions)
+    ? strategicPanel.opinion_change_conditions.slice(0, 4)
+    : [];
 
   return (
     <ScrollView
@@ -83,6 +92,44 @@ export default function HomeTab() {
           <Pill label={workspace?.chart_capabilities?.signal_zones ? "Chart overlays" : "Chart basic"} />
           <Pill label={access?.otp_required_on_login ? "OTP on premium" : "Direct access"} tone="warning" />
         </View>
+      </Card>
+
+      <Card>
+        <SectionHeader title="Painel Estrategico" subtitle="Leitura unica do Score Mestre, Auditor e Risk IA." />
+        {strategicPanel ? (
+          <View style={{ gap: 10 }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              <Pill label={`Score ${strategicScore ?? "n/a"}`} tone="accent" />
+              <Pill label={String(strategicDirection)} tone="info" />
+              <Pill label={String(strategicRisk)} tone={String(strategicRisk).toLowerCase().includes("alto") ? "danger" : "warning"} />
+            </View>
+            <Text style={{ color: theme.colors.text, fontSize: 20, fontWeight: "800" }}>{String(strategicAction)}</Text>
+            <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
+              {strategicPanel.strategic_panel_summary || "Resumo estrategico ainda indisponivel."}
+            </Text>
+            {strategicWhy.length ? (
+              <View style={{ gap: 4 }}>
+                {strategicWhy.map((item: any) => (
+                  <Text key={`${item.tool || item.label}`} style={{ color: theme.colors.text, lineHeight: 19 }}>
+                    {item.label || item.reason}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+            {strategicChangeConditions.length ? (
+              <View style={{ gap: 4 }}>
+                <Text style={{ color: theme.colors.muted, fontWeight: "700" }}>O que mudaria minha opiniao?</Text>
+                {strategicChangeConditions.map((item: string) => (
+                  <Text key={item} style={{ color: theme.colors.muted, lineHeight: 18 }}>
+                    - {item}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ) : (
+          <EmptyState title="Painel indisponivel" description="O snapshot ainda nao trouxe o contrato estrategico." />
+        )}
       </Card>
 
       <Card>

@@ -134,6 +134,9 @@ def analyze_symbol(symbol):
             "master_score": source.get("master_score"),
             "master_direction": source.get("master_direction"),
             "master_status": source.get("master_status"),
+            "strategic_panel": source.get("strategic_panel") if isinstance(source.get("strategic_panel"), dict) else {},
+            "strategic_panel_summary": source.get("strategic_panel_summary") or "",
+            "recommended_action": source.get("recommended_action"),
         }
 
     except Exception:
@@ -171,6 +174,9 @@ def build_radar():
                     "master_summary": source.get("master_summary"),
                     "master_risk": source.get("master_risk"),
                     "master_status": source.get("master_status"),
+                    "strategic_panel": source.get("strategic_panel") if isinstance(source.get("strategic_panel"), dict) else {},
+                    "strategic_panel_summary": source.get("strategic_panel_summary") or "",
+                    "recommended_action": source.get("recommended_action"),
                     "state": row.get("state"),
                     "source": row.get("source") or "snapshot",
                     "data_quality": coerce_data_quality(row),
