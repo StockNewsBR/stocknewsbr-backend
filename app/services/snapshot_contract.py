@@ -164,8 +164,30 @@ def has_blocking_reasons(row: dict[str, Any]) -> bool:
     return bool(reasons)
 
 
+def audit_status_value(row: dict[str, Any]) -> str:
+    auditor = row.get("auditor") if isinstance(row.get("auditor"), dict) else {}
+    return str(
+        row.get("audit_status")
+        or row.get("auditor_status")
+        or auditor.get("audit_status")
+        or auditor.get("auditor_status")
+        or ""
+    ).upper().strip()
+
+
+def is_auditor_blocked(row: dict[str, Any]) -> bool:
+    auditor = row.get("auditor") if isinstance(row.get("auditor"), dict) else {}
+    if row.get("blocked_by_auditor") is True or auditor.get("blocked_by_auditor") is True:
+        return True
+    if audit_status_value(row) == "BLOCKED":
+        return True
+    return False
+
+
 def is_actionable_snapshot_row(row: Any) -> bool:
     if not isinstance(row, dict):
+        return False
+    if is_auditor_blocked(row):
         return False
     signal = snapshot_signal_value(row)
     if signal not in ACTIONABLE_SIGNALS:
@@ -217,7 +239,7 @@ def is_blocked_snapshot_row(row: Any) -> bool:
 
     if signal in NO_TRADE_SIGNALS or decision_state in {"NO_TRADE", "DO_NOT_TRADE"}:
         return True
-    if row.get("blocked_by_auditor") is True:
+    if is_auditor_blocked(row):
         return True
     if row.get("stale") is True or row.get("is_stale") is True:
         return True
@@ -258,6 +280,12 @@ def snapshot_row_summary(row: dict[str, Any]) -> dict[str, Any]:
         "provider_error": row.get("provider_error"),
         "price": row.get("price") or row.get("close") or row.get("last_price"),
         "volume": row.get("volume") or row.get("last_volume"),
+        "audit_status": row.get("audit_status"),
+        "audit_score": row.get("audit_score"),
+        "audit_confidence": row.get("audit_confidence"),
+        "audit_blocks": row.get("audit_blocks") or [],
+        "audit_warnings": row.get("audit_warnings") or [],
+        "blocked_by_auditor": bool(row.get("blocked_by_auditor") is True),
     }
 
 

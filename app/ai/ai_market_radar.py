@@ -9,7 +9,7 @@ import pandas as pd
 
 from app.ai.ai_radar import run_radar
 from app.cache.snapshot_cache import get_snapshot_signals
-from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score
+from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score, is_actionable_snapshot_row
 
 logger = logging.getLogger("stocknewsbr.market_radar")
 
@@ -113,6 +113,7 @@ def analyze_symbol(symbol):
             row
             for row in get_snapshot_signals()
             if _normalize_symbol(row.get("ticker") or row.get("symbol")) == normalized
+            and is_actionable_snapshot_row(row)
         ]
 
         radar_rows = run_radar(rows, limit=1)
@@ -143,7 +144,9 @@ def build_radar():
     results = []
 
     try:
-        for row in run_radar(get_snapshot_signals(), limit=50):
+        actionable_rows = [row for row in get_snapshot_signals() if is_actionable_snapshot_row(row)]
+
+        for row in run_radar(actionable_rows, limit=50):
             symbol = row.get("ticker") or row.get("symbol")
             if not symbol:
                 continue
@@ -160,6 +163,11 @@ def build_radar():
                     "is_stale": bool(row.get("stale") is True or row.get("is_stale") is True or coerce_data_quality(row) == "stale"),
                     "fallback_used": bool(row.get("fallback_used")),
                     "provider_error": row.get("provider_error"),
+                    "audit_status": row.get("audit_status"),
+                    "audit_score": row.get("audit_score"),
+                    "audit_confidence": row.get("audit_confidence"),
+                    "audit_summary": row.get("audit_summary"),
+                    "blocked_by_auditor": bool(row.get("blocked_by_auditor") is True),
                 }
             )
 

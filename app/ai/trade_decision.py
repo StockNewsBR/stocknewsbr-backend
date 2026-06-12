@@ -137,6 +137,13 @@ def _auditor_guard(row: Dict[str, Any]) -> List[str]:
         if status in {"blocked", "rejected", "invalid", "critical", "high_risk", "do_not_trade"}:
             reasons.append("auditor_blocked")
 
+        audit_status = _state(source.get("audit_status"))
+        if audit_status == "blocked":
+            reasons.append("auditor_blocked")
+
+        if source.get("auditor_approved") is False:
+            reasons.append("auditor_blocked")
+
         conflict_level = _state(source.get("conflict_level") or source.get("institutional_conflict_level"))
         if conflict_level in {"high", "critical", "severe"}:
             reasons.append("institutional_conflict")

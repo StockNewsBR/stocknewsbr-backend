@@ -177,6 +177,22 @@ def _score_row(row: Dict[str, Any]) -> Dict[str, Any]:
     payload["risk"] = decision["risk"]
     payload["risk_level"] = decision["risk_level"]
     payload["market_regime_state"] = decision["market_regime_state"]
+    if row.get("auditor") or row.get("audit_status") or row.get("blocked_by_auditor"):
+        auditor = row.get("auditor") if isinstance(row.get("auditor"), dict) else {}
+        payload["auditor"] = auditor
+        payload["institutional_auditor"] = row.get("institutional_auditor") if isinstance(row.get("institutional_auditor"), dict) else auditor
+        payload["audit_status"] = row.get("audit_status") or auditor.get("audit_status")
+        payload["auditor_status"] = row.get("auditor_status") or auditor.get("auditor_status") or payload.get("audit_status")
+        payload["audit_score"] = row.get("audit_score") or auditor.get("audit_score")
+        payload["auditor_score"] = row.get("auditor_score") or auditor.get("auditor_score") or payload.get("audit_score")
+        payload["audit_confidence"] = row.get("audit_confidence") or auditor.get("audit_confidence")
+        payload["audit_reason"] = row.get("audit_reason") or auditor.get("audit_reason")
+        payload["audit_blocks"] = row.get("audit_blocks") or auditor.get("audit_blocks") or []
+        payload["audit_warnings"] = row.get("audit_warnings") or auditor.get("audit_warnings") or []
+        payload["audit_summary"] = row.get("audit_summary") or auditor.get("audit_summary")
+        payload["auditor_summary"] = row.get("auditor_summary") or auditor.get("auditor_summary") or payload.get("audit_summary")
+        payload["auditor_approved"] = bool(row.get("auditor_approved") is True or auditor.get("auditor_approved") is True)
+        payload["blocked_by_auditor"] = bool(row.get("blocked_by_auditor") is True or auditor.get("blocked_by_auditor") is True)
     payload["data_quality"] = coerce_data_quality(row)
     payload["data_quality_label"] = data_quality_label(payload["data_quality"])
     payload["data_quality_score"] = data_quality_score(payload["data_quality"])

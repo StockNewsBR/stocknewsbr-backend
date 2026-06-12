@@ -8,6 +8,14 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from app.ai.feature_hub import build_ai_payload_bundle
+from app.ai.ai_market_pulse import market_pulse as build_market_pulse
+from app.ai.institutional_auditor import (
+    apply_audit_to_ai_tools,
+    apply_audits_by_ticker,
+    audit_index,
+    audit_market_rows,
+    summarize_audits,
+)
 from app.ai.trade_decision import summarize_trade_decision
 from app.cache.signal_cache import get_all_signals
 from app.cache.snapshot_cache import get_last_good_snapshot, get_snapshot, update_snapshot
@@ -361,6 +369,40 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         item["score"] = _safe_score(item)
         normalized.append(_apply_data_quality(item))
 
+    generated_at = datetime.now(timezone.utc).isoformat()
+    normalized.sort(key=_safe_score, reverse=True)
+    ai_input_rows = normalized[:AI_INPUT_LIMIT]
+
+    ai_bundle: dict[str, object] = {}
+    try:
+        ai_bundle = build_ai_payload_bundle(
+            top_signals=ai_input_rows,
+            ranking=ai_input_rows,
+            limit=AI_OUTPUT_LIMIT,
+        )
+        ai_tools = ai_bundle.get("ai_tools") if isinstance(ai_bundle, dict) else {}
+        master_score_rows = ai_bundle.get("master_score") if isinstance(ai_bundle, dict) else []
+    except Exception:
+        logger.exception("Snapshot AI payload build failed")
+        ai_tools = {}
+        master_score_rows = []
+
+    pre_audit_pulse = build_market_pulse(normalized)
+    snapshot_context = {
+        "schema_version": SNAPSHOT_SCHEMA_VERSION,
+        "source": source,
+        "stale": bool(stale),
+        "generated_at": generated_at,
+    }
+    normalized = audit_market_rows(
+        normalized,
+        ai_tools=ai_tools,
+        market_pulse=pre_audit_pulse,
+        snapshot_context=snapshot_context,
+    )
+    audits = audit_index(normalized)
+    ai_tools = apply_audit_to_ai_tools(ai_tools, audits)
+    master_score_rows = apply_audits_by_ticker(master_score_rows, audits)
     normalized.sort(key=_safe_score, reverse=True)
     record_signal_quality_coverage(normalized, source=f"snapshot:{source}")
 
@@ -368,7 +410,6 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
     signal_stats = summarize_snapshot_rows(normalized)
     bullish = signal_stats["actionable_bullish"]
     bearish = signal_stats["actionable_bearish"]
-    generated_at = datetime.now(timezone.utc).isoformat()
     priced_rows = [row for row in normalized if _has_positive_value(row, "price", "close", "last_price")]
     score_only_rows = [
         row
@@ -401,21 +442,8 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         "blocked_signals": signal_stats["blocked_signals"],
         "watchlist_candidates": signal_stats["watchlist_candidates"],
     }
-    ai_input_rows = normalized[:AI_INPUT_LIMIT]
-
-    ai_bundle: dict[str, object] = {}
-    try:
-        ai_bundle = build_ai_payload_bundle(
-            top_signals=ai_input_rows,
-            ranking=ai_input_rows,
-            limit=AI_OUTPUT_LIMIT,
-        )
-        ai_tools = ai_bundle.get("ai_tools") if isinstance(ai_bundle, dict) else {}
-        master_score_rows = ai_bundle.get("master_score") if isinstance(ai_bundle, dict) else []
-    except Exception:
-        logger.exception("Snapshot AI payload build failed")
-        ai_tools = {}
-        master_score_rows = []
+    post_audit_pulse = build_market_pulse(normalized)
+    auditor_summary = summarize_audits(normalized)
 
     decision = summarize_trade_decision(master_score_rows)
     logger.info(
@@ -445,6 +473,9 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             "internal_engine_keys": ai_bundle.get("internal_engine_keys", []) if isinstance(ai_bundle, dict) else [],
         },
         "decision": decision,
+        "market_pulse": post_audit_pulse,
+        "auditor": auditor_summary,
+        "institutional_auditor": auditor_summary,
         "generated_at": generated_at,
         "market_snapshot_interval_seconds": MARKET_SNAPSHOT_INTERVAL_SECONDS,
         "ai_snapshot_interval_seconds": AI_SNAPSHOT_INTERVAL_SECONDS,

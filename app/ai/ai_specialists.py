@@ -89,6 +89,7 @@ def _governance_metrics(row: Dict[str, Any]) -> Dict[str, Any]:
         row.get("blocked_by_auditor")
         or row.get("auditor_blocked")
         or auditor.get("blocked_by_auditor")
+        or str(row.get("audit_status") or auditor.get("audit_status") or "").upper() == "BLOCKED"
     )
     if blocked_by_auditor:
         blocked.append("auditor_blocked")
@@ -100,7 +101,10 @@ def _governance_metrics(row: Dict[str, Any]) -> Dict[str, Any]:
         "market_pulse": row.get("market_pulse") or row.get("market_pulse_state") or row.get("market_context"),
         "blocked_signals": sorted(set(blocked)),
         "blocked_by_auditor": blocked_by_auditor,
-        "auditor_status": auditor.get("status") or row.get("auditor_status") or "not_available",
+        "auditor_status": auditor.get("audit_status") or auditor.get("status") or row.get("audit_status") or row.get("auditor_status") or "not_available",
+        "audit_score": row.get("audit_score") or auditor.get("audit_score"),
+        "audit_blocks": row.get("audit_blocks") or auditor.get("audit_blocks") or [],
+        "audit_warnings": row.get("audit_warnings") or auditor.get("audit_warnings") or [],
     }
 
 

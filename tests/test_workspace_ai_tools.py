@@ -400,6 +400,9 @@ class WorkspaceAiToolsTests(unittest.TestCase):
                 "rsi": 58.0,
                 "macd": 0.12,
                 "data_quality": "priced",
+                "trade_action": "BUY",
+                "decision_ready": True,
+                "decision_state": "BUY_READY",
             }
         ]
         stale_ranking = [

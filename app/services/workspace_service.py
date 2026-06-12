@@ -11,6 +11,7 @@ from app.services.legal_service import get_public_bootstrap
 from app.services.media_service import get_media_status
 from app.services.push_service import get_push_status
 from app.services.ranking import get_ranking
+from app.services.snapshot_contract import is_actionable_snapshot_row
 from app.services.ticker_room_service import list_room_messages
 from app.services.workspace_layout_service import get_user_workspace_layout
 from app.social.posts import get_posts
@@ -134,7 +135,13 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
     if not isinstance(snapshot, dict):
         snapshot = {}
     snapshot_signals = _safe_rows(snapshot.get("signals"))
-    top_signals = snapshot_signals[:12]
+    actionable_signals = [row for row in snapshot_signals if is_actionable_snapshot_row(row)]
+    blocked_signals = [
+        row
+        for row in snapshot_signals
+        if row.get("blocked_by_auditor") is True or str(row.get("audit_status") or "").upper() == "BLOCKED"
+    ]
+    top_signals = actionable_signals[:12]
     symbol_snapshots = snapshot.get("symbol_snapshots") if isinstance(snapshot.get("symbol_snapshots"), dict) else {}
     market_snapshot = {
         "schema_version": snapshot.get("schema_version"),
@@ -145,12 +152,15 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "ai_snapshot_interval_seconds": snapshot.get("ai_snapshot_interval_seconds"),
         "stats": snapshot.get("stats") if isinstance(snapshot.get("stats"), dict) else {},
         "data_status": snapshot.get("data_status") if isinstance(snapshot.get("data_status"), dict) else {},
+        "market_pulse": snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else {},
+        "auditor": snapshot.get("auditor") if isinstance(snapshot.get("auditor"), dict) else {},
+        "institutional_auditor": snapshot.get("institutional_auditor") if isinstance(snapshot.get("institutional_auditor"), dict) else {},
         "symbol_count": len(symbol_snapshots),
     }
     data_status = market_snapshot["data_status"] if isinstance(market_snapshot.get("data_status"), dict) else {}
     ranking_source = get_ranking() or []
     ranking_rows = _safe_rows(ranking_source if isinstance(ranking_source, list) else [])
-    ranking = snapshot_signals[:200] if snapshot_signals else ranking_rows[:200]
+    ranking = actionable_signals[:200] if actionable_signals else ranking_rows[:200]
     featured_posts = _safe_rows(get_posts(limit=10))
     ai_outputs = _coerce_ai_outputs(snapshot.get("ai_tools"))
     market_decision = snapshot.get("decision") if isinstance(snapshot, dict) else {}
@@ -204,6 +214,7 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "tabs": tabs,
         "top_signals": top_signals,
         "ranking": ranking,
+        "blocked_signals": blocked_signals[:50],
         "symbol_snapshots": symbol_snapshots,
         "market_snapshot": market_snapshot,
         "featured_posts": featured_posts,
@@ -252,4 +263,6 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         },
         "ai_tools": ai_outputs,
         "market_decision": market_decision if isinstance(market_decision, dict) else {},
+        "auditor": snapshot.get("auditor") if isinstance(snapshot.get("auditor"), dict) else {},
+        "institutional_auditor": snapshot.get("institutional_auditor") if isinstance(snapshot.get("institutional_auditor"), dict) else {},
     }

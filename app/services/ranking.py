@@ -264,6 +264,14 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
                 "fallback_used": bool(row.get("fallback_used")),
                 "provider_error": row.get("provider_error"),
                 "source": row.get("source") or "snapshot",
+                "audit_status": row.get("audit_status"),
+                "audit_score": row.get("audit_score"),
+                "audit_confidence": row.get("audit_confidence"),
+                "audit_summary": row.get("audit_summary"),
+                "audit_blocks": row.get("audit_blocks") or [],
+                "audit_warnings": row.get("audit_warnings") or [],
+                "auditor_approved": row.get("auditor_approved"),
+                "blocked_by_auditor": bool(row.get("blocked_by_auditor") is True),
             }
         )
 

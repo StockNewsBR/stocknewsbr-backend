@@ -2600,6 +2600,9 @@ function aiToolDataQuality(row?: Partial<AiToolRow> | null) {
 
 function isOperationalAiFinding(row?: Partial<AiToolRow> | null) {
   const rawRow = (row || {}) as any;
+  const auditor = rawRow.auditor || {};
+  const auditStatus = String(rawRow.audit_status || rawRow.auditor_status || auditor.audit_status || "").toUpperCase();
+  if (rawRow.blocked_by_auditor === true || auditor.blocked_by_auditor === true || auditStatus === "BLOCKED") return false;
   const price = firstFiniteNumber(rawRow.price);
   const volume = firstFiniteNumber(rawRow.volume);
   const quality = aiToolDataQuality(row);

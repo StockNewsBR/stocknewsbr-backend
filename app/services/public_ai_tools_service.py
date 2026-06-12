@@ -44,6 +44,10 @@ def _positive_number(value: Any) -> float | None:
 
 def _is_operational_row(row: dict[str, Any]) -> bool:
     metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+    auditor = row.get("auditor") if isinstance(row.get("auditor"), dict) else {}
+    audit_status = str(row.get("audit_status") or auditor.get("audit_status") or row.get("auditor_status") or "").upper()
+    if row.get("blocked_by_auditor") is True or auditor.get("blocked_by_auditor") is True or audit_status == "BLOCKED":
+        return False
     quality = str(
         row.get("data_quality")
         or row.get("dataQuality")

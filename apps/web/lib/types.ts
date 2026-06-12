@@ -37,6 +37,14 @@ export type RankingRow = {
   provider_timestamp?: string | number | null;
   blocked_reasons?: string[] | string | null;
   warnings?: string[] | string | null;
+  audit_status?: string | null;
+  audit_score?: number | null;
+  audit_confidence?: string | null;
+  audit_summary?: string | null;
+  audit_blocks?: string[] | null;
+  audit_warnings?: string[] | null;
+  auditor_approved?: boolean | null;
+  blocked_by_auditor?: boolean | null;
 };
 
 export type SignalRow = {
@@ -69,6 +77,14 @@ export type SignalRow = {
   provider_timestamp?: string | number | null;
   blocked_reasons?: string[] | string | null;
   warnings?: string[] | string | null;
+  audit_status?: string | null;
+  audit_score?: number | null;
+  audit_confidence?: string | null;
+  audit_summary?: string | null;
+  audit_blocks?: string[] | null;
+  audit_warnings?: string[] | null;
+  auditor_approved?: boolean | null;
+  blocked_by_auditor?: boolean | null;
 };
 
 export type WorkspaceSymbolSnapshot = Partial<RankingRow & SignalRow> & Record<string, unknown>;
@@ -82,6 +98,9 @@ export type WorkspaceMarketSnapshot = {
   ai_snapshot_interval_seconds?: number;
   stats?: Record<string, unknown>;
   data_status?: Record<string, unknown>;
+  market_pulse?: Record<string, unknown>;
+  auditor?: Record<string, unknown>;
+  institutional_auditor?: Record<string, unknown>;
   symbol_count?: number;
 };
 
@@ -131,6 +150,20 @@ export type AiToolRow = {
   no_trade_reasons?: string[] | null;
   blocked_signals?: string[] | null;
   blocked_by_auditor?: boolean | null;
+  audit_status?: string | null;
+  audit_score?: number | null;
+  auditor_score?: number | null;
+  audit_confidence?: string | null;
+  audit_reason?: string | null;
+  audit_summary?: string | null;
+  auditor_summary?: string | null;
+  audit_blocks?: string[] | null;
+  audit_warnings?: string[] | null;
+  auditor_approved?: boolean | null;
+  auditor?: Record<string, unknown> | null;
+  institutional_auditor?: Record<string, unknown> | null;
+  conflict_detected?: boolean | null;
+  conflict_level?: string | null;
   official_ai?: boolean | null;
   internal_engines?: string[] | null;
   risk_score?: number | null;
@@ -239,8 +272,11 @@ export type WorkspaceData = {
   tabs: WorkspaceTab[];
   top_signals: SignalRow[];
   ranking: RankingRow[];
+  blocked_signals?: SignalRow[];
   symbol_snapshots?: Record<string, WorkspaceSymbolSnapshot>;
   market_snapshot?: WorkspaceMarketSnapshot;
+  auditor?: Record<string, unknown>;
+  institutional_auditor?: Record<string, unknown>;
   ai_tools: WorkspaceAiTools;
   featured_posts: FeedPost[];
   ticker_room_preview: {

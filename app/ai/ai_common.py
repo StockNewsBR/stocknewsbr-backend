@@ -306,7 +306,7 @@ def build_payload(
     reason_text = reason or _reason_from_metrics(tool, state, score, metric_payload)
     signal = signal_from_score(score)
     decision_state = "WATCH" if signal == "WATCH" else "WAIT"
-    return {
+    payload = {
         "ticker": row.get("ticker", "UNKNOWN"),
         "name": row.get("name", row.get("ticker", "UNKNOWN")),
         "tool": tool,
@@ -356,6 +356,23 @@ def build_payload(
         "updated_at": market_time,
         "last_seen_at": market_time,
     }
+    if row.get("auditor") or row.get("audit_status") or row.get("blocked_by_auditor"):
+        auditor = row.get("auditor") if isinstance(row.get("auditor"), dict) else {}
+        payload["auditor"] = auditor
+        payload["institutional_auditor"] = row.get("institutional_auditor") if isinstance(row.get("institutional_auditor"), dict) else auditor
+        payload["audit_status"] = row.get("audit_status") or auditor.get("audit_status")
+        payload["auditor_status"] = row.get("auditor_status") or auditor.get("auditor_status") or payload.get("audit_status")
+        payload["audit_score"] = row.get("audit_score") or auditor.get("audit_score")
+        payload["auditor_score"] = row.get("auditor_score") or auditor.get("auditor_score") or payload.get("audit_score")
+        payload["audit_confidence"] = row.get("audit_confidence") or auditor.get("audit_confidence")
+        payload["audit_reason"] = row.get("audit_reason") or auditor.get("audit_reason")
+        payload["audit_blocks"] = row.get("audit_blocks") or auditor.get("audit_blocks") or []
+        payload["audit_warnings"] = row.get("audit_warnings") or auditor.get("audit_warnings") or []
+        payload["audit_summary"] = row.get("audit_summary") or auditor.get("audit_summary")
+        payload["auditor_summary"] = row.get("auditor_summary") or auditor.get("auditor_summary") or payload.get("audit_summary")
+        payload["auditor_approved"] = bool(row.get("auditor_approved") is True or auditor.get("auditor_approved") is True)
+        payload["blocked_by_auditor"] = bool(row.get("blocked_by_auditor") is True or auditor.get("blocked_by_auditor") is True)
+    return payload
 
 
 def top_n(results: Iterable[Dict[str, Any]], limit: int = 12) -> List[Dict[str, Any]]:
