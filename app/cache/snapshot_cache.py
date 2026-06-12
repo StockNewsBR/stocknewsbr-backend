@@ -6,6 +6,7 @@ import hashlib
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
+from app.services.snapshot_contract import summarize_snapshot_rows
 from app.system.system_metrics import record_cache_lookup, update_cache_timestamp
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -139,28 +140,12 @@ class SnapshotCache:
         else:
             return self._empty_payload()
 
-        bullish = 0
-        bearish = 0
-
-        for signal in signals:
-            try:
-                score = float(signal.get("score", 0) or 0)
-            except Exception:
-                score = 0.0
-
-            if score >= 70:
-                bullish += 1
-            elif score <= 30:
-                bearish += 1
-
+        derived_stats = summarize_snapshot_rows(signals)
+        existing_stats = payload.get("stats") if isinstance(payload.get("stats"), dict) else {}
         payload["signals"] = signals
         payload["leaders"] = signals[:20]
         payload["by_ticker"] = self._build_by_ticker(signals)
-        payload["stats"] = {
-            "total_signals": len(signals),
-            "bullish": bullish,
-            "bearish": bearish,
-        }
+        payload["stats"] = {**existing_stats, **derived_stats}
 
         return payload
 

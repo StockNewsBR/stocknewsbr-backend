@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.cache.snapshot_cache import get_snapshot_signals
 from app.dependencies import require_active_plan
 from app.services.quote_service import get_cached_quote_payload
+from app.services.snapshot_contract import is_actionable_snapshot_row
 
 logger = logging.getLogger("stocknewsbr.market")
 
@@ -140,6 +141,9 @@ def get_market_radar(current_user=Depends(require_active_plan)):
 
         for row in signals:
             if not isinstance(row, dict):
+                continue
+
+            if not is_actionable_snapshot_row(row):
                 continue
 
             signal_name = str(row.get("signal", "")).upper()

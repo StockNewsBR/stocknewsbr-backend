@@ -7,12 +7,48 @@ import logging
 from datetime import datetime, timezone
 
 from app.cache.snapshot_cache import get_snapshot_signals
-from app.services.snapshot_contract import is_actionable_snapshot_row, snapshot_signal_value
+from app.services.snapshot_contract import (
+    is_actionable_snapshot_row,
+    is_blocked_snapshot_row,
+    is_watchlist_snapshot_row,
+    snapshot_row_orientation,
+    snapshot_row_summary,
+    summarize_snapshot_rows,
+)
 
 logger = logging.getLogger("stocknewsbr.market_pulse")
 
-_BULLISH_ACTIONS = {"BUY", "COVER"}
-_BEARISH_ACTIONS = {"SELL", "SHORT"}
+_GROUP_SAMPLE_LIMIT = 25
+
+
+def _empty_pulse(timestamp, sentiment="neutral", error=None):
+    payload = {
+        "sentiment": sentiment,
+        "bullish_signals": 0,
+        "bearish_signals": 0,
+        "total_signals": 0,
+        "scanned_signals": 0,
+        "bullish_candidates": 0,
+        "actionable_bullish": 0,
+        "bearish_candidates": 0,
+        "actionable_bearish": 0,
+        "blocked_signals": 0,
+        "watchlist_candidates": 0,
+        "bullish_ratio": 0.0,
+        "bearish_ratio": 0.0,
+        "timestamp": timestamp,
+        "signal_groups": {
+            "bullish_candidates": [],
+            "actionable_bullish": [],
+            "bearish_candidates": [],
+            "actionable_bearish": [],
+            "blocked_signals": [],
+            "watchlist_candidates": [],
+        },
+    }
+    if error:
+        payload["error"] = error
+    return payload
 
 
 def market_pulse(signals=None):
@@ -24,43 +60,61 @@ def market_pulse(signals=None):
         results = signals if signals is not None else get_snapshot_signals()
 
         if not results or not isinstance(results, list):
+            return _empty_pulse(timestamp)
 
-            return {
-                "sentiment": "neutral",
-                "bullish_signals": 0,
-                "bearish_signals": 0,
-                "total_signals": 0,
-                "timestamp": timestamp
-            }
+        rows = [r for r in results if isinstance(r, dict)]
+        stats = summarize_snapshot_rows(rows)
+        groups = {
+            "bullish_candidates": [],
+            "actionable_bullish": [],
+            "bearish_candidates": [],
+            "actionable_bearish": [],
+            "blocked_signals": [],
+            "watchlist_candidates": [],
+        }
 
-        bullish = 0
-        bearish = 0
-        valid_signals = 0
+        for row in rows:
+            orientation = snapshot_row_orientation(row)
+            actionable = is_actionable_snapshot_row(row)
 
-        for r in results:
+            if orientation == "bullish":
+                groups["bullish_candidates"].append(snapshot_row_summary(row))
+                if actionable:
+                    groups["actionable_bullish"].append(snapshot_row_summary(row))
 
-            if not is_actionable_snapshot_row(r):
-                continue
+            elif orientation == "bearish":
+                groups["bearish_candidates"].append(snapshot_row_summary(row))
+                if actionable:
+                    groups["actionable_bearish"].append(snapshot_row_summary(row))
 
-            valid_signals += 1
+            if is_blocked_snapshot_row(row):
+                groups["blocked_signals"].append(snapshot_row_summary(row))
 
-            action = snapshot_signal_value(r)
+            if is_watchlist_snapshot_row(row):
+                groups["watchlist_candidates"].append(snapshot_row_summary(row))
 
-            if action in _BULLISH_ACTIONS:
-                bullish += 1
+        groups = {
+            key: value[:_GROUP_SAMPLE_LIMIT]
+            for key, value in groups.items()
+        }
 
-            elif action in _BEARISH_ACTIONS:
-                bearish += 1
+        bullish = stats["actionable_bullish"]
+        bearish = stats["actionable_bearish"]
+        valid_signals = stats["actionable"]
 
         if valid_signals == 0:
-
-            return {
-                "sentiment": "neutral",
-                "bullish_signals": 0,
-                "bearish_signals": 0,
-                "total_signals": 0,
-                "timestamp": timestamp
-            }
+            payload = _empty_pulse(timestamp)
+            payload.update(
+                {
+                    "scanned_signals": stats["total_signals"],
+                    "bullish_candidates": stats["bullish_candidates"],
+                    "bearish_candidates": stats["bearish_candidates"],
+                    "blocked_signals": stats["blocked_signals"],
+                    "watchlist_candidates": stats["watchlist_candidates"],
+                    "signal_groups": groups,
+                }
+            )
+            return payload
 
         bullish_ratio = bullish / valid_signals
         bearish_ratio = bearish / valid_signals
@@ -80,9 +134,17 @@ def market_pulse(signals=None):
             "bullish_signals": bullish,
             "bearish_signals": bearish,
             "total_signals": valid_signals,
+            "scanned_signals": stats["total_signals"],
+            "bullish_candidates": stats["bullish_candidates"],
+            "actionable_bullish": bullish,
+            "bearish_candidates": stats["bearish_candidates"],
+            "actionable_bearish": bearish,
+            "blocked_signals": stats["blocked_signals"],
+            "watchlist_candidates": stats["watchlist_candidates"],
             "bullish_ratio": round(bullish_ratio, 3),
             "bearish_ratio": round(bearish_ratio, 3),
-            "timestamp": timestamp
+            "timestamp": timestamp,
+            "signal_groups": groups
 
         }
 
@@ -90,12 +152,4 @@ def market_pulse(signals=None):
 
         logger.exception("Market pulse error")
 
-        return {
-
-            "sentiment": "unknown",
-            "bullish_signals": 0,
-            "bearish_signals": 0,
-            "total_signals": 0,
-            "timestamp": timestamp,
-            "error": str(e)
-        }
+        return _empty_pulse(timestamp, sentiment="unknown", error=str(e))

@@ -16,6 +16,7 @@ from app.engine.engine_orchestrator import run_engine
 from app.engine.indicators.vector_indicator_engine import compute_rsi
 from app.services.snapshot_contract import is_actionable_snapshot_row as _contract_is_actionable_snapshot_row
 from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score
+from app.services.snapshot_contract import summarize_snapshot_rows
 from app.services.signal_history import store_signals
 from app.system.system_metrics import record_signal_quality_coverage
 
@@ -364,8 +365,9 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
     record_signal_quality_coverage(normalized, source=f"snapshot:{source}")
 
     actionable_rows = [row for row in normalized if _is_actionable_snapshot_row(row)]
-    bullish = len([row for row in actionable_rows if _snapshot_signal_value(row) in _BULLISH_ACTIONS])
-    bearish = len([row for row in actionable_rows if _snapshot_signal_value(row) in _BEARISH_ACTIONS])
+    signal_stats = summarize_snapshot_rows(normalized)
+    bullish = signal_stats["actionable_bullish"]
+    bearish = signal_stats["actionable_bearish"]
     generated_at = datetime.now(timezone.utc).isoformat()
     priced_rows = [row for row in normalized if _has_positive_value(row, "price", "close", "last_price")]
     score_only_rows = [
@@ -392,6 +394,12 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         "score_only": len(score_only_rows),
         "stale_rows": len(stale_rows),
         "actionable": len(actionable_rows),
+        "bullish_candidates": signal_stats["bullish_candidates"],
+        "bearish_candidates": signal_stats["bearish_candidates"],
+        "actionable_bullish": signal_stats["actionable_bullish"],
+        "actionable_bearish": signal_stats["actionable_bearish"],
+        "blocked_signals": signal_stats["blocked_signals"],
+        "watchlist_candidates": signal_stats["watchlist_candidates"],
     }
     ai_input_rows = normalized[:AI_INPUT_LIMIT]
 
@@ -439,6 +447,12 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             "score_only": len(score_only_rows),
             "stale_rows": len(stale_rows),
             "actionable": len(actionable_rows),
+            "bullish_candidates": signal_stats["bullish_candidates"],
+            "bearish_candidates": signal_stats["bearish_candidates"],
+            "actionable_bullish": signal_stats["actionable_bullish"],
+            "actionable_bearish": signal_stats["actionable_bearish"],
+            "blocked_signals": signal_stats["blocked_signals"],
+            "watchlist_candidates": signal_stats["watchlist_candidates"],
             "bullish": bullish,
             "bearish": bearish,
         },

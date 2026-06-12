@@ -1,6 +1,6 @@
 # StockNewsBR Project Status
 
-Atualizado em: 2026-06-05
+Atualizado em: 2026-06-11
 
 ## Estado Atual
 
@@ -73,6 +73,10 @@ Atualizado em: 2026-06-05
 - Retomada corretiva 2026-05-18 BBAS3/PETR3: rompimento aceito acima da resistência agora vira `Buy Long`, não `Sell Short`; short só entra em perda de suporte ou falso rompimento/rejeição vendedor. Warmup intraday foi reduzido para capturar tendência que começa perto da abertura sem esperar metade do pregão.
 - Boxes de topo agora são cards explicativos reais para `Preço`, `Variação`, `Volume`, `Score IA`, `RSI` e `Bias`, com leitura direta do tipo "-0.24% indicando queda", "2,2 mi abaixo/perto/acima da média", "Score IA 5.0 indicando baixa/venda", "RSI neutro" e "Bias indicando lado operacional".
 - Retomada 2026-06-05 do TODO de forward test: replay/backtest agora contabiliza regime barra a barra, preserva regime/liquidez nos trades, agrega resultado por ticker/regime e mede overtrading lateral por taxa de entradas em `chop`/`range`/`squeeze` sem transformar `Watch` em operacao.
+- Missao 8 - Engine de Mercado / Market Pulse fechada em 2026-06-11: Market Pulse separa `bullish_candidates`, `actionable_bullish`, `bearish_candidates`, `actionable_bearish`, `blocked_signals` e `watchlist_candidates`, mantendo `bullish_signals`/`bearish_signals` como aliases de operacoes acionaveis.
+- O contrato compartilhado de snapshot agora diferencia interesse direcional, operacao acionavel, bloqueio operacional e watchlist; `score_only`, `stale`, `NO_TRADE`, `DO_NOT_TRADE`, falha de provider, `blocked_reasons` e sinais ativos sem `decision_ready=True` nao inflam leitura operacional bullish/bearish.
+- `SnapshotCache` nao recalcula mais `stats.bullish`/`stats.bearish` por score bruto ao normalizar payload; esses campos seguem apenas sinais realmente acionaveis.
+- Radar legado `/market/radar` deixa de colocar linhas bloqueadas/score_only no bucket `bearish`, preservando a regra de que radar nao transforma bloqueio em oportunidade operacional.
 
 ## Validado
 
@@ -197,6 +201,14 @@ Atualizado em: 2026-06-05
 - `venv\Scripts\python.exe -m unittest tests.test_backtest_engine tests.test_trend_breakout_signal_engine`: 24 testes OK.
 - `git diff --check -- app/portfolio/backtest_engine.py tests/test_backtest_engine.py`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
 - `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 191 testes OK; Yahoo Finance ainda imprimiu avisos externos para aliases sem dado, mas a suite passou.
+- `venv\Scripts\python.exe -m py_compile app\services\snapshot_contract.py app\ai\ai_market_pulse.py app\cache\snapshot_cache.py app\engine\market_snapshot_engine.py app\api\market_routes.py tests\test_market_pulse_actionable.py tests\test_single_snapshot_source.py`: OK em 2026-06-11.
+- `venv\Scripts\python.exe -m unittest tests.test_market_pulse_actionable`: 5 testes OK cobrindo candidatos, acionaveis, bloqueados e watchlist.
+- `venv\Scripts\python.exe -m unittest tests.test_single_snapshot_source`: 15 testes OK cobrindo snapshot/cache/radar/push/telegram; Yahoo Finance imprimiu avisos externos conhecidos sem quebrar a suite.
+- `venv\Scripts\python.exe -m unittest tests.test_ranking_service`: 8 testes OK cobrindo ranking apenas com snapshot acionavel.
+- `venv\Scripts\python.exe -m unittest tests.test_market_snapshot_ai_tools`: 6 testes OK cobrindo snapshot/Score Mestre/ai_tools.
+- `venv\Scripts\python.exe -m unittest tests.test_market_pulse_actionable tests.test_ranking_service tests.test_single_snapshot_source tests.test_market_snapshot_ai_tools tests.test_system_health`: 38 testes OK em 2026-06-11.
+- `git diff --check -- app/services/snapshot_contract.py app/ai/ai_market_pulse.py app/cache/snapshot_cache.py app/engine/market_snapshot_engine.py app/api/market_routes.py tests/test_market_pulse_actionable.py tests/test_single_snapshot_source.py`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
+- Probe direto do Market Pulse em 2026-06-11 confirmou: 3 candidatos bullish, 1 bullish acionavel, 1 bearish acionavel, 1 bloqueado auditavel, 1 watchlist e sentimento neutro por operacoes acionaveis equilibradas.
 
 ## Controle da Etapa Atual
 
@@ -212,6 +224,7 @@ Atualizado em: 2026-06-05
 - Arquivos alterados nesta retomada corretiva BBAS3/PETR3/boxes 2026-05-18: `app/ai/trade_decision.py`, `app/engine/trend_breakout_signal_engine.py`, `apps/web/app/globals.css`, `apps/web/components/workspace-shell.tsx`, `tests/test_trade_decision_engine.py`, `tests/test_trend_breakout_signal_engine.py` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada replay/backtest 2026-06-01: `app/portfolio/backtest_engine.py`, `tests/test_backtest_engine.py` e `PROJECT_STATUS.md`.
 - Arquivos alterados nesta retomada forward test 2026-06-05: `app/portfolio/backtest_engine.py`, `tests/test_backtest_engine.py` e `PROJECT_STATUS.md`.
+- Arquivos alterados nesta retomada da Missao 8: `app/services/snapshot_contract.py`, `app/ai/ai_market_pulse.py`, `app/cache/snapshot_cache.py`, `app/engine/market_snapshot_engine.py`, `app/api/market_routes.py`, `tests/test_market_pulse_actionable.py`, `tests/test_single_snapshot_source.py` e `PROJECT_STATUS.md`.
 - Testes/smokes registrados: `npm run typecheck` em `apps/mobile`; `$env:REQUIRE_MOBILE_DEVICE='1'; npm run smoke:mobile`; `npm run export:android`.
 - Testes/smokes registrados nesta retomada: validacao do `venv` Python 3.11.9 e dependencias; unittest focado de `signal_cache`/snapshot/worker; unittest discover completo com 133 testes OK.
 - Testes/smokes registrados nesta retomada da engine/futuros/root web: unittest focado com 35 testes OK, unittest completo com 139 testes OK, `npm run build`, `start_all_local`, smoke API futures, smoke visual B3/USA e browser real da raiz.
@@ -220,6 +233,7 @@ Atualizado em: 2026-06-05
 - Testes/smokes registrados nesta retomada corretiva BBAS3/PETR3/boxes: unittest focado com 24 testes OK, unittest completo com 151 testes OK, `npm run build`, `start_all_local`, smoke API de `BBAS3`/`PETR3` e Playwright com screenshots dos boxes explicativos.
 - Testes/smokes registrados nesta retomada replay/backtest: `venv\Scripts\python.exe -m py_compile app\portfolio\backtest_engine.py tests\test_backtest_engine.py` OK; `venv\Scripts\python.exe -m unittest tests.test_backtest_engine tests.test_trend_breakout_signal_engine` com 21 testes OK; `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"` com 183 testes OK.
 - Testes/smokes registrados nesta retomada forward test: `py_compile` OK; `unittest tests.test_backtest_engine` com 7 testes OK; `unittest tests.test_backtest_engine tests.test_trend_breakout_signal_engine` com 24 testes OK; `git diff --check` sem erro; `unittest discover` com 191 testes OK.
+- Testes/smokes registrados nesta retomada da Missao 8: `py_compile` OK; `unittest tests.test_market_pulse_actionable` com 5 testes OK; `unittest tests.test_single_snapshot_source` com 15 testes OK; `unittest tests.test_ranking_service` com 8 testes OK; `unittest tests.test_market_snapshot_ai_tools` com 6 testes OK; suite ampliada `tests.test_market_pulse_actionable tests.test_ranking_service tests.test_single_snapshot_source tests.test_market_snapshot_ai_tools tests.test_system_health` com 38 testes OK; `git diff --check` sem erro.
 - Proxima etapa clara: checklist final de lancamento amplo so deve mexer em credenciais reais, Price IDs/assinaturas da Play Console e submissao EAS quando a conta Google Play estiver disponivel.
 - Stage/commit: fechado nesta rodada somente com os arquivos listados nesta etapa, sem incluir alteracoes antigas de outras etapas.
 
@@ -249,6 +263,7 @@ Atualizado em: 2026-06-05
 - Futuros B3 `WIN`/`WDO` estao com preco de referencia quando o provider publico nao entrega o contrato exato; para decisao executavel de day trade em B3, integrar feed oficial/contratado que entregue o contrato vigente com book/volume/agressao.
 - A engine agora usa regime/confianca/liquidez, mas hit rate institucional so deve ser aprovado por backtest/forward test por ativo, horario e regime; `Watch` continua sendo nao-operacao quando confirmacao faltar.
 - O forward test atual mede barras locais e replays/logs ja capturados; aprovacao real por ticker/regime ainda exige alimentar o fluxo com OHLC real de producao e revisar amostra por horario, regime e qualidade de volume.
+- Missao 8: os campos institucionais estao prontos no backend/snapshot/Market Pulse; se alguma tela externa ainda ler somente `stats.bullish`/`stats.bearish`, ela recebera contagem acionavel, mas a exibicao comercial ideal deve migrar para `bullish_candidates` vs `actionable_bullish` para nao parecer otimista com bloqueio.
 - Rodar `npm run build` enquanto `next dev` esta vivo pode corromper o manifesto `.next`; o `start_all_local.ps1` agora limpa esse cache ao reiniciar em modo dev.
 - A validacao visual de 2026-05-18 usa dados atuais do provider, nao os OHLC exatos dos prints antigos; para provar melhora nos mesmos candles dos prints, carregar replay/backtest com aquele dataset.
 - `ITUB4` em 2026-05-18 veio com sessao parcial curta; o short saiu com `coherence_status=watch` e risco medio porque ainda exigia confirmacao de breakdown em range.
@@ -271,6 +286,7 @@ Atualizado em: 2026-06-05
 - Separar refatoracoes institucionais maiores em commits pequenos por area: data/api, ai, web, tests.
 - Proxima melhoria de produto: codigo ja liga preco/volume real ao `signal_cache` via `warm_market_pool` e passou nos testes com o `venv` Python 3.11.9; acompanhar proximo ciclo real do worker com dados de mercado para confirmar auditoria IA `approved` em producao.
 - Proxima melhoria de trading: forward test local por ticker/regime foi implementado sobre o replay deterministico, com contagem de regime barra a barra, metricas por regime de entrada e status de overtrading lateral; proximo passo e alimentar com barras reais capturadas em producao/forward log e revisar resultado por ativo, horario e regime.
+- Missao 8 esta fechada no escopo solicitado; nao iniciar Missao 9 ou posteriores sem pedido explicito.
 - Proxima melhoria de trading 1D: usar `replay_trading_scenario` nos cenarios dos prints antigos (`ITUB4`, `AAPL`, `PETR4`, `PLTR`) assim que as mesmas barras forem carregadas, comparando trades perdidos, exits cedo e reducao de `Watch` sem depender de provider externo durante a analise.
 - Proxima melhoria de dados B3: se o produto exigir leilao/pre-abertura antes de 10:00, integrar provider que entregue esse feed; o chart atual nao inventa barras antes da primeira barra recebida.
 - Proxima melhoria de dados futuros B3: substituir `reference_proxy` por feed oficial do contrato `WIN`/`WDO` vigente antes de usar esses numeros para execucao real.

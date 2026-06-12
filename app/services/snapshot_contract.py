@@ -4,6 +4,12 @@ from typing import Any, Iterable
 
 
 ACTIONABLE_SIGNALS = {"BUY", "SELL", "SHORT", "COVER"}
+BULLISH_ACTIONS = {"BUY", "COVER"}
+BEARISH_ACTIONS = {"SELL", "SHORT"}
+BULLISH_WATCH_SIGNALS = {"WATCH_BUY", "WATCH_LONG", "LONG_WATCH"}
+BEARISH_WATCH_SIGNALS = {"WATCH_SHORT", "WATCH_SELL", "SHORT_WATCH"}
+WATCH_SIGNALS = {"WATCH", "WAIT", "HOLD"} | BULLISH_WATCH_SIGNALS | BEARISH_WATCH_SIGNALS
+NO_TRADE_SIGNALS = {"NO_TRADE", "DO_NOT_TRADE"}
 READY_DECISION_STATES = {"BUY_READY", "SELL_READY", "SHORT_READY"}
 BLOCKED_DECISION_STATES = {"WATCH", "WAIT", "NO_TRADE", "DO_NOT_TRADE"}
 READY_STATE_BY_SIGNAL = {
@@ -120,6 +126,31 @@ def snapshot_decision_state(row: dict[str, Any]) -> str:
     return str(row.get("decision_state") or "").upper().strip()
 
 
+def snapshot_row_orientation(row: Any) -> str | None:
+    if not isinstance(row, dict):
+        return None
+
+    signal = snapshot_signal_value(row)
+    if signal in BULLISH_ACTIONS or signal in BULLISH_WATCH_SIGNALS:
+        return "bullish"
+    if signal in BEARISH_ACTIONS or signal in BEARISH_WATCH_SIGNALS:
+        return "bearish"
+
+    for key in ("trade_direction", "trade_bias", "bias", "side", "direction"):
+        value = str(row.get(key) or "").strip().lower()
+        if value in {"long", "buy", "bull", "bullish", "comprador", "alta"}:
+            return "bullish"
+        if value in {"short", "sell", "bear", "bearish", "vendedor", "baixa"}:
+            return "bearish"
+
+    score = safe_float(row.get("score"), 50.0)
+    if score >= 70.0:
+        return "bullish"
+    if score <= 30.0:
+        return "bearish"
+    return None
+
+
 def has_positive_value(row: dict[str, Any], *keys: str) -> bool:
     return any(safe_float(row.get(key)) > 0 for key in keys)
 
@@ -165,6 +196,102 @@ def is_actionable_snapshot_row(row: Any) -> bool:
     if not has_positive_value(row, "volume", "last_volume"):
         return False
     return True
+
+
+def is_watchlist_snapshot_row(row: Any) -> bool:
+    if not isinstance(row, dict):
+        return False
+    signal = snapshot_signal_value(row)
+    decision_state = snapshot_decision_state(row)
+    return signal in WATCH_SIGNALS or signal.startswith("WATCH") or decision_state in {"WATCH", "WAIT"}
+
+
+def is_blocked_snapshot_row(row: Any) -> bool:
+    if not isinstance(row, dict):
+        return False
+    if is_actionable_snapshot_row(row):
+        return False
+
+    signal = snapshot_signal_value(row)
+    decision_state = snapshot_decision_state(row)
+
+    if signal in NO_TRADE_SIGNALS or decision_state in {"NO_TRADE", "DO_NOT_TRADE"}:
+        return True
+    if row.get("blocked_by_auditor") is True:
+        return True
+    if row.get("stale") is True or row.get("is_stale") is True:
+        return True
+    if str(row.get("data_quality") or "").lower().strip() in BLOCKED_DATA_QUALITIES:
+        return True
+    for status_key in ("quote_status", "status", "provider_status", "market_data_status"):
+        if str(row.get(status_key) or "").lower().strip() in BLOCKED_DATA_QUALITIES:
+            return True
+    if row.get("provider_failed") is True or row.get("provider_error") is True:
+        return True
+    if has_blocking_reasons(row):
+        return True
+    if signal in ACTIONABLE_SIGNALS:
+        if row.get("decision_ready") is not True:
+            return True
+        if not has_positive_value(row, "price", "close", "last_price"):
+            return True
+        if not has_positive_value(row, "volume", "last_volume"):
+            return True
+        if decision_state and decision_state != READY_STATE_BY_SIGNAL.get(signal):
+            return True
+    return False
+
+
+def snapshot_row_summary(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ticker": row.get("ticker") or row.get("symbol"),
+        "symbol": row.get("symbol") or row.get("ticker"),
+        "score": row.get("score"),
+        "signal": row.get("signal"),
+        "trade_action": row.get("trade_action"),
+        "decision_ready": row.get("decision_ready"),
+        "decision_state": row.get("decision_state"),
+        "data_quality": coerce_data_quality(row),
+        "blocked_reasons": row.get("blocked_reasons") or [],
+        "warnings": row.get("warnings") or [],
+        "stale": bool(row.get("stale") is True or row.get("is_stale") is True),
+        "provider_error": row.get("provider_error"),
+        "price": row.get("price") or row.get("close") or row.get("last_price"),
+        "volume": row.get("volume") or row.get("last_volume"),
+    }
+
+
+def summarize_snapshot_rows(rows: Iterable[Any]) -> dict[str, int]:
+    safe_rows = [row for row in rows or [] if isinstance(row, dict)]
+    actionable_rows = [row for row in safe_rows if is_actionable_snapshot_row(row)]
+    bullish_candidates = [
+        row for row in safe_rows if snapshot_row_orientation(row) == "bullish"
+    ]
+    bearish_candidates = [
+        row for row in safe_rows if snapshot_row_orientation(row) == "bearish"
+    ]
+    actionable_bullish = [
+        row for row in actionable_rows if snapshot_row_orientation(row) == "bullish"
+    ]
+    actionable_bearish = [
+        row for row in actionable_rows if snapshot_row_orientation(row) == "bearish"
+    ]
+    blocked_signals = [row for row in safe_rows if is_blocked_snapshot_row(row)]
+    watchlist_candidates = [row for row in safe_rows if is_watchlist_snapshot_row(row)]
+
+    return {
+        "total_signals": len(safe_rows),
+        "candidates": len(safe_rows),
+        "bullish_candidates": len(bullish_candidates),
+        "bearish_candidates": len(bearish_candidates),
+        "actionable": len(actionable_rows),
+        "actionable_bullish": len(actionable_bullish),
+        "actionable_bearish": len(actionable_bearish),
+        "blocked_signals": len(blocked_signals),
+        "watchlist_candidates": len(watchlist_candidates),
+        "bullish": len(actionable_bullish),
+        "bearish": len(actionable_bearish),
+    }
 
 
 def actionable_snapshot_rows(rows: Iterable[Any], limit: int | None = None) -> list[dict[str, Any]]:

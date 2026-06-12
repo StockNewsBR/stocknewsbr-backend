@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import worker
 from app.cache.snapshot_cache import SnapshotCache
-from app.api import routes_chart
+from app.api import market_routes, routes_chart
 from app.services import public_ai_tools_service, ranking
 from app.system import push_dispatcher
 from app.telegram import telegram_alert_engine
@@ -179,6 +179,30 @@ class SingleSnapshotSourceTests(unittest.TestCase):
         self.assertEqual(payload[0]["snapshot_id"], row["snapshot_id"])
         self.assertEqual(payload[0]["events"][0]["type"], "momentum")
 
+    def test_legacy_market_radar_excludes_blocked_score_only_rows(self):
+        actionable = {
+            **_actionable_row("PETR4", score=25.0),
+            "signal": "SHORT",
+            "trade_action": "SHORT",
+            "decision_state": "SHORT_READY",
+        }
+        blocked = {
+            **_actionable_row("BLOQ1", score=5.0),
+            "signal": "SHORT",
+            "trade_action": "SHORT",
+            "decision_ready": False,
+            "decision_state": "DO_NOT_TRADE",
+            "data_quality": "score_only",
+            "price": 0,
+            "volume": 0,
+            "blocked_reasons": ["price_missing_or_zero"],
+        }
+
+        with patch.object(market_routes, "get_snapshot_signals", return_value=[blocked, actionable]):
+            payload = market_routes.get_market_radar(current_user=SimpleNamespace(plan="premium"))
+
+        self.assertEqual([row["ticker"] for row in payload["bearish"]], ["PETR4"])
+
     def test_chart_routes_preserve_snapshot_metadata_in_overlay_signals(self):
         row = {**_actionable_row("PETR4"), "events": ["momentum"]}
         ohlc = [{"time": "2026-06-11T10:00:00+00:00", "open": 1, "high": 2, "low": 1, "close": 1.5, "volume": 1000}]
@@ -288,6 +312,48 @@ class SingleSnapshotSourceTests(unittest.TestCase):
 
         self.assertTrue(first["signals"])
         self.assertEqual(second["signals"][0]["ticker"], "PETR4")
+
+    def test_snapshot_cache_stats_count_only_actionable_bullish_bearish(self):
+        cache = SnapshotCache()
+        cache.update(
+            {
+                "signals": [
+                    _actionable_row("PETR4", score=88.0),
+                    {
+                        "ticker": "BLOCKED",
+                        "symbol": "BLOCKED",
+                        "score": 99.0,
+                        "signal": "BUY",
+                        "trade_action": "BUY",
+                        "decision_ready": False,
+                        "decision_state": "DO_NOT_TRADE",
+                        "data_quality": "score_only",
+                        "price": 0,
+                        "volume": 0,
+                        "blocked_reasons": ["price_missing_or_zero"],
+                    },
+                    {
+                        "ticker": "WATCH1",
+                        "symbol": "WATCH1",
+                        "score": 92.0,
+                        "signal": "WATCH_BUY",
+                        "trade_action": "WATCH_BUY",
+                        "decision_ready": False,
+                        "decision_state": "WATCH",
+                        "data_quality": "priced",
+                        "price": 10,
+                        "volume": 1000,
+                    },
+                ]
+            }
+        )
+
+        stats = cache.get()["stats"]
+        self.assertEqual(stats["bullish"], 1)
+        self.assertEqual(stats["actionable_bullish"], 1)
+        self.assertEqual(stats["bullish_candidates"], 3)
+        self.assertEqual(stats["blocked_signals"], 1)
+        self.assertEqual(stats["watchlist_candidates"], 1)
 
 
 if __name__ == "__main__":
