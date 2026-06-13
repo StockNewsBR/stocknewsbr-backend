@@ -117,6 +117,10 @@ Atualizado em: 2026-06-12
 - `SnapshotCache` passou a rastrear `last_good_snapshot`, `last_good_timestamp`, `last_good_signals` e metricas de escrita, preservando fallback institucional sem inventar sinais.
 - Worker registra sucesso/falha de geracao e escrita do snapshot; observabilidade, dashboard, workspace e APIs publicas consomem o status real do snapshot e bloqueiam go-live quando o cache esta vazio/degradado.
 - `/public/market/ai-tools` usa `last_good_snapshot` somente quando houver ferramentas operacionais reais e marca `using_fallback=true`; se nao houver base valida, retorna `snapshot_unavailable` sem derivar dados paralelos.
+- Missao 24F - Go-Live Consistency fechada em 2026-06-13: `go_live_status_service` virou fonte unica para `go_live_ready`, score de consistencia, cobertura de contrato e certificacao institucional.
+- Snapshot, workspace, dashboard, observabilidade, status/readiness/health e API publica de AI tools agora consomem o mesmo contrato de go-live, evitando divergencia entre `snapshot.go_live_ready`, `system_status.go_live_ready` e `observability.go_live_ready`.
+- O snapshot passou a preencher contratos institucionais em 100% das linhas elegiveis, inclusive quando ha mais de 20 sinais; listas resumidas seguem limitadas, mas cada `signal` fica autocontido.
+- `Auditor APPROVED + Operational BLOCKED` foi formalizado como bloqueio operacional valido e documentado via `operational_block_reason`, sem virar falso positivo critico de consistencia.
 
 ## Validado
 
@@ -218,6 +222,14 @@ Atualizado em: 2026-06-12
 - `npm run typecheck` em `apps\mobile`: OK.
 - `git diff --check`: sem erro; apenas avisos esperados de LF para CRLF no Windows.
 - Verificacao de `runtime/cache/snapshot.json`: nenhum `BLOCKED`, `WATCH1`, `TEST`, `FAKE` ou `MOCK` apos a suite completa.
+- `venv\Scripts\python.exe -m py_compile` com `PYTHONPYCACHEPREFIX` temporario para arquivos da Missao 24F: OK.
+- `venv\Scripts\python.exe -m unittest tests.test_mission_24f_go_live_consistency`: 6 testes OK cobrindo go-live unico, contratos 100%, bloqueio operacional documentado, metricas sincronizadas e certificacao.
+- `venv\Scripts\python.exe -m unittest tests.test_mission_24b_hardening tests.test_mission_24c_go_live_runtime tests.test_system_health tests.test_observability_institutional tests.test_single_snapshot_source`: 36 testes OK.
+- `venv\Scripts\python.exe -m unittest tests.test_market_data_loader tests.test_market_data_cache tests.test_mission_24d_symbol_sanitization`: 23 testes OK.
+- `venv\Scripts\python.exe -m unittest discover -s tests`: 355 testes OK; Yahoo Finance imprimiu avisos externos conhecidos para `ELET6.SA`.
+- `npm exec -- tsc --noEmit --incremental false` em `apps\web`: OK.
+- `npm run typecheck` em `apps\mobile`: OK.
+- Probe de snapshot com 25 linhas: `contract_coverage=100%`, `institutional_consistency_score=100`, `institutional_certified=True`, `go_live_ready=True`.
 - `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`: 113 testes OK.
 - `npm run build` em `apps/web`: build OK apos UX do grafico, tooltips e modos Guiado/Trader/Pro.
 - Browser interno em `http://127.0.0.1:3000/panel/F`: modos Guiado/Trader/Pro validados com `Leitura atual`, `Direcao operacional`, `Confirmacao necessaria`, `Invalidacao` e `Risco`.

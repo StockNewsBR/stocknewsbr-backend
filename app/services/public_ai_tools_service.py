@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.cache.snapshot_cache import get_last_good_snapshot, get_snapshot
+from app.services.go_live_status_service import build_go_live_status
 from app.services.ai_alert_history_service import (
     AI_ALERT_MAX_ROWS_PER_TOOL,
     AI_ALERT_RESET_HOUR,
@@ -74,6 +75,7 @@ def build_public_ai_tools_payload(extra_symbols: list[Any] | None = None) -> dic
     snapshot = get_snapshot()
     tools = _snapshot_tools(snapshot if isinstance(snapshot, dict) else {})
     updated_at = (snapshot.get("updated_at") or snapshot.get("generated_at")) if isinstance(snapshot, dict) else None
+    go_live = build_go_live_status(snapshot if isinstance(snapshot, dict) else {})
     if _has_operational_tools(tools):
         return {
             "reset_key": get_ai_alert_reset_key(),
@@ -83,12 +85,18 @@ def build_public_ai_tools_payload(extra_symbols: list[Any] | None = None) -> dic
             "timezone": str(AI_ALERT_TZ),
             "source": "snapshot",
             "using_fallback": False,
+            "go_live_ready": bool(go_live.get("go_live_ready")),
+            "go_live": go_live,
+            "institutional_certified": bool(go_live.get("institutional_certified")),
+            "institutional_consistency_score": go_live.get("institutional_consistency_score"),
+            "contract_coverage": go_live.get("contract_coverage", {}),
             "tools": tools,
         }
 
     last_good_snapshot = get_last_good_snapshot()
     fallback_tools = _snapshot_tools(last_good_snapshot if isinstance(last_good_snapshot, dict) else {})
     if _has_operational_tools(fallback_tools):
+        fallback_go_live = build_go_live_status(last_good_snapshot if isinstance(last_good_snapshot, dict) else {})
         return {
             "reset_key": get_ai_alert_reset_key(),
             "updated_at": (
@@ -101,6 +109,11 @@ def build_public_ai_tools_payload(extra_symbols: list[Any] | None = None) -> dic
             "timezone": str(AI_ALERT_TZ),
             "source": "last_good_snapshot",
             "using_fallback": True,
+            "go_live_ready": bool(fallback_go_live.get("go_live_ready")),
+            "go_live": fallback_go_live,
+            "institutional_certified": bool(fallback_go_live.get("institutional_certified")),
+            "institutional_consistency_score": fallback_go_live.get("institutional_consistency_score"),
+            "contract_coverage": fallback_go_live.get("contract_coverage", {}),
             "tools": fallback_tools,
         }
 
@@ -112,5 +125,10 @@ def build_public_ai_tools_payload(extra_symbols: list[Any] | None = None) -> dic
         "timezone": str(AI_ALERT_TZ),
         "source": "snapshot_unavailable",
         "using_fallback": False,
+        "go_live_ready": False,
+        "go_live": go_live,
+        "institutional_certified": False,
+        "institutional_consistency_score": go_live.get("institutional_consistency_score"),
+        "contract_coverage": go_live.get("contract_coverage", {}),
         "tools": _empty_tools(),
     }

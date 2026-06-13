@@ -1,13 +1,33 @@
 import unittest
 from unittest.mock import patch
 
+import pandas as pd
+
 from app.market import market_data_loader
+from app.services.symbol_sanitizer import clear_symbol_cooldown
 from app.system.system_metrics import provider_call_context
+
+
+class EmptyDownload:
+    empty = True
+
+
+class FakeYFinance:
+    def __init__(self):
+        self.calls = []
+
+    def download(self, *args, **kwargs):
+        self.calls.append({"args": args, "kwargs": kwargs})
+        return EmptyDownload()
 
 
 class MarketDataLoaderTests(unittest.TestCase):
     def setUp(self):
         market_data_loader._SYMBOL_FAILURES.clear()
+        with market_data_loader._PRICE_SNAPSHOT_CACHE_LOCK:
+            market_data_loader._PRICE_SNAPSHOT_CACHE.clear()
+        for symbol in ("BTCUSD", "BTC-USD", "BTCUSDT", "DOGEUSD", "DOGE-USD", "ADAUSD", "SOLUSD", "LINKUSD", "AVAXUSD", "ETHUSD"):
+            clear_symbol_cooldown(symbol)
 
     def test_cme_and_b3_futures_normalize_to_provider_symbols(self):
         self.assertEqual(market_data_loader._normalize_symbol("NQ"), "NQ=F")
@@ -24,6 +44,57 @@ class MarketDataLoaderTests(unittest.TestCase):
         self.assertEqual(market_data_loader.get_display_symbol("NQ"), "NQ")
         self.assertEqual(market_data_loader.get_display_symbol("MNO"), "MNO")
         self.assertEqual(market_data_loader.get_display_symbol("WINM26"), "WINM26")
+
+    def test_crypto_symbols_normalize_to_yahoo_provider_symbols(self):
+        expected = {
+            "BTCUSD": "BTC-USD",
+            "ETHUSD": "ETH-USD",
+            "DOGEUSD": "DOGE-USD",
+            "ADAUSD": "ADA-USD",
+            "SOLUSD": "SOL-USD",
+            "LINKUSD": "LINK-USD",
+            "AVAXUSD": "AVAX-USD",
+        }
+
+        for display_symbol, provider_symbol in expected.items():
+            with self.subTest(display_symbol=display_symbol):
+                self.assertEqual(market_data_loader._normalize_symbol(display_symbol), provider_symbol)
+                self.assertEqual(market_data_loader.get_display_symbol(display_symbol), display_symbol)
+
+        self.assertEqual(market_data_loader._normalize_symbol("BTCUSDT"), "BTC-USD")
+        self.assertEqual(market_data_loader.get_display_symbol("BTCUSDT"), "BTCUSD")
+        self.assertEqual(market_data_loader._normalize_symbol("PETR4"), "PETR4.SA")
+        self.assertEqual(market_data_loader._normalize_symbol("TSLA"), "TSLA")
+
+    def test_batch_download_sends_crypto_provider_symbol_to_yfinance(self):
+        fake_yf = FakeYFinance()
+
+        with patch.object(market_data_loader, "_get_yfinance", return_value=fake_yf), patch.object(
+            market_data_loader, "record_external_provider_call"
+        ), patch.object(market_data_loader, "record_worker_stage_duration"):
+            self.assertIsNone(market_data_loader.batch_download(["DOGEUSD"], period="1d", interval="5m"))
+
+        self.assertEqual(fake_yf.calls[0]["kwargs"]["tickers"], ["DOGE-USD"])
+        self.assertNotIn("DOGEUSD", fake_yf.calls[0]["kwargs"]["tickers"])
+
+    def test_crypto_snapshot_preserves_display_and_provider_symbols(self):
+        frame = pd.DataFrame(
+            [
+                {"Open": 0.10, "High": 0.11, "Low": 0.09, "Close": 0.10, "Volume": 1_000_000},
+                {"Open": 0.10, "High": 0.12, "Low": 0.10, "Close": 0.12, "Volume": 2_000_000},
+            ],
+            index=pd.date_range("2026-01-01", periods=2, freq="h"),
+        )
+
+        with patch.object(market_data_loader, "batch_download", return_value=frame) as download:
+            payload = market_data_loader.get_price_snapshot("DOGEUSD")
+
+        download.assert_called_once_with(["DOGE-USD"], period="5d", interval="30m")
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["provider_symbol"], "DOGE-USD")
+        self.assertEqual(payload["display_symbol"], "DOGEUSD")
+        self.assertEqual(payload["symbol"], "DOGEUSD")
+        self.assertEqual(payload["price"], 0.12)
 
     def test_cme_future_rejects_old_equity_cache_payload(self):
         self.assertFalse(

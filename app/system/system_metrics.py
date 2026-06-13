@@ -148,6 +148,14 @@ _institutional_consistency_metrics = {
     "direction_conflicts": 0,
     "priority_no_trade": 0,
     "approved_operational_blocked": 0,
+    "documented_operational_blocks": 0,
+    "missing_contracts": 0,
+    "contract_complete": 0,
+    "contract_coverage_pct": 0.0,
+    "go_live_inconsistencies": 0,
+    "promotion_violations": 0,
+    "metric_divergences": 0,
+    "consistency_score": 0.0,
     "updated_at": 0.0,
 }
 
@@ -703,6 +711,14 @@ def record_institutional_consistency_metrics(metrics: dict | None):
                 "direction_conflicts": int(safe.get("direction_conflicts", 0) or 0),
                 "priority_no_trade": int(safe.get("priority_no_trade", 0) or 0),
                 "approved_operational_blocked": int(safe.get("approved_operational_blocked", 0) or 0),
+                "documented_operational_blocks": int(safe.get("documented_operational_blocks", 0) or 0),
+                "missing_contracts": int(safe.get("missing_contracts", 0) or 0),
+                "contract_complete": int(safe.get("contract_complete", 0) or 0),
+                "contract_coverage_pct": round(float(safe.get("contract_coverage_pct", 0.0) or 0.0), 2),
+                "go_live_inconsistencies": int(safe.get("go_live_inconsistencies", 0) or 0),
+                "promotion_violations": int(safe.get("promotion_violations", 0) or 0),
+                "metric_divergences": int(safe.get("metric_divergences", 0) or 0),
+                "consistency_score": round(float(safe.get("consistency_score", 0.0) or 0.0), 2),
                 "updated_at": time.time(),
             }
         )
@@ -1007,8 +1023,20 @@ def format_prometheus_metrics() -> str:
         lines.append('telegram_alerts_total{level="%s"} %s' % (_label_value(field), int(telegram_metrics.get(field, 0))))
 
     consistency_metrics = performance.get("institutional_consistency", {})
-    for field in ("issues", "direction_conflicts", "priority_no_trade", "approved_operational_blocked"):
+    for field in (
+        "issues",
+        "direction_conflicts",
+        "priority_no_trade",
+        "approved_operational_blocked",
+        "documented_operational_blocks",
+        "missing_contracts",
+        "go_live_inconsistencies",
+        "promotion_violations",
+        "metric_divergences",
+    ):
         lines.append('institutional_consistency_total{type="%s"} %s' % (_label_value(field), int(consistency_metrics.get(field, 0))))
+    lines.append("institutional_consistency_score %s" % float(consistency_metrics.get("consistency_score", 0.0)))
+    lines.append("institutional_contract_coverage_pct %s" % float(consistency_metrics.get("contract_coverage_pct", 0.0)))
 
     for item in performance.get("provider_symbol_failures", []):
         lines.append(

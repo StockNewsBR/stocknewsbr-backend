@@ -22,6 +22,8 @@ from app.system.system_metrics import (
 )
 from app.services.symbol_sanitizer import (
     clear_symbol_cooldown,
+    crypto_display_symbol,
+    crypto_provider_symbol,
     is_permanently_blocked_symbol as is_globally_blocked_symbol,
     is_symbol_on_cooldown,
     mark_symbol_cooldown,
@@ -289,8 +291,9 @@ def _normalize_symbol(symbol: str) -> str:
     if provider_symbol and not is_globally_blocked_symbol(provider_symbol):
         return provider_symbol
 
-    if symbol in _CRYPTO_YF_SYMBOLS:
-        return _CRYPTO_YF_SYMBOLS[symbol]
+    crypto_provider = crypto_provider_symbol(symbol)
+    if crypto_provider:
+        return crypto_provider
 
     if (
         "." not in symbol
@@ -320,12 +323,16 @@ def _normalize_ticker_display(symbol: str, normalized_symbol: str) -> str:
     if original in _BDR_PROVIDER_SYMBOLS:
         return original.replace(".SA", "")
 
+    crypto_display = crypto_display_symbol(original or normalized_symbol)
+    if crypto_display and crypto_provider_symbol(original or normalized_symbol) == normalized_symbol:
+        return crypto_display
+
     if original:
         return _BDR_DISPLAY_SYMBOLS.get(original, original.replace(".SA", ""))
 
-    for display_symbol, provider_symbol in _CRYPTO_YF_SYMBOLS.items():
-        if normalized_symbol == provider_symbol:
-            return display_symbol
+    crypto_display = crypto_display_symbol(normalized_symbol)
+    if crypto_display:
+        return crypto_display
 
     return normalized_symbol.replace(".SA", "")
 

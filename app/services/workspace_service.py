@@ -19,7 +19,8 @@ from app.services.media_service import get_media_status
 from app.services.push_service import get_push_status
 from app.services.ranking import get_ranking
 from app.services.snapshot_contract import is_actionable_snapshot_row, is_blocked_snapshot_row
-from app.services.snapshot_runtime_status import evaluate_go_live_ready, evaluate_snapshot_runtime_status
+from app.services.go_live_status_service import build_go_live_status
+from app.services.snapshot_runtime_status import evaluate_snapshot_runtime_status
 from app.services.ticker_room_service import list_room_messages
 from app.services.workspace_layout_service import get_user_workspace_layout
 from app.social.posts import get_posts
@@ -340,12 +341,18 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
     go_live = (
         observability_dashboard.get("go_live")
         if isinstance(observability_dashboard.get("go_live"), dict)
-        else evaluate_go_live_ready(
-            observed_runtime,
-            worker_status=(observability_dashboard.get("operational_dashboard") or {}).get("worker_status"),
-            observability_status=observability_dashboard.get("system_status"),
+        else build_go_live_status(
+            snapshot if isinstance(snapshot, dict) and snapshot.get("signals") else snapshot_runtime_input,
+            institutional_metrics=metrics.get("institutional_metrics", {}) if isinstance(metrics, dict) else {},
         )
     )
+    market_snapshot["go_live_ready"] = bool(go_live.get("go_live_ready"))
+    market_snapshot["go_live"] = go_live
+    market_snapshot["institutional_consistency_score"] = go_live.get("institutional_consistency_score")
+    market_snapshot["contract_coverage"] = go_live.get("contract_coverage", {})
+    market_snapshot["institutional_certified"] = bool(go_live.get("institutional_certified"))
+    market_snapshot["certification_timestamp"] = go_live.get("certification_timestamp")
+    market_snapshot["certification_reasons"] = list(go_live.get("certification_reasons") or [])
     telegram_alert_history = get_telegram_alert_history(limit=30)
     telegram_alerts = {
         "health": get_telegram_health(),
@@ -405,6 +412,11 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "fallback_active": bool(snapshot_runtime.get("fallback_active")),
         "go_live_ready": bool(go_live.get("go_live_ready")),
         "go_live": go_live,
+        "institutional_consistency_score": go_live.get("institutional_consistency_score"),
+        "contract_coverage": go_live.get("contract_coverage", {}),
+        "institutional_certified": bool(go_live.get("institutional_certified")),
+        "certification_timestamp": go_live.get("certification_timestamp"),
+        "certification_reasons": list(go_live.get("certification_reasons") or []),
         "featured_posts": featured_posts,
         "ticker_room_preview": {
             "symbol": pinned_ticker,
@@ -437,6 +449,9 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
             "last_good_signals": snapshot_info.get("last_good_signals", 0),
             "last_good_timestamp": snapshot_info.get("last_good_timestamp"),
             "go_live_ready": bool(go_live.get("go_live_ready")),
+            "institutional_consistency_score": go_live.get("institutional_consistency_score"),
+            "contract_coverage": go_live.get("contract_coverage", {}),
+            "institutional_certified": bool(go_live.get("institutional_certified")),
             "snapshot_actionable": data_status.get("actionable", 0),
             "snapshot_priced": data_status.get("priced", 0),
             "snapshot_score_only": data_status.get("score_only", 0),

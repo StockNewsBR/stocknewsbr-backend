@@ -49,6 +49,7 @@ from app.services.snapshot_contract import is_actionable_snapshot_row as _contra
 from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score
 from app.services.snapshot_contract import summarize_snapshot_rows
 from app.services.institutional_consistency_audit import audit_institutional_consistency
+from app.services.go_live_status_service import attach_go_live_status
 from app.services.snapshot_runtime_status import attach_snapshot_runtime_status
 from app.services.signal_history import store_signals
 from app.system.system_metrics import (
@@ -194,6 +195,30 @@ def _apply_data_quality(row):
     item["fallback_used"] = bool(item.get("fallback_used"))
     item["provider_error"] = item.get("provider_error")
     item["source"] = item.get("source") or "snapshot"
+    return item
+
+
+def _ensure_operational_block_reason(row):
+    item = dict(row)
+    if str(item.get("operational_status") or "").upper().strip() != "BLOCKED":
+        return item
+    reason = item.get("operational_block_reason")
+    if isinstance(reason, str) and reason.strip():
+        return item
+    blocks = item.get("operational_blocks")
+    if isinstance(blocks, str) and blocks.strip():
+        item["operational_block_reason"] = blocks.strip()
+        return item
+    if isinstance(blocks, (list, tuple, set)):
+        joined = "; ".join(str(value).strip() for value in blocks if str(value or "").strip())
+        if joined:
+            item["operational_block_reason"] = joined
+            return item
+    summary = item.get("operational_summary")
+    if isinstance(summary, str) and summary.strip():
+        item["operational_block_reason"] = summary.strip()
+        return item
+    item["operational_block_reason"] = "Auditor aprovou a consistencia dos dados, mas as regras operacionais bloquearam a execucao."
     return item
 
 
@@ -446,9 +471,10 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
     audits = audit_index(normalized)
     ai_tools = apply_audit_to_ai_tools(ai_tools, audits)
     post_audit_pulse = build_market_pulse(normalized)
+    contract_limit = max(AI_OUTPUT_LIMIT, len(normalized))
     master_score_rows = run_master_score(
         normalized,
-        limit=AI_OUTPUT_LIMIT,
+        limit=contract_limit,
         ai_tools=ai_tools,
         market_pulse=post_audit_pulse,
     )
@@ -457,7 +483,7 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
     strategic_panel_rows = build_strategic_panels(
         master_score_rows,
         ai_tools=ai_tools,
-        limit=AI_OUTPUT_LIMIT,
+        limit=contract_limit,
     )
     master_score_rows = apply_strategic_panels_by_ticker(master_score_rows, strategic_panel_rows)
     normalized = apply_strategic_panels_by_ticker(normalized, strategic_panel_rows)
@@ -481,6 +507,7 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         ai_tools=ai_tools,
         market_pulse=final_market_pulse,
     )
+    normalized = [_ensure_operational_block_reason(row) for row in normalized]
     master_score_rows = apply_operational_rules_by_ticker(master_score_rows, normalized)
     strategic_panel_rows = apply_operational_rules_by_ticker(strategic_panel_rows, normalized)
     normalized, conviction_metrics = enrich_institutional_conviction_rows(
@@ -698,7 +725,8 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             "institutional_consistency_issues": consistency_audit["issue_count"],
         },
     }
-    return attach_snapshot_runtime_status(payload)
+    payload = attach_snapshot_runtime_status(payload)
+    return attach_go_live_status(payload)
 
 
 def _get_last_good_signals():

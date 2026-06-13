@@ -5,6 +5,7 @@ from typing import Iterable, Optional, Tuple
 
 from app.config import SYMBOLS
 from app.services.symbol_sanitizer import (
+    crypto_provider_symbol,
     is_permanently_blocked_symbol,
     is_symbol_on_cooldown,
     mark_symbol_cooldown,
@@ -47,14 +48,20 @@ def _normalize_tickers(tickers: Optional[Iterable[str]]) -> Tuple[str, ...]:
         if not normalized_ticker:
             mark_symbol_cooldown(ticker, "invalid_symbol")
             continue
-        if is_permanently_blocked_symbol(normalized_ticker) or is_symbol_on_cooldown(normalized_ticker):
+        provider_ticker = crypto_provider_symbol(normalized_ticker) or normalized_ticker
+        if (
+            is_permanently_blocked_symbol(normalized_ticker)
+            or is_permanently_blocked_symbol(provider_ticker)
+            or is_symbol_on_cooldown(normalized_ticker)
+            or is_symbol_on_cooldown(provider_ticker)
+        ):
             mark_symbol_cooldown(normalized_ticker, "blocked_symbol")
             continue
-        if normalized_ticker in seen:
+        if provider_ticker in seen:
             continue
 
-        seen.add(normalized_ticker)
-        normalized.append(normalized_ticker)
+        seen.add(provider_ticker)
+        normalized.append(provider_ticker)
 
     return tuple(normalized)
 

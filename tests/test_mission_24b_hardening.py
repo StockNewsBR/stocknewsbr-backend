@@ -277,7 +277,9 @@ class Mission24BHardeningTests(unittest.TestCase):
 
         self.assertIn(ISSUE_DIRECTION_CONFLICT, issue_types)
         self.assertIn(ISSUE_PRIORITY_NO_TRADE, issue_types)
-        self.assertIn(ISSUE_APPROVED_OPERATIONAL_BLOCKED, issue_types)
+        self.assertNotIn(ISSUE_APPROVED_OPERATIONAL_BLOCKED, issue_types)
+        self.assertEqual(audit["metrics"]["documented_operational_blocks"], 1)
+        self.assertEqual(audit["documented_operational_blocks"][0]["type"], ISSUE_APPROVED_OPERATIONAL_BLOCKED)
         self.assertEqual(conflicting, original)
 
     def test_real_snapshot_file_has_no_synthetic_test_symbols(self):

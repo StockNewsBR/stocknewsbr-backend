@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 from app.services.snapshot_contract import summarize_snapshot_rows
+from app.services.go_live_status_service import build_go_live_status
 from app.services.snapshot_runtime_status import evaluate_snapshot_runtime_status
 from app.system.system_metrics import record_cache_lookup, record_snapshot_write_metric, update_cache_timestamp
 
@@ -434,11 +435,7 @@ class SnapshotCache:
             "last_good_timestamp": last_good_timestamp,
         }
         runtime_status = evaluate_snapshot_runtime_status(runtime_snapshot)
-        snapshot_go_live_ready = (
-            runtime_status["status"] == "HEALTHY"
-            and int(runtime_status.get("signals", 0) or 0) > 0
-            and not bool(runtime_status.get("fallback_active"))
-        )
+        go_live = build_go_live_status(runtime_snapshot)
         info = {
             "signals": signal_count,
             "timestamp": timestamp,
@@ -450,7 +447,13 @@ class SnapshotCache:
             "snapshot_runtime_status": runtime_status["status"],
             "snapshot_runtime": runtime_status,
             "fallback_active": bool(runtime_status.get("fallback_active")),
-            "go_live_ready": snapshot_go_live_ready,
+            "go_live_ready": bool(go_live.get("go_live_ready")),
+            "go_live": go_live,
+            "institutional_consistency_score": go_live.get("institutional_consistency_score"),
+            "contract_coverage": go_live.get("contract_coverage", {}),
+            "institutional_certified": bool(go_live.get("institutional_certified")),
+            "certification_timestamp": go_live.get("certification_timestamp"),
+            "certification_reasons": list(go_live.get("certification_reasons") or []),
             "last_good_signals": last_good_signals,
             "last_good_timestamp": last_good_timestamp,
             "last_good_age_seconds": last_good_age_seconds,

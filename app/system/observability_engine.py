@@ -11,9 +11,9 @@ from typing import Dict, Any, Iterable
 from app.services.snapshot_runtime_status import (
     SNAPSHOT_RUNTIME_CRITICAL,
     SNAPSHOT_RUNTIME_DEGRADED,
-    evaluate_go_live_ready,
     evaluate_snapshot_runtime_status,
 )
+from app.services.go_live_status_service import build_go_live_status
 
 try:
     import psutil
@@ -237,11 +237,8 @@ def build_observability_dashboard(
     elif provider_health == "DEGRADED" or snapshot_health["status"] == SNAPSHOT_RUNTIME_DEGRADED or str(ai_worker.get("status") or "").lower() == "warning":
         system_status_value = "DEGRADED"
 
-    go_live = evaluate_go_live_ready(
-        snapshot_runtime,
-        worker_status=ai_worker.get("status"),
-        observability_status=system_status_value,
-    )
+    go_live = build_go_live_status(snapshot, institutional_metrics=institutional_metrics)
+    contract_coverage = go_live.get("contract_coverage", {})
 
     return {
         "system_status": system_status_value,
@@ -256,9 +253,26 @@ def build_observability_dashboard(
         "fallback_active": bool(snapshot_runtime.get("fallback_active")),
         "go_live_ready": bool(go_live.get("go_live_ready")),
         "go_live": go_live,
+        "institutional_consistency_score": go_live.get("institutional_consistency_score"),
+        "contract_coverage": contract_coverage,
+        "institutional_certified": bool(go_live.get("institutional_certified")),
+        "certification_timestamp": go_live.get("certification_timestamp"),
+        "certification_reasons": list(go_live.get("certification_reasons") or []),
         "operational_dashboard": {
             "snapshot_status": snapshot_runtime["status"],
             "worker_status": ai_worker.get("status", "idle"),
+            "go_live_ready": bool(go_live.get("go_live_ready")),
+            "consistency_score": go_live.get("institutional_consistency_score"),
+            "consistency_issues": len(go_live.get("consistency_issues") or []),
+            "contract_coverage": contract_coverage,
+            "snapshot_coverage": contract_coverage,
+            "operational_blocks": int(
+                (institutional_metrics.get("operational_rules", {}) if isinstance(institutional_metrics.get("operational_rules"), dict) else {}).get("blocked", 0)
+                or (snapshot.get("data_status", {}) if isinstance(snapshot.get("data_status"), dict) else {}).get("operational_blocked", 0)
+                or 0
+            ),
+            "institutional_certified": bool(go_live.get("institutional_certified")),
+            "certification_reasons": list(go_live.get("certification_reasons") or []),
             "last_good_snapshot": snapshot.get("last_good_snapshot")
             if isinstance(snapshot.get("last_good_snapshot"), dict)
             else {
@@ -269,7 +283,6 @@ def build_observability_dashboard(
             "last_good_timestamp": snapshot.get("last_good_timestamp"),
             "signals_generated": snapshot_runtime.get("signals", 0),
             "fallback_active": bool(snapshot_runtime.get("fallback_active")),
-            "go_live_ready": bool(go_live.get("go_live_ready")),
         },
         "auditor_health": {
             "status": str(ai_tabs.get("overall_status") or "IDLE").upper(),

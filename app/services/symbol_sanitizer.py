@@ -14,6 +14,7 @@ _BLOCKED_CHARS = ("&", "?", "/", "\\")
 _B3_RE = re.compile(r"^[A-Z]{4,5}(3|4|5|6|11|34)$")
 _B3_FUTURE_RE = re.compile(r"^(WIN|WDO)[FGHJKMNQUVXZ]\d{2}$")
 _CRYPTO_RE = re.compile(r"^[A-Z]{2,8}(USD|USDT)$")
+_CRYPTO_PROVIDER_RE = re.compile(r"^[A-Z0-9]{2,8}-USD$")
 _US_RE = re.compile(r"^[A-Z][A-Z0-9.]{0,9}$")
 _CME_PROVIDER_RE = re.compile(r"^[A-Z]{1,4}=F$")
 
@@ -84,6 +85,38 @@ def is_permanently_blocked_symbol(value: Any) -> bool:
     raw = _raw(value)
     compact = raw[:-3] if raw.endswith(".SA") else raw
     return raw in _PERMANENT_BLOCKLIST or compact in _PERMANENT_BLOCKLIST
+
+
+def _crypto_base(value: Any) -> str | None:
+    raw = _raw(value)
+    if _CRYPTO_PROVIDER_RE.match(raw):
+        return raw[:-4]
+    compact = raw.replace("-USD", "USD")
+    if compact.endswith("USDT"):
+        return compact[:-4]
+    if compact.endswith("USD"):
+        return compact[:-3]
+    return None
+
+
+def crypto_provider_symbol(value: Any) -> str | None:
+    sanitized = sanitize_market_symbol(value, allow_provider_symbols=True)
+    if not sanitized:
+        return None
+    base = _crypto_base(sanitized)
+    if not base or not re.fullmatch(r"[A-Z0-9]{2,8}", base):
+        return None
+    return f"{base}-USD"
+
+
+def crypto_display_symbol(value: Any) -> str | None:
+    sanitized = sanitize_market_symbol(value, allow_provider_symbols=True)
+    if not sanitized:
+        return None
+    base = _crypto_base(sanitized)
+    if not base or not re.fullmatch(r"[A-Z0-9]{2,8}", base):
+        return None
+    return f"{base}USD"
 
 
 def _looks_like_query(value: str) -> bool:

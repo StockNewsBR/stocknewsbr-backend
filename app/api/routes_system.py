@@ -5,13 +5,14 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
 
-from app.cache.snapshot_cache import get_snapshot_info
+from app.cache.snapshot_cache import get_snapshot, get_snapshot_info
 from app.dependencies import require_internal_token
 from app.services.media_service import get_media_status
 from app.services.ranking import get_ranking
 from app.services.poll_service import get_poll_store_summary
 from app.services.push_service import get_push_status
-from app.services.snapshot_runtime_status import evaluate_go_live_ready, evaluate_snapshot_runtime_status
+from app.services.go_live_status_service import build_go_live_status
+from app.services.snapshot_runtime_status import evaluate_snapshot_runtime_status
 from app.services.storage_service import get_storage_status
 from app.social.moderation import get_moderation_summary
 from app.system.ai_tab_audit import get_ai_tab_audit_history, get_ai_tab_audit_report, run_ai_tab_audit
@@ -90,8 +91,9 @@ def _derive_health_status(
 def system_status():
     metrics = get_metrics_snapshot()
     snapshot_info = get_snapshot_info()
+    snapshot_payload = get_snapshot()
     snapshot_runtime = snapshot_info.get("snapshot_runtime") if isinstance(snapshot_info.get("snapshot_runtime"), dict) else evaluate_snapshot_runtime_status(snapshot_info)
-    go_live = evaluate_go_live_ready(snapshot_runtime, worker_status="running" if metrics.get("workers", 0) else "idle", observability_status=snapshot_runtime.get("status"))
+    go_live = build_go_live_status(snapshot_payload if isinstance(snapshot_payload, dict) and snapshot_payload.get("signals") else snapshot_info, institutional_metrics=metrics.get("institutional_metrics", {}))
 
     return {
         "engine_cycles": metrics["engine_cycles"],
@@ -125,6 +127,11 @@ def system_status():
         "fallback_active": bool(snapshot_runtime.get("fallback_active")),
         "go_live_ready": bool(go_live.get("go_live_ready")),
         "go_live": go_live,
+        "institutional_consistency_score": go_live.get("institutional_consistency_score"),
+        "contract_coverage": go_live.get("contract_coverage", {}),
+        "institutional_certified": bool(go_live.get("institutional_certified")),
+        "certification_timestamp": go_live.get("certification_timestamp"),
+        "certification_reasons": list(go_live.get("certification_reasons") or []),
         "storage": get_storage_status(),
         "media": get_media_status(),
         "push": get_push_status(),
@@ -158,11 +165,12 @@ def system_metrics_text():
 def system_readiness():
     status_metrics = get_metrics_snapshot()
     snapshot_info = get_snapshot_info()
+    snapshot_payload = get_snapshot()
     snapshot_runtime = snapshot_info.get("snapshot_runtime") if isinstance(snapshot_info.get("snapshot_runtime"), dict) else evaluate_snapshot_runtime_status(snapshot_info)
     storage = get_storage_status()
     media = get_media_status()
     push = get_push_status()
-    go_live = evaluate_go_live_ready(snapshot_runtime, worker_status="running" if status_metrics.get("workers", 0) else "idle", observability_status=snapshot_runtime.get("status"))
+    go_live = build_go_live_status(snapshot_payload if isinstance(snapshot_payload, dict) and snapshot_payload.get("signals") else snapshot_info, institutional_metrics=status_metrics.get("institutional_metrics", {}))
 
     return {
         "api_ready": True,
@@ -176,6 +184,11 @@ def system_readiness():
         "snapshot_runtime": snapshot_runtime,
         "fallback_active": bool(snapshot_runtime.get("fallback_active")),
         "go_live_ready": bool(go_live.get("go_live_ready")),
+        "go_live": go_live,
+        "institutional_consistency_score": go_live.get("institutional_consistency_score"),
+        "contract_coverage": go_live.get("contract_coverage", {}),
+        "institutional_certified": bool(go_live.get("institutional_certified")),
+        "certification_reasons": list(go_live.get("certification_reasons") or []),
         "moderation": get_moderation_summary(),
     }
 
@@ -302,15 +315,20 @@ def system_health():
     ai_worker = get_ai_worker_report()
     ai_tabs = get_ai_tab_audit_report()
     snapshot = get_snapshot_info()
+    snapshot_payload = get_snapshot()
     polls = get_poll_store_summary()
     status = _derive_health_status(snapshot, ai_worker, ai_tabs, polls)
     snapshot_runtime = snapshot.get("snapshot_runtime") if isinstance(snapshot.get("snapshot_runtime"), dict) else evaluate_snapshot_runtime_status(snapshot)
-    go_live = evaluate_go_live_ready(snapshot_runtime, worker_status=ai_worker.get("status"), observability_status=status.upper())
+    go_live = build_go_live_status(snapshot_payload if isinstance(snapshot_payload, dict) and snapshot_payload.get("signals") else snapshot, institutional_metrics=get_metrics_snapshot().get("institutional_metrics", {}))
 
     return {
         "status": status,
         "go_live_ready": bool(go_live.get("go_live_ready")),
         "go_live": go_live,
+        "institutional_consistency_score": go_live.get("institutional_consistency_score"),
+        "contract_coverage": go_live.get("contract_coverage", {}),
+        "institutional_certified": bool(go_live.get("institutional_certified")),
+        "certification_reasons": list(go_live.get("certification_reasons") or []),
         "snapshot": {
             "signals": snapshot.get("signals", 0),
             "timestamp": snapshot.get("timestamp"),
