@@ -6,11 +6,15 @@ from typing import Any
 
 from app.cache.snapshot_cache import get_last_good_snapshot_ticker, get_snapshot_ticker
 from app.market.market_data_loader import get_cached_price_snapshots, get_display_symbol
+from app.services.symbol_sanitizer import mark_symbol_cooldown, sanitize_market_symbol
 from app.system.system_metrics import record_cache_access
 
 
 def _normalize_symbol(symbol: str | None) -> str:
-    return str(symbol or "").upper().strip()
+    sanitized = sanitize_market_symbol(symbol, allow_provider_symbols=True)
+    if not sanitized and symbol:
+        mark_symbol_cooldown(symbol, "invalid_symbol")
+    return sanitized or ""
 
 
 _CME_FUTURES_PROVIDER_SYMBOLS = {

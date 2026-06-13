@@ -4,6 +4,12 @@ import time
 from typing import Iterable, Optional, Tuple
 
 from app.config import SYMBOLS
+from app.services.symbol_sanitizer import (
+    is_permanently_blocked_symbol,
+    is_symbol_on_cooldown,
+    mark_symbol_cooldown,
+    sanitize_market_symbol,
+)
 from app.system.system_metrics import current_provider_call_source, record_external_provider_call, record_worker_stage_duration
 
 logger = logging.getLogger("stocknewsbr.market_cache")
@@ -37,11 +43,18 @@ def _normalize_tickers(tickers: Optional[Iterable[str]]) -> Tuple[str, ...]:
     seen = set()
 
     for ticker in tickers:
-        if not ticker or ticker in seen:
+        normalized_ticker = sanitize_market_symbol(ticker, allow_provider_symbols=True)
+        if not normalized_ticker:
+            mark_symbol_cooldown(ticker, "invalid_symbol")
+            continue
+        if is_permanently_blocked_symbol(normalized_ticker) or is_symbol_on_cooldown(normalized_ticker):
+            mark_symbol_cooldown(normalized_ticker, "blocked_symbol")
+            continue
+        if normalized_ticker in seen:
             continue
 
-        seen.add(ticker)
-        normalized.append(str(ticker).upper())
+        seen.add(normalized_ticker)
+        normalized.append(normalized_ticker)
 
     return tuple(normalized)
 

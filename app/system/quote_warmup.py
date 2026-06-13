@@ -9,6 +9,11 @@ from typing import Iterable
 
 from app.market.market_data_loader import get_chart_data, get_price_snapshots
 from app.market.universe_engine_v3 import B3_UNIVERSE, BDR_UNIVERSE, CRYPTO_UNIVERSE, ETF_UNIVERSE, US_UNIVERSE
+from app.services.symbol_sanitizer import (
+    is_symbol_on_cooldown,
+    mark_symbol_cooldown,
+    sanitize_market_symbol,
+)
 from app.system.system_metrics import provider_call_context, record_worker_stage_duration
 
 logger = logging.getLogger("stocknewsbr.quote_warmup")
@@ -111,7 +116,10 @@ _PUBLIC_CHART_PRIORITY = [
 
 
 def _clean_symbol(symbol: str) -> str:
-    return str(symbol or "").strip().upper().replace(".SA", "")
+    sanitized = sanitize_market_symbol(symbol)
+    if not sanitized and symbol:
+        mark_symbol_cooldown(symbol, "invalid_symbol")
+    return sanitized or ""
 
 
 def _dedupe(symbols: Iterable[str]) -> list[str]:
@@ -131,13 +139,16 @@ def _quote_cooldown_key(symbol: str) -> str:
 
 
 def _chart_cooldown_key(symbol: str, interval: str) -> str:
-    return f"{_clean_symbol(symbol)}:{str(interval or '1D').strip().upper()}"
+    ticker = _clean_symbol(symbol)
+    return f"{ticker}:{str(interval or '1D').strip().upper()}" if ticker else ""
 
 
 def _is_quote_on_cooldown(symbol: str, now: float | None = None) -> bool:
     key = _quote_cooldown_key(symbol)
     if not key:
         return False
+    if is_symbol_on_cooldown(key, now=now):
+        return True
     current_time = now or time.time()
     with _lock:
         cooldown_until = float(_quote_cooldowns.get(key) or 0.0)
@@ -156,6 +167,8 @@ def _is_chart_on_cooldown(symbol: str, interval: str, now: float | None = None) 
     key = _chart_cooldown_key(symbol, interval)
     if not key:
         return False
+    if is_symbol_on_cooldown(symbol, now=now):
+        return True
     current_time = now or time.time()
     with _lock:
         cooldown_until = float(_chart_cooldowns.get(key) or 0.0)

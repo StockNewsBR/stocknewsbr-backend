@@ -5,6 +5,8 @@
 import os
 import logging
 
+from app.services.symbol_sanitizer import sanitize_market_symbol
+
 logger = logging.getLogger("stocknewsbr.config")
 
 # =====================================================
@@ -75,7 +77,13 @@ _SYMBOL_EXCLUSIONS = {
     "MATIC-USD",
 }
 
-SYMBOLS = [symbol for symbol in BR_SYMBOLS + BDR_SYMBOLS if symbol not in _SYMBOL_EXCLUSIONS]
+SYMBOLS = [
+    sanitized
+    for symbol in BR_SYMBOLS + BDR_SYMBOLS
+    if symbol not in _SYMBOL_EXCLUSIONS
+    for sanitized in [sanitize_market_symbol(symbol, allow_provider_symbols=True)]
+    if sanitized
+]
 
 TOTAL_SYMBOLS = len(SYMBOLS)
 

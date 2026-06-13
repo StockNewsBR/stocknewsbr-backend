@@ -133,6 +133,11 @@ def attach_snapshot_runtime_status(payload: Dict[str, Any]) -> Dict[str, Any]:
     output["snapshot_runtime_status"] = runtime["status"]
     output["snapshot_runtime"] = runtime
     output["fallback_active"] = bool(runtime.get("fallback_active"))
+    output["go_live_ready"] = (
+        runtime["status"] == SNAPSHOT_RUNTIME_HEALTHY
+        and int(runtime.get("signals", 0) or 0) > 0
+        and not bool(runtime.get("fallback_active"))
+    )
     return output
 
 

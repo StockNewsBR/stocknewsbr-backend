@@ -10,6 +10,7 @@ from app.market.market_data_loader import (
     get_cached_chart_data,
     get_cached_price_snapshots,
 )
+from app.services.symbol_sanitizer import mark_symbol_cooldown, sanitize_market_symbol
 from app.system.system_metrics import record_cache_access
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -50,7 +51,11 @@ def _fresh_enough(entry: dict, allow_stale: bool, max_age_seconds: int) -> bool:
 
 
 def _symbol_aliases(symbol: str) -> list[str]:
-    raw = str(symbol or "").upper().strip()
+    raw = sanitize_market_symbol(symbol, allow_provider_symbols=True) or ""
+    if not raw:
+        if symbol:
+            mark_symbol_cooldown(symbol, "invalid_symbol")
+        return []
     compact = raw.replace(".SA", "").replace("-", "").replace("/", "")
     aliases = [raw, compact]
     if compact and compact != raw:

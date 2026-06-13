@@ -6,6 +6,8 @@
 import logging
 from typing import Optional, Dict
 
+from app.services.symbol_sanitizer import sanitize_market_symbol
+
 logger = logging.getLogger("stocknewsbr.market_symbols")
 
 
@@ -23,7 +25,7 @@ def normalize_symbol(symbol) -> Optional[str]:
         if not symbol:
             return None
 
-        sym = str(symbol).upper().strip()
+        sym = sanitize_market_symbol(symbol, allow_provider_symbols=True)
 
         if not sym:
             return None

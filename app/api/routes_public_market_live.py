@@ -18,6 +18,7 @@ from app.services.public_market_data_service import (
 )
 from app.services.public_news_service import build_public_news_payload
 from app.services.quote_service import classify_quote_payload, is_usable_quote_payload
+from app.services.symbol_sanitizer import mark_symbol_cooldown, sanitize_market_symbol
 from app.system.system_metrics import record_cache_access
 
 
@@ -51,7 +52,10 @@ def _is_b3_mini_future_symbol(symbol: str) -> bool:
 
 
 def _normalize_public_symbol(symbol: str) -> str:
-    return str(symbol or "").upper().strip()
+    sanitized = sanitize_market_symbol(symbol, allow_provider_symbols=True)
+    if not sanitized and symbol:
+        mark_symbol_cooldown(symbol, "invalid_symbol")
+    return sanitized or ""
 
 
 def _dedupe_public_symbols(symbols) -> list[str]:

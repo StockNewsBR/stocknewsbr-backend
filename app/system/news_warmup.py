@@ -8,6 +8,11 @@ from threading import RLock, Thread
 from typing import Iterable
 
 from app.services.news_service import get_cached_symbol_news, get_symbol_news
+from app.services.symbol_sanitizer import (
+    is_symbol_on_cooldown,
+    mark_symbol_cooldown,
+    sanitize_market_symbol,
+)
 from app.system.system_metrics import provider_call_context, record_worker_stage_duration
 
 logger = logging.getLogger("stocknewsbr.news_warmup")
@@ -60,7 +65,10 @@ _NEWS_PRIORITY = [
 
 
 def _clean_symbol(symbol: str) -> str:
-    return str(symbol or "").strip().upper().replace(".SA", "")
+    sanitized = sanitize_market_symbol(symbol)
+    if not sanitized and symbol:
+        mark_symbol_cooldown(symbol, "invalid_symbol")
+    return sanitized or ""
 
 
 def _dedupe(symbols: Iterable[str]) -> list[str]:
@@ -79,6 +87,8 @@ def _is_on_cooldown(symbol: str, now: float | None = None) -> bool:
     ticker = _clean_symbol(symbol)
     if not ticker:
         return False
+    if is_symbol_on_cooldown(ticker, now=now):
+        return True
     current_time = now or time.time()
     with _lock:
         cooldown_until = float(_symbol_cooldowns.get(ticker) or 0.0)

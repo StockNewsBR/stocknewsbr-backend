@@ -434,6 +434,11 @@ class SnapshotCache:
             "last_good_timestamp": last_good_timestamp,
         }
         runtime_status = evaluate_snapshot_runtime_status(runtime_snapshot)
+        snapshot_go_live_ready = (
+            runtime_status["status"] == "HEALTHY"
+            and int(runtime_status.get("signals", 0) or 0) > 0
+            and not bool(runtime_status.get("fallback_active"))
+        )
         info = {
             "signals": signal_count,
             "timestamp": timestamp,
@@ -445,6 +450,7 @@ class SnapshotCache:
             "snapshot_runtime_status": runtime_status["status"],
             "snapshot_runtime": runtime_status,
             "fallback_active": bool(runtime_status.get("fallback_active")),
+            "go_live_ready": snapshot_go_live_ready,
             "last_good_signals": last_good_signals,
             "last_good_timestamp": last_good_timestamp,
             "last_good_age_seconds": last_good_age_seconds,

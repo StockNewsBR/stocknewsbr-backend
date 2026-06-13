@@ -20,6 +20,13 @@ from app.system.system_metrics import (
     record_external_provider_call,
     record_worker_stage_duration,
 )
+from app.services.symbol_sanitizer import (
+    clear_symbol_cooldown,
+    is_permanently_blocked_symbol as is_globally_blocked_symbol,
+    is_symbol_on_cooldown,
+    mark_symbol_cooldown,
+    sanitize_market_symbol,
+)
 
 logger = logging.getLogger("stocknewsbr.market_data_loader")
 _YFINANCE = None
@@ -51,10 +58,16 @@ _CHART_CACHE_LOADED = False
 _CHART_CACHE_MTIME = 0.0
 _SYMBOL_FAILURE_COOLDOWN_SECONDS = 180
 _PERMANENT_PROVIDER_BLOCKLIST = {
+    "AXIA6",
+    "AXIA6.SA",
+    "AZUL4",
+    "AZUL4.SA",
     "BRFS3",
     "BRFS3.SA",
     "ENBR3",
     "ENBR3.SA",
+    "GOLL4",
+    "GOLL4.SA",
     "JBSS3",
     "JBSS3.SA",
 }
@@ -261,7 +274,7 @@ _BDR_DISPLAY_SYMBOLS = {
 
 
 def _normalize_symbol(symbol: str) -> str:
-    symbol = (symbol or "").upper().strip()
+    symbol = sanitize_market_symbol(symbol, allow_provider_symbols=True) or ""
 
     if not symbol:
         return symbol
@@ -272,8 +285,9 @@ def _normalize_symbol(symbol: str) -> str:
     if _B3_MINI_FUTURE_RE.match(symbol):
         return f"{symbol}.SA"
 
-    if symbol in _BDR_PROVIDER_SYMBOLS:
-        return _BDR_PROVIDER_SYMBOLS[symbol]
+    provider_symbol = _BDR_PROVIDER_SYMBOLS.get(symbol)
+    if provider_symbol and not is_globally_blocked_symbol(provider_symbol):
+        return provider_symbol
 
     if symbol in _CRYPTO_YF_SYMBOLS:
         return _CRYPTO_YF_SYMBOLS[symbol]
@@ -289,7 +303,7 @@ def _normalize_symbol(symbol: str) -> str:
 
 
 def _normalize_ticker_display(symbol: str, normalized_symbol: str) -> str:
-    original = (symbol or "").upper().strip()
+    original = sanitize_market_symbol(symbol, allow_provider_symbols=True) or ""
 
     if original in _CME_FUTURES_PROVIDER_SYMBOLS:
         return original
@@ -328,7 +342,9 @@ def _is_bdr_symbol(symbol: str) -> bool:
 
 
 def _is_permanently_blocked_symbol(symbol: str) -> bool:
-    original = (symbol or "").upper().strip()
+    if is_globally_blocked_symbol(symbol):
+        return True
+    original = sanitize_market_symbol(symbol, allow_provider_symbols=True) or ""
     normalized = _normalize_symbol(original)
     display = _normalize_ticker_display(original, normalized)
     return original in _PERMANENT_PROVIDER_BLOCKLIST or normalized in _PERMANENT_PROVIDER_BLOCKLIST or display in _PERMANENT_PROVIDER_BLOCKLIST
@@ -397,6 +413,7 @@ def _failure_key(symbol: str, provider: str = "yfinance") -> str:
 
 
 def _mark_symbol_failure(symbol: str, provider: str = "yfinance", error: str | None = None):
+    mark_symbol_cooldown(symbol, reason=error or "provider_failure", seconds=_SYMBOL_FAILURE_COOLDOWN_SECONDS)
     key = _cache_key(symbol)
     if key:
         with _PRICE_SNAPSHOT_CACHE_LOCK:
@@ -417,6 +434,7 @@ def _mark_symbol_failure(symbol: str, provider: str = "yfinance", error: str | N
 
 
 def _clear_symbol_failure(symbol: str, provider: str = "yfinance"):
+    clear_symbol_cooldown(symbol)
     key = _cache_key(symbol)
     if key:
         with _PRICE_SNAPSHOT_CACHE_LOCK:
@@ -424,6 +442,8 @@ def _clear_symbol_failure(symbol: str, provider: str = "yfinance"):
 
 
 def _is_symbol_cooling_down(symbol: str, provider: str = "yfinance") -> bool:
+    if is_symbol_on_cooldown(symbol):
+        return True
     key = _cache_key(symbol)
     if not key:
         return False
@@ -604,18 +624,24 @@ def _persist_chart_cache():
 
 
 def _chart_cache_key(symbol: str, interval: str) -> str:
-    return f"{_cache_key(symbol)}:{str(interval or '1D').upper()}"
+    key = _cache_key(symbol)
+    return f"{key}:{str(interval or '1D').upper()}" if key else ""
 
 
 def get_cached_chart_data(symbol: str, interval: str = "1D", allow_stale: bool = False):
     start = time.perf_counter()
+    cache_key = _chart_cache_key(symbol, interval)
+    if not cache_key:
+        mark_symbol_cooldown(symbol, reason="invalid_symbol")
+        record_cache_lookup("chart", time.perf_counter() - start, len(_CHART_DATA_CACHE))
+        return None
     _load_chart_cache_once()
     with _PRICE_SNAPSHOT_CACHE_LOCK:
-        cached = _CHART_DATA_CACHE.get(_chart_cache_key(symbol, interval))
+        cached = _CHART_DATA_CACHE.get(cache_key)
     if not cached:
         _load_chart_cache_once(force=True)
         with _PRICE_SNAPSHOT_CACHE_LOCK:
-            cached = _CHART_DATA_CACHE.get(_chart_cache_key(symbol, interval))
+            cached = _CHART_DATA_CACHE.get(cache_key)
     if not cached:
         record_cache_lookup("chart", time.perf_counter() - start, len(_CHART_DATA_CACHE))
         return None
@@ -624,7 +650,7 @@ def get_cached_chart_data(symbol: str, interval: str = "1D", allow_stale: bool =
     if age > _CHART_CACHE_TTL_SECONDS:
         _load_chart_cache_once(force=True)
         with _PRICE_SNAPSHOT_CACHE_LOCK:
-            cached = _CHART_DATA_CACHE.get(_chart_cache_key(symbol, interval))
+            cached = _CHART_DATA_CACHE.get(cache_key)
         age = time.time() - float((cached or {}).get("timestamp") or 0)
     if not cached or (age > _CHART_CACHE_TTL_SECONDS and not allow_stale):
         record_cache_lookup("chart", time.perf_counter() - start, len(_CHART_DATA_CACHE))
@@ -640,7 +666,11 @@ def _cache_chart_data(symbol: str, interval: str, rows: list):
         return rows
 
     with _PRICE_SNAPSHOT_CACHE_LOCK:
-        _CHART_DATA_CACHE[_chart_cache_key(symbol, interval)] = {
+        cache_key = _chart_cache_key(symbol, interval)
+        if not cache_key:
+            mark_symbol_cooldown(symbol, reason="invalid_symbol")
+            return rows
+        _CHART_DATA_CACHE[cache_key] = {
             "timestamp": time.time(),
             "rows": [dict(row) for row in rows],
         }
@@ -713,9 +743,13 @@ def batch_download(
 
         seen = set()
         for ticker in tickers:
-            if not ticker or _is_permanently_blocked_symbol(ticker) or _is_symbol_cooling_down(ticker):
+            sanitized = sanitize_market_symbol(ticker, allow_provider_symbols=True)
+            if not sanitized:
+                _mark_symbol_failure(ticker, error="invalid_symbol")
                 continue
-            normalized_symbol = _normalize_symbol(ticker)
+            if _is_permanently_blocked_symbol(sanitized) or _is_symbol_cooling_down(sanitized):
+                continue
+            normalized_symbol = _normalize_symbol(sanitized)
             if not normalized_symbol or normalized_symbol in seen:
                 continue
             seen.add(normalized_symbol)
@@ -797,6 +831,9 @@ def get_ticker_frame(
     period: str = "1d",
     interval: str = "5m",
 ) -> Optional[pd.DataFrame]:
+    if not sanitize_market_symbol(symbol, allow_provider_symbols=True):
+        _mark_symbol_failure(symbol, error="invalid_symbol")
+        return None
     if not _network_provider_allowed():
         _record_blocked_http_provider(symbol, "download")
         return None
@@ -807,6 +844,9 @@ def get_ticker_frame(
 
 
 def get_chart_data(symbol: str, interval: str = "1D"):
+    if not sanitize_market_symbol(symbol, allow_provider_symbols=True):
+        _mark_symbol_failure(symbol, error="invalid_symbol")
+        return []
     normalized_interval = str(interval or "1D").upper()
     min_rows_map = {
         "1D": 12,
@@ -1003,6 +1043,9 @@ def _price_payload_from_fast_info(symbol: str):
     """Fallback for symbols where intraday history is temporarily unavailable."""
     start = time.perf_counter()
     try:
+        if not sanitize_market_symbol(symbol, allow_provider_symbols=True):
+            _mark_symbol_failure(symbol, error="invalid_symbol")
+            return None
         if not _network_provider_allowed():
             _record_blocked_http_provider(symbol, "fast_info")
             return None
@@ -1101,6 +1144,10 @@ def _price_payload_from_fast_info(symbol: str):
 
 
 def get_price_snapshot(symbol: str):
+    if not sanitize_market_symbol(symbol, allow_provider_symbols=True):
+        _mark_symbol_failure(symbol, error="invalid_symbol")
+        return None
+
     if not _network_provider_allowed():
         _record_blocked_http_provider(symbol, "quote")
         return _get_cached_price_payload(symbol, allow_stale=True)
@@ -1160,9 +1207,14 @@ def get_price_snapshots(symbols: List[str], *, force_refresh: bool = False):
     unique_symbols = []
     seen = set()
     for symbol in symbols:
-        if _is_permanently_blocked_symbol(symbol):
+        sanitized = sanitize_market_symbol(symbol, allow_provider_symbols=True)
+        if not sanitized:
+            _mark_symbol_failure(symbol, error="invalid_symbol")
             continue
-        display_symbol = _normalize_ticker_display(symbol, _normalize_symbol(symbol))
+        if _is_permanently_blocked_symbol(sanitized):
+            _mark_symbol_failure(sanitized, error="blocked_symbol")
+            continue
+        display_symbol = _normalize_ticker_display(sanitized, _normalize_symbol(sanitized))
         if not display_symbol or display_symbol in seen:
             continue
         seen.add(display_symbol)
@@ -1262,6 +1314,9 @@ def get_cached_price_snapshots(symbols: List[str], allow_stale: bool = False):
     with _PRICE_SNAPSHOT_CACHE_LOCK:
         now = time.time()
         for symbol in symbols or []:
+            if not sanitize_market_symbol(symbol, allow_provider_symbols=True):
+                mark_symbol_cooldown(symbol, reason="invalid_symbol")
+                continue
             key = _cache_key(symbol)
             if not key:
                 continue

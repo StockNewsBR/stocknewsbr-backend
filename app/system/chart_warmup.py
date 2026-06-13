@@ -10,6 +10,11 @@ from threading import RLock
 from typing import Iterable
 
 from app.market.market_data_loader import get_cached_chart_data, get_chart_data
+from app.services.symbol_sanitizer import (
+    is_symbol_on_cooldown,
+    mark_symbol_cooldown,
+    sanitize_market_symbol,
+)
 from app.system.system_metrics import provider_call_context, record_worker_stage_duration
 from app.watchlists.watchlist_default import (
     WATCHLIST_B3,
@@ -44,7 +49,10 @@ _pair_cooldowns: dict[str, float] = {}
 
 
 def _normalize_symbol(value: object) -> str:
-    return str(value or "").upper().strip().replace(".SA", "")
+    sanitized = sanitize_market_symbol(value)
+    if not sanitized and value:
+        mark_symbol_cooldown(value, "invalid_symbol")
+    return sanitized or ""
 
 
 def _normalize_interval(value: object) -> str:
@@ -53,11 +61,16 @@ def _normalize_interval(value: object) -> str:
 
 
 def _pair_key(symbol: str, interval: str) -> str:
-    return f"{_normalize_symbol(symbol)}:{_normalize_interval(interval)}"
+    ticker = _normalize_symbol(symbol)
+    return f"{ticker}:{_normalize_interval(interval)}" if ticker else ""
 
 
 def _is_on_cooldown(symbol: str, interval: str, now: float | None = None) -> bool:
     key = _pair_key(symbol, interval)
+    if not key:
+        return True
+    if is_symbol_on_cooldown(symbol, now=now):
+        return True
     current_time = now or time.time()
     with _REQUEST_LOCK:
         cooldown_until = float(_pair_cooldowns.get(key) or 0.0)
@@ -66,12 +79,16 @@ def _is_on_cooldown(symbol: str, interval: str, now: float | None = None) -> boo
 
 def _mark_cooldown(symbol: str, interval: str, seconds: int = DEFAULT_CHART_COOLDOWN_SECONDS) -> None:
     key = _pair_key(symbol, interval)
+    if not key:
+        return
     with _REQUEST_LOCK:
         _pair_cooldowns[key] = time.time() + max(60, int(seconds or DEFAULT_CHART_COOLDOWN_SECONDS))
 
 
 def _is_blocked_chart_symbol(symbol: str) -> bool:
     compact = _normalize_symbol(symbol)
+    if not compact:
+        return True
     return bool(_B3_MINI_FUTURE_RE.match(compact))
 
 
@@ -149,7 +166,11 @@ def _requested_pairs() -> list[tuple[str, str]]:
 
 
 def _drop_warmed_requests(pairs: Iterable[tuple[str, str]]) -> None:
-    pair_keys = {f"{_normalize_symbol(symbol)}:{_normalize_interval(interval)}" for symbol, interval in pairs}
+    pair_keys = {
+        _pair_key(symbol, interval)
+        for symbol, interval in pairs
+        if _pair_key(symbol, interval)
+    }
     if not pair_keys:
         return
     with _REQUEST_LOCK:
