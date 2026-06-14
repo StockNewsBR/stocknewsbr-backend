@@ -167,6 +167,20 @@ _signal_outcome_metrics = {
     "released_won": 0,
     "updated_at": 0.0,
 }
+_performance_intelligence_metrics = {
+    "status": "IDLE",
+    "sample_size": 0,
+    "assets": 0,
+    "regimes": 0,
+    "score_buckets": 0,
+    "blocked_correctly": 0,
+    "blocked_would_have_won": 0,
+    "released_failed": 0,
+    "released_won": 0,
+    "auditor_efficiency": None,
+    "recommendations": 0,
+    "updated_at": 0.0,
+}
 _institutional_consistency_metrics = {
     "signals_checked": 0,
     "issues": 0,
@@ -763,6 +777,33 @@ def get_signal_outcome_metrics_snapshot():
         return dict(_signal_outcome_metrics)
 
 
+def record_performance_intelligence_metrics(metrics: dict | None):
+    safe = metrics if isinstance(metrics, dict) else {}
+    auditor = safe.get("auditor_efficiency") if isinstance(safe.get("auditor_efficiency"), dict) else {}
+    with _lock:
+        _performance_intelligence_metrics.update(
+            {
+                "status": str(safe.get("status") or "IDLE"),
+                "sample_size": int(safe.get("sample_size", 0) or 0),
+                "assets": len(safe.get("by_asset", {}) if isinstance(safe.get("by_asset"), dict) else {}),
+                "regimes": len(safe.get("by_regime", {}) if isinstance(safe.get("by_regime"), dict) else {}),
+                "score_buckets": len(safe.get("by_score_bucket", {}) if isinstance(safe.get("by_score_bucket"), dict) else {}),
+                "blocked_correctly": int(safe.get("blocked_correctly", 0) or 0),
+                "blocked_would_have_won": int(safe.get("blocked_would_have_won", 0) or 0),
+                "released_failed": int(safe.get("released_failed", 0) or 0),
+                "released_won": int(safe.get("released_won", 0) or 0),
+                "auditor_efficiency": auditor.get("institutional_auditor_efficiency"),
+                "recommendations": len(safe.get("recommendations", []) if isinstance(safe.get("recommendations"), list) else []),
+                "updated_at": time.time(),
+            }
+        )
+
+
+def get_performance_intelligence_metrics_snapshot():
+    with _lock:
+        return dict(_performance_intelligence_metrics)
+
+
 def record_institutional_consistency_metrics(metrics: dict | None):
     safe = metrics if isinstance(metrics, dict) else {}
     with _lock:
@@ -900,6 +941,7 @@ def get_performance_metrics_snapshot():
         final_decision = dict(_final_decision_metrics)
         telegram_alerts = dict(_telegram_alert_metrics)
         signal_outcomes = dict(_signal_outcome_metrics)
+        performance_intelligence = dict(_performance_intelligence_metrics)
         institutional_consistency = dict(_institutional_consistency_metrics)
         institutional_metrics = _institutional_metrics_snapshot_locked()
         worker_runtime = dict(_worker_runtime_metrics)
@@ -940,6 +982,7 @@ def get_performance_metrics_snapshot():
         "final_decision": final_decision,
         "telegram_alerts": telegram_alerts,
         "signal_outcomes": signal_outcomes,
+        "performance_intelligence": performance_intelligence,
         "institutional_consistency": institutional_consistency,
         "institutional_metrics": institutional_metrics,
         "provider_symbol_failures": repeated_failures,
