@@ -1,6 +1,6 @@
 # StockNewsBR Project Status
 
-Atualizado em: 2026-06-12
+Atualizado em: 2026-06-14
 
 ## Estado Atual
 
@@ -459,3 +459,9 @@ Atualizado em: 2026-06-12
 - Proxima melhoria de trading 1D: aplicar `compare_replay_scenarios()` aos cenarios dos prints antigos (`ITUB4`, `AAPL`, `PETR4`, `PLTR`) assim que as mesmas barras forem carregadas, comparando trades perdidos, exits cedo e reducao de `Watch` sem depender de provider externo durante a analise.
 - Proxima melhoria de dados B3: se o produto exigir leilao/pre-abertura antes de 10:00, integrar provider que entregue esse feed; o chart atual nao inventa barras antes da primeira barra recebida.
 - Proxima melhoria de dados futuros B3: substituir `reference_proxy` por feed oficial do contrato `WIN`/`WDO` vigente antes de usar esses numeros para execucao real.
+- Missao 25D - Contrato Visual do Workspace/Chart validado em 2026-06-14: `show_support`, `show_resistance`, `resolveCanonicalChartLevelZones`, `resolveLiquidityTarget(chartForOperationalLevels)`, `supportLevel`/`resistanceLevel`, `Snapshot RSI`, `Volume snapshot` e o badge `snbr-chart-panel-rsi-badge` ficaram cobertos por script dedicado.
+- A validacao 25D passou com `node apps/web/scripts/mission-25d-visual-contract.mjs` e confirmou que o contrato visual do chart nao injeta RSI do TradingView nem posiciona suporte/resistencia por OHLC local.
+- Missao 26 - Performance Validation & Signal Outcome Audit fechada em 2026-06-14: auditoria de outcomes mede sinais simulados por janelas, separa executaveis, bloqueados, pulados e `insufficient_data`, mantem `PAPER_ONLY`/`SIMULATED` e nao consulta provider externo.
+- Arquivos alterados nesta retomada da Missao 26: `app/cache/signal_outcome_cache.py`, `app/system/signal_outcome_audit.py`, `app/api/routes_paper_trading.py`, `app/system/system_metrics.py`, `worker.py`, `tests/test_mission_26_signal_outcome_audit.py` e `PROJECT_STATUS.md`.
+- Validacao final da Missao 26: `venv\Scripts\python.exe -m unittest tests.test_mission_26_signal_outcome_audit` com 11 testes OK; `py_compile` OK; `git diff --check` sem erro; worker validado com auditoria isolada em `try/except`.
+- Proximo TODO prioritario: deixar o worker acumular outcomes reais por `5m`, `15m`, `30m`, `60m` e fechamento do dia, depois revisar o relatorio com amostra suficiente antes de qualquer ajuste de regra; nao iniciar Missao 27 sem pedido explicito.

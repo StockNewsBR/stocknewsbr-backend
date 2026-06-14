@@ -142,6 +142,31 @@ _telegram_alert_metrics = {
     "medium": 0,
     "updated_at": 0.0,
 }
+_signal_outcome_metrics = {
+    "total_signals": 0,
+    "executable_signals": 0,
+    "blocked_signals": 0,
+    "skipped_signals": 0,
+    "insufficient_data": 0,
+    "evaluated_executable_signals": 0,
+    "winner_signals": 0,
+    "loser_signals": 0,
+    "neutral_signals": 0,
+    "win_rate": 0.0,
+    "average_mfe_pct": 0.0,
+    "average_mae_pct": 0.0,
+    "average_payoff": 0.0,
+    "simulated_drawdown_pct": 0.0,
+    "block_rate": 0.0,
+    "false_positive_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "insufficient_data_rate": 0.0,
+    "blocked_would_have_won": 0,
+    "blocked_correctly": 0,
+    "released_failed": 0,
+    "released_won": 0,
+    "updated_at": 0.0,
+}
 _institutional_consistency_metrics = {
     "signals_checked": 0,
     "issues": 0,
@@ -701,6 +726,43 @@ def get_telegram_alert_metrics_snapshot():
         return dict(_telegram_alert_metrics)
 
 
+def record_signal_outcome_metrics(metrics: dict | None):
+    safe = metrics if isinstance(metrics, dict) else {}
+    with _lock:
+        _signal_outcome_metrics.update(
+            {
+                "total_signals": int(safe.get("total_signals", 0) or 0),
+                "executable_signals": int(safe.get("executable_signals", 0) or 0),
+                "blocked_signals": int(safe.get("blocked_signals", 0) or 0),
+                "skipped_signals": int(safe.get("skipped_signals", 0) or 0),
+                "insufficient_data": int(safe.get("insufficient_data", 0) or 0),
+                "evaluated_executable_signals": int(safe.get("evaluated_executable_signals", 0) or 0),
+                "winner_signals": int(safe.get("winner_signals", 0) or 0),
+                "loser_signals": int(safe.get("loser_signals", 0) or 0),
+                "neutral_signals": int(safe.get("neutral_signals", 0) or 0),
+                "win_rate": round(float(safe.get("win_rate", 0.0) or 0.0), 2),
+                "average_mfe_pct": round(float(safe.get("average_mfe_pct", 0.0) or 0.0), 4),
+                "average_mae_pct": round(float(safe.get("average_mae_pct", 0.0) or 0.0), 4),
+                "average_payoff": round(float(safe.get("average_payoff", 0.0) or 0.0), 4),
+                "simulated_drawdown_pct": round(float(safe.get("simulated_drawdown_pct", 0.0) or 0.0), 4),
+                "block_rate": round(float(safe.get("block_rate", 0.0) or 0.0), 2),
+                "false_positive_rate": round(float(safe.get("false_positive_rate", 0.0) or 0.0), 2),
+                "false_negative_rate": round(float(safe.get("false_negative_rate", 0.0) or 0.0), 2),
+                "insufficient_data_rate": round(float(safe.get("insufficient_data_rate", 0.0) or 0.0), 2),
+                "blocked_would_have_won": int(safe.get("blocked_would_have_won", 0) or 0),
+                "blocked_correctly": int(safe.get("blocked_correctly", 0) or 0),
+                "released_failed": int(safe.get("released_failed", 0) or 0),
+                "released_won": int(safe.get("released_won", 0) or 0),
+                "updated_at": time.time(),
+            }
+        )
+
+
+def get_signal_outcome_metrics_snapshot():
+    with _lock:
+        return dict(_signal_outcome_metrics)
+
+
 def record_institutional_consistency_metrics(metrics: dict | None):
     safe = metrics if isinstance(metrics, dict) else {}
     with _lock:
@@ -741,6 +803,7 @@ def _institutional_metrics_snapshot_locked():
         "institutional_ranking": dict(_institutional_ranking_metrics),
         "final_decision": dict(_final_decision_metrics),
         "telegram_alerts": dict(_telegram_alert_metrics),
+        "signal_outcomes": dict(_signal_outcome_metrics),
         "institutional_consistency": dict(_institutional_consistency_metrics),
     }
 
@@ -836,6 +899,7 @@ def get_performance_metrics_snapshot():
         institutional_priority = dict(_institutional_priority_metrics)
         final_decision = dict(_final_decision_metrics)
         telegram_alerts = dict(_telegram_alert_metrics)
+        signal_outcomes = dict(_signal_outcome_metrics)
         institutional_consistency = dict(_institutional_consistency_metrics)
         institutional_metrics = _institutional_metrics_snapshot_locked()
         worker_runtime = dict(_worker_runtime_metrics)
@@ -875,6 +939,7 @@ def get_performance_metrics_snapshot():
         "institutional_priority": institutional_priority,
         "final_decision": final_decision,
         "telegram_alerts": telegram_alerts,
+        "signal_outcomes": signal_outcomes,
         "institutional_consistency": institutional_consistency,
         "institutional_metrics": institutional_metrics,
         "provider_symbol_failures": repeated_failures,
@@ -1182,6 +1247,7 @@ def get_metrics_snapshot():
             "institutional_ranking": institutional_metrics["institutional_ranking"],
             "final_decision": institutional_metrics["final_decision"],
             "telegram_alerts": institutional_metrics["telegram_alerts"],
+            "signal_outcomes": institutional_metrics["signal_outcomes"],
             "institutional_consistency": institutional_metrics["institutional_consistency"],
             "worker_runtime": dict(_worker_runtime_metrics),
             "institutional_metrics": institutional_metrics,

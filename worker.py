@@ -14,6 +14,7 @@ from app.system.news_warmup import warm_news_once
 from app.system.chart_warmup import warm_charts_once
 from app.system.paper_trading import update_paper_trading_from_snapshot
 from app.system.quote_warmup import warm_quotes_once
+from app.system.signal_outcome_audit import update_signal_outcome_audit_from_snapshot
 from app.telegram.telegram_alert_engine import send_bulk_alert
 from app.system.system_metrics import (
     increment_engine_cycles,
@@ -157,6 +158,14 @@ def worker_loop(stop_event: threading.Event):
                         except Exception:
                             record_worker_stage_duration("paper_trading", time.perf_counter() - paper_start, success=False)
                             logger.exception("Paper trading update error")
+
+                        outcome_start = time.perf_counter()
+                        try:
+                            update_signal_outcome_audit_from_snapshot(snapshot_payload)
+                            record_worker_stage_duration("signal_outcome_audit", time.perf_counter() - outcome_start, success=True)
+                        except Exception:
+                            record_worker_stage_duration("signal_outcome_audit", time.perf_counter() - outcome_start, success=False)
+                            logger.exception("Signal outcome audit update error")
 
                     if snapshot_signals:
                         push_start = time.perf_counter()
