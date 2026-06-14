@@ -44,6 +44,7 @@ WATCHLIST_US_GLOBAL: Tuple[str, ...] = (
     "PFE",
     "PYPL",
     "QCOM",
+    "SPCX",
     "TSLA",
     "TSM",
     "XOM",

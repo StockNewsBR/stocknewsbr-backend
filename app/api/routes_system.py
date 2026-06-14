@@ -17,6 +17,7 @@ from app.services.storage_service import get_storage_status
 from app.social.moderation import get_moderation_summary
 from app.system.ai_tab_audit import get_ai_tab_audit_history, get_ai_tab_audit_report, run_ai_tab_audit
 from app.system.observability_engine import build_observability_dashboard, get_metrics, record_observability_event
+from app.system.paper_trading import get_paper_trading_status, summarize_paper_trading_status
 from app.system.system_metrics import format_prometheus_metrics, get_metrics_snapshot, get_performance_metrics_snapshot
 from app.telegram.telegram_alert_engine import get_telegram_health
 
@@ -40,6 +41,10 @@ def get_ai_worker_history(limit: int = 10):
     from app.system.ai_worker import get_ai_worker_history as _get_ai_worker_history
 
     return _get_ai_worker_history(limit=limit)
+
+
+def _paper_trading_observability() -> dict:
+    return summarize_paper_trading_status(get_paper_trading_status())
 
 
 def _derive_health_status(
@@ -94,6 +99,7 @@ def system_status():
     snapshot_payload = get_snapshot()
     snapshot_runtime = snapshot_info.get("snapshot_runtime") if isinstance(snapshot_info.get("snapshot_runtime"), dict) else evaluate_snapshot_runtime_status(snapshot_info)
     go_live = build_go_live_status(snapshot_payload if isinstance(snapshot_payload, dict) and snapshot_payload.get("signals") else snapshot_info, institutional_metrics=metrics.get("institutional_metrics", {}))
+    paper_trading = _paper_trading_observability()
 
     return {
         "engine_cycles": metrics["engine_cycles"],
@@ -132,6 +138,9 @@ def system_status():
         "institutional_certified": bool(go_live.get("institutional_certified")),
         "certification_timestamp": go_live.get("certification_timestamp"),
         "certification_reasons": list(go_live.get("certification_reasons") or []),
+        "paper_trading": paper_trading,
+        "paper_trading_enabled": paper_trading.get("paper_trading_enabled"),
+        "paper_trading_status": paper_trading.get("paper_trading_status"),
         "storage": get_storage_status(),
         "media": get_media_status(),
         "push": get_push_status(),
@@ -171,6 +180,7 @@ def system_readiness():
     media = get_media_status()
     push = get_push_status()
     go_live = build_go_live_status(snapshot_payload if isinstance(snapshot_payload, dict) and snapshot_payload.get("signals") else snapshot_info, institutional_metrics=status_metrics.get("institutional_metrics", {}))
+    paper_trading = _paper_trading_observability()
 
     return {
         "api_ready": True,
@@ -189,6 +199,9 @@ def system_readiness():
         "contract_coverage": go_live.get("contract_coverage", {}),
         "institutional_certified": bool(go_live.get("institutional_certified")),
         "certification_reasons": list(go_live.get("certification_reasons") or []),
+        "paper_trading": paper_trading,
+        "paper_trading_enabled": paper_trading.get("paper_trading_enabled"),
+        "paper_trading_status": paper_trading.get("paper_trading_status"),
         "moderation": get_moderation_summary(),
     }
 
@@ -200,6 +213,7 @@ def observability_report():
     performance_metrics = get_performance_metrics_snapshot()
     snapshot_info = get_snapshot_info()
     telegram_health = get_telegram_health()
+    paper_trading = _paper_trading_observability()
     dashboard = build_observability_dashboard(
         snapshot=snapshot_info,
         ai_worker=get_ai_worker_report(),
@@ -231,6 +245,7 @@ def observability_report():
         "performance": performance_metrics,
         "snapshot_runtime_status": dashboard.get("snapshot_runtime_status"),
         "go_live_ready": dashboard.get("go_live_ready"),
+        "paper_trading": paper_trading,
         "dashboard": dashboard,
     }
 
@@ -255,6 +270,7 @@ def observability_dashboard():
     push_status = get_push_status()
     storage_status = get_storage_status()
     telegram_health = get_telegram_health()
+    paper_trading = _paper_trading_observability()
     dashboard = build_observability_dashboard(
         snapshot=get_snapshot_info(),
         ai_worker=get_ai_worker_report(),
@@ -285,6 +301,7 @@ def observability_dashboard():
     )
     if dashboard.get("system_status") == "CRITICAL":
         record_observability_event("system", "observability dashboard critical", severity="critical")
+    dashboard["paper_trading"] = paper_trading
     return dashboard
 
 
@@ -320,6 +337,7 @@ def system_health():
     status = _derive_health_status(snapshot, ai_worker, ai_tabs, polls)
     snapshot_runtime = snapshot.get("snapshot_runtime") if isinstance(snapshot.get("snapshot_runtime"), dict) else evaluate_snapshot_runtime_status(snapshot)
     go_live = build_go_live_status(snapshot_payload if isinstance(snapshot_payload, dict) and snapshot_payload.get("signals") else snapshot, institutional_metrics=get_metrics_snapshot().get("institutional_metrics", {}))
+    paper_trading = _paper_trading_observability()
 
     return {
         "status": status,
@@ -329,6 +347,7 @@ def system_health():
         "contract_coverage": go_live.get("contract_coverage", {}),
         "institutional_certified": bool(go_live.get("institutional_certified")),
         "certification_reasons": list(go_live.get("certification_reasons") or []),
+        "paper_trading": paper_trading,
         "snapshot": {
             "signals": snapshot.get("signals", 0),
             "timestamp": snapshot.get("timestamp"),

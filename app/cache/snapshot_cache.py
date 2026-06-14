@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 from app.services.snapshot_contract import summarize_snapshot_rows
-from app.services.go_live_status_service import build_go_live_status
+from app.services.go_live_status_service import attach_go_live_status, build_go_live_status
 from app.services.snapshot_runtime_status import evaluate_snapshot_runtime_status
 from app.system.system_metrics import record_cache_lookup, record_snapshot_write_metric, update_cache_timestamp
 
@@ -87,7 +87,12 @@ _STALE_SOURCES = {
     "empty",
     "exception",
 }
-_TOP_LEVEL_SIGNATURE_VOLATILE_KEYS = {"generated_at", "updated_at"}
+_TOP_LEVEL_SIGNATURE_VOLATILE_KEYS = {
+    "certification_timestamp",
+    "generated_at",
+    "go_live",
+    "updated_at",
+}
 
 
 def _env_float(name: str, default: float) -> float:
@@ -326,6 +331,7 @@ class SnapshotCache:
         now = time.time()
         normalized["updated_at"] = now
         normalized.setdefault("generated_at", now)
+        normalized = attach_go_live_status(normalized, now=now)
         signature = self._payload_signature(normalized)
 
         with self._lock:

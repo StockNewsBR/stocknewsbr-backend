@@ -499,7 +499,7 @@ const BDR_UNDERLYING: Record<string, string> = {
 
 const WATCHLIST_US = [
   "F", "AAL", "BA",
-  "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
+  "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "SPCX",
   "AMD", "INTC", "AVGO", "TSM",
   "JPM", "BAC", "GS",
   "XOM", "CVX",

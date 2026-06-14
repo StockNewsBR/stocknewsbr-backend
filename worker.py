@@ -12,6 +12,7 @@ from app.engine.market_snapshot_engine import generate_market_snapshot
 from app.system.push_dispatcher import dispatch_signal_pushes
 from app.system.news_warmup import warm_news_once
 from app.system.chart_warmup import warm_charts_once
+from app.system.paper_trading import update_paper_trading_from_snapshot
 from app.system.quote_warmup import warm_quotes_once
 from app.telegram.telegram_alert_engine import send_bulk_alert
 from app.system.system_metrics import (
@@ -148,6 +149,15 @@ def worker_loop(stop_event: threading.Event):
                         logger.exception("Snapshot update error")
 
                     snapshot_signals = snapshot_payload.get("signals", []) if isinstance(snapshot_payload, dict) else []
+                    if isinstance(snapshot_payload, dict) and snapshot_payload:
+                        paper_start = time.perf_counter()
+                        try:
+                            update_paper_trading_from_snapshot(snapshot_payload)
+                            record_worker_stage_duration("paper_trading", time.perf_counter() - paper_start, success=True)
+                        except Exception:
+                            record_worker_stage_duration("paper_trading", time.perf_counter() - paper_start, success=False)
+                            logger.exception("Paper trading update error")
+
                     if snapshot_signals:
                         push_start = time.perf_counter()
                         try:

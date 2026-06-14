@@ -50,6 +50,7 @@ US_UNIVERSE = [
     "NVDA",
     "AMZN",
     "TSLA",
+    "SPCX",
     "META",
     "GOOGL",
     "AMD",
