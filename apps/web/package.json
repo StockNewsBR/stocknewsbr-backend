@@ -7,6 +7,8 @@
     "build": "next build",
     "postbuild": "node scripts/sync-server-chunks.mjs",
     "start": "node scripts/sync-server-chunks.mjs && next start",
+    "test:mission25d": "node scripts/mission-25d-visual-contract.mjs",
+    "tsc": "tsc --noEmit --incremental false",
     "smoke:etapa7": "node scripts/smoke-etapa7.mjs",
     "lint": "next lint"
   },

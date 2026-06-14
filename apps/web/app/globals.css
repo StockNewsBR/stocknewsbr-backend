@@ -2954,22 +2954,296 @@ a {
 
 .snbr-tv-widget-shell {
   position: relative;
-  height: clamp(560px, 68vh, 820px);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
   min-height: 560px;
+  height: auto;
   padding: 0;
+}
+
+.snbr-tv-plot-area {
+  position: relative;
+  min-height: clamp(500px, 58vh, 700px);
+  flex: 1 1 auto;
 }
 
 .snbr-tv-widget {
   width: 100%;
-  min-height: 560px;
+  min-height: clamp(500px, 58vh, 700px);
   height: 100% !important;
   border-radius: 14px;
   overflow: hidden;
 }
 
 .snbr-tv-widget iframe {
-  min-height: 560px;
+  min-height: clamp(500px, 58vh, 700px);
   height: 100% !important;
+}
+
+.snbr-chart-level-lines {
+  position: absolute;
+  inset: 44px 70px 94px 70px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.snbr-chart-level-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 2px dashed rgba(245, 158, 11, 0.78);
+  filter: drop-shadow(0 5px 10px rgba(15, 23, 42, 0.2));
+}
+
+.snbr-chart-level-line.resistance {
+  top: 26%;
+  border-color: rgba(248, 113, 113, 0.92);
+}
+
+.snbr-chart-level-line.support {
+  top: 55%;
+  border-color: rgba(52, 211, 153, 0.9);
+}
+
+.snbr-chart-level-line span {
+  position: absolute;
+  right: 0;
+  top: -16px;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: rgba(255, 251, 235, 0.96);
+  color: #78350f;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+}
+
+.snbr-chart-level-line.support span {
+  border-color: rgba(22, 163, 74, 0.38);
+  background: rgba(236, 253, 245, 0.96);
+  color: #065f46;
+}
+
+.snbr-chart-level-line.resistance span {
+  border-color: rgba(220, 38, 38, 0.34);
+  background: rgba(254, 242, 242, 0.96);
+  color: #991b1b;
+}
+
+.snbr-chart-level-overlays {
+  position: absolute;
+  top: 52px;
+  right: 18px;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: min(520px, calc(100% - 36px));
+  pointer-events: none;
+}
+
+.snbr-chart-level-overlay {
+  position: static;
+}
+
+.snbr-chart-level-overlay span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: rgba(255, 251, 235, 0.96);
+  color: #78350f;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+}
+
+.snbr-chart-level-overlay.support span {
+  border-color: rgba(22, 163, 74, 0.38);
+  background: rgba(236, 253, 245, 0.96);
+  color: #065f46;
+}
+
+.snbr-chart-level-overlay.resistance span {
+  border-color: rgba(220, 38, 38, 0.34);
+  background: rgba(254, 242, 242, 0.96);
+  color: #991b1b;
+}
+
+.snbr-chart-panel-rsi-badge {
+  position: absolute;
+  right: 18px;
+  top: 92px;
+  z-index: 4;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(168, 85, 247, 0.42);
+  background: rgba(250, 245, 255, 0.96);
+  color: #6b21a8;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  pointer-events: none;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+}
+
+.snbr-institutional-rsi-panel {
+  min-height: 126px;
+  margin-top: -1px;
+  padding: 12px 18px 14px 78px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: 0 0 14px 14px;
+  background:
+    radial-gradient(circle at 88% 0%, rgba(168, 85, 247, 0.16), transparent 24%),
+    linear-gradient(180deg, rgba(250, 245, 255, 0.94), rgba(245, 243, 255, 0.86));
+}
+
+.snbr-institutional-rsi-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.snbr-institutional-rsi-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.snbr-institutional-rsi-head strong {
+  color: var(--text);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.snbr-institutional-rsi-head span,
+.snbr-institutional-rsi-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.snbr-institutional-rsi-value {
+  min-width: 66px;
+  text-align: right;
+  color: #7c3aed !important;
+  font-size: 22px !important;
+  letter-spacing: -0.03em !important;
+  text-transform: none !important;
+}
+
+.snbr-institutional-rsi-track {
+  --snbr-rsi-position: 50%;
+  position: relative;
+  height: 68px;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(168, 85, 247, 0.18);
+  background:
+    linear-gradient(90deg, rgba(34, 197, 94, 0.16) 0 30%, rgba(168, 85, 247, 0.14) 30% 70%, rgba(239, 68, 68, 0.16) 70% 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(237, 233, 254, 0.72));
+}
+
+.snbr-institutional-rsi-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px dashed rgba(124, 58, 237, 0.38);
+}
+
+.snbr-rsi-zone,
+.snbr-rsi-threshold,
+.snbr-institutional-rsi-marker {
+  position: absolute;
+  pointer-events: none;
+}
+
+.snbr-rsi-zone {
+  top: 8px;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.snbr-rsi-zone.oversold {
+  left: 12px;
+}
+
+.snbr-rsi-zone.neutral {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.snbr-rsi-zone.overbought {
+  right: 12px;
+}
+
+.snbr-rsi-threshold {
+  bottom: 8px;
+  color: color-mix(in srgb, var(--muted) 72%, transparent);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.snbr-rsi-threshold::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  height: 46px;
+  border-left: 1px dashed rgba(124, 58, 237, 0.24);
+}
+
+.snbr-rsi-threshold.threshold-25 {
+  left: 25%;
+}
+
+.snbr-rsi-threshold.threshold-50 {
+  left: 50%;
+}
+
+.snbr-rsi-threshold.threshold-75 {
+  left: 75%;
+}
+
+.snbr-institutional-rsi-marker {
+  left: var(--snbr-rsi-position);
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px solid #a855f7;
+  filter: drop-shadow(0 0 12px rgba(168, 85, 247, 0.48));
+}
+
+.snbr-institutional-rsi-marker span {
+  position: absolute;
+  top: 22px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(168, 85, 247, 0.42);
+  background: rgba(250, 245, 255, 0.98);
+  color: #6b21a8;
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .snbr-tv-fallback {
@@ -3004,6 +3278,60 @@ a {
 
 .snbr-app.theme-dark .snbr-trading-chart {
   background: linear-gradient(180deg, rgba(11, 22, 36, 0.98), rgba(7, 16, 26, 0.98));
+}
+
+.snbr-app.theme-dark .snbr-chart-level-overlay span {
+  background: rgba(30, 41, 59, 0.94);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+}
+
+.snbr-app.theme-dark .snbr-chart-level-line {
+  filter: drop-shadow(0 5px 14px rgba(0, 0, 0, 0.34));
+}
+
+.snbr-app.theme-dark .snbr-chart-level-line span {
+  background: rgba(30, 41, 59, 0.94);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+}
+
+.snbr-app.theme-dark .snbr-chart-level-line.support span {
+  color: #bbf7d0;
+}
+
+.snbr-app.theme-dark .snbr-chart-level-line.resistance span {
+  color: #fecaca;
+}
+
+.snbr-app.theme-dark .snbr-chart-level-overlay.support span {
+  color: #bbf7d0;
+}
+
+.snbr-app.theme-dark .snbr-chart-level-overlay.resistance span {
+  color: #fecaca;
+}
+
+.snbr-app.theme-dark .snbr-chart-panel-rsi-badge {
+  background: rgba(30, 41, 59, 0.94);
+  color: #e9d5ff;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+}
+
+.snbr-app.theme-dark .snbr-institutional-rsi-panel {
+  background:
+    radial-gradient(circle at 88% 0%, rgba(168, 85, 247, 0.18), transparent 24%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(17, 24, 39, 0.92));
+}
+
+.snbr-app.theme-dark .snbr-institutional-rsi-track {
+  border-color: rgba(168, 85, 247, 0.24);
+  background:
+    linear-gradient(90deg, rgba(34, 197, 94, 0.14) 0 30%, rgba(168, 85, 247, 0.16) 30% 70%, rgba(239, 68, 68, 0.14) 70% 100%),
+    linear-gradient(180deg, rgba(30, 41, 59, 0.78), rgba(17, 24, 39, 0.84));
+}
+
+.snbr-app.theme-dark .snbr-institutional-rsi-marker span {
+  background: rgba(30, 41, 59, 0.98);
+  color: #e9d5ff;
 }
 
 .snbr-candle line {
