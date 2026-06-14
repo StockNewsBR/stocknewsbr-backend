@@ -2191,12 +2191,6 @@ function quoteHasMarketValue(quote?: QuotePayload | null) {
   return Number.isFinite(price) && price > 0;
 }
 
-function watchlistItemHasMarketValue(item?: WatchlistItem | null) {
-  if (!item) return false;
-  const price = Number(item.price);
-  return Number.isFinite(price) && price > 0;
-}
-
 function mergeQuoteState(current: Record<string, QuotePayload>, incoming: Record<string, QuotePayload>) {
   const next = { ...current };
 
@@ -7369,16 +7363,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     customWatchItems,
     activeWatchSymbols,
   ]);
-  const availableActiveWatchlist = useMemo(
-    () => activeWatchlist.filter(watchlistItemHasMarketValue),
-    [activeWatchlist],
-  );
   const filteredActiveWatchlist = useMemo(
     () => sortWatchlistItemsAlphabetically(
-      availableActiveWatchlist.filter((item) => watchCategory === "Todos" || item.category === watchCategory),
+      activeWatchlist.filter((item) => watchCategory === "Todos" || item.category === watchCategory),
       appLocale,
     ),
-    [availableActiveWatchlist, appLocale, watchCategory],
+    [activeWatchlist, appLocale, watchCategory],
+  );
+  const activeWatchCountForFilter = useMemo(
+    () => (watchCategory === "Todos" ? activeWatchlist.length : activeWatchlist.filter((item) => item.category === watchCategory).length),
+    [activeWatchlist, watchCategory],
   );
   const filteredUniverse = useMemo(
     () =>
@@ -7672,6 +7666,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const priceMovementPercent = firstFiniteNumber(displayQuote?.change_pct) ?? null;
   const headerVolume = firstPositiveFiniteNumber(displayQuote?.volume);
   const symbolLabel = currentWatchItem?.label || symbolName(selectedTicker);
+  const selectedTickerMarketLabel = currentWatchItem?.category || guessCategory(selectedTicker);
   const currentAiKey = AI_TOOL_TAB_MAP[currentTab as keyof typeof AI_TOOL_TAB_MAP];
   const currentAiRows: AiToolRow[] = useMemo(
     () => (currentAiKey ? workspace?.ai_tools?.[currentAiKey] || publicAiTools?.tools?.[currentAiKey] : undefined) || [],
@@ -9701,8 +9696,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             </div>
           ) : (
             <div className="snbr-empty-thread">
-              <strong>{isUsLocale ? "No operational read with confirmed price and volume." : "Sem leitura operacional com preço e volume confirmados."}</strong>
-              <p>{isUsLocale ? "Confident, partial and limited data are shown explicitly; weak rows do not count as findings." : "Contextos confiáveis, parciais e limitados são mostrados explicitamente; linhas fracas não contam como achado."}</p>
+              <strong>
+                {currentTab === "news-ia"
+                  ? (isUsLocale ? "No news analysis available for this asset right now." : "Nenhuma análise de notícia disponível para este ativo no momento.")
+                  : (isUsLocale ? "No read available for this asset right now." : "Sem leitura disponível para este ativo no momento.")}
+              </strong>
+              <p>{isUsLocale ? "When the backend sends a valid payload, this card shows the content; otherwise the absence is explicit." : "Quando o backend enviar um payload válido, este card mostra o conteúdo; caso contrário, a ausência fica explícita."}</p>
             </div>
           )}
         </section>
@@ -10788,7 +10787,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           onRemoveTicker={() => handleRemoveFromActiveList()}
           watchCategory={watchCategory}
           onSetWatchCategory={setWatchCategory}
-          activeWatchCount={activeWatchlist.length}
+          activeWatchCount={activeWatchCountForFilter}
           accessCard={renderAccessCard()}
           authCard={null}
           notificationCard={renderNotificationCard()}
@@ -10925,15 +10924,20 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   <h2>{selectedTicker}</h2>
                   <p>{symbolLabel}</p>
                 </div>
+                <span className="snbr-chip">{selectedTickerMarketLabel}</span>
               </div>
-              <div className="snbr-price-line">
-                <strong>{advancedMode ? formatAssetMoney(displayQuote?.price, selectedTicker, appLocale) : (isUsLocale ? "Available in Pro Plan" : "Disponível no Plano Pro")}</strong>
-                {advancedMode ? (
+              {advancedMode ? (
+                <div className="snbr-price-line">
+                  <strong>{formatAssetMoney(displayQuote?.price, selectedTicker, appLocale)}</strong>
                   <span className={cx("snbr-price-change", priceDirectionClass)}>
                     {formatSignedPercent(displayQuote?.change_pct)}
                   </span>
-                ) : null}
-              </div>
+                </div>
+              ) : (
+                <div className="snbr-basic-pro-lock" aria-label={isUsLocale ? "Premium metrics hidden in Basic Mode" : "Métricas premium ocultas no Modo Básico"}>
+                  {isUsLocale ? "Premium metrics available in Pro Plan" : "Métricas premium disponíveis no Plano Pro"}
+                </div>
+              )}
               {advancedMode && hasPriceMovement ? (
                 <div className={cx("snbr-after-hours-line", priceDirectionClass)}>
                   <span>{movementArrow(priceDirectionClass)}</span>

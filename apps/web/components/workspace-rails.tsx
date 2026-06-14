@@ -101,6 +101,7 @@ export function WorkspaceLeftRail({
     Crypto: "Crypto",
     USA: "USA",
   };
+  const activeCountLabel = `${categoryLabels[watchCategory]} — ${activeWatchCount} ${isEnglish ? "assets" : "ativos"}`;
 
   return (
     <aside className="snbr-left-rail" ref={railRef}>
@@ -171,7 +172,7 @@ export function WorkspaceLeftRail({
               <strong>{isEnglish ? "My Active List" : "Minha Lista Ativa"}</strong>
               <p>{isEnglish ? "Preloaded assets by category + any asset added from search." : "Ativos preloaded por categoria + qualquer ativo adicionado pela busca."}</p>
             </div>
-            <span className="snbr-chip">{activeWatchCount} {isEnglish ? "assets" : "ativos"}</span>
+            <span className="snbr-chip">{activeCountLabel}</span>
           </div>
           <div className="snbr-active-filter-row" aria-label={isEnglish ? "Active list filters" : "Filtros da lista ativa"}>
             {(["Todos", "B3", "BDR", "Crypto", "USA"] as const).map((category) => (

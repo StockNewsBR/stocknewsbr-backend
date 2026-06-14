@@ -313,13 +313,11 @@ export function TickerChart({
     <div className="snbr-chart-shell snbr-tv-widget-shell">
       <div className="snbr-tv-plot-area">
         <div className="tradingview-widget-container snbr-tv-widget" ref={containerRef} />
-        {(showRsi && rsiPanelLabel) || levelOverlays.length ? (
+        {rsiPanelLabel || levelOverlays.length ? (
           <div className="snbr-chart-top-overlays" aria-hidden="true">
-            {showRsi && rsiPanelLabel ? (
-              <div className="snbr-chart-panel-rsi-badge">
-                {rsiPanelLabel}
-              </div>
-            ) : null}
+            <div className={`snbr-chart-panel-rsi-badge ${showRsi && rsiPanelLabel ? "" : "hidden"}`}>
+              {rsiPanelLabel || "RSI SCORE: --"}
+            </div>
             {levelOverlays.length ? (
               <div className="snbr-chart-level-overlays">
                 {levelOverlays.map((level) => (

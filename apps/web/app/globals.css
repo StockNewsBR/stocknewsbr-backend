@@ -959,6 +959,20 @@ a {
   margin-top: 12px;
 }
 
+.snbr-basic-pro-lock {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 14px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  background: color-mix(in srgb, var(--surface-soft) 88%, transparent);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .snbr-price-line strong {
   font-size: clamp(36px, 3vw, 44px);
   letter-spacing: -0.05em;
@@ -3057,6 +3071,7 @@ a {
 
 .snbr-chart-panel-rsi-badge {
   position: static;
+  min-width: 124px;
   padding: 5px 9px;
   border-radius: 999px;
   border: 1px solid rgba(168, 85, 247, 0.42);
@@ -3068,6 +3083,10 @@ a {
   text-transform: uppercase;
   pointer-events: none;
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+}
+
+.snbr-chart-panel-rsi-badge.hidden {
+  visibility: hidden;
 }
 
 .snbr-institutional-rsi-panel {

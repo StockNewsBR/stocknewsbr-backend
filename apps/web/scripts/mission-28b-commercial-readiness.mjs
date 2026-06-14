@@ -43,11 +43,20 @@ for (const oldLabel of ["Flow IA", "Liquidity IA", "Trend IA", "Momentum IA", "R
 
 assertIncludes(workspaceShell, "Disponível no Plano Pro", "Basic Mode protects premium indicator values");
 assertIncludes(workspaceShell, "displayStats", "Basic Mode uses protected display stats");
-assertIncludes(workspaceShell, "activeWatchCount={activeWatchlist.length}", "active list counter uses all monitored categories");
+assertIncludes(workspaceShell, "snbr-basic-pro-lock", "Basic Mode keeps the asset identity header while locking premium metrics");
+assertIncludes(workspaceShell, "selectedTickerMarketLabel", "asset header keeps the market/category identity visible");
+assertIncludes(workspaceShell, "activeWatchCount={activeWatchCountForFilter}", "active list counter uses the selected filter count");
+assertIncludes(workspaceShell, "watchCategory === \"Todos\" ? activeWatchlist.length", "Todos counter aggregates all monitored categories");
+assertIncludes(workspaceRails, "activeCountLabel", "left rail shows the active filter name next to its count");
 
 assertIncludes(workspaceShell, "RSI SCORE", "RSI score is explicit in the top card");
 assertIncludes(tickerChart, "RSI SCORE:", "RSI score is explicit in the chart badge and lower panel");
 assertIncludes(tickerChart, "snbr-chart-top-overlays", "chart renders top row for RSI, support and resistance");
+assertIncludes(tickerChart, "? \"\" : \"hidden\"", "RSI badge reserves space when toggled off");
+assertIncludes(css, ".snbr-chart-panel-rsi-badge.hidden", "RSI toggle uses visibility instead of shifting level overlays");
+assertIncludes(workspaceShell, "resolveCanonicalChartLevelZones", "support/resistance uses canonical chart zones");
+assertIncludes(workspaceShell, "supportLevel={chartSupportResistanceLevels.support}", "support overlay consumes canonical support value");
+assertIncludes(workspaceShell, "resistanceLevel={chartSupportResistanceLevels.resistance}", "resistance overlay consumes canonical resistance value");
 if (tickerChart.indexOf("snbr-chart-panel-rsi-badge") > tickerChart.indexOf("snbr-chart-level-overlays")) {
   throw new Error("Mission 28B regression: RSI SCORE must render before support/resistance chips");
 }
@@ -65,6 +74,9 @@ assertIncludes(workspaceShell, "Visualizado às", "AI viewed time is explicit");
 assertIncludes(workspaceSections, "Publicado às", "news publication time is explicit");
 assertIncludes(workspaceSections, "Fonte", "news source is explicit");
 assertIncludes(workspaceSections, "Sentimento", "news sentiment is explicit");
+assertIncludes(workspaceSections, "Nenhuma notícia encontrada para este ativo no momento.", "news area has explicit empty-state fallback");
+assertIncludes(workspaceShell, "Nenhuma análise de notícia disponível para este ativo no momento.", "news AI area has explicit empty-state fallback");
+assertIncludes(workspaceShell, "Sem leitura disponível para este ativo no momento.", "AI tool tabs have explicit empty-state fallback");
 assertIncludes(workspaceSections, "Bullish", "news bullish sentiment exists");
 assertIncludes(workspaceSections, "Neutra", "news neutral sentiment exists");
 assertIncludes(workspaceSections, "Bearish", "news bearish sentiment exists");
@@ -85,4 +97,4 @@ assertIncludes(snapshotContract, "master_score_display", "snapshot contract expo
 assertNotIncludes(allWebSources, "toggle do gráfico mostra RSI do TradingView", "old Portuguese TradingView RSI text absent");
 assertNotIncludes(allWebSources, "chart toggle shows TradingView RSI", "old English TradingView RSI text absent");
 
-console.log(JSON.stringify({ ok: true, mission: "28B", checks: 44 }, null, 2));
+console.log(JSON.stringify({ ok: true, mission: "28B", checks: 56 }, null, 2));

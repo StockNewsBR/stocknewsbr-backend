@@ -299,8 +299,8 @@ export function WorkspaceNewsPanel({
           })}
           {!newsRows.length ? (
             <div className="snbr-empty-thread">
-              <strong>{isEnglish ? "No real news available right now." : "Sem notícias reais disponíveis agora."}</strong>
-              <p>{localizedNewsStateText || (isEnglish ? "As soon as the ticker feed brings a useful headline, it appears here with a trader-ready read." : "Assim que o feed do ticker trouxer uma manchete útil, ela aparece aqui com leitura pronta para trader.")}</p>
+              <strong>{isEnglish ? `No news found for ${selectedTicker} right now.` : "Nenhuma notícia encontrada para este ativo no momento."}</strong>
+              <p>{localizedNewsStateText || (isEnglish ? "As soon as the ticker feed brings a useful headline, it appears here with source, original time and sentiment." : "Assim que o feed do ticker trouxer uma manchete útil, ela aparece aqui com fonte, horário original e sentimento.")}</p>
             </div>
           ) : null}
         </div>
