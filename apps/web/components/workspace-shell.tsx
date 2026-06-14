@@ -89,6 +89,8 @@ type ChartSettings = {
   show_averages: boolean;
   show_macd: boolean;
   show_rsi: boolean;
+  show_support: boolean;
+  show_resistance: boolean;
   show_supertrend: boolean;
   show_volume: boolean;
 };
@@ -380,6 +382,8 @@ const DEFAULT_CHART_SETTINGS: ChartSettings = {
   show_averages: true,
   show_macd: false,
   show_rsi: false,
+  show_support: true,
+  show_resistance: true,
   show_supertrend: true,
   show_volume: true,
 };
@@ -3586,14 +3590,53 @@ function extractLevelFromLiquidityText(value?: string | null) {
 }
 
 function resolveOperationalZones(chart: ChartPayload | null, fallbackLevel: number | null) {
-  const zones = Array.isArray(chart?.zones) ? chart?.zones || [] : [];
-  const support = zones.find((zone) => /suporte|support/i.test(String(zone.label || "")))?.price;
-  const resistance = zones.find((zone) => /resist[eê]ncia|resistencia|resistance/i.test(String(zone.label || "")))?.price;
-  const zonePrices = zones.map((zone) => firstFiniteNumber(zone.price)).filter((value): value is number => value != null);
+  const canonicalZones = resolveCanonicalChartLevelZones(chart);
+  const support = canonicalZones.find((zone) => zone.kind === "support")?.price;
+  const resistance = canonicalZones.find((zone) => zone.kind === "resistance")?.price;
   return {
-    support: firstFiniteNumber(support, zonePrices.length ? Math.min(...zonePrices) : null, fallbackLevel),
-    resistance: firstFiniteNumber(resistance, zonePrices.length ? Math.max(...zonePrices) : null, fallbackLevel),
+    support: firstFiniteNumber(support, fallbackLevel),
+    resistance: firstFiniteNumber(resistance, fallbackLevel),
   };
+}
+
+type CanonicalChartLevelZone = {
+  kind: "support" | "resistance";
+  label: string;
+  price: number;
+};
+
+function resolveCanonicalChartLevelZones(chart: ChartPayload | null): CanonicalChartLevelZone[] {
+  const zones = Array.isArray(chart?.zones) ? chart?.zones || [] : [];
+  const rows = chart?.ohlc?.length ? chart.ohlc : chart?.series || [];
+  const latestRow = rows.length ? rows[rows.length - 1] : null;
+  const anchorPrice = firstFiniteNumber(chart?.summary?.latest_close, latestRow?.close, (latestRow as any)?.price);
+
+  const parsed = zones
+    .map((zone) => {
+      const price = firstFiniteNumber(zone?.price);
+      if (price == null || price <= 0) return null;
+      const label = normalizeUiText(String(zone?.label || ""));
+      const kind = /suporte|support/.test(label)
+        ? "support"
+        : /resistencia|resistance/.test(label)
+          ? "resistance"
+          : null;
+      return kind ? { kind, label: String(zone?.label || kind), price } : null;
+    })
+    .filter((zone): zone is CanonicalChartLevelZone => zone != null);
+
+  function pick(kind: CanonicalChartLevelZone["kind"]) {
+    const candidates = parsed.filter((zone) => zone.kind === kind);
+    if (!candidates.length) return null;
+    if (anchorPrice == null || anchorPrice <= 0) return candidates[0];
+    const directional = candidates.filter((zone) =>
+      kind === "resistance" ? zone.price >= anchorPrice : zone.price <= anchorPrice,
+    );
+    const eligible = directional.length ? directional : candidates;
+    return [...eligible].sort((left, right) => Math.abs(left.price - anchorPrice) - Math.abs(right.price - anchorPrice))[0];
+  }
+
+  return [pick("resistance"), pick("support")].filter((zone): zone is CanonicalChartLevelZone => zone != null);
 }
 
 function buildOperationalDecision(input: {
@@ -5763,6 +5806,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [showAverages, setShowAverages] = useState(DEFAULT_CHART_SETTINGS.show_averages);
   const [showMacd, setShowMacd] = useState(DEFAULT_CHART_SETTINGS.show_macd);
   const [showRsi, setShowRsi] = useState(DEFAULT_CHART_SETTINGS.show_rsi);
+  const [showSupport, setShowSupport] = useState(DEFAULT_CHART_SETTINGS.show_support);
+  const [showResistance, setShowResistance] = useState(DEFAULT_CHART_SETTINGS.show_resistance);
   const [showSupertrend, setShowSupertrend] = useState(DEFAULT_CHART_SETTINGS.show_supertrend);
   const [showVolume, setShowVolume] = useState(DEFAULT_CHART_SETTINGS.show_volume);
   const [mobileWatchlistOpen, setMobileWatchlistOpen] = useState(false);
@@ -5897,6 +5942,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     setShowAverages(chartSettings?.show_averages ?? DEFAULT_CHART_SETTINGS.show_averages);
     setShowMacd(chartSettings?.show_macd ?? DEFAULT_CHART_SETTINGS.show_macd);
     setShowRsi(chartSettings?.show_rsi ?? DEFAULT_CHART_SETTINGS.show_rsi);
+    setShowSupport(chartSettings?.show_support ?? DEFAULT_CHART_SETTINGS.show_support);
+    setShowResistance(chartSettings?.show_resistance ?? DEFAULT_CHART_SETTINGS.show_resistance);
     setShowSupertrend(chartSettings?.show_supertrend ?? DEFAULT_CHART_SETTINGS.show_supertrend);
     setShowVolume(chartSettings?.show_volume ?? DEFAULT_CHART_SETTINGS.show_volume);
   }, [
@@ -5907,6 +5954,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     workspace?.layout?.chart_settings?.show_averages,
     workspace?.layout?.chart_settings?.show_macd,
     workspace?.layout?.chart_settings?.show_rsi,
+    workspace?.layout?.chart_settings?.show_support,
+    workspace?.layout?.chart_settings?.show_resistance,
     workspace?.layout?.chart_settings?.show_supertrend,
     workspace?.layout?.chart_settings?.show_volume,
   ]);
@@ -6599,6 +6648,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         show_averages: chartSettings?.show_averages ?? workspace?.layout?.chart_settings?.show_averages ?? showAverages,
         show_macd: chartSettings?.show_macd ?? workspace?.layout?.chart_settings?.show_macd ?? showMacd,
         show_rsi: chartSettings?.show_rsi ?? workspace?.layout?.chart_settings?.show_rsi ?? showRsi,
+        show_support: chartSettings?.show_support ?? workspace?.layout?.chart_settings?.show_support ?? showSupport,
+        show_resistance: chartSettings?.show_resistance ?? workspace?.layout?.chart_settings?.show_resistance ?? showResistance,
         show_supertrend: chartSettings?.show_supertrend ?? workspace?.layout?.chart_settings?.show_supertrend ?? showSupertrend,
         show_volume: chartSettings?.show_volume ?? workspace?.layout?.chart_settings?.show_volume ?? showVolume,
       };
@@ -6646,6 +6697,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }
     if (key === "show_rsi") {
       setShowRsi(value);
+    }
+    if (key === "show_support") {
+      setShowSupport(value);
+    }
+    if (key === "show_resistance") {
+      setShowResistance(value);
     }
     if (key === "show_supertrend") {
       setShowSupertrend(value);
@@ -7519,9 +7576,29 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     derivedPublicInsight?.trend_bias,
     selectedTicker,
   ]);
+  const chartCanonicalLevelZones = useMemo(
+    () => resolveCanonicalChartLevelZones(chartForDisplay),
+    [chartForDisplay],
+  );
+  const chartForOperationalLevels = useMemo(
+    () => chartForDisplay ? { ...chartForDisplay, zones: chartCanonicalLevelZones } : chartForDisplay,
+    [chartForDisplay, chartCanonicalLevelZones],
+  );
+  const chartSupportResistanceLevels = useMemo(() => ({
+    resistance: chartCanonicalLevelZones.find((zone) => zone.kind === "resistance")?.price ?? null,
+    support: chartCanonicalLevelZones.find((zone) => zone.kind === "support")?.price ?? null,
+    zones: chartCanonicalLevelZones,
+  }), [chartCanonicalLevelZones]);
   const effectiveAiScore = useMemo(
     () => displayQuoteHasCoreData ? usableScore(derivedPublicInsight?.score, currentRanking?.score, currentDerivedScore) : null,
     [derivedPublicInsight?.score, currentRanking?.score, currentDerivedScore, displayQuoteHasCoreData],
+  );
+  const panelRsiValue = useMemo(
+    () =>
+      displayQuoteHasCoreData
+        ? firstValidRsiNumber(derivedPublicInsight?.rsi, currentRanking?.rsi, (displayQuote as any)?.rsi)
+        : null,
+    [displayQuoteHasCoreData, derivedPublicInsight?.rsi, currentRanking?.rsi, displayQuote],
   );
   const priceMovementValue = firstFiniteNumber(displayQuote?.change) ?? null;
   const priceMovementPercent = firstFiniteNumber(displayQuote?.change_pct) ?? null;
@@ -7663,10 +7740,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const changeNumber = Number.isFinite(rawChangeNumber) ? rawChangeNumber : null;
     const rawBias = displayQuoteHasCoreData ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || currentRanking?.trend || "" : "";
     const biasValue = displayQuoteHasCoreData ? biasStrengthLabel(rawBias, scoreNumber, changeNumber ?? 0, appLocale) : "n/a";
-    const rsiRaw = displayQuoteHasCoreData
-      ? firstValidRsiNumber(derivedPublicInsight?.rsi, currentRanking?.rsi, (displayQuote as any)?.rsi)
-      : null;
-    const rsiDescriptor = describeRsiValue(rsiRaw, appLocale);
+    const rsiDescriptor = describeRsiValue(panelRsiValue, appLocale);
     const rsiValue = rsiDescriptor.label;
     const changeDirection = changeNumber == null
       ? (isUsLocale ? "no confirmed change" : "sem variação real")
@@ -7700,6 +7774,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       : hasVolume
         ? (isUsLocale ? "real volume confirmed; RVOL depends on historical average" : "volume real confirmado; RVOL depende da média histórica")
         : (isUsLocale ? "no reliable volume in the current provider payload" : "sem volume confiável no payload atual");
+    const volumeSourceHint = isUsLocale
+      ? `Card uses quote/snapshot volume; chart volume follows ${chartInterval}.`
+      : `Card usa volume do quote/snapshot; o volume do gráfico segue ${chartInterval}.`;
     const scoreHint = Number.isFinite(scoreNumber)
       ? scoreNumber >= 7
         ? (isUsLocale ? `${aiScoreValue} favors strength/buy only with confirmation.` : `${aiScoreValue} favorece força/compra apenas com confirmação.`)
@@ -7707,7 +7784,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           ? (isUsLocale ? `${aiScoreValue} indicates weak/sell bias; avoid long without confirmation.` : `${aiScoreValue} indicando baixa/venda; evite compra sem confirmação.`)
           : (isUsLocale ? `${aiScoreValue} is moderate: wait for price/volume confirmation.` : `${aiScoreValue} é moderado: aguarde confirmação de preço/volume.`)
       : (isUsLocale ? "No Master Score confirmed for this asset yet." : "Sem Score Mestre confirmado para este ativo ainda.");
-    const rsiHint = rsiDescriptor.hint;
+    const rsiHint = isUsLocale
+      ? `${rsiDescriptor.hint} Panel RSI is the institutional snapshot/ranking indicator; TradingView does not calculate a separate RSI here.`
+      : `${rsiDescriptor.hint} RSI do painel: indicador institucional do snapshot/ranking. O TradingView não calcula RSI separado.`;
 
     return [
       {
@@ -7725,9 +7804,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         tone: changeNumber != null && changeNumber > 0 ? "up" : changeNumber != null && changeNumber < 0 ? "down" : "neutral",
       },
       {
-        label: "Volume",
+        label: isUsLocale ? "Snapshot Volume" : "Volume snapshot",
         value: volumeValue,
-        hint: isUsLocale ? `${volumeValue}; ${volumeContext}.` : `${volumeValue}, ${volumeContext}.`,
+        hint: isUsLocale ? `${volumeValue}; ${volumeContext}. ${volumeSourceHint}` : `${volumeValue}, ${volumeContext}. ${volumeSourceHint}`,
         tone: relVolume != null && relVolume > 1.2 ? "up" : relVolume != null && relVolume < 0.8 ? "down" : "neutral",
       },
       {
@@ -7737,7 +7816,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         tone: Number.isFinite(scoreNumber) && scoreNumber >= 7 ? "up" : Number.isFinite(scoreNumber) && scoreNumber <= 5.5 ? "down" : "neutral",
       },
       {
-        label: "RSI",
+        label: isUsLocale ? "Snapshot RSI" : "RSI snapshot",
         value: rsiValue,
         hint: rsiHint,
         tone: rsiDescriptor.tone,
@@ -7756,14 +7835,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     displayQuote?.change_pct,
     headerVolume,
     effectiveAiScore,
-    currentRanking?.rsi,
     currentRanking?.rel_volume,
     currentRanking?.trend,
     currentWatchItem?.averageVolume,
     currentWatchItem?.relVolume,
     derivedPublicInsight?.score,
     derivedPublicInsight?.rel_volume,
-    derivedPublicInsight?.rsi,
     derivedPublicInsight?.trend_bias,
     derivedPublicInsight?.signal,
     isUsLocale,
@@ -7771,6 +7848,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     selectedTicker,
     displayQuote,
     displayQuoteHasCoreData,
+    chartInterval,
+    panelRsiValue,
   ]);
   const tapeItems = useMemo(
     () =>
@@ -8342,21 +8421,61 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             : (isUsLocale ? "Neutral" : "Neutro");
   const sentimentScore = calibrateSentimentMeterValue(effectiveSentimentScore, sentimentLabel);
   const volumeActivity = (discussionPosts.length * 8) + (roomItems.length * 5);
+  const assetAverageVolumeForMeter = firstPositiveFiniteNumber(
+    (displayQuote as any)?.average_volume,
+    (displayQuote as any)?.averageVolume,
+    (displayQuote as any)?.avg_volume,
+    currentWatchItem?.averageVolume,
+  );
+  const assetRelativeVolumeForMeter = firstPositiveFiniteNumber(
+    derivedPublicInsight?.rel_volume,
+    currentRanking?.rel_volume,
+    (displayQuote as any)?.rel_volume,
+    (displayQuote as any)?.rvol,
+    currentWatchItem?.relVolume,
+    calculateRelativeVolume(headerVolume, assetAverageVolumeForMeter),
+  );
   const publicVolumeScore =
-    displayQuote?.volume != null
+    assetRelativeVolumeForMeter != null
+      ? assetRelativeVolumeForMeter < 0.8
+        ? 28
+        : assetRelativeVolumeForMeter > 1.2
+          ? 80
+          : 52
+      : displayQuote?.volume != null
       ? clampNumber(Math.round((Math.log10(Number(displayQuote.volume) + 1) - 4.5) * 30), 0, 100)
       : null;
   const rawVolumeScore = volumeActivity > 0 ? clampNumber(volumeActivity, 0, 100) : publicVolumeScore;
-  const volumeMeterTitle = volumeActivity > 0 ? (isUsLocale ? "Message volume" : "Volume de mensagens") : (isUsLocale ? "Asset volume" : "Volume do ativo");
+  const volumeMeterTitle = volumeActivity > 0
+    ? (isUsLocale ? "Message volume" : "Volume de mensagens")
+    : (isUsLocale ? "Asset volume (RVOL)" : "Volume do ativo (RVOL)");
   const volumeLabel =
     rawVolumeScore == null
       ? (isUsLocale ? "No read" : "Sem leitura")
+      : volumeActivity <= 0 && assetRelativeVolumeForMeter != null
+        ? assetRelativeVolumeForMeter < 0.8
+          ? (isUsLocale ? "Below average" : "Abaixo da média")
+          : assetRelativeVolumeForMeter > 1.2
+            ? (isUsLocale ? "Above average" : "Acima da média")
+            : "Normal"
       : rawVolumeScore >= 65
         ? (isUsLocale ? "High" : "Alto")
         : rawVolumeScore >= 35
           ? "Normal"
           : (isUsLocale ? "Low" : "Baixo");
   const volumeScore = calibrateVolumeMeterValue(rawVolumeScore, volumeLabel);
+  const volumeMeterTone =
+    volumeActivity <= 0 && assetRelativeVolumeForMeter != null
+      ? assetRelativeVolumeForMeter > 1.2
+        ? "bullish"
+        : assetRelativeVolumeForMeter < 0.8
+          ? "bearish"
+          : "neutral"
+      : rawVolumeScore != null && rawVolumeScore >= 65
+        ? "bullish"
+        : rawVolumeScore != null && rawVolumeScore < 35
+          ? "bearish"
+          : "neutral";
   const priceDirectionClass = movementClass(priceMovementPercent, currentRanking?.trend, currentRanking?.score);
   const priceMovementLabel = marketSessionLabel(selectedTicker, appLocale);
   const hasPriceMovement = priceMovementValue != null || priceMovementPercent != null;
@@ -8424,13 +8543,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       flowCard,
       {
         label: isUsLocale ? "Liquidity Target" : "Liquidez alvo",
-        value: resolveLiquidityTarget(null, displayQuote?.price, directionTone, appLocale),
+        value: resolveLiquidityTarget(chartForOperationalLevels, displayQuote?.price, directionTone, appLocale),
         tone: directionTone === "exit" ? "watch" : directionTone,
       },
       riskCard,
     ];
   }, [
     appLocale,
+    chartForOperationalLevels,
     currentStrategicPanel,
     currentRanking?.rsi,
     derivedPublicInsight?.rsi,
@@ -8525,11 +8645,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       locale: appLocale,
       cards: essentialDecisionCards,
       conclusion: strategicConclusion,
-      chart: null,
+      chart: chartForOperationalLevels,
       hasCoreData,
     });
   }, [
     appLocale,
+    chartForOperationalLevels,
     currentStrategicPanel,
     displayQuote?.price,
     displayQuoteHasCoreData,
@@ -9652,8 +9773,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       { key: "show_vwap", checked: showVwap, label: "VWAP" },
       { key: "show_averages", checked: showAverages, label: isUsLocale ? "Averages" : "Médias" },
       { key: "show_macd", checked: showMacd, label: "MACD" },
-      { key: "show_rsi", checked: showRsi, label: "RSI" },
-      { key: "show_volume", checked: showVolume, label: "Volume" },
+      { key: "show_rsi", checked: showRsi, label: isUsLocale ? "Panel RSI" : "RSI painel" },
+      { key: "show_volume", checked: showVolume, label: isUsLocale ? "Chart volume" : "Volume gráfico" },
+      { key: "show_support", checked: showSupport, label: isUsLocale ? "Support" : "Suporte" },
+      { key: "show_resistance", checked: showResistance, label: isUsLocale ? "Resistance" : "Resistência" },
     ];
 
     return (
@@ -9681,7 +9804,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           </div>
 
           <TickerChart
-            chart={chartForDisplay}
+            chart={chartForOperationalLevels}
             ticker={selectedTicker}
             interval={chartInterval}
             showMarkers={showMarkers}
@@ -9693,6 +9816,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             showRsi={showRsi}
             showSupertrend={showSupertrend}
             showVolume={showVolume}
+            showSupport={showSupport}
+            showResistance={showResistance}
+            supportLevel={chartSupportResistanceLevels.support}
+            resistanceLevel={chartSupportResistanceLevels.resistance}
+            institutionalRsiValue={panelRsiValue}
             locale={appLocale}
           />
 
@@ -9738,13 +9866,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               volumeMeterTitle,
               volumeLabel,
               volumeScore,
-              rawVolumeScore != null && rawVolumeScore >= 65 ? "bullish" : rawVolumeScore != null && rawVolumeScore < 35 ? "bearish" : "neutral",
+              volumeMeterTone,
             )}
           </div>
 
-          {showZones && chartForDisplay?.zones?.length ? (
+          {showZones && chartSupportResistanceLevels.zones.length ? (
             <div className="snbr-zone-row">
-              {chartForDisplay.zones.map((zone: any) => (
+              {chartSupportResistanceLevels.zones.map((zone) => (
                 <span key={`${zone.label}-${zone.price}`} className="snbr-chip">
                   {isUsLocale ? localizeUiText(String(zone.label || "").replace("RESISTENCIA", "RESISTANCE").replace("SUPORTE", "SUPPORT"), appLocale, selectedTicker) : zone.label}: {formatLocalePrice(zone.price, appLocale)}
                 </span>

@@ -411,6 +411,8 @@ export type WorkspaceLayout = {
     show_averages?: boolean;
     show_macd?: boolean;
     show_rsi?: boolean;
+    show_support?: boolean;
+    show_resistance?: boolean;
     show_supertrend?: boolean;
     show_volume?: boolean;
   };
