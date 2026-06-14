@@ -181,6 +181,15 @@ _performance_intelligence_metrics = {
     "recommendations": 0,
     "updated_at": 0.0,
 }
+_explainability_metrics = {
+    "status": "IDLE",
+    "explanations": 0,
+    "average_decision_explainability_score": 0.0,
+    "high_explainability": 0,
+    "low_explainability": 0,
+    "missing_change_conditions": 0,
+    "updated_at": 0.0,
+}
 _institutional_consistency_metrics = {
     "signals_checked": 0,
     "issues": 0,
@@ -804,6 +813,30 @@ def get_performance_intelligence_metrics_snapshot():
         return dict(_performance_intelligence_metrics)
 
 
+def record_explainability_metrics(metrics: dict | None):
+    safe = metrics if isinstance(metrics, dict) else {}
+    with _lock:
+        _explainability_metrics.update(
+            {
+                "status": str(safe.get("status") or "IDLE"),
+                "explanations": int(safe.get("explanations", 0) or 0),
+                "average_decision_explainability_score": round(
+                    float(safe.get("average_decision_explainability_score", 0.0) or 0.0),
+                    2,
+                ),
+                "high_explainability": int(safe.get("high_explainability", 0) or 0),
+                "low_explainability": int(safe.get("low_explainability", 0) or 0),
+                "missing_change_conditions": int(safe.get("missing_change_conditions", 0) or 0),
+                "updated_at": time.time(),
+            }
+        )
+
+
+def get_explainability_metrics_snapshot():
+    with _lock:
+        return dict(_explainability_metrics)
+
+
 def record_institutional_consistency_metrics(metrics: dict | None):
     safe = metrics if isinstance(metrics, dict) else {}
     with _lock:
@@ -942,6 +975,7 @@ def get_performance_metrics_snapshot():
         telegram_alerts = dict(_telegram_alert_metrics)
         signal_outcomes = dict(_signal_outcome_metrics)
         performance_intelligence = dict(_performance_intelligence_metrics)
+        explainability = dict(_explainability_metrics)
         institutional_consistency = dict(_institutional_consistency_metrics)
         institutional_metrics = _institutional_metrics_snapshot_locked()
         worker_runtime = dict(_worker_runtime_metrics)
@@ -983,6 +1017,7 @@ def get_performance_metrics_snapshot():
         "telegram_alerts": telegram_alerts,
         "signal_outcomes": signal_outcomes,
         "performance_intelligence": performance_intelligence,
+        "explainability": explainability,
         "institutional_consistency": institutional_consistency,
         "institutional_metrics": institutional_metrics,
         "provider_symbol_failures": repeated_failures,

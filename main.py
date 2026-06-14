@@ -52,6 +52,7 @@ ROUTER_SPECS = [
     ("app.api.routes_internal", "router"),
     ("app.api.routes_paper_trading", "router"),
     ("app.api.routes_performance_intelligence", "router"),
+    ("app.api.routes_explainability", "router"),
     ("app.api.api_market_routes", "router"),
     ("app.api.market_routes", "router"),
     ("app.api.routes_heatmap", "router"),
