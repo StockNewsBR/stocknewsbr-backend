@@ -3006,36 +3006,7 @@ a {
   border-color: rgba(52, 211, 153, 0.9);
 }
 
-.snbr-chart-level-line span {
-  position: absolute;
-  right: 0;
-  top: -16px;
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 9px;
-  border-radius: 999px;
-  border: 1px solid rgba(245, 158, 11, 0.45);
-  background: rgba(255, 251, 235, 0.96);
-  color: #78350f;
-  font-size: 11px;
-  font-weight: 900;
-  text-transform: uppercase;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
-}
-
-.snbr-chart-level-line.support span {
-  border-color: rgba(22, 163, 74, 0.38);
-  background: rgba(236, 253, 245, 0.96);
-  color: #065f46;
-}
-
-.snbr-chart-level-line.resistance span {
-  border-color: rgba(220, 38, 38, 0.34);
-  background: rgba(254, 242, 242, 0.96);
-  color: #991b1b;
-}
-
-.snbr-chart-level-overlays {
+.snbr-chart-top-overlays {
   position: absolute;
   top: 52px;
   right: 18px;
@@ -3046,6 +3017,10 @@ a {
   gap: 8px;
   max-width: min(520px, calc(100% - 36px));
   pointer-events: none;
+}
+
+.snbr-chart-level-overlays {
+  display: contents;
 }
 
 .snbr-chart-level-overlay {
@@ -3081,10 +3056,7 @@ a {
 }
 
 .snbr-chart-panel-rsi-badge {
-  position: absolute;
-  right: 18px;
-  top: 92px;
-  z-index: 4;
+  position: static;
   padding: 5px 9px;
   border-radius: 999px;
   border: 1px solid rgba(168, 85, 247, 0.42);
@@ -3287,19 +3259,6 @@ a {
 
 .snbr-app.theme-dark .snbr-chart-level-line {
   filter: drop-shadow(0 5px 14px rgba(0, 0, 0, 0.34));
-}
-
-.snbr-app.theme-dark .snbr-chart-level-line span {
-  background: rgba(30, 41, 59, 0.94);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
-}
-
-.snbr-app.theme-dark .snbr-chart-level-line.support span {
-  color: #bbf7d0;
-}
-
-.snbr-app.theme-dark .snbr-chart-level-line.resistance span {
-  color: #fecaca;
 }
 
 .snbr-app.theme-dark .snbr-chart-level-overlay.support span {
@@ -3688,6 +3647,32 @@ a {
   background: rgba(120, 129, 156, 0.08);
 }
 
+.snbr-news-sentiment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.snbr-news-sentiment.bullish {
+  border-color: rgba(31, 211, 138, 0.34);
+  background: rgba(31, 211, 138, 0.12);
+  color: var(--green);
+}
+
+.snbr-news-sentiment.bearish {
+  border-color: rgba(255, 107, 107, 0.34);
+  background: rgba(255, 107, 107, 0.12);
+  color: var(--red);
+}
+
 .snbr-news-impact.compact {
   padding: 3px 7px;
   font-size: 10px;
@@ -3726,6 +3711,10 @@ a {
 
 .snbr-news-chip-row {
   margin-top: 2px;
+}
+
+.snbr-temporal-chip-row {
+  justify-content: flex-end;
 }
 
 .snbr-news-chip,

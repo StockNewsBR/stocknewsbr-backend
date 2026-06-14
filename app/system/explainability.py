@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Tuple
 
 from app.cache.snapshot_cache import get_snapshot
+from app.services.score_display import attach_master_score_display_contract
 from app.system.system_metrics import record_explainability_metrics
 
 BREAKDOWN_CATEGORIES: Dict[str, Tuple[str, ...]] = {
@@ -269,6 +270,7 @@ def decision_explainability_score(row: Dict[str, Any], why: Dict[str, List[str]]
 
 
 def explain_signal(row: Dict[str, Any]) -> Dict[str, Any]:
+    display_row = attach_master_score_display_contract(row)
     why = why_this_score(row)
     change_mind = what_would_change_my_mind(row)
     breakdown = score_breakdown(row)
@@ -276,6 +278,8 @@ def explain_signal(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "ticker": _symbol(row),
         "master_score": row.get("master_score", row.get("score")),
+        "master_score_display": display_row.get("master_score_display"),
+        "master_score_display_warning": display_row.get("master_score_display_warning"),
         "master_direction": row.get("master_direction"),
         "final_decision": row.get("final_decision"),
         "conviction_level": row.get("conviction_level"),

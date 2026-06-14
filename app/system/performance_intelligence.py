@@ -47,7 +47,11 @@ def _score_value(record: Dict[str, Any]) -> float | None:
     score = _safe_float(raw, -1.0)
     if score < 0:
         return None
-    return score / 10.0 if score > 10 else score
+    if score > 20:
+        return min(10.0, score / 10.0)
+    if score > 10:
+        return 10.0
+    return score
 
 
 def score_bucket(record: Dict[str, Any]) -> str:

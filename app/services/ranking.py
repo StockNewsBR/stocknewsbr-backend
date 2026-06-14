@@ -21,6 +21,7 @@ from app.cache.market_data_cache import get_market_data
 from app.cache.snapshot_cache import get_snapshot_info, get_snapshot_signals
 from app.config import SYMBOLS
 from app.dependencies import require_active_plan
+from app.services.score_display import attach_master_score_display_contract
 from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score, is_actionable_snapshot_row
 from app.system.system_metrics import current_provider_call_source
 
@@ -264,12 +265,16 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
             display_score = float(row.get("master_score", row.get("score", 0)) or 0)
         except Exception:
             display_score = ranking_score
+        display_contract = attach_master_score_display_contract({"master_score": display_score})
 
         results.append(
             {
                 "ticker": symbol,
                 "symbol": symbol,
                 "score": display_score,
+                "score_display": display_contract.get("master_score_display"),
+                "master_score_display": display_contract.get("master_score_display"),
+                "master_score_display_warning": display_contract.get("master_score_display_warning"),
                 "source_score": row.get("score"),
                 "ranking_opportunity_score": row.get("ranking_opportunity_score", ranking_score),
                 "ranking_classification": row.get("ranking_classification"),

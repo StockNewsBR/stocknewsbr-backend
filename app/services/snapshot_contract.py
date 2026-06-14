@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from app.services.score_display import attach_master_score_display_contract
+
 
 ACTIONABLE_SIGNALS = {"BUY", "SELL", "SHORT", "COVER"}
 BULLISH_ACTIONS = {"BUY", "COVER"}
@@ -305,6 +307,7 @@ def is_blocked_snapshot_row(row: Any) -> bool:
 
 
 def snapshot_row_summary(row: dict[str, Any]) -> dict[str, Any]:
+    score_display_contract = attach_master_score_display_contract(row)
     return {
         "ticker": row.get("ticker") or row.get("symbol"),
         "symbol": row.get("symbol") or row.get("ticker"),
@@ -327,6 +330,8 @@ def snapshot_row_summary(row: dict[str, Any]) -> dict[str, Any]:
         "audit_warnings": row.get("audit_warnings") or [],
         "blocked_by_auditor": bool(row.get("blocked_by_auditor") is True),
         "master_score": row.get("master_score"),
+        "master_score_display": score_display_contract.get("master_score_display"),
+        "master_score_display_warning": score_display_contract.get("master_score_display_warning"),
         "master_direction": row.get("master_direction"),
         "master_conviction": row.get("master_conviction"),
         "master_confidence": row.get("master_confidence"),

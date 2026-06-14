@@ -210,13 +210,13 @@ const TAB_META: Record<string, { label: string; short: string }> = {
   grafico: { label: "📈 Gráfico IA / Rede Social", short: "Gráfico/Rede Social" },
   news: { label: "📰 Notícias", short: "Notícias" },
   busca: { label: "🔎 Busca", short: "Busca" },
-  flow: { label: "🏦 Flow IA", short: "Flow" },
-  liquidity: { label: "🧲 Liquidity IA", short: "Liquidez" },
-  trend: { label: "📈 Trend IA", short: "Trend" },
-  momentum: { label: "⚡ Momentum IA", short: "Momentum" },
+  flow: { label: "🏦 Fluxo IA", short: "Fluxo" },
+  liquidity: { label: "🧲 Liquidez IA", short: "Liquidez" },
+  trend: { label: "📈 Tendência IA", short: "Tendência" },
+  momentum: { label: "⚡ Momento IA", short: "Momento" },
   "smart-money": { label: "💼 Dinheiro Inteligente", short: "Smart" },
-  risk: { label: "⚠️ Risk IA", short: "Risco" },
-  "news-ia": { label: "📰 News IA", short: "News IA" },
+  risk: { label: "⚠️ Risco IA", short: "Risco" },
+  "news-ia": { label: "📰 Notícias IA", short: "Notícias IA" },
   macro: { label: "🌎 Macro IA", short: "Macro" },
   regime: { label: "📊 Regime IA", short: "Regime" },
   referrals: { label: "🤝 Indicações", short: "Indicações" },
@@ -295,13 +295,13 @@ const VISIBLE_WORKSPACE_PERSONAS: WorkspacePersona[] = ["guiado"];
 const TOP_TAB_TEXT: Record<string, string> = {
   grafico: "Gráfico IA / Rede Social",
   news: "Notícias",
-  flow: "Flow IA",
-  liquidity: "Liquidity IA",
-  trend: "Trend IA",
-  momentum: "Momentum IA",
+  flow: "Fluxo IA",
+  liquidity: "Liquidez IA",
+  trend: "Tendência IA",
+  momentum: "Momento IA",
   "smart-money": "Smart Money",
-  risk: "Risk IA",
-  "news-ia": "News IA",
+  risk: "Risco IA",
+  "news-ia": "Notícias IA",
   macro: "Macro IA",
   regime: "Regime IA",
   referrals: "Indicações",
@@ -360,13 +360,13 @@ const FALLBACK_TABS: WorkspaceTab[] = [
   { id: "grafico", title: "Gráfico IA / Rede Social" },
   { id: "news", title: "Notícias" },
   { id: "busca", title: "Busca" },
-  { id: "flow", title: "Flow IA" },
-  { id: "liquidity", title: "Liquidity IA" },
-  { id: "trend", title: "Trend IA" },
-  { id: "momentum", title: "Momentum IA" },
+  { id: "flow", title: "Fluxo IA" },
+  { id: "liquidity", title: "Liquidez IA" },
+  { id: "trend", title: "Tendência IA" },
+  { id: "momentum", title: "Momento IA" },
   { id: "smart-money", title: "Dinheiro Inteligente" },
-  { id: "risk", title: "Risk IA" },
-  { id: "news-ia", title: "News IA" },
+  { id: "risk", title: "Risco IA" },
+  { id: "news-ia", title: "Notícias IA" },
   { id: "macro", title: "Macro IA" },
   { id: "regime", title: "Regime IA" },
   { id: "referrals", title: "Indicações" },
@@ -539,13 +539,13 @@ const FIXED_TAPE_SYMBOLS = [
 const HELP_MANUAL_ITEMS = [
   "📈 Gráfico IA → exibe sinais no gráfico: COMPRA, VENDA A DESCOBERTO ou ⚠ encerrar posição.",
   "⭐ Score Mestre → sistema operacional da decisão: consolida as 9 IAs, auditoria, dados e risco.",
-  "🏦 Flow IA → lê fluxo institucional, agressão e pressão compradora ou vendedora.",
-  "🧲 Liquidity IA → consolida zonas de liquidez, sweeps, traps e invalidação.",
-  "📈 Trend IA → avalia direção predominante e estrutura de mercado.",
-  "⚡ Momentum IA → consolida aceleração, rompimento e força relativa em uma leitura só.",
+  "🏦 Fluxo IA → lê fluxo institucional, agressão e pressão compradora ou vendedora.",
+  "🧲 Liquidez IA → consolida zonas de liquidez, varreduras, armadilhas e invalidação.",
+  "📈 Tendência IA → avalia direção predominante e estrutura de mercado.",
+  "⚡ Momento IA → consolida aceleração, rompimento e força relativa em uma leitura só.",
   "💰 Smart Money IA → combina flow, acumulação e absorção sem duplicar confirmação.",
-  "⚠ Risk IA → responde se vale operar, por que não operar e quais bloqueios existem.",
-  "📰 News IA → trata notícia como contexto, com relevância, confiança e provider status.",
+  "⚠ Risco IA → responde se vale operar, por que não operar e quais bloqueios existem.",
+  "📰 Notícias IA → trata notícia como contexto, com relevância, confiança e status do provedor.",
   "🌎 Macro IA → separa macro real de macro derivado apenas de notícia.",
   "📊 Regime IA → classifica lateralidade, tendência e volatilidade do ambiente.",
 ];
@@ -672,12 +672,26 @@ const INSTITUTIONAL_SECTIONS = [
     ],
   },
   {
+    id: "filosofia-oficial",
+    label: "FILOSOFIA OFICIAL",
+    title: "📜 FILOSOFIA OFICIAL",
+    body: [
+      "StockNewsBR é a plataforma inteligente que transforma dados em oportunidades. Com tecnologia de IA e cálculos financeiros quânticos, oferece análises exclusivas para traders da B3, BDRs, ações dos EUA e criptoativos.",
+      "Nosso objetivo é entregar insights rápidos, decisões mais seguras e aumentar seu potencial de lucro com melhor tomada de decisão.",
+      "A proposta do produto é transformar leitura institucional, fluxo, estrutura e contexto do mercado em uma tela simples, rápida e prática para operação diária.",
+      "As análises são apoio inteligente, não garantias.",
+      "Gestão de risco e disciplina são essenciais.",
+      "O mercado é dinâmico: esteja preparado para agir rápido.",
+      "StockNewsBR: Inteligência de Mercado com estrutura institucional e IA's, gerando ao trader uma tomada de decisão superior. Boas Trades !!! $$$$$",
+    ],
+  },
+  {
     id: "institucional-produto",
     label: "2️⃣ Descrição do produto",
     title: "📦 Descrição do produto",
     body: [
       "O produto principal nasce no app Google Play e libera experiência integrada entre app, website e Telegram conforme o plano do usuário.",
-      "As superfícies atuais incluem Score Mestre, Ranking de Oportunidades, Radar Institucional, Risk IA, 9 IAs especialistas oficiais, gráfico, comunidade e ajuda educacional.",
+      "As superfícies atuais incluem Score Mestre, Ranking de Oportunidades, Radar Institucional, Risco IA, 9 IAs especialistas oficiais, gráfico, comunidade e ajuda educacional.",
     ],
   },
   {
@@ -812,6 +826,20 @@ const INSTITUTIONAL_SECTIONS_EN = [
       "StockNewsBR is an intelligent platform that turns data into opportunities. With AI technology and quantum financial calculations, it provides exclusive analysis for B3, BDR, US stock and crypto traders.",
       "The goal is to deliver fast insights, safer decisions and better decision-making potential.",
       "The product turns institutional reading, flow, structure and market context into a fast daily trading workspace.",
+    ],
+  },
+  {
+    id: "filosofia-oficial",
+    label: "OFFICIAL PHILOSOPHY",
+    title: "📜 OFFICIAL PHILOSOPHY",
+    body: [
+      "StockNewsBR is an intelligent platform that turns data into opportunities. With AI technology and quantum financial calculations, it provides exclusive analysis for B3, BDR, US stock and crypto traders.",
+      "The goal is to deliver fast insights, safer decisions and better decision-making potential.",
+      "The product turns institutional reading, flow, structure and market context into a fast daily trading workspace.",
+      "The analyses are intelligent support, not guarantees.",
+      "Risk management and discipline are essential.",
+      "The market is dynamic: be ready to act quickly.",
+      "StockNewsBR: market intelligence with institutional structure and AI, giving traders superior decision-making.",
     ],
   },
   {
@@ -1027,24 +1055,24 @@ const COMPANY_HINTS: Record<string, string> = {
 
 const TOOL_COPY: Record<string, { title: string; description: string; explanation: string }> = {
   flow: {
-    title: "🏦 Flow IA",
+    title: "🏦 Fluxo IA",
     description: "Lê fluxo institucional, agressão e pressão compradora ou vendedora.",
     explanation: "Mostra interesse institucional, mas não libera operação sem decision ready, dados válidos e risco controlado.",
   },
   liquidity: {
-    title: "🧲 Liquidity IA",
-    description: "Consolida zonas de liquidez, sweeps, traps e invalidação.",
+    title: "🧲 Liquidez IA",
+    description: "Consolida zonas de liquidez, varreduras, armadilhas e invalidação.",
     explanation: "Une varredura e mapa de liquidez em uma leitura só, evitando duplicidade visual.",
   },
   trend: {
-    title: "📈 Trend IA",
+    title: "📈 Tendência IA",
     description: "Avalia direção predominante e estrutura de mercado.",
-    explanation: "Trend IA é dedicada: tendência fica separada de regime, momentum e score.",
+    explanation: "Tendência IA é dedicada: tendência fica separada de regime, momento e score.",
   },
   momentum: {
-    title: "⚡ Momentum IA",
+    title: "⚡ Momento IA",
     description: "Consolida radar, breakout e heat map em uma leitura de aceleração.",
-    explanation: "Momentum mostra força e exaustão, mas continua não acionável quando a decisão operacional não está pronta.",
+    explanation: "Momento IA mostra força e exaustão, mas continua não acionável quando a decisão operacional não está pronta.",
   },
   "smart-money": {
     title: "💼 Smart Money IA",
@@ -1052,13 +1080,13 @@ const TOOL_COPY: Record<string, { title: string; description: string; explanatio
     explanation: "Evita mostrar Flow, Smart Money e Accumulation como três confirmações independentes.",
   },
   risk: {
-    title: "⚠️ Risk IA",
+    title: "⚠️ Risco IA",
     description: "Mostra risco operacional, bloqueios, Can Trade e motivo de não operar.",
     explanation: "Score alto com dado ruim, liquidez fraca ou conflito continua bloqueado.",
   },
   "news-ia": {
-    title: "📰 News IA",
-    description: "Mostra estado da notícia, relevância, confiança, impacto e provider status.",
+    title: "📰 Notícias IA",
+    description: "Mostra estado da notícia, relevância, confiança, impacto e status do provedor.",
     explanation: "Notícia é contexto. Não vira compra ou venda isolada.",
   },
   macro: {
@@ -1069,7 +1097,7 @@ const TOOL_COPY: Record<string, { title: string; description: string; explanatio
   regime: {
     title: "📊 Regime IA",
     description: "Classifica contexto de mercado: tendência, lateralidade e volatilidade.",
-    explanation: "Regime orienta o cenário, mas não substitui Risk IA nem decisão operacional.",
+    explanation: "Regime orienta o cenário, mas não substitui Risco IA nem decisão operacional.",
   },
 };
 
@@ -1829,6 +1857,16 @@ function resolveAiFindingTimestamp(row: AiToolRow) {
   );
 }
 
+function resolveAiPublishedTimestamp(row: AiToolRow) {
+  return (
+    normalizeAlertTimestamp(row.published_at) ||
+    normalizeAlertTimestamp(row.news_published_at) ||
+    normalizeAlertTimestamp(row.provider_publish_time) ||
+    normalizeAlertTimestamp((row as any).publishedAt) ||
+    normalizeAlertTimestamp((row as any).providerPublishTime)
+  );
+}
+
 function formatAlertTime(symbol: string, rawTimestamp?: number | null) {
   const date = rawTimestamp ? new Date(rawTimestamp) : null;
   if (!date || Number.isNaN(date.getTime())) return "sem horário";
@@ -2182,9 +2220,30 @@ function mergeQuoteState(current: Record<string, QuotePayload>, incoming: Record
 function usableScore(...scores: Array<number | null | undefined>) {
   for (const score of scores) {
     const numeric = Number(score);
-    if (Number.isFinite(numeric) && numeric > 0) return numeric;
+    if (Number.isFinite(numeric) && numeric > 0) return normalizeMasterScoreForDisplay(numeric);
   }
   return null;
+}
+
+function normalizeMasterScoreForDisplay(score: number | null | undefined) {
+  const numeric = Number(score);
+  if (!Number.isFinite(numeric)) return null;
+  if (numeric < 0) {
+    console.warn("[StockNewsBR] Score Mestre negativo normalizado para display.", { raw: numeric, display: 0 });
+    return 0;
+  }
+  if (numeric > 20) {
+    const display = clampNumber(Number((numeric / 10).toFixed(1)), 0, 10);
+    if (display >= 10) {
+      console.warn("[StockNewsBR] Score Mestre acima de 10 normalizado para display.", { raw: numeric, display });
+    }
+    return display;
+  }
+  if (numeric > 10) {
+    console.warn("[StockNewsBR] Score Mestre acima de 10 normalizado para display.", { raw: numeric, display: 10 });
+    return 10;
+  }
+  return clampNumber(Number(numeric.toFixed(1)), 0, 10);
 }
 
 function derivePublicScore(input: {
@@ -3305,6 +3364,13 @@ function localizeImpactLabel(value: string | null | undefined, locale: AppLocale
   return localizeUiText(text, locale);
 }
 
+function resolveNewsSentiment(item: NewsItem): "bullish" | "bearish" | "neutral" {
+  const raw = normalizeUiText((item as any).sentiment || item.impact || item.impact_label || item.impact_reason || "");
+  if (raw.includes("bull") || raw.includes("positivo") || raw.includes("alta") || raw.includes("compra")) return "bullish";
+  if (raw.includes("bear") || raw.includes("negativo") || raw.includes("baixa") || raw.includes("venda")) return "bearish";
+  return "neutral";
+}
+
 function isGenericPollQuestion(question?: string | null) {
   return /qual leitura semanal|qual o cen[aá]rio mais prov[aá]vel|o cen[aá]rio favorece|vai bater o an[uú]ncio|estrutura atual|continuidade com vi[eé]s|press[aã]o ou lateraliza[cç][aã]o|leitura da semana/i.test(String(question || ""));
 }
@@ -3385,6 +3451,7 @@ function strategicPanelTone(panel?: StrategicPanel | null): DecisionTone {
 function strategicPanelDecisionCards(panel: StrategicPanel, locale: AppLocale): EssentialDecisionCard[] {
   const isEnglish = locale === "en-US";
   const score = firstFiniteNumber((panel.master_score_block as any)?.score);
+  const displayScore = normalizeMasterScoreForDisplay(score);
   const direction = strategicPanelText(panel.probable_direction_block?.visual_label || panel.probable_direction_block?.label, isEnglish ? "Neutral" : "Neutra");
   const action = strategicPanelText(panel.recommended_action, isEnglish ? "WAIT" : "AGUARDAR");
   const audit = strategicPanelText(panel.auditor_block?.visual_status, isEnglish ? "Attention" : "Atenção");
@@ -3396,10 +3463,10 @@ function strategicPanelDecisionCards(panel: StrategicPanel, locale: AppLocale): 
   return [
     {
       label: isEnglish ? "Master Score" : "Score Mestre",
-      value: score != null ? score.toFixed(0) : "n/a",
-      tone: score != null && score >= 80 ? "bullish" : score != null && score < 60 ? "watch" : tone,
+      value: displayScore != null ? `${displayScore.toFixed(1)} / 10` : "n/a",
+      tone: displayScore != null && displayScore >= 8 ? "bullish" : displayScore != null && displayScore < 6 ? "watch" : tone,
       meta: `${conviction} | ${confidence}`,
-      meter: score != null ? clampNumber(score, 0, 100) : null,
+      meter: displayScore != null ? clampNumber(displayScore * 10, 0, 100) : null,
     },
     {
       label: isEnglish ? "Likely Direction" : "Direção provável",
@@ -4934,7 +5001,7 @@ function buildPublicToolNarrative(input: {
       return {
         ...base,
         state: input.volume && input.volume > 1_000_000 ? "fluxo relevante" : "fluxo em observação",
-        ai_comment: `${input.symbol} em Flow IA: ${signature}; volume ${volumeText}, variação ${changeText}. Direção de fluxo: ${side}.`,
+        ai_comment: `${input.symbol} em Fluxo IA: ${signature}; volume ${volumeText}, variação ${changeText}. Direção de fluxo: ${side}.`,
         trigger: `Executar ${side} só se RVOL sustentar ${rvolText} ou maior junto com deslocamento ${direction}.`,
         invalidation: `Desconsiderar se volume vier sem deslocamento, com pavio contra a tese ou absorção de ${oppositeSide}.`,
       };
@@ -4942,7 +5009,7 @@ function buildPublicToolNarrative(input: {
       return {
         ...base,
         state: "zonas e traps de liquidez",
-        ai_comment: `${input.symbol} em Liquidity IA: ${signature}; use bordas do range para planejar ${side} só com reação confirmada.`,
+        ai_comment: `${input.symbol} em Liquidez IA: ${signature}; use bordas do range para planejar ${side} só com reação confirmada.`,
         trigger: `Aguardar toque na zona, sweep ou trap confirmado com RVOL ${rvolText}; liquidez é alerta, não entrada automática.`,
         invalidation: `Zona perde força após rompimento limpo com volume ou ATR ${atrText} expandindo contra a tese.`,
       };
@@ -4950,7 +5017,7 @@ function buildPublicToolNarrative(input: {
       return {
         ...base,
         state: isBullish ? "estrutura de alta" : isBearish ? "estrutura de baixa" : "estrutura indefinida",
-        ai_comment: `${input.symbol} em Trend IA: ${signature}; RSI ${rsiText}, movimento ${changeText}. Direção estrutural: ${side}.`,
+        ai_comment: `${input.symbol} em Tendência IA: ${signature}; RSI ${rsiText}, movimento ${changeText}. Direção estrutural: ${side}.`,
         trigger: isBullish
           ? `Priorizar compras apenas se estrutura, VWAP e RVOL ${rvolText} confirmarem.`
           : `Priorizar defesa/venda/tamanho menor até recuperar estrutura; Score ${scoreText} não autoriza compra isolada.`,
@@ -4962,7 +5029,7 @@ function buildPublicToolNarrative(input: {
       return {
         ...base,
         state: strongMove ? "momentum ativo" : "momentum inicial",
-        ai_comment: `${input.symbol} em Momentum IA: ${signature}; aceleração ${changeText}, volume ${volumeText}. Direção preferida: ${side}.`,
+        ai_comment: `${input.symbol} em Momento IA: ${signature}; aceleração ${changeText}, volume ${volumeText}. Direção preferida: ${side}.`,
         trigger: strongMove
           ? `Entrar só se o próximo candle continuar ${direction}, RVOL ficar perto/acima de ${rvolText} e ADX não perder força.`
           : `Aguardar nova aceleração; com Score ${scoreText}, ${side} ainda exige expansão de preço e volume.`,
@@ -4980,7 +5047,7 @@ function buildPublicToolNarrative(input: {
       return {
         ...base,
         state: scoreValue >= 7 ? "risco elevado" : "risco monitorado",
-        ai_comment: `${input.symbol} em Risk IA: ${signature}; preço ${priceText}, volume ${volumeText}. Resultado: não operar sem Can Trade.`,
+        ai_comment: `${input.symbol} em Risco IA: ${signature}; preço ${priceText}, volume ${volumeText}. Resultado: não operar sem Can Trade.`,
         trigger: `Liberar somente se dados, liquidez, auditor e decision ready confirmarem ${side}.`,
         invalidation: `Qualquer bloqueio de liquidez, dado ruim, conflito institucional ou auditor bloqueado invalida operação.`,
       };
@@ -4988,7 +5055,7 @@ function buildPublicToolNarrative(input: {
       return {
         ...base,
         state: "contexto de notícia",
-        ai_comment: `${input.symbol} em News IA: ${signature}; notícia é contexto e precisa de confirmação no preço.`,
+        ai_comment: `${input.symbol} em Notícias IA: ${signature}; notícia é contexto e precisa de confirmação no preço.`,
         trigger: `Usar notícia só junto com preço, volume e fluxo confirmando ${side}.`,
         invalidation: `Notícia perde peso se estiver stale, sem provider confiável ou sem relação direta com o ticker.`,
       };
@@ -5649,6 +5716,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const queryTicker = normalizeSymbol(searchParams.get("ticker") || initialTicker || "PETR4");
 
   const [token, setToken] = useState("");
+  const [viewedAtIso] = useState(() => new Date().toISOString());
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [otpCode, setOtpCode] = useState("");
@@ -7459,7 +7527,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const currentDerivedScore = useMemo(
     () => {
       if (!displayQuoteHasCoreData) return null;
-      if (snapshotInsight?.score != null) return snapshotInsight.score;
+      if (snapshotInsight?.score != null) return normalizeMasterScoreForDisplay(snapshotInsight.score);
       return derivePublicScore({
         changePct: displayQuote?.change_pct ?? null,
         rsi: snapshotInsight?.rsi ?? currentPublicInsight?.rsi ?? (currentRanking?.rsi != null ? Number(currentRanking.rsi) : null),
@@ -7687,6 +7755,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           ? item.entities.filter(Boolean).map((entity) => appLocale === "en-US" ? localizeUiText(entity, appLocale, selectedTicker) : expandPortugueseMarketTerms(entity))
           : [];
         const impact = localizeImpactLabel(item.impact_label || item.impact || "Neutro", appLocale);
+        const sentiment = resolveNewsSentiment(item);
         const title = displayNewsTitle(item, selectedTicker, appLocale);
         const rawHeadline = bestRawNewsHeadline(item, selectedTicker);
         const headline = isUsLocale ? clampHeadline(rawHeadline || title, 150) : title;
@@ -7706,11 +7775,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           source: item.source || "Yahoo Finance",
           age,
           publishedTime,
+          publishedAtIso,
           sector,
           industry,
           labels: labelsForLocale,
           entities,
           impact,
+          sentiment,
           quality,
           useful: item.useful !== false,
           relevanceScore: item.relevance_score,
@@ -7742,6 +7813,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const biasValue = displayQuoteHasCoreData ? biasStrengthLabel(rawBias, scoreNumber, changeNumber ?? 0, appLocale) : "n/a";
     const rsiDescriptor = describeRsiValue(panelRsiValue, appLocale);
     const rsiValue = rsiDescriptor.label;
+    const rsiScoreValue = rsiValue === "n/a" ? "n/a" : `RSI SCORE: ${rsiValue}`;
     const changeDirection = changeNumber == null
       ? (isUsLocale ? "no confirmed change" : "sem variação real")
       : changeNumber < 0
@@ -7774,9 +7846,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       : hasVolume
         ? (isUsLocale ? "real volume confirmed; RVOL depends on historical average" : "volume real confirmado; RVOL depende da média histórica")
         : (isUsLocale ? "no reliable volume in the current provider payload" : "sem volume confiável no payload atual");
-    const volumeSourceHint = isUsLocale
-      ? `Card uses quote/snapshot volume; chart volume follows ${chartInterval}.`
-      : `Card usa volume do quote/snapshot; o volume do gráfico segue ${chartInterval}.`;
     const scoreHint = Number.isFinite(scoreNumber)
       ? scoreNumber >= 7
         ? (isUsLocale ? `${aiScoreValue} favors strength/buy only with confirmation.` : `${aiScoreValue} favorece força/compra apenas com confirmação.`)
@@ -7784,9 +7853,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           ? (isUsLocale ? `${aiScoreValue} indicates weak/sell bias; avoid long without confirmation.` : `${aiScoreValue} indicando baixa/venda; evite compra sem confirmação.`)
           : (isUsLocale ? `${aiScoreValue} is moderate: wait for price/volume confirmation.` : `${aiScoreValue} é moderado: aguarde confirmação de preço/volume.`)
       : (isUsLocale ? "No Master Score confirmed for this asset yet." : "Sem Score Mestre confirmado para este ativo ainda.");
-    const rsiHint = isUsLocale
-      ? `${rsiDescriptor.hint} Panel RSI is the institutional snapshot/ranking indicator; TradingView does not calculate a separate RSI here.`
-      : `${rsiDescriptor.hint} RSI do painel: indicador institucional do snapshot/ranking. O TradingView não calcula RSI separado.`;
+    const rsiHint = rsiDescriptor.hint;
 
     return [
       {
@@ -7806,7 +7873,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       {
         label: isUsLocale ? "Snapshot Volume" : "Volume snapshot",
         value: volumeValue,
-        hint: isUsLocale ? `${volumeValue}; ${volumeContext}. ${volumeSourceHint}` : `${volumeValue}, ${volumeContext}. ${volumeSourceHint}`,
+        hint: isUsLocale ? `${volumeValue}; ${volumeContext}.` : `${volumeValue}, ${volumeContext}.`,
         tone: relVolume != null && relVolume > 1.2 ? "up" : relVolume != null && relVolume < 0.8 ? "down" : "neutral",
       },
       {
@@ -7816,8 +7883,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         tone: Number.isFinite(scoreNumber) && scoreNumber >= 7 ? "up" : Number.isFinite(scoreNumber) && scoreNumber <= 5.5 ? "down" : "neutral",
       },
       {
-        label: isUsLocale ? "Snapshot RSI" : "RSI snapshot",
-        value: rsiValue,
+        label: "RSI SCORE",
+        value: rsiScoreValue,
         hint: rsiHint,
         tone: rsiDescriptor.tone,
       },
@@ -7848,9 +7915,22 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     selectedTicker,
     displayQuote,
     displayQuoteHasCoreData,
-    chartInterval,
     panelRsiValue,
   ]);
+  const displayStats = useMemo(
+    () => {
+      if (advancedMode) return stats;
+      const lockedValue = isUsLocale ? "Available in Pro Plan" : "Disponível no Plano Pro";
+      const lockedHint = isUsLocale ? "Open Pro Mode to see this institutional metric." : "Abra o Modo Pro para ver esta métrica institucional.";
+      return stats.map((item) => ({
+        ...item,
+        value: lockedValue,
+        hint: lockedHint,
+        tone: "neutral",
+      }));
+    },
+    [advancedMode, isUsLocale, stats],
+  );
   const tapeItems = useMemo(
     () =>
       FIXED_TAPE_SYMBOLS.map((symbol) => {
@@ -7966,7 +8046,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           id: `${selectedTicker}-${index}`,
           symbol: selectedTicker,
           label: symbolLabel,
-          score: currentRanking?.score != null ? Number(currentRanking.score) : null,
+          score: normalizeMasterScoreForDisplay(currentRanking?.score),
           trend: currentRanking?.trend || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || "monitorando",
           price: displayQuote?.price ?? null,
           changePct: displayQuote?.change_pct ?? null,
@@ -9407,12 +9487,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const copy = copySource[currentTab] || { title, description, explanation: "" };
     const tabLensPt: Record<string, string> = {
       flow: "Lente: fluxo institucional e agressão compradora/vendedora.",
-      liquidity: "Lente: zonas de liquidez, sweeps, traps e invalidação.",
+      liquidity: "Lente: zonas de liquidez, varreduras, armadilhas e invalidação.",
       trend: "Lente: direção predominante e estrutura de mercado.",
       momentum: "Lente: aceleração, força e exaustão.",
       "smart-money": "Lente: dinheiro inteligente e deslocamento pré-movimento.",
       risk: "Lente: risco operacional, bloqueios e Can Trade.",
-      "news-ia": "Lente: notícias como contexto, relevância e provider status.",
+      "news-ia": "Lente: notícias como contexto, relevância e status do provedor.",
       macro: "Lente: macro real separado de macro-news.",
       regime: "Lente: regime atual, lateralidade e volatilidade.",
     };
@@ -9499,6 +9579,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   ? localizeInvalidationText(invalidationFallback, appLocale, item.ticker)
                   : localizeInvalidationText(invalidationSource, appLocale, item.ticker);
                 const mainReadLines = formatAiMainReadText(mainReadText, appLocale);
+                const detectedAt = resolveAiFindingTimestamp(item);
+                const publishedAt = resolveAiPublishedTimestamp(item);
 
                 return (
                   <div key={`${currentTab}-${item.ticker}-${index}`} className="snbr-tool-row">
@@ -9508,7 +9590,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                           <h3>{isUsLocale ? "Asset Panel" : "Painel do ativo"}</h3>
                           <p>{isUsLocale ? "Daily alert from the current lens, with detection time and execution criteria." : "Alerta diário da lente atual, com horário detectado e critérios de execução."}</p>
                         </div>
-                        <span className="snbr-chip">{isUsLocale ? "Found" : "Encontrado"}: {formatAiUpdatedAt(resolveAiFindingTimestamp(item), appLocale)}</span>
+                        <div className="snbr-news-chip-row snbr-temporal-chip-row">
+                          <span className="snbr-chip">{isUsLocale ? "Detected at" : "Detectado às"}: {formatAiUpdatedAt(detectedAt, appLocale)}</span>
+                          {publishedAt ? <span className="snbr-chip">{isUsLocale ? "Published at" : "Publicado às"}: {formatAiUpdatedAt(publishedAt, appLocale)}</span> : null}
+                          <span className="snbr-chip">{isUsLocale ? "Viewed at" : "Visualizado às"}: {formatAiUpdatedAt(viewedAtIso, appLocale)}</span>
+                        </div>
                       </div>
                       <button className="snbr-asset-box snbr-asset-box-large" onClick={() => selectTicker(item.ticker)} type="button">
                         <div className="snbr-asset-box-head">
@@ -9644,6 +9730,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               : String(item.trend || "").toLowerCase().includes("baixa") || String(item.trend || "").toLowerCase().includes("bear")
                 ? "bearish"
                 : "neutral";
+            const detectedAt = normalizeAlertTimestamp(item.timestamp);
 
             return (
               <div key={`${currentTab}-${item.id}-${index}`} className="snbr-tool-row">
@@ -9664,7 +9751,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       <h3>{isUsLocale ? "Asset Panel" : "Painel do ativo"}</h3>
                       <p>{isUsLocale ? "Alert from the current lens, with detection time and setup parameters." : "Alerta da lente atual, com horário detectado e parâmetros do setup."}</p>
                     </div>
-                    <span className="snbr-chip">{isUsLocale ? "Found" : "Encontrado"}: {formatAiUpdatedAt(normalizeAlertTimestamp(item.timestamp), appLocale)}</span>
+                    <div className="snbr-news-chip-row snbr-temporal-chip-row">
+                      <span className="snbr-chip">{isUsLocale ? "Detected at" : "Detectado às"}: {formatAiUpdatedAt(detectedAt, appLocale)}</span>
+                      <span className="snbr-chip">{isUsLocale ? "Viewed at" : "Visualizado às"}: {formatAiUpdatedAt(viewedAtIso, appLocale)}</span>
+                    </div>
                   </div>
                   <button className="snbr-asset-box snbr-asset-box-large" onClick={() => selectTicker(item.symbol)} type="button">
                     <div className="snbr-asset-box-head">
@@ -10630,7 +10720,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       <WorkspaceRightRail
         mobileInsightsOpen={mobileInsightsOpen}
         onToggleMobileInsights={() => setMobileInsightsOpen((value) => !value)}
-        stats={stats}
+        stats={displayStats}
         newsRows={newsRows}
         discussionPosts={discussionPosts}
         activePoll={localizedActivePoll}
@@ -10698,7 +10788,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           onRemoveTicker={() => handleRemoveFromActiveList()}
           watchCategory={watchCategory}
           onSetWatchCategory={setWatchCategory}
-          activeWatchCount={availableActiveWatchlist.length}
+          activeWatchCount={activeWatchlist.length}
           accessCard={renderAccessCard()}
           authCard={null}
           notificationCard={renderNotificationCard()}
@@ -10837,12 +10927,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 </div>
               </div>
               <div className="snbr-price-line">
-                <strong>{formatAssetMoney(displayQuote?.price, selectedTicker, appLocale)}</strong>
-                <span className={cx("snbr-price-change", priceDirectionClass)}>
-                  {formatSignedPercent(displayQuote?.change_pct)}
-                </span>
+                <strong>{advancedMode ? formatAssetMoney(displayQuote?.price, selectedTicker, appLocale) : (isUsLocale ? "Available in Pro Plan" : "Disponível no Plano Pro")}</strong>
+                {advancedMode ? (
+                  <span className={cx("snbr-price-change", priceDirectionClass)}>
+                    {formatSignedPercent(displayQuote?.change_pct)}
+                  </span>
+                ) : null}
               </div>
-              {hasPriceMovement ? (
+              {advancedMode && hasPriceMovement ? (
                 <div className={cx("snbr-after-hours-line", priceDirectionClass)}>
                   <span>{movementArrow(priceDirectionClass)}</span>
                   <strong>{priceMovementValue != null ? formatLocalePrice(priceMovementValue, appLocale) : "n/a"}</strong>
@@ -10853,7 +10945,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             </div>
 
             <div className="snbr-stat-strip" aria-label={isUsLocale ? "Indicator explanation boxes" : "Boxes explicativos dos indicadores"}>
-              {stats.map((item) => (
+              {displayStats.map((item) => (
                 <div key={item.label} className={cx("snbr-stat-cell", item.tone)}>
                   <span className="snbr-stat-label">{item.label}</span>
                   <strong className="snbr-stat-value">{item.value}</strong>

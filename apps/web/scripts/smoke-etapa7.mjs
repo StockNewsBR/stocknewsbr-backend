@@ -7,13 +7,13 @@ const repoRoot = path.resolve(process.cwd(), "..", "..");
 const runtimeDir = path.join(repoRoot, "runtime", "etapa7");
 const tickers = ["F", "PETR4", "BTCUSD", "META34"];
 const aiTabs = [
-  { id: "flow", name: /Flow IA|Flow AI/i },
-  { id: "liquidity", name: /Liquidity IA|Liquidity AI/i },
-  { id: "trend", name: /Trend IA|Trend AI/i },
-  { id: "momentum", name: /Momentum IA|Momentum AI/i },
+  { id: "flow", name: /Fluxo IA|Flow AI/i },
+  { id: "liquidity", name: /Liquidez IA|Liquidity AI/i },
+  { id: "trend", name: /Tendência IA|Trend AI/i },
+  { id: "momentum", name: /Momento IA|Momentum AI/i },
   { id: "smart-money", name: /Smart|Dinheiro/i },
-  { id: "risk", name: /Risk IA|Risk AI/i },
-  { id: "news-ia", name: /News IA|News AI/i },
+  { id: "risk", name: /Risco IA|Risk AI/i },
+  { id: "news-ia", name: /Notícias IA|News AI/i },
   { id: "macro", name: /Macro IA|Macro AI/i },
   { id: "regime", name: /Regime IA|Regime AI/i },
 ];
@@ -129,7 +129,7 @@ try {
     assert(!text.includes(term), `USA nao deve mostrar texto PT no shell: ${term}`);
   }
 
-  if ((await page.getByRole("tab", { name: /Flow IA|Flow AI/i }).count()) === 0) {
+  if ((await page.getByRole("tab", { name: /Fluxo IA|Flow AI/i }).count()) === 0) {
     await page.getByRole("button", { name: /Pro Mode|Modo Pro/i }).click();
   }
   await page.waitForTimeout(400);
@@ -180,7 +180,7 @@ try {
   await page.waitForTimeout(900);
   text = await pageText(page);
   assert(text.includes("PETR4"), "troca de ticker via UI deve carregar PETR4");
-  if ((await page.getByRole("tab", { name: /Flow IA|Flow AI/i }).count()) === 0) {
+  if ((await page.getByRole("tab", { name: /Fluxo IA|Flow AI/i }).count()) === 0) {
     await page.getByRole("button", { name: /Modo Pro|Pro Mode/i }).click();
     await page.waitForTimeout(700);
   }

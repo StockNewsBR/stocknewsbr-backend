@@ -7,7 +7,7 @@ from app.services.video_library_service import get_help_video_entry, get_help_vi
 HELP_GUIDES = {
     "flow": {
         "slug": "flow",
-        "title": "Flow IA",
+        "title": "Fluxo IA",
         "tagline": "Entenda a direcao do fluxo institucional sem duplicar leitura.",
         "what_it_does": [
             "Mostra pressao institucional compradora ou vendedora.",
@@ -16,14 +16,14 @@ HELP_GUIDES = {
         ],
         "how_to_use": [
             "Use como contexto de fluxo, nao como ordem isolada.",
-            "Cruze com Risk IA antes de agir.",
+            "Cruze com Risco IA antes de agir.",
             "Evite tratar interesse institucional como trade pronto.",
         ],
-        "example": "PETR4 com Flow IA forte vira candidato, mas so opera se Risk IA liberar.",
+        "example": "PETR4 com Fluxo IA forte vira candidato, mas so opera se Risco IA liberar.",
     },
     "liquidity": {
         "slug": "liquidity",
-        "title": "Liquidity IA",
+        "title": "Liquidez IA",
         "tagline": "Zonas, sweeps e traps em uma leitura unica.",
         "what_it_does": [
             "Consolida mapa e sweep de liquidez.",
@@ -33,9 +33,9 @@ HELP_GUIDES = {
         "how_to_use": [
             "Use zonas como referencia, nao como entrada automatica.",
             "Aguarde reacao e volume.",
-            "Se a liquidez for fina, deixe Risk IA bloquear.",
+            "Se a liquidez for fina, deixe Risco IA bloquear.",
         ],
-        "example": "VALE3 varre liquidez e rejeita a zona; Liquidity IA mostra trap, Risk IA decide se vale operar.",
+        "example": "VALE3 varre liquidez e rejeita a zona; Liquidez IA mostra trap, Risco IA decide se vale operar.",
     },
     "grafico": {
         "slug": "grafico",

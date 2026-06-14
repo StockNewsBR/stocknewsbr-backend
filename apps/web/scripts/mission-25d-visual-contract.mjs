@@ -38,14 +38,11 @@ assertIncludes(workspaceShell, "resolveLiquidityTarget(chartForOperationalLevels
 assertIncludes(workspaceShell, "chart: chartForOperationalLevels", "operational levels use canonical chart zones");
 assertIncludes(workspaceShell, "supportLevel={chartSupportResistanceLevels.support}", "support level reaches chart");
 assertIncludes(workspaceShell, "resistanceLevel={chartSupportResistanceLevels.resistance}", "resistance level reaches chart");
-assertIncludes(workspaceShell, "Snapshot RSI", "RSI card source is explicit in English");
-assertIncludes(workspaceShell, "RSI snapshot", "RSI card source is explicit in Portuguese");
-assertIncludes(workspaceShell, "RSI do painel: indicador institucional do snapshot/ranking", "RSI card source is institutional");
-assertIncludes(workspaceShell, "O TradingView não calcula RSI separado", "TradingView RSI divergence is explicitly disabled");
+assertIncludes(workspaceShell, "RSI SCORE", "RSI card uses the institutional RSI SCORE label");
 assertIncludes(workspaceShell, "institutionalRsiValue={panelRsiValue}", "panel RSI reaches chart as institutional value");
 assertIncludes(workspaceShell, "label: isUsLocale ? \"Panel RSI\" : \"RSI painel\"", "chart RSI toggle is labeled as panel indicator");
 assertIncludes(workspaceShell, "Volume snapshot", "volume card source is explicit");
-assertIncludes(workspaceShell, "Card usa volume do quote/snapshot", "volume divergence explanation is present");
+assertNotIncludes(workspaceShell, "Card usa volume do quote/snapshot", "old volume divergence explanation was removed");
 assertIncludes(workspaceShell, "assetRelativeVolumeForMeter", "volume meter uses relative volume when available");
 assertIncludes(workspaceShell, "Abaixo da média", "volume meter can mirror below-average card state");
 
@@ -61,15 +58,20 @@ assertIncludes(tickerChart, "snbr-institutional-rsi-panel", "chart renders the i
 assertIncludes(tickerChart, "snbr-institutional-rsi-marker", "institutional RSI lower panel marks the same snapshot value");
 assertIncludes(tickerChart, "--snbr-rsi-position", "institutional RSI marker uses the passed value");
 assertIncludes(tickerChart, "O RSI do TradingView continua desativado", "empty RSI state keeps TradingView RSI disabled");
+assertIncludes(tickerChart, "RSI SCORE:", "institutional RSI labels include RSI SCORE");
+assertIncludes(tickerChart, "snbr-chart-top-overlays", "RSI/support/resistance top row controls visual order");
 assertNotIncludes(tickerChart, "RSI@tv-basicstudies", "TradingView RSI study must not be injected");
+assertNotIncludes(tickerChart, "snbr-chart-level-line ${level.key}`}>", "support/resistance lines must not repeat labels");
 assertNotIncludes(tickerChart, "style={{ top:", "support/resistance overlay must not be positioned from local OHLC");
 
+assertIncludes(css, ".snbr-chart-top-overlays", "top overlay row is styled");
 assertIncludes(css, ".snbr-chart-level-overlays", "overlay container is styled");
 assertIncludes(css, ".snbr-chart-level-lines", "visible support/resistance line container is styled");
 assertIncludes(css, ".snbr-chart-level-line.support", "support line is styled");
 assertIncludes(css, ".snbr-chart-level-line.resistance", "resistance line is styled");
-assertIncludes(css, ".snbr-chart-level-overlay.support span", "support badge is styled");
-assertIncludes(css, ".snbr-chart-level-overlay.resistance span", "resistance badge is styled");
+assertIncludes(css, ".snbr-chart-level-overlay.support span", "support badge is styled in top row");
+assertIncludes(css, ".snbr-chart-level-overlay.resistance span", "resistance badge is styled in top row");
+assertNotIncludes(css, ".snbr-chart-level-line span", "support/resistance line labels were removed");
 assertIncludes(css, ".snbr-chart-panel-rsi-badge", "panel RSI badge is styled");
 assertIncludes(css, ".snbr-institutional-rsi-panel", "institutional RSI lower panel is styled");
 assertIncludes(css, ".snbr-institutional-rsi-track", "institutional RSI lower panel track is styled");

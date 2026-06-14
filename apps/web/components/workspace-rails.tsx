@@ -37,6 +37,17 @@ function socialText(value: string | null | undefined, locale: AppLocale) {
     .replace(/Fluxo/g, "Flow");
 }
 
+function newsSentimentLabel(sentiment?: string | null, locale: AppLocale = "pt-BR") {
+  const normalized = String(sentiment || "").trim().toLowerCase();
+  if (normalized.includes("bull") || normalized.includes("alta") || normalized.includes("positivo")) {
+    return `🟢 ${locale === "en-US" ? "Bullish" : "Bullish"}`;
+  }
+  if (normalized.includes("bear") || normalized.includes("baixa") || normalized.includes("negativo")) {
+    return `🔴 ${locale === "en-US" ? "Bearish" : "Bearish"}`;
+  }
+  return `⚪ ${locale === "en-US" ? "Neutral" : "Neutra"}`;
+}
+
 type LeftRailProps = {
   locale: AppLocale;
   railRef?: RefObject<HTMLElement | null>;
@@ -303,10 +314,11 @@ export function WorkspaceRightRail({
               >
                 <div className="snbr-news-copy">
                   <strong>{item.title}</strong>
-                  <p>{item.source} • {item.age}</p>
+                  <p>{isEnglish ? "Source" : "Fonte"}: {item.source} • {isEnglish ? "Published" : "Publicado"}: {item.publishedTime}</p>
                   <span>{item.cardSummary}</span>
                   <div className="snbr-news-meta-row compact">
                     {item.impact ? <span className="snbr-news-impact compact">{item.impact}</span> : null}
+                    <span className="snbr-news-impact compact">{newsSentimentLabel(item.sentiment, locale)}</span>
                     <span className="snbr-news-impact compact">{item.quality}</span>
                     {item.sameStoryCount > 1 ? <span>{item.sameStoryCount} {isEnglish ? "versions" : "versoes"}</span> : null}
                     {item.relevanceScore != null ? <span>{Math.round(item.relevanceScore)} {isEnglish ? "rel." : "relev."}</span> : null}

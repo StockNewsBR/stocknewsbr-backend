@@ -32,6 +32,17 @@ function uniqueNewsLines(title: string, values: string[]) {
   });
 }
 
+function newsSentimentVisual(sentiment?: string | null, locale: AppLocale = "pt-BR") {
+  const normalized = normalizeText(sentiment);
+  if (normalized.includes("bull") || normalized.includes("alta") || normalized.includes("positivo")) {
+    return { label: locale === "en-US" ? "Bullish" : "Bullish", tone: "bullish", icon: "🟢" };
+  }
+  if (normalized.includes("bear") || normalized.includes("baixa") || normalized.includes("negativo")) {
+    return { label: locale === "en-US" ? "Bearish" : "Bearish", tone: "bearish", icon: "🔴" };
+  }
+  return { label: locale === "en-US" ? "Neutral" : "Neutra", tone: "neutral", icon: "⚪" };
+}
+
 function helpTextEn(value?: string | null) {
   const text = String(value || "").trim();
   if (!text) return "";
@@ -73,11 +84,13 @@ export type WorkspaceNewsRow = {
   source: string;
   age: string;
   publishedTime: string;
+  publishedAtIso?: string | null;
   sector: string;
   industry: string;
   labels: string[];
   entities: string[];
   impact: string;
+  sentiment?: "bullish" | "bearish" | "neutral" | string | null;
   quality: string;
   useful: boolean;
   relevanceScore?: number | null;
@@ -216,6 +229,7 @@ export function WorkspaceNewsPanel({
               : normalizeText(item.impact).includes("negative") || normalizeText(item.impact).includes("negativo")
                 ? "negative"
                 : "neutral";
+            const sentimentVisual = newsSentimentVisual(item.sentiment, locale);
 
             return (
             <article key={item.id} className={cx("snbr-headline-row", "snbr-news-row", !item.useful && "noise")}>
@@ -226,14 +240,19 @@ export function WorkspaceNewsPanel({
                     <span className={cx("snbr-news-impact", impactTone)}>
                       {item.impact} • {item.quality}
                     </span>
-                    <small>{item.publishedTime}</small>
+                    <span className={cx("snbr-news-sentiment", sentimentVisual.tone)}>
+                      {sentimentVisual.icon} {sentimentVisual.label}
+                    </span>
+                    <small>{isEnglish ? "Published at" : "Publicado às"}: {item.publishedTime}</small>
                   </div>
                 </div>
                 {detailLines.map((line) => (
                   <div key={`${item.id}-${line}`} className="snbr-news-why">{line}</div>
                 ))}
                 <div className="snbr-news-meta-row">
-                  <span>{item.source} • {item.age}</span>
+                  <span>{isEnglish ? "Source" : "Fonte"}: {item.source}</span>
+                  <span>{isEnglish ? "Original time" : "Horário original"}: {item.publishedTime}</span>
+                  <span>{isEnglish ? "Sentiment" : "Sentimento"}: {sentimentVisual.icon} {sentimentVisual.label}</span>
                   {item.sector ? <span>{item.sector}</span> : null}
                   {item.industry ? <span>{item.industry}</span> : null}
                   {item.sameStoryCount > 1 ? <span>{item.sameStoryCount} {isEnglish ? "versions" : "versoes"}</span> : null}

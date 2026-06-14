@@ -695,6 +695,7 @@ export type NewsItem = {
   entities?: string[];
   impact?: string | null;
   impact_label?: string | null;
+  sentiment?: string | null;
   impact_reason?: string | null;
   why_it_matters?: string | null;
   editorial?: string | null;

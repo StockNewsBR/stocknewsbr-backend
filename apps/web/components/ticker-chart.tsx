@@ -231,7 +231,7 @@ export function TickerChart({
   }, [institutionalRsiValue]);
   const rsiPanelLabel = useMemo(() => {
     if (institutionalRsi == null) return null;
-    return `${locale === "en-US" ? "Panel RSI" : "RSI painel"}: ${formatRsiValue(institutionalRsi, locale)}`;
+    return `RSI SCORE: ${formatRsiValue(institutionalRsi, locale)}`;
   }, [institutionalRsi, locale]);
   const rsiPanelStyle = useMemo(() => {
     if (institutionalRsi == null) return undefined;
@@ -313,34 +313,34 @@ export function TickerChart({
     <div className="snbr-chart-shell snbr-tv-widget-shell">
       <div className="snbr-tv-plot-area">
         <div className="tradingview-widget-container snbr-tv-widget" ref={containerRef} />
+        {(showRsi && rsiPanelLabel) || levelOverlays.length ? (
+          <div className="snbr-chart-top-overlays" aria-hidden="true">
+            {showRsi && rsiPanelLabel ? (
+              <div className="snbr-chart-panel-rsi-badge">
+                {rsiPanelLabel}
+              </div>
+            ) : null}
+            {levelOverlays.length ? (
+              <div className="snbr-chart-level-overlays">
+                {levelOverlays.map((level) => (
+                  <div
+                    key={level.key}
+                    className={`snbr-chart-level-overlay ${level.key}`}
+                  >
+                    <span>
+                      {level.label}: {formatLevelPrice(level.price, locale)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {levelOverlays.length ? (
           <div className="snbr-chart-level-lines" aria-hidden="true">
             {levelOverlays.map((level) => (
-              <div key={level.key} className={`snbr-chart-level-line ${level.key}`}>
-                <span>
-                  {level.label}: {formatLevelPrice(level.price, locale)}
-                </span>
-              </div>
+              <div key={level.key} className={`snbr-chart-level-line ${level.key}`} />
             ))}
-          </div>
-        ) : null}
-        {levelOverlays.length ? (
-          <div className="snbr-chart-level-overlays" aria-hidden="true">
-            {levelOverlays.map((level) => (
-              <div
-                key={level.key}
-                className={`snbr-chart-level-overlay ${level.key}`}
-              >
-                <span>
-                  {level.label}: {formatLevelPrice(level.price, locale)}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : null}
-        {showRsi && rsiPanelLabel ? (
-          <div className="snbr-chart-panel-rsi-badge" aria-hidden="true">
-            {rsiPanelLabel}
           </div>
         ) : null}
         {loadFailed ? (
@@ -359,7 +359,7 @@ export function TickerChart({
         >
           <div className="snbr-institutional-rsi-head">
             <div>
-              <strong>{locale === "en-US" ? "Institutional RSI" : "RSI institucional"}</strong>
+              <strong>RSI SCORE</strong>
               <span>
                 {institutionalRsi == null
                   ? (locale === "en-US" ? "No institutional RSI in the current payload." : "Sem RSI institucional no payload atual.")
@@ -369,7 +369,7 @@ export function TickerChart({
               </span>
             </div>
             <strong className="snbr-institutional-rsi-value">
-              {institutionalRsi == null ? "n/a" : formatRsiValue(institutionalRsi, locale)}
+              {institutionalRsi == null ? "n/a" : `RSI SCORE: ${formatRsiValue(institutionalRsi, locale)}`}
             </strong>
           </div>
           {institutionalRsi == null ? (
@@ -387,7 +387,7 @@ export function TickerChart({
               <span className="snbr-rsi-threshold threshold-50">50</span>
               <span className="snbr-rsi-threshold threshold-75">75</span>
               <span className="snbr-institutional-rsi-marker">
-                <span>{formatRsiValue(institutionalRsi, locale)}</span>
+                <span>RSI SCORE: {formatRsiValue(institutionalRsi, locale)}</span>
               </span>
             </div>
           )}
