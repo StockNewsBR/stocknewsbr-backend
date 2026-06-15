@@ -350,11 +350,11 @@ export function TickerChart({
           </div>
         ) : null}
       </div>
-      {showRsi ? (
-        <section
-          className={`snbr-institutional-rsi-panel ${rsiPanelTone}`}
-          aria-label={locale === "en-US" ? "Institutional RSI panel" : "Painel RSI institucional"}
-        >
+      <section
+        className={`snbr-institutional-rsi-panel ${rsiPanelTone} ${showRsi ? "" : "hidden"}`}
+        aria-hidden={!showRsi}
+        aria-label={locale === "en-US" ? "Institutional RSI panel" : "Painel RSI institucional"}
+      >
           <div className="snbr-institutional-rsi-head">
             <div>
               <strong>RSI SCORE</strong>
@@ -389,8 +389,7 @@ export function TickerChart({
               </span>
             </div>
           )}
-        </section>
-      ) : null}
+      </section>
     </div>
   );
 }

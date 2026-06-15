@@ -3100,6 +3100,12 @@ a {
     linear-gradient(180deg, rgba(250, 245, 255, 0.94), rgba(245, 243, 255, 0.86));
 }
 
+.snbr-institutional-rsi-panel.hidden {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .snbr-institutional-rsi-head {
   display: flex;
   justify-content: space-between;

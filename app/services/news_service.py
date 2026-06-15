@@ -29,6 +29,9 @@ _NEWS_CACHE: dict[str, dict[str, Any]] = {}
 _NEWS_PROVIDER_STATUS: dict[str, dict[str, Any]] = {}
 _REQUEST_LOCKS: dict[str, threading.Lock] = {}
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_TICKER_NEWS_ALIASES = {
+    "F": ("ford", "ford motor", "ford motor company"),
+}
 
 
 def _project_runtime_path(env_name: str, default_relative: str) -> Path:
@@ -608,15 +611,45 @@ def _extract_url(raw_item: dict[str, Any]) -> str | None:
 
 
 def _extract_related_tickers(raw_item: dict[str, Any]) -> list[str]:
-    related = raw_item.get("relatedTickers")
-    if not isinstance(related, list):
-        return []
+    related_sources = [
+        raw_item.get("relatedTickers"),
+        _nested_value(raw_item, "content", "finance", "stockTickers"),
+        _nested_value(raw_item, "content", "finance", "companyTickers"),
+        _nested_value(raw_item, "content", "finance", "relatedTickers"),
+        _nested_value(raw_item, "content", "relatedTickers"),
+    ]
     result: list[str] = []
-    for item in related:
-        symbol = _normalize_ticker(item if isinstance(item, str) else str(item or ""))
-        if symbol:
-            result.append(symbol)
+    for related in related_sources:
+        if not isinstance(related, list):
+            continue
+        for item in related:
+            if isinstance(item, dict):
+                raw_symbol = item.get("symbol") or item.get("ticker") or item.get("name")
+            else:
+                raw_symbol = item
+            symbol = _normalize_ticker(str(raw_symbol or ""))
+            if symbol:
+                result.append(symbol)
     return list(dict.fromkeys(result))
+
+
+def _news_aliases(ticker: str) -> set[str]:
+    normalized = _normalize_ticker(ticker).replace(".SA", "")
+    aliases = {
+        normalized,
+        normalized.replace("34", ""),
+        normalized.replace(".SA", ""),
+    }
+    aliases.update(_TICKER_NEWS_ALIASES.get(normalized, ()))
+    return {alias.lower().strip() for alias in aliases if alias}
+
+
+def _text_has_alias(text: str, alias: str) -> bool:
+    if not alias:
+        return False
+    if len(alias) <= 2:
+        return bool(re.search(rf"\b{re.escape(alias)}\b", text))
+    return alias in text
 
 
 def _sector_from_keywords(text: str) -> tuple[str, str]:
@@ -701,14 +734,10 @@ def _extract_entities(ticker: str, title: str, summary: str, related_tickers: li
 def _ticker_directness(ticker: str, title: str, summary: str, related_tickers: list[str]) -> tuple[bool, float]:
     normalized_ticker = _normalize_ticker(ticker).replace(".SA", "")
     text = _safe_lower(f"{title} {summary}")
-    aliases = {
-        normalized_ticker,
-        normalized_ticker.replace("34", ""),
-        normalized_ticker.replace(".SA", ""),
-    }
+    aliases = _news_aliases(ticker)
     related = {_normalize_ticker(item).replace(".SA", "") for item in related_tickers}
 
-    if any(alias and _safe_lower(alias) in text for alias in aliases):
+    if any(_text_has_alias(text, _safe_lower(alias)) for alias in aliases):
         return True, 100.0
     if normalized_ticker in related:
         return True, 88.0
@@ -1078,7 +1107,8 @@ def _relevance_score(labels: list[str], confidence: float, title: str, summary: 
             "fato relevante": 16.0,
         }
         base += sum(label_weight.get(label, 8.0) for label in labels[:3])
-    if ticker.upper() in _safe_lower(f"{title} {summary}"):
+    text = _safe_lower(f"{title} {summary}")
+    if any(_text_has_alias(text, alias) for alias in _news_aliases(ticker)):
         base += 18.0
     if sector and sector != "Mercado":
         base += 8.0
@@ -1422,21 +1452,53 @@ def _cluster_news(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def build_symbol_news(ticker: str, raw_items: list[dict[str, Any]], limit: int = 6) -> list[dict[str, Any]]:
+    items, _report = build_symbol_news_with_report(ticker, raw_items, limit=limit)
+    return items
+
+
+def build_symbol_news_with_report(ticker: str, raw_items: list[dict[str, Any]], limit: int = 6) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     normalized_ticker = _normalize_ticker(ticker)
     limit = _sanitize_limit(limit)
+    original_raw_count = len(raw_items) if isinstance(raw_items, list) else 0
+    reason_counts: Counter[str] = Counter()
+    if isinstance(raw_items, list):
+        for raw_item in raw_items[: min(len(raw_items), _NEWS_MAX_INPUT_ITEMS, max(limit * 8, 40))]:
+            if not isinstance(raw_item, dict):
+                reason_counts["provider_invalid"] += 1
+                continue
+            if not _extract_title(raw_item) and not _extract_summary(raw_item):
+                reason_counts["missing_title"] += 1
     raw_items = _prepare_raw_items(raw_items, limit)
+    prepared_count = len(raw_items)
+    if original_raw_count > prepared_count:
+        explained = sum(reason_counts.values())
+        duplicate_count = max(0, original_raw_count - prepared_count - explained)
+        if duplicate_count:
+            reason_counts["duplicate"] += duplicate_count
     normalized_items = []
 
     for raw_item in raw_items or []:
         if not isinstance(raw_item, dict):
+            reason_counts["provider_invalid"] += 1
             continue
         candidate = _normalize_raw_item(raw_item, normalized_ticker)
         if candidate is None:
+            reason_counts["missing_title"] += 1
             continue
         normalized_items.append(candidate)
 
     if not normalized_items:
-        return []
+        reason = reason_counts.most_common(1)[0][0] if reason_counts else ("provider_invalid" if original_raw_count else "no_raw_news")
+        return [], {
+            "ticker": normalized_ticker,
+            "status": "empty",
+            "reason": reason,
+            "raw_count": original_raw_count,
+            "prepared_count": prepared_count,
+            "normalized_count": 0,
+            "output_count": 0,
+            "discard_reasons": dict(reason_counts),
+        }
 
     normalized_items.sort(
         key=lambda item: (
@@ -1485,7 +1547,18 @@ def build_symbol_news(ticker: str, raw_items: list[dict[str, Any]], limit: int =
         if len(output) >= limit:
             break
 
-    return output
+    report_status = "ok" if output else "empty"
+    reason = None if output else (reason_counts.most_common(1)[0][0] if reason_counts else "filtered_by_quality")
+    return output, {
+        "ticker": normalized_ticker,
+        "status": report_status,
+        "reason": reason,
+        "raw_count": original_raw_count,
+        "prepared_count": prepared_count,
+        "normalized_count": len(normalized_items),
+        "output_count": len(output),
+        "discard_reasons": dict(reason_counts),
+    }
 
 
 def get_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
@@ -1518,7 +1591,7 @@ def get_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
                 if candidate != normalized_ticker:
                     logger.info("News service resolved %s via candidate %s", normalized_ticker, candidate)
                 break
-        items = build_symbol_news(normalized_ticker, raw_items, limit=limit)
+        items, filter_report = build_symbol_news_with_report(normalized_ticker, raw_items, limit=limit)
         provider_meta = _latest_news_provider_status(
             fetched_from if raw_items else (attempted_candidates[-1] if attempted_candidates else normalized_ticker)
         )
@@ -1558,6 +1631,9 @@ def get_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
                 "provider_status": provider_meta.get("status"),
                 "provider_error": provider_meta.get("error"),
                 "attempted_candidates": attempted_candidates,
+                "filter_report": filter_report,
+                "discard_reasons": filter_report.get("discard_reasons", {}),
+                "discard_reason": filter_report.get("reason"),
                 "report": intelligence_report,
             }
             _persist_news_cache_locked()
@@ -1752,17 +1828,20 @@ def get_news_cache_info(ticker: str) -> dict[str, Any]:
     with _CACHE_LOCK:
         cached = _NEWS_CACHE.get(normalized_ticker)
         if not cached:
+            provider_raw_count = int(provider_meta.get("raw_count", 0) or 0)
             return {
                 "ticker": normalized_ticker,
                 "status": "cold",
                 "timestamp": None,
                 "age_seconds": None,
                 "items": 0,
-                "raw_count": 0,
+                "raw_count": provider_raw_count,
                 "provider": "yfinance",
                 "provider_status": provider_meta.get("status"),
                 "provider_error": provider_meta.get("error"),
                 "attempted_candidates": [],
+                "discard_reason": "cache_missing_after_provider_raw" if provider_raw_count > 0 else None,
+                "discard_reasons": {"cache_missing_after_provider_raw": provider_raw_count} if provider_raw_count > 0 else {},
             }
 
         timestamp = float(cached.get("timestamp", 0.0) or 0.0)
@@ -1780,6 +1859,9 @@ def get_news_cache_info(ticker: str) -> dict[str, Any]:
             "provider_status": cached.get("provider_status") or "not_checked",
             "provider_error": cached.get("provider_error"),
             "attempted_candidates": list(cached.get("attempted_candidates") or []),
+            "filter_report": cached.get("filter_report") if isinstance(cached.get("filter_report"), dict) else {},
+            "discard_reason": cached.get("discard_reason"),
+            "discard_reasons": cached.get("discard_reasons") if isinstance(cached.get("discard_reasons"), dict) else {},
         }
 
 

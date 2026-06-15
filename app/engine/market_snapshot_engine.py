@@ -50,6 +50,7 @@ from app.services.snapshot_contract import coerce_data_quality, data_quality_lab
 from app.services.snapshot_contract import summarize_snapshot_rows
 from app.services.institutional_consistency_audit import audit_institutional_consistency
 from app.services.go_live_status_service import attach_go_live_status
+from app.services.score_display import canonicalize_master_score_row
 from app.services.snapshot_runtime_status import attach_snapshot_runtime_status
 from app.services.signal_history import store_signals
 from app.system.system_metrics import (
@@ -121,6 +122,48 @@ def _safe_master_score(row):
         return float(row.get("master_score", row.get("score", 0)) or 0)
     except Exception:
         return _safe_score(row)
+
+
+def _canonicalize_master_score_surfaces(payload):
+    """Expose Score Mestre on 0..10 while preserving raw score for internal audits."""
+    dict_keys = (
+        "master_score",
+        "strategic_panel",
+        "historical_confidence",
+        "institutional_conviction",
+        "institutional_priority",
+        "final_decision",
+    )
+    list_keys = (
+        "signals",
+        "leaders",
+        "master_scores",
+        "strategic_panels",
+        "institutional_radar",
+        "institutional_ranking",
+        "historical_confidences",
+        "operational_rules",
+        "institutional_convictions",
+        "institutional_priorities",
+        "final_decisions",
+    )
+    for key in dict_keys:
+        if isinstance(payload.get(key), dict):
+            payload[key] = canonicalize_master_score_row(dict(payload[key]))
+    for key in list_keys:
+        if isinstance(payload.get(key), list):
+            payload[key] = [
+                canonicalize_master_score_row(dict(row))
+                for row in payload[key]
+                if isinstance(row, dict)
+            ]
+    if isinstance(payload.get("symbol_snapshots"), dict):
+        payload["symbol_snapshots"] = {
+            symbol: canonicalize_master_score_row(dict(row))
+            for symbol, row in payload["symbol_snapshots"].items()
+            if isinstance(row, dict)
+        }
+    return payload
 
 
 def _normalize_pool_key(value: str | None) -> str:
@@ -725,6 +768,7 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             "institutional_consistency_issues": consistency_audit["issue_count"],
         },
     }
+    payload = _canonicalize_master_score_surfaces(payload)
     payload = attach_snapshot_runtime_status(payload)
     return attach_go_live_status(payload)
 

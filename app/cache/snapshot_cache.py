@@ -13,6 +13,7 @@ from pathlib import Path
 from app.services.snapshot_contract import summarize_snapshot_rows
 from app.services.go_live_status_service import attach_go_live_status, build_go_live_status
 from app.services.snapshot_runtime_status import evaluate_snapshot_runtime_status
+from app.services.score_display import canonicalize_master_score_row, master_score_sort_value
 from app.system.system_metrics import record_cache_lookup, record_snapshot_write_metric, update_cache_timestamp
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -150,10 +151,10 @@ class SnapshotCache:
                 row["ticker"] = ticker
                 row["symbol"] = ticker
 
-            normalized.append(row)
+            normalized.append(canonicalize_master_score_row(row))
 
         normalized.sort(
-            key=lambda row: float(row.get("master_score", row.get("score", 0)) or 0),
+            key=master_score_sort_value,
             reverse=True,
         )
 
@@ -205,6 +206,33 @@ class SnapshotCache:
         payload["leaders"] = signals[:20]
         payload["by_ticker"] = self._build_by_ticker(signals)
         payload["stats"] = {**existing_stats, **derived_stats}
+        for key in (
+            "master_score",
+            "strategic_panel",
+            "historical_confidence",
+            "institutional_conviction",
+            "institutional_priority",
+            "final_decision",
+        ):
+            if isinstance(payload.get(key), dict):
+                payload[key] = canonicalize_master_score_row(dict(payload[key]))
+        for key in (
+            "master_scores",
+            "strategic_panels",
+            "institutional_radar",
+            "institutional_ranking",
+            "historical_confidences",
+            "operational_rules",
+            "institutional_convictions",
+            "institutional_priorities",
+            "final_decisions",
+        ):
+            if isinstance(payload.get(key), list):
+                payload[key] = [
+                    canonicalize_master_score_row(dict(row))
+                    for row in payload[key]
+                    if isinstance(row, dict)
+                ]
 
         return payload
 
@@ -247,10 +275,10 @@ class SnapshotCache:
             "institutional_consistency",
         ):
             if isinstance(payload.get(key), dict):
-                cloned[key] = dict(payload.get(key, {}))
+                cloned[key] = canonicalize_master_score_row(dict(payload.get(key, {})))
         for key in ("master_scores", "strategic_panels", "institutional_radar", "institutional_ranking", "historical_confidences", "operational_rules", "institutional_convictions", "institutional_priorities", "final_decisions"):
             if isinstance(payload.get(key), list):
-                cloned[key] = [dict(row) for row in payload.get(key, []) if isinstance(row, dict)]
+                cloned[key] = [canonicalize_master_score_row(dict(row)) for row in payload.get(key, []) if isinstance(row, dict)]
         for key in ("radar_metrics", "ranking_metrics", "historical_confidence_metrics", "operational_rules_metrics", "conviction_metrics", "priority_metrics", "final_decision_metrics", "institutional_consistency_metrics"):
             if isinstance(payload.get(key), dict):
                 cloned[key] = dict(payload.get(key, {}))

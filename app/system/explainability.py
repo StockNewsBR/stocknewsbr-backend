@@ -277,7 +277,8 @@ def explain_signal(row: Dict[str, Any]) -> Dict[str, Any]:
     explainability_score = decision_explainability_score(row, why, change_mind, breakdown)
     return {
         "ticker": _symbol(row),
-        "master_score": row.get("master_score", row.get("score")),
+        "master_score": display_row.get("master_score"),
+        "master_score_raw": display_row.get("master_score_raw"),
         "master_score_display": display_row.get("master_score_display"),
         "master_score_display_warning": display_row.get("master_score_display_warning"),
         "master_direction": row.get("master_direction"),

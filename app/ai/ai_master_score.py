@@ -63,6 +63,7 @@ INSTITUTIONAL_TOOLS = ("flow", "liquidity", "smart_money")
 
 MASTER_CONTRACT_FIELDS = (
     "master_score",
+    "master_score_raw",
     "master_direction",
     "master_conviction",
     "master_confidence",
@@ -597,6 +598,7 @@ def _score_row(
 
     metrics = {
         "master_score": score,
+        "master_score_raw": score,
         "master_direction": direction,
         "master_status": status,
         "master_conviction": conviction,
@@ -634,6 +636,7 @@ def _score_row(
             "score": score,
             "_rank_score": score,
             "master_score": score,
+            "master_score_raw": score,
             "master_direction": direction,
             "master_conviction": conviction,
             "master_confidence": confidence,

@@ -243,7 +243,8 @@ class InstitutionalMasterScoreTests(unittest.TestCase):
             radar = web_radar.get_radar()
 
         self.assertEqual(ranked[0]["score"], 82.0)
-        self.assertEqual(ranked[0]["master_score"], 82.0)
+        self.assertEqual(ranked[0]["master_score"], 8.2)
+        self.assertEqual(ranked[0]["master_score_raw"], 82.0)
         self.assertEqual(radar[0]["ticker"], "PETR4")
 
     def test_public_insight_exposes_master_score(self):

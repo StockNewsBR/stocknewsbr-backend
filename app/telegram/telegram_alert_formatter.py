@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.score_display import normalize_master_score_display
+
 
 def _strip_visual(value: Any) -> str:
     text = str(value or "").strip()
@@ -12,9 +14,8 @@ def _strip_visual(value: Any) -> str:
 
 
 def _score(value: Any) -> str:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
+    number, _warning = normalize_master_score_display(value)
+    if value in (None, "") or _warning == "master_score_display_invalid":
         return "N/A"
     if number.is_integer():
         return str(int(number))

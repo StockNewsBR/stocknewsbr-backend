@@ -2226,16 +2226,10 @@ function normalizeMasterScoreForDisplay(score: number | null | undefined) {
     console.warn("[StockNewsBR] Score Mestre negativo normalizado para display.", { raw: numeric, display: 0 });
     return 0;
   }
-  if (numeric > 20) {
-    const display = clampNumber(Number((numeric / 10).toFixed(1)), 0, 10);
-    if (display >= 10) {
-      console.warn("[StockNewsBR] Score Mestre acima de 10 normalizado para display.", { raw: numeric, display });
-    }
-    return display;
-  }
   if (numeric > 10) {
-    console.warn("[StockNewsBR] Score Mestre acima de 10 normalizado para display.", { raw: numeric, display: 10 });
-    return 10;
+    const display = clampNumber(Number((numeric / 10).toFixed(1)), 0, 10);
+    console.warn("[StockNewsBR] Score Mestre bruto normalizado para escala 0..10.", { raw: numeric, display });
+    return display;
   }
   return clampNumber(Number(numeric.toFixed(1)), 0, 10);
 }
@@ -2752,7 +2746,7 @@ function translatePtToEn(value?: string | null, symbol?: string | null) {
   const normalizedKey = normalized.replace(/[.,;:!?]+$/g, "");
   const exactTranslations: Record<string, string> = {
     "leitura favoravel ao ativo no curto prazo": "Short-term read is favorable for the asset.",
-    "manchete relevante, mas ainda ambigua ou indireta para o papel; precisa de confirmacao": "Relevant headline, but still ambiguous or indirect for the stock; wait for confirmation.",
+    "manchete relevante, mas ainda ambígua ou indireta para o papel; precisa de confirmação": "Relevant headline, but still ambiguous or indirect for the stock; wait for confirmation.",
     "consumo": "Consumer",
     "varejo": "Retail",
     "energia": "Energy",
@@ -6622,7 +6616,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setOtpCode("");
       setDebugOtpCode("");
     } catch (requestError) {
-      setLoginError(requestError instanceof Error ? requestError.message : "Falha na verificacao");
+      setLoginError(requestError instanceof Error ? requestError.message : "Falha na verificação");
     }
   }
 
@@ -8408,6 +8402,41 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       ? aiAlertHistory[currentTab].rows
       : null;
   const currentTabAlertRows = (currentTabHistory?.length ? currentTabHistory : visibleAiRowsWithTimestamps).filter(isAiDealFinding);
+  const currentAiPayloadAvailable = Boolean(
+    currentAiKey &&
+    (
+      (workspace?.ai_tools && Object.prototype.hasOwnProperty.call(workspace.ai_tools, currentAiKey)) ||
+      (publicAiTools?.tools && Object.prototype.hasOwnProperty.call(publicAiTools.tools, currentAiKey))
+    ),
+  );
+  const currentAiEmptyState = useMemo(() => {
+    if (!currentAiKey) return null;
+    if (loading) {
+      return {
+        title: isUsLocale ? "AI loading." : "IA carregando.",
+        body: isUsLocale ? "Waiting for the current payload." : "Aguardando o payload atual.",
+      };
+    }
+    if (!currentAiPayloadAvailable) {
+      return {
+        title: isUsLocale ? "AI temporarily has no data." : "IA temporariamente sem dados.",
+        body: isUsLocale ? "No payload was received for this lens yet." : "Nenhum payload foi recebido para esta lente ainda.",
+      };
+    }
+    if (currentAiRows.length > 0 && currentTabAlertRows.length === 0) {
+      return {
+        title: isUsLocale ? "No finding for this asset right now." : "Nenhum achado desta IA para este ativo agora.",
+        body: isUsLocale ? "The AI has global data, but nothing actionable matched this ticker/filter." : "A IA tem dados globais, mas nenhum achado acionável casou com este ticker/filtro.",
+      };
+    }
+    if (currentAiRows.length === 0) {
+      return {
+        title: isUsLocale ? "AI temporarily has no data." : "IA temporariamente sem dados.",
+        body: isUsLocale ? "The payload exists, but it is empty for this lens." : "O payload existe, mas está vazio para esta lente.",
+      };
+    }
+    return null;
+  }, [currentAiKey, currentAiPayloadAvailable, currentAiRows.length, currentTabAlertRows.length, isUsLocale, loading]);
   const showSymbolHeader = currentTab === "grafico";
   const profileName = access?.display_name || access?.email || "Trader";
   const activePoll = useMemo(
@@ -9300,7 +9329,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       return (
         <div className="snbr-empty-thread">
           <strong>{isUsLocale ? "No featured social discussion for this ticker yet." : emptyText}</strong>
-          <p>{isUsLocale ? `Open the conversation with your thesis, post a chart screenshot or comment on the market read for ${selectedTicker}.` : `Abra a conversa com sua tese, poste um print do grafico ou comente a leitura do mercado para ${selectedTicker}.`}</p>
+          <p>{isUsLocale ? `Open the conversation with your thesis, post a chart screenshot or comment on the market read for ${selectedTicker}.` : `Abra a conversa com sua tese, poste um print do gráfico ou comente a leitura do mercado para ${selectedTicker}.`}</p>
         </div>
       );
     }
@@ -9697,11 +9726,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           ) : (
             <div className="snbr-empty-thread">
               <strong>
-                {currentTab === "news-ia"
+                {currentAiEmptyState?.title || (currentTab === "news-ia"
                   ? (isUsLocale ? "No news analysis available for this asset right now." : "Nenhuma análise de notícia disponível para este ativo no momento.")
-                  : (isUsLocale ? "No read available for this asset right now." : "Sem leitura disponível para este ativo no momento.")}
+                  : (isUsLocale ? "No read available for this asset right now." : "Sem leitura disponível para este ativo no momento."))}
               </strong>
-              <p>{isUsLocale ? "When the backend sends a valid payload, this card shows the content; otherwise the absence is explicit." : "Quando o backend enviar um payload válido, este card mostra o conteúdo; caso contrário, a ausência fica explícita."}</p>
+              <p>{currentAiEmptyState?.body || (isUsLocale ? "When the backend sends a valid payload, this card shows the content; otherwise the absence is explicit." : "Quando o backend enviar um payload válido, este card mostra o conteúdo; caso contrário, a ausência fica explícita.")}</p>
             </div>
           )}
         </section>
@@ -10325,7 +10354,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           <div className="snbr-section-head compact">
             <div>
               <h3>{isUsLocale ? "Email code" : "Codigo por email"}</h3>
-              <p>{isUsLocale ? "Premium account requires verification on each new login." : "Conta Premium pede verificacao a cada novo login."}</p>
+              <p>{isUsLocale ? "Premium account requires verification on each new login." : "Conta Premium pede verificação a cada novo login."}</p>
             </div>
           </div>
           <div className="snbr-auth">
@@ -10358,7 +10387,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       <div className="snbr-side-card">
         <div className="snbr-section-head compact">
           <div>
-            <h3>{isUsLocale ? "Authentication" : "Autenticacao"}</h3>
+            <h3>{isUsLocale ? "Authentication" : "Autenticação"}</h3>
             <p>{isUsLocale ? "Trial and Free enter directly. Premium confirms login through the email code." : "Trial e Free entram direto. Premium confirma o login pelo codigo no email."}</p>
           </div>
         </div>
@@ -10608,7 +10637,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           aria-expanded={notificationOpen}
         >
           <div>
-            <h3>{isUsLocale ? "Notifications" : "Notificacao"}</h3>
+            <h3>{isUsLocale ? "Notifications" : "Notificação"}</h3>
             <p>{isUsLocale ? "Notices to be published on website, app and Telegram." : "Avisos a serem publicados no website, app e Telegram."}</p>
           </div>
           <span>{notificationOpen ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}</span>
@@ -10634,13 +10663,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         >
           <div>
             <h3>{isUsLocale ? "Tools" : "Ferramentas"}</h3>
-            <p>{isUsLocale ? "Account preferences, blocked and muted users." : "Preferencias da conta, bloqueados e silenciados."}</p>
+            <p>{isUsLocale ? "Account preferences, blocked and muted users." : "Preferências da conta, bloqueados e silenciados."}</p>
           </div>
           <span>{toolsOpen ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}</span>
         </button>
         {toolsOpen ? (
           <>
-        <div className="snbr-settings-tabs" role="tablist" aria-label={isUsLocale ? "Settings tools" : "Ferramentas de configuracao"}>
+        <div className="snbr-settings-tabs" role="tablist" aria-label={isUsLocale ? "Settings tools" : "Ferramentas de configuração"}>
           <button
             className={cx("snbr-settings-tab", settingsTab === "preferencias" && "active")}
             onClick={() => {
@@ -10648,7 +10677,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             }}
             type="button"
           >
-            {isUsLocale ? "Preferences" : "Preferencias"}
+            {isUsLocale ? "Preferences" : "Preferências"}
           </button>
           <button
             className={cx("snbr-settings-tab", settingsTab === "bloqueados" && "active")}
@@ -10753,7 +10782,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       <div className="snbr-popout-header">
           <div>
             <h1>{focusedLabel.label}</h1>
-            <p>{isUsLocale ? `${selectedTicker} in detached monitor mode.` : `${selectedTicker} em modo destacavel para monitor separado.`}</p>
+            <p>{isUsLocale ? `${selectedTicker} in detached monitor mode.` : `${selectedTicker} em modo destacável para monitor separado.`}</p>
           </div>
           <div className="snbr-symbol-pills">
             <span className="snbr-chip">Ticker: {selectedTicker}</span>
@@ -10798,7 +10827,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         />
 
       <main className="snbr-symbol-page" id="snbr-main-content">
-        <nav className="snbr-symbol-tabs snbr-top-tabs" aria-label={isUsLocale ? "Symbol tabs" : "Tabs do simbolo"} role="tablist">
+        <nav className="snbr-symbol-tabs snbr-top-tabs" aria-label={isUsLocale ? "Symbol tabs" : "Tabs do símbolo"} role="tablist">
           <button className="snbr-tab-scroll" onClick={() => scrollTabs("left")} type="button" aria-label={isUsLocale ? "Move tabs left" : "Mover tabs para a esquerda"}>
             ◀
           </button>
@@ -10822,7 +10851,15 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   >
                     <span>{topTabText(tab.id, meta.short, appLocale)}</span>
                     {isAiTab ? (
-                      <span className="snbr-tab-count-badge" aria-label={isUsLocale ? `${aiCount} findings` : `${aiCount} achados`}>
+                      <span
+                        className="snbr-tab-count-badge"
+                        aria-label={aiCount === 0
+                          ? (isUsLocale ? "0 findings: no finding for this asset now" : "0 achados: nenhum achado desta IA para este ativo agora")
+                          : (isUsLocale ? `${aiCount} findings` : `${aiCount} achados`)}
+                        title={aiCount === 0
+                          ? (isUsLocale ? "AI ok; no finding for this asset now." : "IA ok; nenhum achado para este ativo agora.")
+                          : undefined}
+                      >
                         {aiCount}
                       </span>
                     ) : null}
@@ -10926,18 +10963,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 </div>
                 <span className="snbr-chip">{selectedTickerMarketLabel}</span>
               </div>
-              {advancedMode ? (
-                <div className="snbr-price-line">
-                  <strong>{formatAssetMoney(displayQuote?.price, selectedTicker, appLocale)}</strong>
-                  <span className={cx("snbr-price-change", priceDirectionClass)}>
-                    {formatSignedPercent(displayQuote?.change_pct)}
-                  </span>
-                </div>
-              ) : (
+              <div className="snbr-price-line">
+                <strong>{formatAssetMoney(displayQuote?.price, selectedTicker, appLocale)}</strong>
+                <span className={cx("snbr-price-change", priceDirectionClass)}>
+                  {formatSignedPercent(displayQuote?.change_pct)}
+                </span>
+              </div>
+              {!advancedMode ? (
                 <div className="snbr-basic-pro-lock" aria-label={isUsLocale ? "Premium metrics hidden in Basic Mode" : "Métricas premium ocultas no Modo Básico"}>
-                  {isUsLocale ? "Premium metrics available in Pro Plan" : "Métricas premium disponíveis no Plano Pro"}
+                  {isUsLocale ? "Premium metrics available in Pro Plan" : "🔒 Disponível no Pro"}
                 </div>
-              )}
+              ) : null}
               {advancedMode && hasPriceMovement ? (
                 <div className={cx("snbr-after-hours-line", priceDirectionClass)}>
                   <span>{movementArrow(priceDirectionClass)}</span>
@@ -10962,7 +10998,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
         <section className="snbr-main-column">
           {error ? <div className="snbr-empty">Erro: {error}</div> : null}
-          {loading && token ? <div className="snbr-empty">Carregando contexto do usuario...</div> : null}
+          {loading && token ? <div className="snbr-empty">Carregando contexto do usuário...</div> : null}
           {showSymbolHeader ? (
             <section className="snbr-decision-panel" aria-label={isUsLocale ? "Strategic Analysis Panel" : "Painel de Análise Estratégica"}>
               <div className="snbr-decision-head">

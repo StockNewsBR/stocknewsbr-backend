@@ -40,10 +40,10 @@ function socialText(value: string | null | undefined, locale: AppLocale) {
 function newsSentimentLabel(sentiment?: string | null, locale: AppLocale = "pt-BR") {
   const normalized = String(sentiment || "").trim().toLowerCase();
   if (normalized.includes("bull") || normalized.includes("alta") || normalized.includes("positivo")) {
-    return `🟢 ${locale === "en-US" ? "Bullish" : "Bullish"}`;
+    return `🟢 ${locale === "en-US" ? "Bullish" : "Alta"}`;
   }
   if (normalized.includes("bear") || normalized.includes("baixa") || normalized.includes("negativo")) {
-    return `🔴 ${locale === "en-US" ? "Bearish" : "Bearish"}`;
+    return `🔴 ${locale === "en-US" ? "Bearish" : "Baixa"}`;
   }
   return `⚪ ${locale === "en-US" ? "Neutral" : "Neutra"}`;
 }
@@ -109,7 +109,7 @@ export function WorkspaceLeftRail({
         <div className="snbr-header-brand">
           <div className="snbr-header-brand-copy">
             <h1>StockNewsBR</h1>
-            <p>{isEnglish ? "AI Market Intelligence" : "Inteligencia de Mercado com IA"}</p>
+            <p>{isEnglish ? "AI Market Intelligence" : "Inteligência de Mercado com IA"}</p>
           </div>
           <img
             className="snbr-brand-image"
@@ -157,10 +157,10 @@ export function WorkspaceLeftRail({
             <button className="snbr-button primary" onClick={onApplyTicker} type="button" aria-label={isEnglish ? "Open asset on screen" : "Abrir ativo na tela"}>
               {isEnglish ? "Open" : "Abrir na tela"}
             </button>
-            <button className="snbr-button secondary" onClick={onAddTicker} type="button" aria-label={isEnglish ? "Add current asset to active list" : "Adicionar acao atual a lista ativa"}>
+            <button className="snbr-button secondary" onClick={onAddTicker} type="button" aria-label={isEnglish ? "Add current asset to active list" : "Adicionar ação atual à lista ativa"}>
               {isEnglish ? "Add to list" : "Adicionar a lista"}
             </button>
-            <button className="snbr-button secondary" onClick={onRemoveTicker} type="button" aria-label={isEnglish ? "Remove current asset from active list" : "Excluir acao atual da lista ativa"}>
+            <button className="snbr-button secondary" onClick={onRemoveTicker} type="button" aria-label={isEnglish ? "Remove current asset from active list" : "Excluir ação atual da lista ativa"}>
               {isEnglish ? "Remove" : "Excluir"}
             </button>
           </div>
@@ -198,7 +198,7 @@ export function WorkspaceLeftRail({
               key={section.id}
               onClick={() => section.id && onOpenInstitutionalSection(section.id)}
               type="button"
-              aria-label={`${isEnglish ? "Open institutional section" : "Abrir secao institucional"} ${section.label || section.title}`}
+              aria-label={`${isEnglish ? "Open institutional section" : "Abrir seção institucional"} ${section.label || section.title}`}
             >
               {section.label || section.title}
             </button>
@@ -321,7 +321,7 @@ export function WorkspaceRightRail({
                     {item.impact ? <span className="snbr-news-impact compact">{item.impact}</span> : null}
                     <span className="snbr-news-impact compact">{newsSentimentLabel(item.sentiment, locale)}</span>
                     <span className="snbr-news-impact compact">{item.quality}</span>
-                    {item.sameStoryCount > 1 ? <span>{item.sameStoryCount} {isEnglish ? "versions" : "versoes"}</span> : null}
+                    {item.sameStoryCount > 1 ? <span>{item.sameStoryCount} {isEnglish ? "versions" : "versões"}</span> : null}
                     {item.relevanceScore != null ? <span>{Math.round(item.relevanceScore)} {isEnglish ? "rel." : "relev."}</span> : null}
                   </div>
                 </div>
@@ -335,7 +335,7 @@ export function WorkspaceRightRail({
           <div className="snbr-section-head compact">
             <div>
               <h3>{isEnglish ? "Featured Discussions" : "Discussoes em destaque"}</h3>
-              <p>{isEnglish ? "Conversations driving reactions and engagement right now." : "Conversas que estao puxando reacao e engajamento agora."}</p>
+              <p>{isEnglish ? "Conversations driving reactions and engagement right now." : "Conversas que estão puxando reação e engajamento agora."}</p>
             </div>
           </div>
           <div className="snbr-discussion-mini-list">

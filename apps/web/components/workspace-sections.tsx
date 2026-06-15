@@ -35,10 +35,10 @@ function uniqueNewsLines(title: string, values: string[]) {
 function newsSentimentVisual(sentiment?: string | null, locale: AppLocale = "pt-BR") {
   const normalized = normalizeText(sentiment);
   if (normalized.includes("bull") || normalized.includes("alta") || normalized.includes("positivo")) {
-    return { label: locale === "en-US" ? "Bullish" : "Bullish", tone: "bullish", icon: "🟢" };
+    return { label: locale === "en-US" ? "Bullish" : "Alta", tone: "bullish", icon: "🟢" };
   }
   if (normalized.includes("bear") || normalized.includes("baixa") || normalized.includes("negativo")) {
-    return { label: locale === "en-US" ? "Bearish" : "Bearish", tone: "bearish", icon: "🔴" };
+    return { label: locale === "en-US" ? "Bearish" : "Baixa", tone: "bearish", icon: "🔴" };
   }
   return { label: locale === "en-US" ? "Neutral" : "Neutra", tone: "neutral", icon: "⚪" };
 }
@@ -255,11 +255,11 @@ export function WorkspaceNewsPanel({
                   <span>{isEnglish ? "Sentiment" : "Sentimento"}: {sentimentVisual.icon} {sentimentVisual.label}</span>
                   {item.sector ? <span>{item.sector}</span> : null}
                   {item.industry ? <span>{item.industry}</span> : null}
-                  {item.sameStoryCount > 1 ? <span>{item.sameStoryCount} {isEnglish ? "versions" : "versoes"}</span> : null}
+                  {item.sameStoryCount > 1 ? <span>{item.sameStoryCount} {isEnglish ? "versions" : "versões"}</span> : null}
                   {item.sourceCount && item.sourceCount > 1 ? <span>{item.sourceCount} {isEnglish ? "sources" : "fontes"}</span> : null}
                   {item.relevanceScore != null ? <span>{Math.round(item.relevanceScore)} {isEnglish ? "rel." : "relev."}</span> : null}
                   {item.confidenceScore != null ? <span>{Math.round(item.confidenceScore)} conf.</span> : null}
-                  {item.ambiguityScore != null && item.ambiguityScore >= 45 ? <span>{isEnglish ? "Ambiguous read" : "Leitura ambigua"}</span> : null}
+                  {item.ambiguityScore != null && item.ambiguityScore >= 45 ? <span>{isEnglish ? "Ambiguous read" : "Leitura ambígua"}</span> : null}
                 </div>
                 {item.labels.length ? (
                   <div className="snbr-news-chip-row">
@@ -355,7 +355,7 @@ export function WorkspaceEducationPanel({
       <div className="snbr-section-head">
         <div>
           <h3>{isEnglish ? "Trader Help" : "Ajuda Educacional para o Trader"}</h3>
-          <p>{isEnglish ? "Clear explanation of each platform module, focused on real daily trader use." : "Explicacao clara de cada modulo da plataforma, com foco no uso real no dia a dia do trader."}</p>
+          <p>{isEnglish ? "Clear explanation of each platform module, focused on real daily trader use." : "Explicação clara de cada módulo da plataforma, com foco no uso real no dia a dia do trader."}</p>
         </div>
       </div>
       <div className="snbr-help-stack">

@@ -18,6 +18,7 @@ from app.ai.institutional_conviction import CONVICTION_HIGH, CONVICTION_MODERATE
 from app.ai.institutional_priority import PRIORITY_CRITICAL, PRIORITY_HIGH, PRIORITY_MEDIUM
 from app.ai.operational_rules import OPERATIONAL_BLOCKED, OPERATIONAL_READY
 from app.core.settings import settings
+from app.services.score_display import normalize_master_score_display
 from app.services.snapshot_contract import audit_status_value
 from app.system.observability_engine import record_observability_event
 from app.system.system_metrics import get_telegram_alert_metrics_snapshot, record_telegram_alert_metric
@@ -157,7 +158,8 @@ def _event_payload(
         "reason": reason,
         "message": message,
         "fingerprint": fingerprint,
-        "master_score": safe_signal.get("master_score"),
+        "master_score": normalize_master_score_display(safe_signal.get("master_score", safe_signal.get("score")))[0],
+        "master_score_raw": safe_signal.get("master_score_raw", safe_signal.get("master_score")),
         "final_decision_score": safe_signal.get("final_decision_score"),
         "final_decision_confidence": safe_signal.get("final_decision_confidence"),
     }
@@ -489,7 +491,7 @@ def send_bulk_alert(signals, regime=None, *, now: float | None = None, cooldown_
             key=lambda item: (
                 ALERT_ORDER.get(str(item[1].get("alert_level") or ""), 99),
                 -_safe_float(item[0].get("final_decision_score")),
-                -_safe_float(item[0].get("master_score")),
+                -_safe_float(item[0].get("master_score_raw", item[0].get("master_score"))),
             )
         )
 

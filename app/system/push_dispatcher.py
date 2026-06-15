@@ -7,6 +7,7 @@ from pathlib import Path
 from app.database import SessionLocal
 from app.models import User
 from app.services.push_service import get_push_token_store, send_push_notification
+from app.services.score_display import normalize_master_score_display
 from app.services.snapshot_contract import is_actionable_snapshot_row
 
 
@@ -48,7 +49,7 @@ def _eligible_signals(signals):
             continue
 
         try:
-            score = float(item.get("master_score", item.get("score", 0)) or 0)
+            score = float(item.get("master_score_raw", item.get("master_score", item.get("score", 0))) or 0)
         except Exception:
             score = 0.0
 
@@ -109,10 +110,8 @@ def dispatch_signal_pushes(signals):
                 continue
 
             title = f"Alerta SNBR: {ticker}"
-            body = (
-                f"Score Mestre {round(float(signal.get('master_score', signal.get('score', 0)) or 0), 2)} | "
-                f"{signal.get('master_direction') or signal.get('trend') or 'n/a'}"
-            )
+            display_score = normalize_master_score_display(signal.get("master_score", signal.get("score")))[0]
+            body = f"Score Mestre {display_score} | {signal.get('master_direction') or signal.get('trend') or 'n/a'}"
 
             signal_sent = 0
 

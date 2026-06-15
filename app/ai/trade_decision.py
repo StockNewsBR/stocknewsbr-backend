@@ -485,7 +485,7 @@ def _detect_decision_conflicts(
     action = str(action or "").upper()
     bullish = safe_float(bullish, safe_float(row.get("bullish_pressure"), 0.0))
     bearish = safe_float(bearish, safe_float(row.get("bearish_pressure"), 0.0))
-    score = safe_float(row.get("source_score", row.get("score", row.get("master_score"))), 0.0)
+    score = safe_float(row.get("source_score", row.get("score", row.get("master_score_raw", row.get("master_score")))), 0.0)
     side = _explicit_side_from_row(row)
 
     buy_score = max(
@@ -798,7 +798,7 @@ def evaluate_trade_coherence(
     elif action == "SELL":
         if _is_bullish_squeeze(row):
             blocked.append("sell_into_bullish_squeeze")
-        if regime_state == "bull_trend" and _score(row, "smart_money_score") >= 60 and _score(row, "master_score", _score(row, "score")) >= 60:
+        if regime_state == "bull_trend" and _score(row, "smart_money_score") >= 60 and _score(row, "master_score_raw", _score(row, "master_score", _score(row, "score"))) >= 60:
             blocked.append("sell_against_bull_regime")
         if chart_regime in {"trend_up", "breakout_up"} and bullish > bearish + 8:
             warnings.append("exit_long_against_uptrend_continuation")

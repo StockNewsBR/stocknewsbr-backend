@@ -41,16 +41,16 @@ def _is_blocked(record: Dict[str, Any]) -> bool:
 
 
 def _score_value(record: Dict[str, Any]) -> float | None:
-    raw = record.get("master_score")
+    raw = record.get("master_score_raw")
+    if raw is None:
+        raw = record.get("master_score")
     if raw is None:
         raw = record.get("score")
     score = _safe_float(raw, -1.0)
     if score < 0:
         return None
-    if score > 20:
-        return min(10.0, score / 10.0)
     if score > 10:
-        return 10.0
+        return min(10.0, score / 10.0)
     return score
 
 

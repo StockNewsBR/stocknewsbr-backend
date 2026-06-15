@@ -166,7 +166,7 @@ def get_market_radar(current_user=Depends(require_active_plan)):
                 buckets["liquidity_sweep"].append(row)
 
             master_direction = str(row.get("master_direction") or "").upper()
-            master_score = _safe_float(row.get("master_score", row.get("score")))
+            master_score = _safe_float(row.get("master_score_raw", row.get("master_score", row.get("score"))))
             if "BEARISH" in haystack or master_direction == "BEARISH" or master_score <= 30:
                 buckets["bearish"].append(row)
 

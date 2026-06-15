@@ -60,7 +60,7 @@ class TelegramInstitutionalTests(unittest.TestCase):
         self.assertEqual(result["alert_level"], ALERT_CRITICAL)
         self.assertIn("ALERTA CRÍTICO", message)
         self.assertIn("OPORTUNIDADE CONFIRMADA", message)
-        self.assertIn("Score Mestre: 88", message)
+        self.assertIn("Score Mestre: 8.8", message)
         self.assertIn("Auditor: APROVADO", message)
         self.assertGreaterEqual(after["sent"], before["sent"] + 1)
         self.assertGreaterEqual(after["critical"], before["critical"] + 1)

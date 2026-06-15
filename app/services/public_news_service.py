@@ -102,6 +102,25 @@ def _headline_from_url(url: Any) -> str:
         return ""
 
 
+def _fix_portuguese_news_text(value: Any) -> Any:
+    if not isinstance(value, str) or not value:
+        return value
+    replacements = {
+        "ambigua": "ambígua",
+        "Ambigua": "Ambígua",
+        "confirmacao": "confirmação",
+        "Confirmacao": "Confirmação",
+        "nao ": "não ",
+        "Nao ": "Não ",
+        "noticia": "notícia",
+        "Noticia": "Notícia",
+    }
+    text = value
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    return text
+
+
 def _normalize_public_news_item(item: dict[str, Any], ticker: str) -> dict[str, Any]:
     normalized = dict(item)
     title = normalized.get("title") or normalized.get("headline")
@@ -110,6 +129,9 @@ def _normalize_public_news_item(item: dict[str, Any], ticker: str) -> dict[str, 
         if url_title:
             normalized["title"] = url_title
             normalized["headline"] = url_title
+    for field in ("summary", "card_summary", "impact_reason", "why_it_matters", "editorial", "market_context", "trader_takeaway"):
+        if field in normalized:
+            normalized[field] = _fix_portuguese_news_text(normalized.get(field))
     return normalized
 
 
@@ -187,19 +209,25 @@ def _build_news_state(symbol: str, items: list[dict[str, Any]], cache: dict[str,
     cache_status = str(cache.get("status") or "cold")
     provider_status = str(cache.get("provider_status") or "not_checked")
     provider_error = cache.get("provider_error")
+    raw_count = int(cache.get("raw_count", 0) or 0)
+    filter_report = cache.get("filter_report") if isinstance(cache.get("filter_report"), dict) else {}
+    discard_reason = cache.get("discard_reason") or filter_report.get("reason")
 
     if items:
         status = "ok"
         message = f"News filtradas e validadas para {symbol}."
         if cache_status == "stale_fallback":
             status = "stale_fallback"
-            message = f"Usando noticia antiga de {symbol}; provider atual nao entregou item novo."
+            message = f"Usando notícia antiga de {symbol}; provider atual não entregou item novo."
     else:
         status = "empty"
-        message = f"Sem noticia real para {symbol} agora; nenhuma noticia de outro ticker foi reaproveitada."
+        message = f"Sem notícia real para {symbol} agora; nenhuma notícia de outro ticker foi reaproveitada."
         if provider_error:
             status = "provider_error"
             message = f"Provider de news falhou para {symbol}: {provider_error}."
+        elif raw_count > 0 and discard_reason:
+            status = "empty"
+            message = f"Provider encontrou {raw_count} notícia(s) bruta(s) para {symbol}, mas o cache final ficou vazio por {discard_reason}."
         elif provider_status in {"empty", "no_news", "error"}:
             message = f"Provider retornou {provider_status} para {symbol}; tela deve mostrar estado vazio explicito."
 
@@ -211,6 +239,9 @@ def _build_news_state(symbol: str, items: list[dict[str, Any]], cache: dict[str,
         "provider": cache.get("provider") or "yfinance",
         "provider_status": provider_status,
         "provider_error": provider_error,
+        "raw_count": raw_count,
+        "reason": discard_reason,
+        "discard_reasons": cache.get("discard_reasons") if isinstance(cache.get("discard_reasons"), dict) else {},
         "report_status": report.get("status") or ("ok" if items else "empty"),
         "items": len(items),
     }
@@ -236,6 +267,7 @@ def build_public_news_payload(symbol: str, limit: int = 6, source: str | None = 
         "items": items,
         "count": len(items),
         "status": state["status"],
+        "reason": state.get("reason"),
         "state": state,
         "message": state["message"],
         "scope": {

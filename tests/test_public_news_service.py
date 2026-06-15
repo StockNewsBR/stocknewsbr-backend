@@ -51,7 +51,7 @@ class PublicNewsServiceTests(unittest.TestCase):
         self.assertEqual(payload["symbol"], "PETR4")
         self.assertEqual(payload["status"], "empty")
         self.assertEqual(payload["count"], 0)
-        self.assertIn("Sem noticia real para PETR4", payload["message"])
+        self.assertIn("Sem notícia real para PETR4", payload["message"])
         self.assertEqual(payload["scope"]["filtered_out"], 1)
 
     def test_provider_error_is_exposed(self):

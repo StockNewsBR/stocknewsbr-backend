@@ -265,7 +265,13 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
             display_score = float(row.get("master_score", row.get("score", 0)) or 0)
         except Exception:
             display_score = ranking_score
-        display_contract = attach_master_score_display_contract({"master_score": display_score})
+        display_contract = attach_master_score_display_contract(
+            {
+                "score": display_score,
+                "master_score": row.get("master_score", display_score),
+                "master_score_raw": row.get("master_score_raw"),
+            }
+        )
 
         results.append(
             {
@@ -275,6 +281,7 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
                 "score_display": display_contract.get("master_score_display"),
                 "master_score_display": display_contract.get("master_score_display"),
                 "master_score_display_warning": display_contract.get("master_score_display_warning"),
+                "master_score_raw": display_contract.get("master_score_raw"),
                 "source_score": row.get("score"),
                 "ranking_opportunity_score": row.get("ranking_opportunity_score", ranking_score),
                 "ranking_classification": row.get("ranking_classification"),
@@ -282,7 +289,7 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
                 "ranking_summary": row.get("ranking_summary"),
                 "ranking_eligible": row.get("ranking_eligible"),
                 "ranking_excluded_reasons": row.get("ranking_excluded_reasons") or [],
-                "master_score": row.get("master_score"),
+                "master_score": display_contract.get("master_score"),
                 "master_direction": row.get("master_direction"),
                 "master_conviction": row.get("master_conviction"),
                 "master_confidence": row.get("master_confidence"),
