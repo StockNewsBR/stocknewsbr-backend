@@ -16,6 +16,7 @@ from app.social.reposts import (
 )
 from app.social.posts import create_post, delete_post, get_post, get_posts
 from app.services.social_discussion_service import build_discussion_state, rank_featured_discussions
+from app.services.symbol_registry import canonical_symbol
 from app.services.social_realtime_service import broadcast_ticker_event
 
 
@@ -43,7 +44,7 @@ def ticker_feed(
     limit: int = 30,
     current_user: User = Depends(require_any_channel_access("app", "web")),
 ):
-    symbol = symbol.upper()
+    symbol = canonical_symbol(symbol)
     blocked_users = get_blocked_users(current_user.id)
     posts = get_posts(symbol, limit, blocked_users=blocked_users)
     post_ids = [post.get("id") for post in posts if post.get("id") is not None]
@@ -88,7 +89,7 @@ async def create_ticker_post(
     post = create_post(
         user_id=current_user.id,
         text=payload.text,
-        ticker=symbol,
+        ticker=canonical_symbol(symbol),
         image_url=payload.image_url,
         sentiment=payload.sentiment,
         display_name=current_user.display_name or current_user.email,
@@ -103,7 +104,7 @@ async def create_ticker_post(
         raise HTTPException(status_code=429, detail=post.get("reason", "post_blocked"))
 
     await broadcast_ticker_event(
-        symbol,
+        canonical_symbol(symbol),
         "post_created",
         {
             "post": post,

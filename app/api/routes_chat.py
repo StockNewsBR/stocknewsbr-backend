@@ -6,6 +6,7 @@ from app.dependencies import require_active_plan
 from app.models import User
 from app.security import resolve_token_user
 from app.services.access_service import has_channel_access, refresh_user_access
+from app.services.symbol_registry import canonical_symbol
 from app.services.ticker_room_service import append_room_message, list_room_messages
 from app.social.moderation import can_publish
 from app.system.room_websocket_manager import room_ws_manager
@@ -50,7 +51,7 @@ def chat_history(
     current_user: User = Depends(require_active_plan),
 ):
     del current_user
-    symbol = symbol.upper()
+    symbol = canonical_symbol(symbol)
     return {
         "symbol": symbol,
         "items": list_room_messages(symbol, limit=limit),
@@ -63,7 +64,7 @@ async def chat_message(
     payload: ChatMessageRequest,
     current_user: User = Depends(require_active_plan),
 ):
-    symbol = symbol.upper()
+    symbol = canonical_symbol(symbol)
     allowed, reason = can_publish(current_user.id, payload.text)
 
     if not allowed:
@@ -92,7 +93,7 @@ async def chat_message(
 
 @router.websocket("/ws/chat/{symbol}")
 async def websocket_chat(websocket: WebSocket, symbol: str):
-    symbol = symbol.upper()
+    symbol = canonical_symbol(symbol)
     token = websocket.query_params.get("token")
     user = _resolve_user_from_token(token)
 

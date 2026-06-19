@@ -1,3 +1,5 @@
+import { canonicalSymbol } from "@/lib/symbolRegistry";
+
 const API_BASE = (process.env.EXPO_PUBLIC_API_BASE || "http://127.0.0.1:8000").replace(/\/$/, "");
 const DEFAULT_TIMEOUT_MS = 12000;
 
@@ -20,6 +22,10 @@ function buildUrl(path: string, query?: Record<string, QueryValue>) {
   }
 
   return url.toString();
+}
+
+function tickerPathValue(ticker: string) {
+  return canonicalSymbol(ticker) || "PETR4";
 }
 
 async function readErrorDetail(response: Response) {
@@ -188,8 +194,9 @@ export async function getWorkspace(token: string) {
 }
 
 export async function getChart(token: string, ticker: string, interval = "1D") {
+  const symbol = tickerPathValue(ticker);
   return requestJson<Record<string, any>>(
-    `/chart/${encodeURIComponent(ticker)}`,
+    `/chart/${encodeURIComponent(symbol)}`,
     {
       headers: { Authorization: `Bearer ${token}` },
     },
@@ -198,14 +205,16 @@ export async function getChart(token: string, ticker: string, interval = "1D") {
 }
 
 export async function getTickerSnapshot(token: string, ticker: string) {
-  return requestJson<Record<string, any>>(`/ticker/${encodeURIComponent(ticker)}`, {
+  const symbol = tickerPathValue(ticker);
+  return requestJson<Record<string, any>>(`/ticker/${encodeURIComponent(symbol)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 }
 
 export async function getNews(token: string, ticker: string, limit = 8) {
+  const symbol = tickerPathValue(ticker);
   return requestJson<Record<string, any>>(
-    `/news/${encodeURIComponent(ticker)}`,
+    `/news/${encodeURIComponent(symbol)}`,
     {
       headers: { Authorization: `Bearer ${token}` },
     },
@@ -214,8 +223,9 @@ export async function getNews(token: string, ticker: string, limit = 8) {
 }
 
 export async function getTickerFeed(token: string, ticker: string, limit = 24) {
+  const symbol = tickerPathValue(ticker);
   return requestJson<Record<string, any>>(
-    `/ticker/${encodeURIComponent(ticker)}/feed`,
+    `/ticker/${encodeURIComponent(symbol)}/feed`,
     {
       headers: { Authorization: `Bearer ${token}` },
     },
@@ -228,8 +238,9 @@ export async function createTickerPost(
   ticker: string,
   payload: { text: string; image_url?: string | null; sentiment?: string | null },
 ) {
+  const symbol = tickerPathValue(ticker);
   return requestJson<Record<string, any>>(
-    `/ticker/${encodeURIComponent(ticker)}/post`,
+    `/ticker/${encodeURIComponent(symbol)}/post`,
     {
       method: "POST",
       headers: {
@@ -353,20 +364,23 @@ export async function getTopMovers(token: string) {
 }
 
 export async function getPoll(ticker: string) {
-  return requestJson<Record<string, any>>(`/poll/${encodeURIComponent(ticker)}`);
+  const symbol = tickerPathValue(ticker);
+  return requestJson<Record<string, any>>(`/poll/${encodeURIComponent(symbol)}`);
 }
 
 export async function getPollHistory(ticker: string, limit = 8) {
+  const symbol = tickerPathValue(ticker);
   return requestJson<Record<string, any>>(
-    `/poll/${encodeURIComponent(ticker)}/history`,
+    `/poll/${encodeURIComponent(symbol)}/history`,
     {},
     { limit },
   );
 }
 
 export async function votePoll(token: string, ticker: string, option: string) {
+  const symbol = tickerPathValue(ticker);
   return requestJson<Record<string, any>>(
-    `/poll/${encodeURIComponent(ticker)}/vote`,
+    `/poll/${encodeURIComponent(symbol)}/vote`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },

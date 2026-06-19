@@ -24,7 +24,7 @@ B3_UNIVERSE = [
     "PRIO3",
     "VBBR3",
     "EQTL3",
-    "ELET6",
+    "AXIA6",
     "MGLU3",
     "UGPA3",
     "TOTS3",

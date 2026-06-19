@@ -15,6 +15,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases
 from app.system.system_metrics import record_cache_access, record_cache_lookup, record_external_provider_call, record_worker_stage_duration
 
 logger = logging.getLogger("stocknewsbr.news")
@@ -375,6 +376,7 @@ _TICKER_SECTOR_MAP = {
     "KLBN11": ("Materiais / Papel e Celulose", "Papel e celulose"),
     "ELET3": ("Utilidades / Energia", "Energia elétrica"),
     "ELET6": ("Utilidades / Energia", "Energia elétrica"),
+    "AXIA6": ("Utilidades / Energia", "Energia elétrica"),
     "CPFE3": ("Utilidades / Energia", "Energia elétrica"),
     "EQTL3": ("Utilidades / Energia", "Energia elétrica"),
     "ENBR3": ("Utilidades / Energia", "Energia elétrica"),
@@ -454,7 +456,7 @@ def _clean_whitespace(value: str) -> str:
 
 @lru_cache(maxsize=4096)
 def _normalize_ticker(ticker: str) -> str:
-    return _clean_whitespace(str(ticker or "")).upper().replace(" ", "")
+    return canonical_symbol(ticker) or _clean_whitespace(str(ticker or "")).upper().replace(" ", "")
 
 
 @lru_cache(maxsize=4096)
@@ -640,6 +642,7 @@ def _news_aliases(ticker: str) -> set[str]:
         normalized.replace("34", ""),
         normalized.replace(".SA", ""),
     }
+    aliases.update(canonical_symbol_aliases(normalized))
     aliases.update(_TICKER_NEWS_ALIASES.get(normalized, ()))
     return {alias.lower().strip() for alias in aliases if alias}
 
@@ -1241,7 +1244,7 @@ def _news_ticker_candidates(ticker: str) -> list[str]:
 
     unique_candidates: list[str] = []
     for candidate in candidates:
-        candidate = _normalize_ticker(candidate)
+        candidate = _clean_whitespace(str(candidate or "")).upper().replace(" ", "")
         if candidate and candidate not in unique_candidates:
             unique_candidates.append(candidate)
     return unique_candidates
@@ -1571,14 +1574,14 @@ def get_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
     now = _now_ts()
     with _CACHE_LOCK:
         cached = _NEWS_CACHE.get(normalized_ticker)
-        if cached and now - float(cached.get("timestamp", 0.0) or 0.0) < _CACHE_TTL_SECONDS:
+        if cached and cached.get("items") and now - float(cached.get("timestamp", 0.0) or 0.0) < _CACHE_TTL_SECONDS:
             return list(cached.get("items", []))[:limit]
 
     request_lock = _get_request_lock(normalized_ticker)
     with request_lock:
         with _CACHE_LOCK:
             cached = _NEWS_CACHE.get(normalized_ticker)
-            if cached and now - float(cached.get("timestamp", 0.0) or 0.0) < _CACHE_TTL_SECONDS:
+            if cached and cached.get("items") and now - float(cached.get("timestamp", 0.0) or 0.0) < _CACHE_TTL_SECONDS:
                 return list(cached.get("items", []))[:limit]
 
         raw_items: list[dict[str, Any]] = []

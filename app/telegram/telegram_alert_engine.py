@@ -19,7 +19,8 @@ from app.ai.institutional_priority import PRIORITY_CRITICAL, PRIORITY_HIGH, PRIO
 from app.ai.operational_rules import OPERATIONAL_BLOCKED, OPERATIONAL_READY
 from app.core.settings import settings
 from app.services.score_display import normalize_master_score_display
-from app.services.snapshot_contract import audit_status_value
+from app.services.snapshot_contract import DECISION_READY, audit_status_value, build_decision_envelope
+from app.services.symbol_registry import canonical_symbol
 from app.system.observability_engine import record_observability_event
 from app.system.system_metrics import get_telegram_alert_metrics_snapshot, record_telegram_alert_metric
 from app.telegram.telegram_alert_formatter import format_signal_alert
@@ -113,7 +114,7 @@ def _contains(value: Any, expected: str) -> bool:
 
 
 def _ticker(signal: dict[str, Any]) -> str:
-    return str(signal.get("ticker") or signal.get("symbol") or "").upper().strip()
+    return canonical_symbol(signal.get("canonical_symbol") or signal.get("ticker") or signal.get("symbol"))
 
 
 def _direction(signal: dict[str, Any]) -> str:
@@ -143,12 +144,15 @@ def _event_payload(
     message: str | None = None,
 ) -> dict[str, Any]:
     safe_signal = signal if isinstance(signal, dict) else {}
+    ticker = _ticker(safe_signal)
     return {
         "timestamp": time.time(),
         "status": status,
-        "ticker": _ticker(safe_signal),
+        "ticker": ticker,
+        "canonical_symbol": ticker,
         "direction": _direction(safe_signal),
         "final_decision": safe_signal.get("final_decision"),
+        "decision_status": (safe_signal.get("decision_envelope") if isinstance(safe_signal.get("decision_envelope"), dict) else {}).get("decision_status") or safe_signal.get("decision_status"),
         "priority_level": safe_signal.get("priority_level"),
         "conviction_level": safe_signal.get("conviction_level"),
         "operational_status": safe_signal.get("operational_status"),
@@ -231,6 +235,12 @@ def _cooldown_key(signal: dict[str, Any], alert_level: str) -> str:
 
 
 def _blocking_reason(signal: dict[str, Any]) -> str | None:
+    envelope = build_decision_envelope(signal)
+    if envelope.get("decision_status") != DECISION_READY or envelope.get("decision_ready") is not True:
+        blockers = envelope.get("blockers") if isinstance(envelope.get("blockers"), list) else []
+        reason = ";".join(str(item) for item in blockers[:4] if str(item or "").strip())
+        return f"decision_envelope={envelope.get('decision_status')}" + (f":{reason}" if reason else "")
+
     operational_status = str(signal.get("operational_status") or "").upper().strip()
     audit_status = audit_status_value(signal)
 

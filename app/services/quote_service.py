@@ -6,12 +6,13 @@ from typing import Any
 
 from app.cache.snapshot_cache import get_last_good_snapshot_ticker, get_snapshot_ticker
 from app.market.market_data_loader import get_cached_price_snapshots, get_display_symbol
+from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases
 from app.services.symbol_sanitizer import mark_symbol_cooldown, sanitize_market_symbol
 from app.system.system_metrics import record_cache_access
 
 
 def _normalize_symbol(symbol: str | None) -> str:
-    sanitized = sanitize_market_symbol(symbol, allow_provider_symbols=True)
+    sanitized = canonical_symbol(symbol) or sanitize_market_symbol(symbol, allow_provider_symbols=True)
     if not sanitized and symbol:
         mark_symbol_cooldown(symbol, "invalid_symbol")
     return sanitized or ""
@@ -33,7 +34,7 @@ _B3_MINI_FUTURE_RE = re.compile(r"^(WIN|WDO)[FGHJKMNQUVXZ]\d{2}$")
 def _quote_candidates(symbol: str) -> list[str]:
     ticker = _normalize_symbol(symbol)
     display = get_display_symbol(ticker)
-    candidates = [ticker, display]
+    candidates = [*canonical_symbol_aliases(ticker), ticker, display]
 
     provider_symbol = _CME_FUTURES_PROVIDER_SYMBOLS.get(ticker)
     if provider_symbol:

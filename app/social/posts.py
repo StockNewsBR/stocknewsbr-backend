@@ -4,6 +4,7 @@ from datetime import datetime
 
 from app.database import SessionLocal
 from app.models import SocialPost
+from app.services.symbol_registry import canonical_symbol
 from app.social.db import ensure_social_tables
 from app.social.moderation import can_publish, is_post_hidden
 
@@ -16,7 +17,7 @@ def _serialize_post(post: SocialPost) -> dict:
         "user_email": post.email,
         "user_avatar_url": post.avatar_url,
         "text": post.text,
-        "ticker": (post.ticker or "").upper() or None,
+        "ticker": canonical_symbol(post.ticker) or None,
         "image_url": post.image_url,
         "sentiment": post.sentiment,
         "timestamp": int((post.created_at or datetime.utcnow()).timestamp()),
@@ -51,7 +52,7 @@ def create_post(
     try:
         post = SocialPost(
             user_id=int(user_id),
-            ticker=(ticker or "").upper() or None,
+            ticker=canonical_symbol(ticker) or None,
             text=str(text)[:1000],
             image_url=image_url,
             sentiment=sentiment,
@@ -70,7 +71,7 @@ def create_post(
 def get_posts(ticker=None, limit=50, blocked_users=None):
     ensure_social_tables()
     blocked_users = set(blocked_users or [])
-    normalized_ticker = (ticker or "").upper() or None
+    normalized_ticker = canonical_symbol(ticker) or None
     db = SessionLocal()
 
     try:
@@ -102,7 +103,7 @@ def count_posts(ticker=None):
         query = db.query(SocialPost)
 
         if ticker:
-            query = query.filter(SocialPost.ticker == str(ticker).upper())
+            query = query.filter(SocialPost.ticker == canonical_symbol(ticker))
 
         return query.count()
     finally:

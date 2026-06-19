@@ -3,6 +3,7 @@ import threading
 import time
 from pathlib import Path
 
+from app.services.symbol_registry import canonical_symbol
 from app.system.system_metrics import increment_chat_messages
 
 
@@ -32,7 +33,7 @@ def _save_store(store):
 
 
 def list_room_messages(symbol: str, limit: int = 100):
-    symbol = (symbol or "").upper().strip()
+    symbol = canonical_symbol(symbol)
     store = _load_store()
     items = store.get(symbol, [])
     return items[-max(1, min(limit, MAX_ROOM_MESSAGES)) :]
@@ -45,7 +46,7 @@ def append_room_message(
     text: str,
     image_url: str | None = None,
 ):
-    symbol = (symbol or "").upper().strip()
+    symbol = canonical_symbol(symbol)
     text = str(text or "").strip()
 
     if not symbol or not user_id or not text:

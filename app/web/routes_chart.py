@@ -11,6 +11,7 @@ from app.market.market_data_loader import get_cached_chart_data
 from app.cache.snapshot_cache import get_snapshot_signals
 from app.services.chart_overlay_service import build_chart_overlays
 from app.services.snapshot_contract import snapshot_surface_row
+from app.services.symbol_registry import canonical_symbol
 from app.api.routes_public_market_live import _load_chart_data_fast as load_chart_data_cache_first
 from app.system.system_metrics import record_cache_access
 
@@ -24,7 +25,7 @@ logger = logging.getLogger("stocknewsbr.web.chart")
 
 
 def _normalize_chart_ticker(value: str) -> str:
-    return str(value or "").upper().strip().replace(".SA", "").replace("-USD", "USD")
+    return canonical_symbol(value) or str(value or "").upper().strip().replace(".SA", "").replace("-USD", "USD")
 
 
 # =====================================================
@@ -36,7 +37,7 @@ def get_chart(ticker: str, interval: str = "1D"):
 
     try:
 
-        ticker = ticker.upper()
+        ticker = canonical_symbol(ticker)
         ohlc = get_cached_chart_data(ticker, interval=interval) or load_chart_data_cache_first(ticker, interval) or []
         record_cache_access("chart", bool(ohlc), "web_chart")
 

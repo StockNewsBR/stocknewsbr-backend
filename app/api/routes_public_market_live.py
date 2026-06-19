@@ -18,6 +18,8 @@ from app.services.public_market_data_service import (
 )
 from app.services.public_news_service import build_public_news_payload
 from app.services.quote_service import classify_quote_payload, is_usable_quote_payload
+from app.services.snapshot_contract import build_decision_envelope
+from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases
 from app.services.symbol_sanitizer import mark_symbol_cooldown, sanitize_market_symbol
 from app.system.system_metrics import record_cache_access
 
@@ -52,7 +54,7 @@ def _is_b3_mini_future_symbol(symbol: str) -> bool:
 
 
 def _normalize_public_symbol(symbol: str) -> str:
-    sanitized = sanitize_market_symbol(symbol, allow_provider_symbols=True)
+    sanitized = canonical_symbol(symbol) or sanitize_market_symbol(symbol, allow_provider_symbols=True)
     if not sanitized and symbol:
         mark_symbol_cooldown(symbol, "invalid_symbol")
     return sanitized or ""
@@ -63,6 +65,17 @@ def _dedupe_public_symbols(symbols) -> list[str]:
     result = []
     for symbol in symbols:
         value = _normalize_public_symbol(symbol)
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def _dedupe_alias_symbols(symbols) -> list[str]:
+    seen = set()
+    result = []
+    for symbol in symbols:
+        value = str(symbol or "").upper().strip()
         if value and value not in seen:
             seen.add(value)
             result.append(value)
@@ -86,7 +99,7 @@ def _symbol_aliases(symbol: str) -> list[str]:
         return []
 
     display = get_display_symbol(raw)
-    aliases = [raw, display]
+    aliases = [*canonical_symbol_aliases(raw), raw, display]
     for candidate in list(aliases):
         base = candidate[:-3] if candidate.endswith(".SA") else candidate
         compact = base.replace("-USD", "USD")
@@ -103,15 +116,19 @@ def _symbol_aliases(symbol: str) -> list[str]:
         if re.match(r"^[A-Z]{4}(3|4|5|6|11)$", base) or re.match(r"^[A-Z]{4,5}34$", base):
             aliases.append(f"{base}.SA")
 
-    return _dedupe_public_symbols(aliases)
+    return _dedupe_alias_symbols(aliases)
 
 
 def _snapshot_master_context(symbol: str) -> dict:
     row = get_snapshot_ticker(_symbol_aliases(symbol))
     if not isinstance(row, dict):
         return {}
+    decision_envelope = build_decision_envelope(row)
     return {
         "master_score": row.get("master_score"),
+        "master_score_raw": row.get("master_score_raw"),
+        "decision_status": decision_envelope.get("decision_status"),
+        "decision_envelope": decision_envelope,
         "master_direction": row.get("master_direction"),
         "master_conviction": row.get("master_conviction"),
         "master_confidence": row.get("master_confidence"),
@@ -540,7 +557,7 @@ def public_quotes(symbols: str = Query(default="")):
         if part.strip() and not _is_blocked_public_symbol(part)
     )
     limited_tickers = tickers[:80]
-    cache_keys = _dedupe_public_symbols(
+    cache_keys = _dedupe_alias_symbols(
         alias for symbol in limited_tickers for alias in _symbol_aliases(symbol)
     )
     cached_payloads = cached_price_payloads(cache_keys, allow_stale=True)

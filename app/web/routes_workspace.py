@@ -8,6 +8,7 @@ from app.models import User
 from app.services.help_center_service import get_help_center_blueprint, get_help_guide
 from app.services.public_news_service import build_public_news_payload
 from app.services.quote_service import empty_quote_payload, get_cached_quote_payload
+from app.services.symbol_registry import canonical_symbol
 from app.services.ticker_room_service import list_room_messages
 from app.services.video_library_service import get_help_video_library
 from app.services.workspace_service import get_workspace_data
@@ -54,7 +55,7 @@ def workspace_ticker_bundle(
     limit: int = 6,
     current_user: User = Depends(require_channel_access("web")),
 ):
-    ticker = str(symbol or "").upper().strip()
+    ticker = canonical_symbol(symbol)
     safe_limit = max(1, min(int(limit or 6), 100))
     quote = get_cached_quote_payload(ticker) or empty_quote_payload(ticker)
 

@@ -50,6 +50,10 @@ import {
   verifyLoginOtp,
   votePoll,
 } from "@/lib/api";
+import {
+  canonicalSymbol as resolveCanonicalSymbol,
+  canonicalSymbolAliases as resolveCanonicalSymbolAliases,
+} from "@/lib/symbol-registry";
 import type {
   AiToolRow,
   AiToolMetrics,
@@ -392,8 +396,8 @@ const AI_ALERT_HISTORY_STORAGE_KEY = "snbr-ai-alert-history-v7";
 const AI_TOOL_SOUND_STORAGE_KEY = "stocknewsbr.ai_tool_sound.v1";
 const AI_DEAL_SOUND_URL = "/sounds/ka-ching.mp3";
 const MAINTENANCE_NOTICES: Array<{ id: string; titulo: string; corpo: string }> = [];
-const B3_SYMBOL_PATTERN = /^[A-Z]{4}(?:3|4|5|6|11)$/;
-const BDR_SYMBOL_PATTERN = /^[A-Z]{4,5}34$/;
+const B3_SYMBOL_PATTERN = /^[A-Z][A-Z0-9]{3,4}(?:3|4|5|6|11)$/;
+const BDR_SYMBOL_PATTERN = /^[A-Z][A-Z0-9]{3,4}34$/;
 const USA_SYMBOL_PATTERN = /^[A-Z]{1,5}$/;
 const FUTURES_MONTH_CODES = ["F", "G", "H", "J", "K", "M", "N", "Q", "U", "V", "X", "Z"] as const;
 const FUTURES_MONTH_NAMES: Record<string, string> = {
@@ -467,7 +471,7 @@ function b3FutureLabel(symbol: string, locale: AppLocale = "pt-BR") {
 const WATCHLIST_B3 = [
   "ITUB4.SA", "BBDC4.SA", "BBAS3.SA", "SANB11.SA", "BPAC11.SA",
   "VALE3.SA", "PETR4.SA", "PETR3.SA", "SUZB3.SA", "KLBN11.SA",
-  "ELET3.SA", "ELET6.SA", "CPFE3.SA", "EQTL3.SA",
+  "ELET3.SA", "AXIA6.SA", "CPFE3.SA", "EQTL3.SA",
   "MGLU3.SA", "LREN3.SA", "AMER3.SA", "VIIA3.SA", "ASAI3.SA",
   "WEGE3.SA", "GGBR4.SA", "CSNA3.SA", "USIM5.SA",
   "TOTS3.SA", "POSI3.SA",
@@ -987,6 +991,7 @@ const COMPANY_HINTS: Record<string, string> = {
   KLBN11: "Klabin Units",
   ELET3: "Eletrobras ON",
   ELET6: "Eletrobras PNB",
+  AXIA6: "Axia Energia",
   CPFE3: "CPFL Energia",
   EQTL3: "Equatorial",
   ENBR3: "EDP Brasil",
@@ -1174,10 +1179,7 @@ function titleFromKey(key: string) {
 }
 
 function normalizeSymbol(raw: string) {
-  const value = String(raw || "").trim().toUpperCase().replace(/\.SA$/, "").replace(/[^A-Z0-9-]/g, "");
-  if (value.endsWith("-USD")) return value.replace(/-USD$/, "USD");
-  if (value.endsWith("USDT")) return `${value.slice(0, -4)}USD`;
-  return value;
+  return resolveCanonicalSymbol(raw);
 }
 
 function symbolAliases(raw?: string | null) {
@@ -1186,13 +1188,7 @@ function symbolAliases(raw?: string | null) {
   const aliases = new Set<string>();
   if (source) aliases.add(source);
   if (normalized) aliases.add(normalized);
-  if (normalized.endsWith("USD")) {
-    aliases.add(normalized.replace(/USD$/, "-USD"));
-    aliases.add(normalized.replace(/USD$/, "USDT"));
-  }
-  if (/^[A-Z]{4}(3|4|5|6|11)$/.test(normalized) || /^[A-Z]{4,5}34$/.test(normalized)) {
-    aliases.add(`${normalized}.SA`);
-  }
+  for (const alias of resolveCanonicalSymbolAliases(normalized || source)) aliases.add(alias);
   return Array.from(aliases);
 }
 
@@ -1712,6 +1708,11 @@ function translateEnglishNewsHeadlineToPt(value?: string | null, symbol?: string
     return clampHeadline(`${firstGridStorage[1]} assina primeiro acordo de armazenamento de rede com ${firstGridStorage[2]}, de até ${firstGridStorage[3]}`);
   }
 
+  const oilResults = normalized.match(/^(.+?)\s+results?\s+improves?\s+as\s+(.+?)\s+benefits?\s+from\s+stronger\s+oil\s+pricing$/i);
+  if (oilResults) {
+    return clampHeadline(`Resultados de ${oilResults[1]} melhoram com ${oilResults[2]} beneficiada por petróleo mais forte`);
+  }
+
   const europeanGrowthStorage = normalized.match(/^(.+?)\s+details\s+european\s+growth\s+strategy,\s+signs?\s+(.+?)\s+energy-storage\s+agreement$/i);
   if (europeanGrowthStorage) {
     return clampHeadline(`${europeanGrowthStorage[1]} detalha estratégia de crescimento na Europa e assina acordo de armazenamento de energia com ${europeanGrowthStorage[2]}`);
@@ -1730,6 +1731,17 @@ function translateEnglishNewsHeadlineToPt(value?: string | null, symbol?: string
   const cleaned = normalized
     .replace(/\bM\s*&\s*A\b/gi, "fusões e aquisições")
     .replace(/\bMergers?\s*&\s*Acquisitions?\b/gi, "fusões e aquisições")
+    .replace(/\bresults?\s+improves?\b/gi, "resultados melhoram")
+    .replace(/\bbenefits?\s+from\b/gi, "se beneficia de")
+    .replace(/\bstronger\s+oil\s+pricing\b/gi, "petróleo mais forte")
+    .replace(/\boil\s+pricing\b/gi, "preços do petróleo")
+    .replace(/\bearnings?\b/gi, "resultados")
+    .replace(/\bguidance\b/gi, "projeções")
+    .replace(/\brevenue\b/gi, "receita")
+    .replace(/\bprofit\b/gi, "lucro")
+    .replace(/\bmarket\b/gi, "mercado")
+    .replace(/\bpricing\b/gi, "precificação")
+    .replace(/\bstronger\b/gi, "mais forte")
     .replace(/\btoday'?s\b/gi, "de hoje")
     .replace(/\bstocks?\b/gi, "ações")
     .replace(/\bmovers?\b/gi, "destaques")
@@ -1745,6 +1757,8 @@ function translateEnglishNewsHeadlineToPt(value?: string | null, symbol?: string
     .replace(/\blands\b/gi, "conquista")
     .replace(/\bdetails\b/gi, "detalha")
     .replace(/\bfirst\b/gi, "primeiro")
+    .replace(/\bfrom\b/gi, "de")
+    .replace(/\bas\b/gi, "com")
     .replace(/\bwith\b/gi, "com")
     .replace(/\bup to\b/gi, "até")
     .replace(/\bcustomer\b/gi, "cliente")
@@ -1752,7 +1766,7 @@ function translateEnglishNewsHeadlineToPt(value?: string | null, symbol?: string
     .replace(/\band\b/gi, "e");
 
   if (cleaned !== normalized) return clampHeadline(cleaned);
-  return clampHeadline(normalized);
+  return clampHeadline(`Notícia relevante em ${ticker}; confirme preço, volume e impacto antes de agir`);
 }
 
 function getSaoPauloParts(date = new Date()) {
@@ -2066,7 +2080,7 @@ function formatPrice(value?: number | null, locale: AppLocale = "pt-BR") {
 
 function isBrazilianMarketSymbol(symbol?: string | null) {
   const normalized = normalizeSymbol(String(symbol || ""));
-  return /^[A-Z]{4}\d{1,2}$/.test(normalized) || /^[A-Z0-9]{3,5}34$/.test(normalized) || normalized.startsWith("WIN") || normalized.startsWith("WDO");
+  return guessCategory(normalized) === "B3" || /^[A-Z0-9]{3,5}34$/.test(normalized) || normalized.startsWith("WIN") || normalized.startsWith("WDO");
 }
 
 function parsePriceNumber(value: unknown) {
@@ -2089,8 +2103,22 @@ function formatLocalePrice(value?: unknown, locale: AppLocale = "pt-BR") {
 }
 
 function formatAssetMoney(value: unknown, symbol: string, locale: AppLocale) {
+  if (parsePriceNumber(value) == null) return locale === "en-US" ? "No confirmed quote" : "Sem cotação confirmada";
   const prefix = isBrazilianMarketSymbol(symbol) ? "R$" : locale === "en-US" ? "$" : "US$";
   return `${prefix} ${formatLocalePrice(value, locale)}`;
+}
+
+function friendlyNetworkErrorMessage(error: unknown, locale: AppLocale = "pt-BR") {
+  const raw = error instanceof Error ? error.message : String(error || "");
+  if (/failed to fetch|networkerror|load failed|aborterror|fetch failed/i.test(raw)) {
+    return locale === "en-US"
+      ? "Market data temporarily unavailable. The screen remains usable with cached data and clear fallbacks."
+      : "Dados temporariamente indisponíveis. A tela continua funcional com cache e fallbacks claros.";
+  }
+  if (!raw.trim()) {
+    return locale === "en-US" ? "Temporary data failure." : "Falha temporária de dados.";
+  }
+  return raw;
 }
 
 function formatSignedPercent(value?: number | null) {
@@ -2140,7 +2168,7 @@ function formatWatchlistPrimaryValue(
   if (item.score != null && Number.isFinite(Number(item.score))) {
     return `Score ${Number(item.score).toFixed(1)}`;
   }
-  return locale === "en-US" ? "no price" : "sem preço";
+  return locale === "en-US" ? "no confirmed snapshot" : "sem snapshot";
 }
 
 function formatMarketMovementText(item: {
@@ -2159,7 +2187,7 @@ function formatMarketMovementText(item: {
     return `Score ${Number(item.score).toFixed(1)}`;
   }
   const trend = String(item.trend || "").trim();
-  return trend ? localizeUiText(trend, locale) : locale === "en-US" ? "no price" : "sem preço";
+  return trend ? localizeUiText(trend, locale) : locale === "en-US" ? "data unavailable" : "dados indisponíveis";
 }
 
 function deriveChangePercent(change?: number | null, price?: number | null) {
@@ -3175,7 +3203,7 @@ function companyAliasesForSymbol(symbol: string) {
   const companyName = COMPANY_HINTS[normalized];
   if (companyName) aliases.add(companyName);
 
-  if (/^[A-Z]{4}\d{1,2}$/.test(normalized)) aliases.add(normalized.slice(0, 4));
+  if (/^[A-Z][A-Z0-9]{3,4}\d{1,2}$/.test(normalized)) aliases.add(normalized.slice(0, -1));
   if (normalized === "F") {
     aliases.add("Ford");
     aliases.add("Ford Motor");
@@ -3451,7 +3479,7 @@ function strategicPanelDecisionCards(panel: StrategicPanel, locale: AppLocale): 
   return [
     {
       label: isEnglish ? "Master Score" : "Score Mestre",
-      value: displayScore != null ? `${displayScore.toFixed(1)} / 10` : "n/a",
+      value: displayScore != null ? `${displayScore.toFixed(1)} / 10` : (isEnglish ? "No confirmed score" : "Sem score confirmado"),
       tone: displayScore != null && displayScore >= 8 ? "bullish" : displayScore != null && displayScore < 6 ? "watch" : tone,
       meta: `${conviction} | ${confidence}`,
       meter: displayScore != null ? clampNumber(displayScore * 10, 0, 100) : null,
@@ -3619,8 +3647,21 @@ function decisionTradeLabel(tone: DecisionTone, hasCoreData: boolean, locale: Ap
   if (tone === "exit") return locale === "en-US" ? "Close position" : "Encerrar posição";
   if (!hasCoreData) return locale === "en-US" ? "Wait" : "Aguardar";
   if (tone === "bullish") return locale === "en-US" ? "Buy/Long" : "Compra";
-  if (tone === "bearish") return locale === "en-US" ? "Sell/Short" : "Short / Comprar vendido";
+  if (tone === "bearish") return locale === "en-US" ? "Sell/Short" : "Venda / Short";
   return locale === "en-US" ? "Wait" : "Aguardar";
+}
+
+function tradeActionSide(value?: string | null): "buy" | "sell" | "wait" | "exit" {
+  const normalized = normalizeUiText(String(value || ""));
+  if (!normalized) return "wait";
+  if (/\b(encerrar|proteger|close|exit|cover|saida|sair)\b/.test(normalized)) return "exit";
+  if (/\b(aguardar|wait|sem dados|dados reais|bloquead|monitorar)\b/.test(normalized)) return "wait";
+  const sell = /\b(venda|vender|vendido|short|sell|bear|baixa|queda)\b/.test(normalized);
+  const buy = /\b(compra|comprar|comprado|buy|long|bull|alta)\b/.test(normalized);
+  if (sell && buy) return "wait";
+  if (sell) return "sell";
+  if (buy) return "buy";
+  return "wait";
 }
 
 function scoreConvictionLabel(score: number | null, locale: AppLocale) {
@@ -3704,7 +3745,9 @@ function buildOperationalDecision(input: {
   const isEnglish = input.locale === "en-US";
   const [scoreCard, directionCard, tradeCard, regimeCard, flowCard, liquidityCard, riskCard] = input.cards;
   const score = numericScoreFromDecisionCard(scoreCard);
-  const directionTone = decisionToneFromText(directionCard?.value, tradeCard?.value);
+  const suggestedSide = tradeActionSide(tradeCard?.value);
+  const forceWait = suggestedSide === "wait" || tradeCard?.tone === "watch";
+  const directionTone = forceWait ? "neutral" : decisionToneFromText(directionCard?.value, tradeCard?.value);
   const biasTone = decisionToneFromText(regimeCard?.value, directionCard?.value);
   const flowTone = decisionToneFromText(flowCard?.value);
   const riskLevel = strategicRiskLevelFromText(riskCard?.value);
@@ -3737,15 +3780,15 @@ function buildOperationalDecision(input: {
   if (incomplete) {
     action = isEnglish ? "WAIT FOR REAL DATA" : "AGUARDAR DADOS REAIS";
     tone = "watch";
-  } else if (directionTone === "exit") {
+  } else if (suggestedSide === "exit" || directionTone === "exit") {
     action = isEnglish ? "CLOSE OR PROTECT POSITION" : "ENCERRAR / PROTEGER POSIÇÃO";
     tone = "exit";
-  } else if (directionTone === "bearish" || biasTone === "bearish") {
+  } else if (!forceWait && (directionTone === "bearish" || biasTone === "bearish")) {
     action = riskLevel === "high"
-      ? (isEnglish ? "DO NOT BUY" : "NÃO ENTRAR COMPRADO")
+      ? (isEnglish ? "WAIT / PROTECT CAPITAL" : "AGUARDAR / PROTEGER CAPITAL")
       : (isEnglish ? "SHORT ONLY WITH CONFIRMATION" : "SHORT SOMENTE COM CONFIRMAÇÃO");
     tone = "bearish";
-  } else if (directionTone === "bullish" || biasTone === "bullish") {
+  } else if (!forceWait && (directionTone === "bullish" || biasTone === "bullish")) {
     action = riskLevel === "low" && confidence != null && confidence >= 70
       ? (isEnglish ? "LOOK FOR BUY TRIGGER" : "BUSCAR GATILHO DE COMPRA")
       : (isEnglish ? "BUY ONLY WITH CONFIRMATION" : "COMPRA SOMENTE COM CONFIRMAÇÃO");
@@ -4644,6 +4687,89 @@ function strategicSectionsForRender(conclusion: StrategicConclusion, locale: App
     { title: standardTitles.interpretation, body: interpretationBody },
     { title: standardTitles.focus, body: focusBody },
   ];
+}
+
+function textHasBuySide(value: string) {
+  return /\b(compra|comprar|comprado|compradora|compradores|alta|comprador|buy|buyer|buyers|long|bullish)\b/i.test(value);
+}
+
+function textHasSellSide(value: string) {
+  return /\b(venda|vender|vendido|vendedora|vendedores|baixa|queda|vendedor|short|sell|seller|sellers|bearish)\b/i.test(value);
+}
+
+function tradeAlignedFallback(side: "buy" | "sell", locale: AppLocale) {
+  if (side === "buy") {
+    return locale === "en-US"
+      ? "Keep the buy read only with confirmation; if it fails, return to Wait."
+      : "Manter a leitura de compra somente com confirmação; se falhar, voltar para Aguardar.";
+  }
+  return locale === "en-US"
+    ? "Keep the sell read only with confirmation; if it fails, return to Wait."
+    : "Manter a leitura de venda somente com confirmação; se falhar, voltar para Aguardar.";
+}
+
+function alignTextWithTradeSide(value: string, side: "buy" | "sell" | "wait" | "exit", locale: AppLocale) {
+  if (side !== "buy" && side !== "sell") return value;
+  const conflicts = side === "buy" ? textHasSellSide(value) : textHasBuySide(value);
+  return conflicts ? tradeAlignedFallback(side, locale) : value;
+}
+
+function alignStrategicSectionsWithTrade(
+  sections: StrategicConclusion["sections"],
+  action: string,
+  locale: AppLocale,
+) {
+  const side = tradeActionSide(action);
+  if (!sections?.length || (side !== "buy" && side !== "sell")) return sections || [];
+  const alignedTitle = side === "buy"
+    ? (locale === "en-US" ? "Buy confirmation" : "Confirmação da compra")
+    : (locale === "en-US" ? "Sell confirmation" : "Confirmação da venda");
+  return sections.map((section) => {
+    const titleHasConflict = side === "buy" ? textHasSellSide(section.title) : textHasBuySide(section.title);
+    return {
+      ...section,
+      title: titleHasConflict ? alignedTitle : section.title,
+      body: section.body ? alignTextWithTradeSide(section.body, side, locale) : section.body,
+      items: section.items?.map((item) => alignTextWithTradeSide(item, side, locale)),
+    };
+  });
+}
+
+function alignStrategicBasisWithTrade(items: string[], action: string, locale: AppLocale) {
+  const side = tradeActionSide(action);
+  return (items || []).map((item) => alignTextWithTradeSide(item, side, locale));
+}
+
+function alignOperationalDecisionWithTrade(decision: OperationalDecision, locale: AppLocale): OperationalDecision {
+  const side = tradeActionSide(decision.action);
+  const combined = [
+    decision.action,
+    decision.bias,
+    decision.risk,
+    ...(decision.reasons || []),
+    ...(decision.levels || []).flatMap((level) => [level.label, level.value]),
+  ].join(" ");
+  const mixed = textHasBuySide(combined) && textHasSellSide(combined);
+  if (side === "wait" && mixed) {
+    return {
+      ...decision,
+      action: locale === "en-US" ? "WAIT FOR CONFIRMATION" : "AGUARDAR CONFIRMAÇÃO",
+      tone: "watch",
+      reasons: locale === "en-US"
+        ? ["Mixed scenario: buy and sell arguments conflict", "Wait for price, volume and flow to align"]
+        : ["Cenário misto: compra e venda entram em conflito", "Aguardar preço, volume e fluxo alinharem"],
+    };
+  }
+  if (side !== "buy" && side !== "sell") return decision;
+  return {
+    ...decision,
+    reasons: decision.reasons.map((reason) => alignTextWithTradeSide(reason, side, locale)),
+    levels: decision.levels.map((level) => ({
+      ...level,
+      label: alignTextWithTradeSide(level.label, side, locale),
+      value: alignTextWithTradeSide(level.value, side, locale),
+    })),
+  };
 }
 
 function quoteFromMap(quotes: Record<string, QuotePayload>, symbol?: string | null) {
@@ -5800,7 +5926,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, [activeTab, focusedTab]);
 
   const publicWatchSymbols = useMemo(
-    () => Array.from(new Set([...PRELOADED_UNIVERSE.map((item) => item.symbol), ...customWatchItems.map((item) => item.symbol), selectedTicker])).filter((symbol) => !isRemovedFutureSymbol(symbol)),
+    () => Array.from(new Set([...PRELOADED_UNIVERSE.map((item) => item.symbol), ...customWatchItems.map((item) => item.symbol), selectedTicker].map(normalizeSymbol).filter(Boolean))).filter((symbol) => !isRemovedFutureSymbol(symbol)),
     [customWatchItems, selectedTicker],
   );
   const publicTickerTapeSymbols = useMemo(
@@ -5813,7 +5939,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         new Set(
           [...PRELOADED_UNIVERSE, ...customWatchItems]
             .filter((item) => !isRemovedFutureSymbol(item.symbol))
-            .filter((item) => activeWatchSymbols.includes(item.symbol))
+            .filter((item) => activeWatchSymbols.map(normalizeSymbol).includes(item.symbol))
             .filter((item) => watchCategory === "Todos" || item.category === watchCategory)
             .map((item) => item.symbol),
         ),
@@ -5821,7 +5947,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     [activeWatchSymbols, customWatchItems, watchCategory],
   );
   const priorityPublicWatchSymbols = useMemo(() => {
-    const activeSet = new Set(activeWatchSymbols);
+    const activeSet = new Set(activeWatchSymbols.map(normalizeSymbol).filter(Boolean));
     const fromCategory = (category: WatchlistItem["category"], limit: number) =>
       PRELOADED_UNIVERSE
         .filter((item) => item.category === category)
@@ -5837,7 +5963,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         ...fromCategory("BDR", 12),
         ...fromCategory("Crypto", 8),
         ...fromCategory("USA", 18),
-        ...customWatchItems.map((item) => item.symbol).filter((symbol) => !isRemovedFutureSymbol(symbol)),
+        ...customWatchItems.map((item) => normalizeSymbol(item.symbol)).filter((symbol) => symbol && !isRemovedFutureSymbol(symbol)),
       ]),
     );
   }, [activeWatchSymbols, customWatchItems, selectedTicker]);
@@ -6172,7 +6298,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           setPublicAiTools(nextPublicAiTools);
         })
         .catch((requestError: Error) => {
-          if (!cancelled) setError(requestError.message);
+          if (!cancelled) setError(friendlyNetworkErrorMessage(requestError, appLocale));
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
@@ -6262,7 +6388,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         });
       })
       .catch((requestError: Error) => {
-        if (!cancelled) setError(requestError.message);
+        if (!cancelled) setError(friendlyNetworkErrorMessage(requestError, appLocale));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -6597,7 +6723,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setPendingLoginToken("");
       setDebugOtpCode("");
     } catch (requestError) {
-      setLoginError(requestError instanceof Error ? requestError.message : "Falha ao entrar");
+      setLoginError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
   }
 
@@ -6616,7 +6742,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setOtpCode("");
       setDebugOtpCode("");
     } catch (requestError) {
-      setLoginError(requestError instanceof Error ? requestError.message : "Falha na verificação");
+      setLoginError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
   }
 
@@ -6647,7 +6773,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       const payload = await requestTelegramLink(token, "web");
       setTelegramLink(payload);
     } catch (requestError) {
-      setLoginError(requestError instanceof Error ? requestError.message : "Falha ao gerar link do Telegram");
+      setLoginError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
   }
 
@@ -6681,7 +6807,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         profileFileInputRef.current.value = "";
       }
     } catch (requestError) {
-      setLoginError(requestError instanceof Error ? requestError.message : "Falha ao salvar perfil");
+      setLoginError(friendlyNetworkErrorMessage(requestError, appLocale));
     } finally {
       setProfileSaving(false);
     }
@@ -6720,7 +6846,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         setWorkspace((current) => (current ? { ...current, layout: nextLayout } : current));
       });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao salvar layout");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
   }
 
@@ -6922,7 +7048,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       });
       if (composerFileInputRef.current) composerFileInputRef.current.value = "";
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao publicar");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     } finally {
       setPosting(false);
     }
@@ -6951,7 +7077,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
       await refreshFeedState();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao atualizar curtida");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
   }
 
@@ -6972,7 +7098,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         setCommentDrafts((current) => ({ ...current, [postId]: "" }));
       });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao comentar");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     } finally {
       setCommentingPostId(null);
     }
@@ -6990,7 +7116,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setBlockedUsers((current) => rememberUser(current, buildUserListEntry(post.user_id, post.user, post.user_email, post.user_avatar_url)));
       await refreshFeedState();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao bloquear trader");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
   }
 
@@ -7024,7 +7150,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         setPredictionTargetDate("");
       });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao publicar previsão");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     } finally {
       setPredictionPosting(false);
     }
@@ -7051,7 +7177,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setSilencedUserIds((current) => (current.includes(post.user_id) ? current : [...current, post.user_id]));
       setSilencedUsers((current) => rememberUser(current, buildUserListEntry(post.user_id, post.user, post.user_email, post.user_avatar_url)));
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao silenciar trader");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
   }
 
@@ -7065,7 +7191,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       await reportPost(token, postId, "community_review");
       setPostMenuId(null);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao denunciar");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
   }
 
@@ -7082,7 +7208,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setBlockedUsers((current) => rememberUser(current, buildUserListEntry(post.user_id, post.user, post.user_email, post.user_avatar_url)));
       await refreshFeedState();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao reportar e bloquear");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
   }
 
@@ -7101,7 +7227,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setPostMenuId(null);
       await refreshFeedState();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao atualizar seguidor");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
   }
 
@@ -7116,7 +7242,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setPostMenuId(null);
       await refreshFeedState();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao excluir post");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
   }
 
@@ -7140,7 +7266,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
       await refreshFeedState();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao repostar trade");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     } finally {
       setPostMenuId(null);
     }
@@ -7187,7 +7313,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setChatText("");
       setChatImageUrl("");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha no ticker room");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
   }
 
@@ -7203,7 +7329,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         setPoll(normalizePollPayload(nextPoll, selectedTicker));
       });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao votar");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
   }
 
@@ -7230,7 +7356,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         setPollCommentOpen(false);
       });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Falha ao comentar na poll");
+      setError(friendlyNetworkErrorMessage(requestError, appLocale));
     } finally {
       setPollCommentPosting(false);
     }
@@ -7335,18 +7461,22 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       selectedTicker,
       customWatchItems,
     );
-    const activeSet = new Set(activeWatchSymbols.length ? activeWatchSymbols : PRELOADED_UNIVERSE.map((item) => item.symbol));
+    const activeSet = new Set(
+      (activeWatchSymbols.length ? activeWatchSymbols : PRELOADED_UNIVERSE.map((item) => item.symbol))
+        .map(normalizeSymbol)
+        .filter(Boolean),
+    );
     const bySymbol = new Map(liveWatchlist.map((item) => [item.symbol, item]));
 
     for (const item of [...PRELOADED_UNIVERSE, ...customWatchItems]) {
       if (isRemovedFutureSymbol(item.symbol)) continue;
-      if (!activeSet.has(item.symbol)) continue;
+      if (!activeSet.has(normalizeSymbol(item.symbol))) continue;
       if (!bySymbol.has(item.symbol)) {
         bySymbol.set(item.symbol, { ...item });
       }
     }
 
-    return Array.from(bySymbol.values()).filter((item) => activeSet.has(item.symbol));
+    return Array.from(bySymbol.values()).filter((item) => activeSet.has(normalizeSymbol(item.symbol)));
   }, [
     rankingRows,
     radarRows,
@@ -7364,9 +7494,18 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     ),
     [activeWatchlist, appLocale, watchCategory],
   );
+  const activeWatchCategoryCounts = useMemo(
+    () => CATEGORY_ORDER.reduce((counts, category) => {
+      counts[category] = activeWatchlist.filter((item) => item.category === category).length;
+      return counts;
+    }, {} as Record<(typeof CATEGORY_ORDER)[number], number>),
+    [activeWatchlist],
+  );
   const activeWatchCountForFilter = useMemo(
-    () => (watchCategory === "Todos" ? activeWatchlist.length : activeWatchlist.filter((item) => item.category === watchCategory).length),
-    [activeWatchlist, watchCategory],
+    () => (watchCategory === "Todos"
+      ? CATEGORY_ORDER.reduce((total, category) => total + (activeWatchCategoryCounts[category] || 0), 0)
+      : activeWatchCategoryCounts[watchCategory] || 0),
+    [activeWatchCategoryCounts, watchCategory],
   );
   const filteredUniverse = useMemo(
     () =>
@@ -7793,16 +7932,20 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     [activeNews?.items, selectedTicker, appLocale, isUsLocale],
   );
   const stats = useMemo(() => {
-    const changeValue = displayQuoteHasCoreData ? formatSignedPercent(displayQuote?.change_pct) : "n/a";
-    const aiScoreValue = effectiveAiScore != null ? Number(effectiveAiScore).toFixed(1) : "n/a";
+    const emptyChangeText = isUsLocale ? "no confirmed change" : "sem variação confirmada";
+    const emptyScoreText = isUsLocale ? "no confirmed score" : "sem Score confirmado";
+    const emptyRsiText = isUsLocale ? "no valid RSI" : "sem RSI válido";
+    const emptyBiasText = isUsLocale ? "no confirmed bias" : "sem Bias confirmado";
+    const changeValue = displayQuoteHasCoreData ? formatSignedPercent(displayQuote?.change_pct) : emptyChangeText;
+    const aiScoreValue = effectiveAiScore != null ? Number(effectiveAiScore).toFixed(1) : emptyScoreText;
     const scoreNumber = effectiveAiScore != null ? Number(effectiveAiScore) : Number.NaN;
     const rawChangeNumber = displayQuoteHasCoreData ? Number(displayQuote?.change_pct) : Number.NaN;
     const changeNumber = Number.isFinite(rawChangeNumber) ? rawChangeNumber : null;
     const rawBias = displayQuoteHasCoreData ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || currentRanking?.trend || "" : "";
-    const biasValue = displayQuoteHasCoreData ? biasStrengthLabel(rawBias, scoreNumber, changeNumber ?? 0, appLocale) : "n/a";
+    const biasValue = displayQuoteHasCoreData ? biasStrengthLabel(rawBias, scoreNumber, changeNumber ?? 0, appLocale) : emptyBiasText;
     const rsiDescriptor = describeRsiValue(panelRsiValue, appLocale);
     const rsiValue = rsiDescriptor.label;
-    const rsiScoreValue = rsiValue === "n/a" ? "n/a" : `RSI SCORE: ${rsiValue}`;
+    const rsiScoreValue = rsiValue === "n/a" ? emptyRsiText : `RSI SCORE: ${rsiValue}`;
     const changeDirection = changeNumber == null
       ? (isUsLocale ? "no confirmed change" : "sem variação real")
       : changeNumber < 0
@@ -7847,8 +7990,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     return [
       {
         label: isUsLocale ? "Price" : "Preço",
-        value: formatLocalePrice(displayQuote?.price, appLocale),
-        hint: isUsLocale ? "Current quote" : "Cotação atual",
+        value: displayQuoteHasCoreData ? formatLocalePrice(displayQuote?.price, appLocale) : (isUsLocale ? "no confirmed quote" : "sem cotação confirmada"),
+        hint: displayQuoteHasCoreData ? (isUsLocale ? "Current quote" : "Cotação atual") : (isUsLocale ? "No confirmed real quote in the current payload." : "Sem cotação real confirmada no payload atual."),
         tone: "neutral",
       },
       {
@@ -8624,7 +8767,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     return [
       {
         label: isUsLocale ? "Master Score" : "Score Mestre",
-        value: scoreValue != null ? `${scoreValue.toFixed(1)} / 10` : "n/a",
+        value: scoreValue != null ? `${scoreValue.toFixed(1)} / 10` : (isUsLocale ? "No confirmed score" : "Sem score confirmado"),
         tone: scoreCardTone,
         meta: scoreConvictionLabel(scoreValue, appLocale),
         meter: scoreValue != null ? clampNumber(scoreValue * 10, 0, 100) : null,
@@ -8636,7 +8779,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       },
       {
         label: isUsLocale ? "Suggested Trade" : "Trade sugerido",
-        value: decisionTradeLabel(directionTone, hasCoreData, appLocale),
+        value: decisionTradeLabel(tradeTone, hasCoreData, appLocale),
         tone: tradeTone,
       },
       {
@@ -8713,7 +8856,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       volume: resolvedVolume,
       averageVolume,
       relVolume,
-      hasCoreData: Boolean(hasCoreData && resolvedVolume != null && resolvedVolume > 0 && scoreCard?.value !== "n/a"),
+      hasCoreData: Boolean(hasCoreData && resolvedVolume != null && resolvedVolume > 0 && numericScoreFromDecisionCard(scoreCard) != null),
     });
   }, [
     appLocale,
@@ -8736,11 +8879,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     selectedTicker,
     strategicAnalysisMinute,
   ]);
-  const strategicConclusionSections = useMemo(
+  const rawStrategicConclusionSections = useMemo(
     () => strategicSectionsForRender(strategicConclusion, appLocale, selectedTicker),
     [appLocale, selectedTicker, strategicConclusion],
   );
-  const operationalDecision = useMemo(() => {
+  const rawOperationalDecision = useMemo(() => {
     if (currentStrategicPanel) {
       return operationalDecisionFromPanel(currentStrategicPanel, appLocale);
     }
@@ -8762,6 +8905,18 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     headerVolume,
     strategicConclusion,
   ]);
+  const operationalDecision = useMemo(
+    () => alignOperationalDecisionWithTrade(rawOperationalDecision, appLocale),
+    [appLocale, rawOperationalDecision],
+  );
+  const strategicConclusionSections = useMemo(
+    () => alignStrategicSectionsWithTrade(rawStrategicConclusionSections, operationalDecision.action, appLocale),
+    [appLocale, operationalDecision.action, rawStrategicConclusionSections],
+  );
+  const strategicConclusionBasis = useMemo(
+    () => alignStrategicBasisWithTrade(strategicConclusion.basis, operationalDecision.action, appLocale),
+    [appLocale, operationalDecision.action, strategicConclusion.basis],
+  );
   useEffect(() => {
     if (currentTab !== "education" || !educationAnchor) return;
 
@@ -9497,7 +9652,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             symbol: item.symbol,
             label: item.label,
             priceText: formatPrice(item.price, appLocale),
-            movementText: `${movementArrow(kind)} ${formatMarketMovementText(item)}`,
+            movementText: `${movementArrow(kind)} ${formatMarketMovementText(item, appLocale)}`,
             movementClass: kind,
           };
         })}
@@ -10854,13 +11009,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       <span
                         className="snbr-tab-count-badge"
                         aria-label={aiCount === 0
-                          ? (isUsLocale ? "0 findings: no finding for this asset now" : "0 achados: nenhum achado desta IA para este ativo agora")
+                          ? (isUsLocale ? "No relevant finding for this asset now" : "Sem evento relevante para este ativo agora")
                           : (isUsLocale ? `${aiCount} findings` : `${aiCount} achados`)}
                         title={aiCount === 0
-                          ? (isUsLocale ? "AI ok; no finding for this asset now." : "IA ok; nenhum achado para este ativo agora.")
+                          ? (isUsLocale ? "No relevant finding for this asset now." : "Sem evento relevante para este ativo agora.")
                           : undefined}
                       >
-                        {aiCount}
+                        {aiCount === 0 ? (isUsLocale ? "no data" : "sem dados") : aiCount}
                       </span>
                     ) : null}
                   </button>
@@ -10944,7 +11099,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   <strong>{item.symbol}</strong>
                   <span className={cx("snbr-tape-value", movementClass(item.changePct, item.trend, item.score))}>
                     {movementArrow(movementClass(item.changePct, item.trend, item.score))}{" "}
-                    {formatMarketMovementText(item)}
+                    {formatMarketMovementText(item, appLocale)}
                   </span>
                 </button>
               ))}
@@ -10966,7 +11121,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               <div className="snbr-price-line">
                 <strong>{formatAssetMoney(displayQuote?.price, selectedTicker, appLocale)}</strong>
                 <span className={cx("snbr-price-change", priceDirectionClass)}>
-                  {formatSignedPercent(displayQuote?.change_pct)}
+                  {displayQuoteHasCoreData
+                    ? formatSignedPercent(displayQuote?.change_pct)
+                    : (isUsLocale ? "no confirmed change" : "sem variação confirmada")}
                 </span>
               </div>
               {!advancedMode ? (
@@ -11121,7 +11278,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                             <strong>{isUsLocale ? "Analysis basis" : "Base da análise"}</strong>
                           </div>
                           <ul>
-                            {strategicConclusion.basis.map((item) => (
+                            {strategicConclusionBasis.map((item) => (
                               <li key={item}>{item}</li>
                             ))}
                           </ul>

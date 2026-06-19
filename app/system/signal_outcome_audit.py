@@ -11,6 +11,7 @@ from app.services.snapshot_contract import (
     BLOCKED_DATA_QUALITIES,
     READY_DECISION_STATES,
     audit_status_value,
+    build_decision_envelope,
     coerce_data_quality,
     has_blocking_reasons,
     has_positive_value,
@@ -219,6 +220,12 @@ def _make_record(row: Dict[str, Any], snapshot: Dict[str, Any], snapshot_timesta
         return None
 
     snapshot_stale = _is_stale_snapshot(snapshot)
+    envelope = build_decision_envelope(
+        row,
+        snapshot_stale=snapshot_stale,
+        source_snapshot_id=snapshot.get("snapshot_id") or snapshot.get("generated_at") or snapshot_timestamp,
+        timestamp=snapshot_timestamp,
+    )
     actionable = False if snapshot_stale else is_actionable_snapshot_row(row)
     blocking_reason = "stale_data" if snapshot_stale else "actionable" if actionable else _blocking_reason(row, snapshot)
     direction = _intended_direction(row)
@@ -237,6 +244,8 @@ def _make_record(row: Dict[str, Any], snapshot: Dict[str, Any], snapshot_timesta
         "entry_price": round(entry_price, 6) if entry_price > 0 else None,
         "intended_direction": direction,
         "decision": snapshot_signal_value(row) or "UNKNOWN",
+        "decision_status": envelope.get("decision_status"),
+        "decision_envelope": envelope,
         "final_decision": row.get("final_decision"),
         "decision_ready": bool(row.get("decision_ready") is True),
         "actionability": bool(actionable),

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from app.services.score_display import attach_master_score_display_contract
+from app.services.symbol_registry import canonical_symbol, canonicalize_symbol_row
 
 
 ACTIONABLE_SIGNALS = {"BUY", "SELL", "SHORT", "COVER"}
@@ -12,6 +14,22 @@ BULLISH_WATCH_SIGNALS = {"WATCH_BUY", "WATCH_LONG", "LONG_WATCH"}
 BEARISH_WATCH_SIGNALS = {"WATCH_SHORT", "WATCH_SELL", "SHORT_WATCH"}
 WATCH_SIGNALS = {"WATCH", "WAIT", "HOLD"} | BULLISH_WATCH_SIGNALS | BEARISH_WATCH_SIGNALS
 NO_TRADE_SIGNALS = {"NO_TRADE", "DO_NOT_TRADE"}
+DECISION_READY = "READY"
+DECISION_BLOCKED = "BLOCKED"
+DECISION_NO_TRADE = "NO_TRADE"
+DECISION_STALE_DATA = "STALE_DATA"
+DECISION_INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+DECISION_CONFLICT = "CONFLICT"
+DECISION_ERROR = "ERROR"
+CANONICAL_DECISION_STATUSES = {
+    DECISION_READY,
+    DECISION_BLOCKED,
+    DECISION_NO_TRADE,
+    DECISION_STALE_DATA,
+    DECISION_INSUFFICIENT_DATA,
+    DECISION_CONFLICT,
+    DECISION_ERROR,
+}
 MASTER_DIRECTIONS = {"BULLISH", "BEARISH", "NEUTRAL"}
 READY_DECISION_STATES = {"BUY_READY", "SELL_READY", "SHORT_READY"}
 BLOCKED_DECISION_STATES = {"WATCH", "WAIT", "NO_TRADE", "DO_NOT_TRADE"}
@@ -53,6 +71,11 @@ QUALITY_LABELS = {
     QUALITY_EMPTY: "Dados Limitados",
     QUALITY_INVALID: "Dados Limitados",
     QUALITY_SCORE_ONLY: "Dados Parciais",
+}
+NON_OPERATIONAL_WARNINGS = {
+    "master_score_normalized_from_raw_100",
+    "master_score_display_invalid",
+    "master_score_display_clamped_below_0",
 }
 
 
@@ -121,6 +144,376 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _listify(value: Any) -> list[str]:
+    if value in (None, "", [], {}):
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item or "").strip()]
+    return [str(value).strip()]
+
+
+def _dedupe(values: Iterable[Any], limit: int | None = None) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        output.append(text)
+        if limit is not None and len(output) >= limit:
+            break
+    return output
+
+
+def _truthy(value: Any) -> bool:
+    if value is True:
+        return True
+    if value in (False, None, "", 0):
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on", "blocked", "invalid"}
+
+
+def _plain(value: Any) -> str:
+    return " ".join(str(value or "").strip().upper().split())
+
+
+def _contains_no_trade(value: Any) -> bool:
+    text = _plain(value)
+    for source, target in (("Ã", "A"), ("Á", "A"), ("À", "A"), ("Â", "A"), ("É", "E"), ("Ê", "E"), ("Í", "I"), ("Ó", "O"), ("Ô", "O"), ("Õ", "O"), ("Ú", "U"), ("Ç", "C")):
+        text = text.replace(source, target)
+    return "NAO OPERAR AGORA" in text or text in {"NO_TRADE", "DO_NOT_TRADE"}
+
+
+def _has_explicit_risk_score(row: dict[str, Any]) -> bool:
+    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+    return any(value not in (None, "") for value in (row.get("risk_score"), metrics.get("risk_score")))
+
+
+def _has_risk_context(row: dict[str, Any]) -> bool:
+    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+    text = " ".join(
+        str(value or "").lower()
+        for value in (
+            row.get("state"),
+            row.get("ai_comment"),
+            row.get("reason"),
+            row.get("risk_level"),
+            row.get("risk_summary"),
+            metrics.get("risk_state"),
+            metrics.get("risk_summary"),
+        )
+    )
+    return any(
+        token in text
+        for token in (
+            "risk",
+            "risco",
+            "critical",
+            "critico",
+            "crítico",
+            "high",
+            "alto",
+            "alta",
+            "medium",
+            "medio",
+            "médio",
+            "moderado",
+            "moderada",
+            "low",
+            "baixo",
+            "baixa",
+        )
+    )
+
+
+def normalize_ai_tools_for_decision_context(ai_tools: Any) -> Any:
+    if not isinstance(ai_tools, dict):
+        return ai_tools
+
+    output: dict[str, Any] = {}
+    for tool, rows in ai_tools.items():
+        if tool != "risk" or not isinstance(rows, list):
+            output[tool] = rows
+            continue
+
+        normalized_rows: list[Any] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                normalized_rows.append(row)
+                continue
+            item = dict(row)
+            if "score" in item and not _has_explicit_risk_score(item) and not _has_risk_context(item):
+                metrics = dict(item.get("metrics")) if isinstance(item.get("metrics"), dict) else {}
+                metrics.setdefault("generic_score", item.pop("score"))
+                item["metrics"] = metrics
+            normalized_rows.append(item)
+        output[tool] = normalized_rows
+    return output
+
+
+def _row_timestamp(row: dict[str, Any], fallback: Any = None) -> Any:
+    for key in (
+        "timestamp",
+        "market_data_updated_at",
+        "last_bar_at",
+        "quote_time",
+        "provider_timestamp",
+        "updated_at",
+        "generated_at",
+        "detected_at",
+    ):
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    if fallback not in (None, ""):
+        return fallback
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _source_snapshot_id(row: dict[str, Any], fallback: Any = None) -> Any:
+    for key in ("source_snapshot_id", "snapshot_id", "snapshot_timestamp", "generated_at", "updated_at"):
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    return fallback
+
+
+def _status_value(row: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, ""):
+            return str(value).upper().strip()
+    return ""
+
+
+def _has_conflict(row: dict[str, Any], action: str) -> bool:
+    if row.get("conflict_detected") is True or _truthy(row.get("institutional_conflict")):
+        return True
+    if not master_confirms_signal(row):
+        return True
+    conflict_values = (
+        _listify(row.get("blocked_reasons"))
+        + _listify(row.get("warnings"))
+        + _listify(row.get("conviction_conflicts"))
+        + _listify(row.get("final_decision_blocks"))
+    )
+    conflict_text = " ".join(conflict_values).lower()
+    if any(token in conflict_text for token in ("conflict", "conflito", "master_score_context_not_confirmed", "score_buy_vs_final_short", "score_short_vs_final_buy")):
+        return True
+    if action in ACTIONABLE_SIGNALS and master_direction_value(row) == "NEUTRAL":
+        return True
+    return False
+
+
+def _market_context(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "regime": row.get("regime") or row.get("market_regime") or row.get("market_regime_state") or row.get("chart_regime_state"),
+        "trend": row.get("trend") or row.get("trend_bias") or row.get("master_direction"),
+        "liquidity": row.get("liquidity_state") or row.get("liquidity_map_state") or row.get("liquidity_event"),
+        "risk_level": row.get("risk_level") or row.get("master_risk") or row.get("operational_risk_level"),
+        "price": row.get("price") or row.get("close") or row.get("last_price"),
+        "volume": row.get("volume") or row.get("last_volume"),
+        "source": row.get("source"),
+    }
+
+
+def _decision_human_message(status: str, symbol: str, blockers: list[str], reasons: list[str]) -> str:
+    if status == DECISION_READY:
+        return f"{symbol}: decisao operacional pronta e auditavel."
+    reason = "; ".join((blockers or reasons or ["contexto institucional insuficiente"])[:5])
+    if status == DECISION_STALE_DATA:
+        return f"{symbol}: NAO OPERAR AGORA. Snapshot stale: {reason}."
+    if status == DECISION_CONFLICT:
+        return f"{symbol}: NAO OPERAR AGORA. Conflito institucional: {reason}."
+    if status == DECISION_INSUFFICIENT_DATA:
+        return f"{symbol}: NAO OPERAR AGORA. Dados insuficientes: {reason}."
+    return f"{symbol}: NAO OPERAR AGORA. {reason}."
+
+
+def build_decision_envelope(
+    row: Any,
+    *,
+    snapshot_stale: bool | None = None,
+    source_snapshot_id: Any = None,
+    timestamp: Any = None,
+) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        now = datetime.now(timezone.utc).isoformat()
+        return {
+            "symbol": "UNKNOWN",
+            "canonical_symbol": None,
+            "action": "NO_DECISION",
+            "decision_status": DECISION_ERROR,
+            "decision_ready": False,
+            "confidence": 0.0,
+            "master_score": 0.0,
+            "master_score_raw": None,
+            "data_quality": QUALITY_INVALID,
+            "blockers": ["invalid_payload"],
+            "warnings": [],
+            "reasons": ["payload invalido"],
+            "invalidation_reason": "payload invalido",
+            "market_context": {},
+            "timestamp": now,
+            "source_snapshot_id": source_snapshot_id,
+            "human_message": "UNKNOWN: NAO OPERAR AGORA. Payload invalido.",
+            "operational_status": None,
+            "auditor_status": None,
+            "auditor_blocked": False,
+            "risk_level": None,
+            "regime": None,
+            "price_valid": False,
+            "volume_valid": False,
+            "stale": False,
+            "source": None,
+        }
+
+    display_row = attach_master_score_display_contract(row)
+    resolved_symbol = canonical_symbol(display_row.get("canonical_symbol") or display_row.get("symbol") or display_row.get("ticker"))
+    symbol = resolved_symbol or str(display_row.get("symbol") or display_row.get("ticker") or "UNKNOWN").upper().strip() or "UNKNOWN"
+    canonical_symbol_value = resolved_symbol or display_row.get("canonical_symbol") or display_row.get("symbol") or display_row.get("ticker")
+    action = snapshot_signal_value(display_row) or "NO_DECISION"
+    quality = coerce_data_quality(display_row)
+    price_valid = has_positive_value(display_row, "price", "close", "last_price")
+    volume_valid = has_positive_value(display_row, "volume", "last_volume")
+    stale = bool(
+        snapshot_stale is True
+        or display_row.get("stale") is True
+        or display_row.get("is_stale") is True
+        or quality == QUALITY_STALE
+    )
+    auditor_status = audit_status_value(display_row) or None
+    auditor_blocked = is_auditor_blocked(display_row)
+    operational_status = _status_value(display_row, "operational_status") or None
+    final_decision = display_row.get("final_decision")
+    decision_state = snapshot_decision_state(display_row)
+    blockers: list[str] = []
+    warnings = _listify(display_row.get("warnings")) + _listify(display_row.get("operational_warnings")) + _listify(display_row.get("audit_warnings"))
+
+    if stale:
+        blockers.append("snapshot_stale")
+    if quality in {QUALITY_SCORE_ONLY, QUALITY_EMPTY, QUALITY_INVALID}:
+        blockers.append(f"data_quality_{quality}")
+    if display_row.get("provider_failed") is True or display_row.get("provider_error"):
+        blockers.append("provider_failed")
+    if not price_valid:
+        blockers.append("price_invalid")
+    if not volume_valid:
+        blockers.append("volume_invalid")
+    if auditor_blocked:
+        blockers.append("auditor_blocked")
+    if master_status_value(display_row) == "BLOCKED":
+        blockers.append("master_score_blocked")
+    if operational_status == "BLOCKED":
+        blockers.extend(_listify(display_row.get("operational_blocks")) or ["operational_blocked"])
+    if display_row.get("radar_no_trade_now") is True:
+        blockers.extend(_listify(display_row.get("radar_blocked_reasons")) or ["radar_blocked"])
+    if display_row.get("ranking_eligible") is False:
+        blockers.extend(_listify(display_row.get("ranking_excluded_reasons")) or ["ranking_excluded"])
+    if _contains_no_trade(final_decision):
+        blockers.extend(_listify(display_row.get("final_decision_blocks")) or ["final_decision_no_trade"])
+    if _has_conflict(display_row, action):
+        blockers.append("decision_conflict")
+    blockers.extend(_listify(display_row.get("blocked_reasons")))
+    blockers = _dedupe(blockers)
+
+    if stale:
+        status = DECISION_STALE_DATA
+    elif any(reason.startswith("data_quality_") or reason in {"price_invalid", "volume_invalid", "provider_failed"} for reason in blockers):
+        status = DECISION_INSUFFICIENT_DATA
+    elif any("conflict" in reason.lower() or "conflito" in reason.lower() for reason in blockers):
+        status = DECISION_CONFLICT
+    elif blockers:
+        status = DECISION_BLOCKED
+    elif action not in ACTIONABLE_SIGNALS or decision_state in BLOCKED_DECISION_STATES:
+        status = DECISION_NO_TRADE
+    elif display_row.get("decision_ready") is not True:
+        status = DECISION_NO_TRADE
+    else:
+        status = DECISION_READY
+
+    decision_ready = bool(status == DECISION_READY)
+    confidence = safe_float(
+        display_row.get("confidence")
+        or display_row.get("trade_confidence")
+        or display_row.get("final_decision_score")
+        or display_row.get("priority_score"),
+        0.0,
+    )
+    reasons = _dedupe(
+        _listify(display_row.get("no_trade_reasons"))
+        + _listify(display_row.get("final_decision_reason"))
+        + _listify(display_row.get("ranking_reason"))
+        + _listify(display_row.get("radar_reason"))
+        + _listify(display_row.get("master_summary"))
+        + blockers,
+        limit=12,
+    )
+    invalidation_reason = (
+        display_row.get("invalidation_reason")
+        or display_row.get("invalidation")
+        or display_row.get("invalidacao")
+        or "; ".join(_listify(display_row.get("opinion_change_conditions"))[:4])
+        or ("; ".join(blockers[:4]) if blockers else "")
+    )
+    market_context = _market_context(display_row)
+
+    return {
+        "symbol": symbol,
+        "canonical_symbol": canonical_symbol_value,
+        "action": action,
+        "decision_status": status,
+        "decision_ready": decision_ready,
+        "confidence": round(confidence, 2),
+        "master_score": display_row.get("master_score"),
+        "master_score_raw": display_row.get("master_score_raw"),
+        "data_quality": quality,
+        "blockers": blockers,
+        "warnings": _dedupe(warnings),
+        "reasons": reasons,
+        "invalidation_reason": invalidation_reason,
+        "market_context": market_context,
+        "timestamp": _row_timestamp(display_row, fallback=timestamp),
+        "source_snapshot_id": _source_snapshot_id(display_row, fallback=source_snapshot_id),
+        "human_message": _decision_human_message(status, symbol, blockers, reasons),
+        "operational_status": operational_status,
+        "auditor_status": auditor_status,
+        "auditor_blocked": auditor_blocked,
+        "risk_level": market_context.get("risk_level"),
+        "regime": market_context.get("regime"),
+        "price_valid": price_valid,
+        "volume_valid": volume_valid,
+        "stale": stale,
+        "source": display_row.get("source"),
+    }
+
+
+def attach_decision_envelope(
+    row: dict[str, Any],
+    *,
+    snapshot_stale: bool | None = None,
+    source_snapshot_id: Any = None,
+    timestamp: Any = None,
+) -> dict[str, Any]:
+    item = canonicalize_symbol_row(dict(row))
+    envelope = build_decision_envelope(
+        item,
+        snapshot_stale=snapshot_stale,
+        source_snapshot_id=source_snapshot_id,
+        timestamp=timestamp,
+    )
+    item["decision_envelope"] = envelope
+    item["decision_status"] = envelope["decision_status"]
+    item["decision_ready"] = bool(envelope["decision_ready"])
+    item["source_snapshot_id"] = envelope.get("source_snapshot_id")
+    item["canonical_symbol"] = envelope.get("canonical_symbol")
+    item["ticker"] = envelope.get("canonical_symbol") or item.get("ticker")
+    item["symbol"] = envelope.get("canonical_symbol") or item.get("symbol")
+    return item
+
+
 def snapshot_signal_value(row: dict[str, Any]) -> str:
     return str(row.get("trade_action") or row.get("signal") or row.get("action") or "").upper().strip()
 
@@ -167,7 +560,9 @@ def has_positive_value(row: dict[str, Any], *keys: str) -> bool:
 
 
 def has_blocking_reasons(row: dict[str, Any]) -> bool:
-    reasons = row.get("blocked_reasons") or row.get("warnings") or []
+    reasons = _listify(row.get("blocked_reasons")) + [
+        warning for warning in _listify(row.get("warnings")) if warning not in NON_OPERATIONAL_WARNINGS
+    ]
     if isinstance(reasons, str):
         return bool(reasons.strip())
     if isinstance(reasons, (list, tuple, set)):
@@ -221,6 +616,9 @@ def master_confirms_signal(row: dict[str, Any]) -> bool:
 def is_actionable_snapshot_row(row: Any) -> bool:
     if not isinstance(row, dict):
         return False
+    envelope = build_decision_envelope(row)
+    if envelope.get("decision_status") != DECISION_READY or envelope.get("decision_ready") is not True:
+        return False
     if is_auditor_blocked(row):
         return False
     if master_status_value(row) == "BLOCKED":
@@ -272,6 +670,16 @@ def is_blocked_snapshot_row(row: Any) -> bool:
     if is_actionable_snapshot_row(row):
         return False
 
+    envelope = build_decision_envelope(row)
+    if envelope.get("decision_status") in {
+        DECISION_BLOCKED,
+        DECISION_STALE_DATA,
+        DECISION_INSUFFICIENT_DATA,
+        DECISION_CONFLICT,
+        DECISION_ERROR,
+    }:
+        return True
+
     signal = snapshot_signal_value(row)
     decision_state = snapshot_decision_state(row)
 
@@ -308,13 +716,17 @@ def is_blocked_snapshot_row(row: Any) -> bool:
 
 def snapshot_row_summary(row: dict[str, Any]) -> dict[str, Any]:
     score_display_contract = attach_master_score_display_contract(row)
+    envelope = build_decision_envelope(score_display_contract)
     return {
-        "ticker": row.get("ticker") or row.get("symbol"),
-        "symbol": row.get("symbol") or row.get("ticker"),
+        "ticker": canonical_symbol(row.get("ticker") or row.get("symbol")) or row.get("ticker") or row.get("symbol"),
+        "symbol": canonical_symbol(row.get("symbol") or row.get("ticker")) or row.get("symbol") or row.get("ticker"),
+        "canonical_symbol": canonical_symbol(row.get("canonical_symbol") or row.get("ticker") or row.get("symbol")) or row.get("canonical_symbol"),
         "score": row.get("score"),
         "signal": row.get("signal"),
         "trade_action": row.get("trade_action"),
         "decision_ready": row.get("decision_ready"),
+        "decision_status": envelope.get("decision_status"),
+        "decision_envelope": envelope,
         "decision_state": row.get("decision_state"),
         "data_quality": coerce_data_quality(row),
         "blocked_reasons": row.get("blocked_reasons") or [],
@@ -410,7 +822,7 @@ def summarize_snapshot_rows(rows: Iterable[Any]) -> dict[str, int]:
 
 
 def actionable_snapshot_rows(rows: Iterable[Any], limit: int | None = None) -> list[dict[str, Any]]:
-    output = [dict(row) for row in rows or [] if is_actionable_snapshot_row(row)]
+    output = [attach_decision_envelope(dict(row)) for row in rows or [] if is_actionable_snapshot_row(row)]
     return output[:limit] if limit is not None else output
 
 
@@ -431,8 +843,8 @@ def normalize_snapshot_events(events: Any) -> list[dict[str, Any]]:
 def snapshot_surface_row(row: Any) -> dict[str, Any]:
     if not isinstance(row, dict):
         return {}
-    output = dict(row)
-    ticker = output.get("ticker") or output.get("symbol")
+    output = attach_decision_envelope(canonicalize_symbol_row(dict(row)))
+    ticker = output.get("canonical_symbol") or output.get("ticker") or output.get("symbol")
     if ticker:
         output["ticker"] = ticker
         output["symbol"] = ticker

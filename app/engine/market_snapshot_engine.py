@@ -45,6 +45,7 @@ from app.cache.snapshot_cache import get_last_good_snapshot, get_snapshot, updat
 from app.data.warm_data_pool import get_market_pool
 from app.engine.engine_orchestrator import run_engine
 from app.engine.indicators.vector_indicator_engine import compute_rsi
+from app.services.snapshot_contract import attach_decision_envelope
 from app.services.snapshot_contract import is_actionable_snapshot_row as _contract_is_actionable_snapshot_row
 from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score
 from app.services.snapshot_contract import summarize_snapshot_rows
@@ -572,6 +573,15 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         ai_tools=ai_tools,
         market_pulse=final_market_pulse,
     )
+    normalized = [
+        attach_decision_envelope(
+            row,
+            snapshot_stale=bool(stale),
+            source_snapshot_id=generated_at,
+            timestamp=generated_at,
+        )
+        for row in normalized
+    ]
     institutional_ranking = institutional_ranking_items(normalized, limit=AI_OUTPUT_LIMIT)
     institutional_radar = institutional_radar_items(normalized, limit=AI_OUTPUT_LIMIT)
     historical_confidences = historical_confidence_items(normalized, limit=AI_OUTPUT_LIMIT)
@@ -690,6 +700,12 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         "final_decisions": final_decisions,
         "final_decision": final_decisions[0] if final_decisions else {},
         "final_decision_metrics": final_decision_metrics,
+        "decision_envelopes": [
+            row.get("decision_envelope")
+            for row in normalized[:200]
+            if isinstance(row.get("decision_envelope"), dict)
+        ],
+        "decision_envelope": normalized[0].get("decision_envelope") if normalized and isinstance(normalized[0], dict) else {},
         "institutional_consistency": consistency_audit,
         "institutional_consistency_metrics": consistency_audit.get("metrics", {}),
         "symbol_snapshots": {
@@ -712,6 +728,7 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
             "institutional_conviction_contract": "mission_21_evidence_alignment",
             "institutional_priority_contract": "mission_22_attention_queue",
             "final_decision_contract": "mission_23_operational_conclusion",
+            "decision_envelope_contract": "mission_29_institutional_decision_envelope",
             "internal_engine_keys": ai_bundle.get("internal_engine_keys", []) if isinstance(ai_bundle, dict) else [],
         },
         "decision": decision,

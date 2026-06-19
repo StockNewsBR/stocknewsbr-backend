@@ -3,6 +3,7 @@ import { RefreshControl, ScrollView, Text, View } from "react-native";
 
 import { getPoll, getPollHistory, votePoll } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
+import { canonicalSymbol } from "@/lib/symbolRegistry";
 import { Button, Card, EmptyState, Field, Pill, SectionHeader, theme } from "@/components/ui";
 import { useSession } from "@/lib/session";
 
@@ -22,8 +23,8 @@ export default function PollsTab() {
     setLoading(true);
     try {
       const [nextPoll, nextHistory] = await Promise.all([
-        getPoll(ticker.trim().toUpperCase()).catch(() => null),
-        getPollHistory(ticker.trim().toUpperCase()).catch(() => ({ history: [] })),
+        getPoll(canonicalSymbol(ticker) || "PETR4").catch(() => null),
+        getPollHistory(canonicalSymbol(ticker) || "PETR4").catch(() => ({ history: [] })),
       ]);
       setPoll(nextPoll);
       setHistory(Array.isArray(nextHistory?.history) ? nextHistory.history : []);
@@ -43,7 +44,7 @@ export default function PollsTab() {
     }
 
     try {
-      const nextPoll = await votePoll(token, ticker.trim().toUpperCase(), option);
+      const nextPoll = await votePoll(token, canonicalSymbol(ticker) || "PETR4", option);
       setPoll(nextPoll);
       setStatus("Voto registrado.");
       await loadPoll();

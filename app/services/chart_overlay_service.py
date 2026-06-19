@@ -1,5 +1,7 @@
 from typing import Iterable, List
 
+from app.services.symbol_registry import canonical_symbol
+
 
 def _ema(values: Iterable[float], period: int) -> List[float]:
     values = [float(value or 0) for value in values]
@@ -397,7 +399,7 @@ def _count_marker_sides(markers: list[dict]) -> tuple[int, int]:
 
 
 def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str = "1D"):
-    ticker = (ticker or "").upper().strip()
+    ticker = canonical_symbol(ticker)
     normalized_interval = str(interval or "1D").upper().strip()
     close_prices = [float(row.get("close", 0) or 0) for row in ohlc]
     high_prices = [float(row.get("high", 0) or 0) for row in ohlc]

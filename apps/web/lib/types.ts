@@ -52,6 +52,35 @@ export type StrategicPanel = {
   blocks?: StrategicPanelBlock[];
 };
 
+export type DecisionEnvelope = {
+  symbol?: string;
+  canonical_symbol?: string | null;
+  action?: string | null;
+  decision_status?: "READY" | "BLOCKED" | "NO_TRADE" | "STALE_DATA" | "INSUFFICIENT_DATA" | "CONFLICT" | "ERROR" | string;
+  decision_ready?: boolean;
+  confidence?: number | null;
+  master_score?: number | null;
+  master_score_raw?: number | null;
+  data_quality?: string | null;
+  blockers?: string[];
+  warnings?: string[];
+  reasons?: string[];
+  invalidation_reason?: string | null;
+  market_context?: Record<string, unknown>;
+  timestamp?: string | number | null;
+  source_snapshot_id?: string | number | null;
+  human_message?: string | null;
+  operational_status?: string | null;
+  auditor_status?: string | null;
+  auditor_blocked?: boolean;
+  risk_level?: string | null;
+  regime?: string | null;
+  price_valid?: boolean;
+  volume_valid?: boolean;
+  stale?: boolean;
+  source?: string | null;
+};
+
 export type RankingRow = {
   symbol: string;
   score: number;
@@ -135,6 +164,8 @@ export type RankingRow = {
   signal?: string | null;
   trade_action?: string | null;
   decision_ready?: boolean | null;
+  decision_status?: DecisionEnvelope["decision_status"] | null;
+  decision_envelope?: DecisionEnvelope | null;
   market_data_updated_at?: string | number | null;
   last_bar_at?: string | number | null;
   quote_time?: string | number | null;
@@ -234,6 +265,8 @@ export type SignalRow = {
   signal?: string | null;
   trade_action?: string | null;
   decision_ready?: boolean | null;
+  decision_status?: DecisionEnvelope["decision_status"] | null;
+  decision_envelope?: DecisionEnvelope | null;
   market_data_updated_at?: string | number | null;
   last_bar_at?: string | number | null;
   quote_time?: string | number | null;
@@ -284,6 +317,8 @@ export type WorkspaceMarketSnapshot = {
   priority_metrics?: Record<string, unknown>;
   final_decisions?: SignalRow[];
   final_decision_metrics?: Record<string, unknown>;
+  decision_envelope?: DecisionEnvelope;
+  decision_envelopes?: DecisionEnvelope[];
   symbol_count?: number;
 };
 
@@ -872,6 +907,8 @@ export type PublicInsightPayload = {
   final_decision_reason?: string | null;
   final_decision_blocks?: string[] | null;
   final_decision_confidence?: string | null;
+  decision_status?: DecisionEnvelope["decision_status"] | null;
+  decision_envelope?: DecisionEnvelope | null;
   rsi?: number | null;
   rel_volume?: number | null;
   trend_bias?: string | null;

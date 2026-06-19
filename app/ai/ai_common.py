@@ -14,6 +14,7 @@ from app.services.snapshot_contract import (
     data_quality_label,
     data_quality_score,
 )
+from app.services.symbol_registry import canonical_symbol
 
 
 def safe_float(value: Any, default: float = 0.0) -> float:
@@ -107,9 +108,10 @@ def deal_timestamp(row: Dict[str, Any]) -> Any:
 
 
 def get_symbol(row: Dict[str, Any]) -> str:
-    return (
+    return canonical_symbol(
         row.get("ticker")
         or row.get("symbol")
+        or row.get("canonical_symbol")
         or row.get("asset")
         or row.get("code")
         or "UNKNOWN"
@@ -180,6 +182,8 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         **row,
         "ticker": get_symbol(row),
+        "symbol": get_symbol(row),
+        "canonical_symbol": get_symbol(row),
         "name": get_name(row),
         "price": price,
         "prev_close": prev_close,
@@ -233,7 +237,7 @@ def confidence_from_inputs(row: Dict[str, Any], extra: float = 0.0) -> int:
 
 def _news_context(row: Dict[str, Any]) -> Dict[str, Any]:
     raw = row.get("news_context") or row.get("news") or row.get("news_report")
-    ticker = str(row.get("ticker") or row.get("symbol") or "UNKNOWN")
+    ticker = get_symbol(row)
 
     if isinstance(raw, dict):
         context = dict(raw)
@@ -307,8 +311,10 @@ def build_payload(
     signal = signal_from_score(score)
     decision_state = "WATCH" if signal == "WATCH" else "WAIT"
     payload = {
-        "ticker": row.get("ticker", "UNKNOWN"),
-        "name": row.get("name", row.get("ticker", "UNKNOWN")),
+        "ticker": get_symbol(row),
+        "symbol": get_symbol(row),
+        "canonical_symbol": get_symbol(row),
+        "name": row.get("name", get_symbol(row)),
         "tool": tool,
         "score": score,
         "signal": signal,

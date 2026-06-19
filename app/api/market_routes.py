@@ -14,6 +14,7 @@ from app.cache.snapshot_cache import get_snapshot_signals
 from app.dependencies import require_active_plan
 from app.services.quote_service import get_cached_quote_payload
 from app.services.snapshot_contract import is_actionable_snapshot_row
+from app.services.symbol_registry import canonical_symbol
 
 logger = logging.getLogger("stocknewsbr.market")
 
@@ -61,7 +62,7 @@ def get_quote(
     ticker: str,
     current_user=Depends(require_active_plan),
 ):
-    ticker = ticker.upper().strip()
+    ticker = canonical_symbol(ticker)
 
     if not ticker:
         raise HTTPException(status_code=400, detail="Invalid ticker")
@@ -86,7 +87,7 @@ def get_quote(
         "volume": quote.get("volume"),
         "high": quote.get("high"),
         "low": quote.get("low"),
-        "currency": "BRL" if ticker.endswith(".SA") else "USD",
+        "currency": "BRL" if any(char.isdigit() for char in ticker) and not ticker.endswith("USD") else "USD",
         "source": quote.get("source"),
     }
 

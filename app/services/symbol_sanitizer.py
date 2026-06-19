@@ -5,13 +5,15 @@ import time
 from threading import RLock
 from typing import Any
 
+from app.services.symbol_registry import canonical_symbol_or_none
+
 
 DEFAULT_SYMBOL_COOLDOWN_SECONDS = 300
 
 _QUERY_TOKENS = ("interval=", "limit=", "period=", "range=", "symbol=", "ticker=")
 _QUERY_NAMES = {"INTERVAL", "LIMIT", "PERIOD", "RANGE", "SYMBOL", "TICKER"}
 _BLOCKED_CHARS = ("&", "?", "/", "\\")
-_B3_RE = re.compile(r"^[A-Z]{4,5}(3|4|5|6|11|34)$")
+_B3_RE = re.compile(r"^[A-Z][A-Z0-9]{3,4}(3|4|5|6|11|34)$")
 _B3_FUTURE_RE = re.compile(r"^(WIN|WDO)[FGHJKMNQUVXZ]\d{2}$")
 _CRYPTO_RE = re.compile(r"^[A-Z]{2,8}(USD|USDT)$")
 _CRYPTO_PROVIDER_RE = re.compile(r"^[A-Z0-9]{2,8}-USD$")
@@ -20,10 +22,6 @@ _CME_PROVIDER_RE = re.compile(r"^[A-Z]{1,4}=F$")
 
 _PROVIDER_SYMBOLS = {"^BVSP", "BRL=X"}
 _PERMANENT_BLOCKLIST = {
-    "AXIA6",
-    "AXIA6.SA",
-    "AZUL4",
-    "AZUL4.SA",
     "GOLL4",
     "GOLL4.SA",
 }
@@ -134,10 +132,6 @@ def sanitize_market_symbol(value: Any, *, allow_provider_symbols: bool = False) 
     raw = _raw(value)
     if not raw:
         return None
-    if _looks_like_query(raw):
-        return None
-    if is_permanently_blocked_symbol(raw):
-        return None
 
     if allow_provider_symbols:
         if raw in _PROVIDER_SYMBOLS or _CME_PROVIDER_RE.match(raw):
@@ -146,6 +140,15 @@ def sanitize_market_symbol(value: Any, *, allow_provider_symbols: bool = False) 
             return raw
         if "=" in raw:
             return None
+
+    canonical = canonical_symbol_or_none(raw)
+    if canonical:
+        return canonical
+
+    if _looks_like_query(raw):
+        return None
+    if is_permanently_blocked_symbol(raw):
+        return None
 
     compact = raw[:-3] if raw.endswith(".SA") else raw
     compact = compact.replace("-USD", "USD")

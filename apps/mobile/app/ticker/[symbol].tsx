@@ -13,6 +13,7 @@ import {
   votePoll,
 } from "@/lib/api";
 import { formatPercent, formatPlainNumber, formatTickerCurrency, formatTimestamp } from "@/lib/format";
+import { canonicalSymbol } from "@/lib/symbolRegistry";
 import { Button, Card, Divider, EmptyState, Field, Pill, SectionHeader, StatTile, theme } from "@/components/ui";
 import { MobilePriceChart } from "@/components/mobile-price-chart";
 import { useSession } from "@/lib/session";
@@ -22,7 +23,7 @@ const RANGES = ["1D", "1W", "1M", "3M", "1Y"];
 
 export default function TickerDetailScreen() {
   const { symbol } = useLocalSearchParams<{ symbol?: string }>();
-  const ticker = String(symbol || "PETR4").toUpperCase().trim();
+  const ticker = canonicalSymbol(symbol || "PETR4") || "PETR4";
   const { token } = useSession();
   const [snapshot, setSnapshot] = useState<Record<string, any> | null>(null);
   const [chart, setChart] = useState<Record<string, any> | null>(null);

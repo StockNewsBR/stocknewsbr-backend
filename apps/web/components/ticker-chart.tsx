@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { ChartPayload } from "@/lib/types";
+import { canonicalSymbol, tradingViewSymbolFor } from "@/lib/symbol-registry";
 
 type Props = {
   chart: ChartPayload | null;
@@ -30,38 +31,6 @@ type ChartLevelOverlay = {
   price: number;
 };
 
-const US_EXCHANGE_BY_SYMBOL: Record<string, string> = {
-  AAL: "NASDAQ",
-  AAPL: "NASDAQ",
-  AMD: "NASDAQ",
-  AMZN: "NASDAQ",
-  AVGO: "NASDAQ",
-  COST: "NASDAQ",
-  GOOGL: "NASDAQ",
-  INTC: "NASDAQ",
-  META: "NASDAQ",
-  MSFT: "NASDAQ",
-  NVDA: "NASDAQ",
-  PLTR: "NASDAQ",
-  QCOM: "NASDAQ",
-  SNOW: "NYSE",
-  TSLA: "NASDAQ",
-  BA: "NYSE",
-  BAC: "NYSE",
-  CVX: "NYSE",
-  DIS: "NYSE",
-  F: "NYSE",
-  GE: "NYSE",
-  GM: "NYSE",
-  GS: "NYSE",
-  JPM: "NYSE",
-  TSM: "NYSE",
-  WMT: "NYSE",
-  XOM: "NYSE",
-};
-
-const CRYPTO_BASES = new Set(["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "MATIC", "AVAX", "LINK"]);
-
 const TIMEFRAME_TO_TRADING_VIEW: Record<string, { interval: string; range: string }> = {
   "1D": { interval: "5", range: "1D" },
   "1W": { interval: "30", range: "5D" },
@@ -74,30 +43,7 @@ const TIMEFRAME_TO_TRADING_VIEW: Record<string, { interval: string; range: strin
 };
 
 function cleanSymbol(value: string | undefined | null) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/\.SA$/, "")
-    .replace(/[^A-Z0-9]/g, "");
-}
-
-function resolveTradingViewSymbol(symbolInput: string | undefined | null) {
-  const symbol = cleanSymbol(symbolInput);
-  if (!symbol) return "BMFBOVESPA:PETR4";
-
-  if (/^WIN[A-Z0-9]*$/.test(symbol)) return "BMFBOVESPA:WIN1!";
-  if (/^WDO[A-Z0-9]*$/.test(symbol)) return "BMFBOVESPA:WDO1!";
-
-  const cryptoMatch = symbol.match(/^([A-Z]{2,6})(USD|USDT)$/);
-  if (cryptoMatch && CRYPTO_BASES.has(cryptoMatch[1])) {
-    return `BINANCE:${cryptoMatch[1]}USDT`;
-  }
-
-  if (/^[A-Z]{4}\d{1,2}$/.test(symbol)) {
-    return `BMFBOVESPA:${symbol}`;
-  }
-
-  return `${US_EXCHANGE_BY_SYMBOL[symbol] || "NASDAQ"}:${symbol}`;
+  return canonicalSymbol(value);
 }
 
 function getTheme() {
@@ -190,6 +136,57 @@ function buildLevelOverlays(
   return overlays;
 }
 
+function priceToY(price: number, minPrice: number, maxPrice: number) {
+  const span = Math.max(maxPrice - minPrice, Math.abs(price) * 0.0001, 0.0001);
+  return 92 - ((price - minPrice) / span) * 84;
+}
+
+function buildPriceAnchoredLevelChart(
+  chart: ChartPayload | null,
+  levels: ChartLevelOverlay[],
+) {
+  const rows = (chart?.series?.length ? chart.series : chart?.ohlc || [])
+    .map((row) => ({
+      time: String(row.time || ""),
+      close: Number(row.close),
+      high: Number(row.high ?? row.close),
+      low: Number(row.low ?? row.close),
+    }))
+    .filter((row) => Number.isFinite(row.close) && row.close > 0)
+    .slice(-160);
+
+  if (!rows.length) return null;
+
+  const levelPrices = levels.map((level) => level.price).filter((price) => Number.isFinite(price) && price > 0);
+  const rawMin = Math.min(...rows.map((row) => Number.isFinite(row.low) && row.low > 0 ? row.low : row.close), ...levelPrices);
+  const rawMax = Math.max(...rows.map((row) => Number.isFinite(row.high) && row.high > 0 ? row.high : row.close), ...levelPrices);
+  const padding = Math.max((rawMax - rawMin) * 0.08, rawMax * 0.001, 0.0001);
+  const minPrice = Math.max(0, rawMin - padding);
+  const maxPrice = rawMax + padding;
+
+  const points = rows.map((row, index) => {
+    const x = rows.length === 1 ? 50 : (index / (rows.length - 1)) * 100;
+    const y = priceToY(row.close, minPrice, maxPrice);
+    return { x, y, close: row.close, time: row.time };
+  });
+
+  const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(3)} ${point.y.toFixed(3)}`).join(" ");
+  const areaPath = `${path} L 100 96 L 0 96 Z`;
+  const levelRows = levels.map((level) => ({
+    ...level,
+    y: priceToY(level.price, minPrice, maxPrice),
+  }));
+
+  return {
+    path,
+    areaPath,
+    levels: levelRows,
+    minPrice,
+    maxPrice,
+    latest: points[points.length - 1],
+  };
+}
+
 export function TickerChart({
   chart,
   ticker,
@@ -210,7 +207,7 @@ export function TickerChart({
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [loadFailed, setLoadFailed] = useState(false);
   const sourceSymbol = cleanSymbol(ticker || chart?.ticker);
-  const tradingViewSymbol = useMemo(() => resolveTradingViewSymbol(sourceSymbol), [sourceSymbol]);
+  const tradingViewSymbol = useMemo(() => tradingViewSymbolFor(sourceSymbol), [sourceSymbol]);
   const timeframe = TIMEFRAME_TO_TRADING_VIEW[interval] || TIMEFRAME_TO_TRADING_VIEW["1D"];
   const tradingViewUrl = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tradingViewSymbol)}`;
   const levelOverlays = useMemo(
@@ -223,6 +220,10 @@ export function TickerChart({
         locale,
       }),
     [showSupport, showResistance, supportLevel, resistanceLevel, locale],
+  );
+  const priceAnchoredChart = useMemo(
+    () => buildPriceAnchoredLevelChart(chart, levelOverlays),
+    [chart, levelOverlays],
   );
   const institutionalRsi = useMemo(() => {
     const numeric = firstFiniteNumber(institutionalRsiValue);
@@ -334,11 +335,44 @@ export function TickerChart({
             ) : null}
           </div>
         ) : null}
-        {levelOverlays.length ? (
-          <div className="snbr-chart-level-lines" aria-hidden="true">
-            {levelOverlays.map((level) => (
-              <div key={level.key} className={`snbr-chart-level-line ${level.key}`} />
-            ))}
+        {priceAnchoredChart ? (
+          <div
+            className="snbr-chart-level-lines"
+            data-price-anchored="true"
+            data-support-price={supportLevel ?? undefined}
+            data-resistance-price={resistanceLevel ?? undefined}
+            aria-hidden="true"
+          >
+            <svg className="snbr-chart-level-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+              <path className="snbr-chart-level-area" d={priceAnchoredChart.areaPath} />
+              <path className="snbr-chart-level-price-path" d={priceAnchoredChart.path} />
+              {priceAnchoredChart.levels.map((level) => (
+                <g key={level.key} className={`snbr-chart-level-group ${level.key}`}>
+                  <line
+                    className={`snbr-chart-level-line ${level.key}`}
+                    x1="0"
+                    x2="100"
+                    y1={level.y}
+                    y2={level.y}
+                    data-price={level.price}
+                  />
+                  <text
+                    className={`snbr-chart-level-label ${level.key}`}
+                    x="98"
+                    y={Math.max(7, level.y - 1)}
+                    textAnchor="end"
+                  >
+                    {level.label}: {formatLevelPrice(level.price, locale)}
+                  </text>
+                </g>
+              ))}
+              <circle
+                className="snbr-chart-level-latest-dot"
+                cx={priceAnchoredChart.latest.x}
+                cy={priceAnchoredChart.latest.y}
+                r="0.9"
+              />
+            </svg>
           </div>
         ) : null}
         {loadFailed ? (

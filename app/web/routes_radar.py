@@ -51,9 +51,19 @@ def get_radar():
             except Exception:
                 continue
 
-        radar.sort(key=lambda x: x["score"], reverse=True)
+        deduped = {}
+        for item in radar:
+            symbol = item.get("canonical_symbol") or item.get("ticker") or item.get("symbol")
+            if not symbol:
+                continue
+            current = deduped.get(symbol)
+            if current is None or float(item.get("score") or 0) > float(current.get("score") or 0):
+                deduped[symbol] = item
 
-        return radar[:20]
+        output = list(deduped.values())
+        output.sort(key=lambda x: x["score"], reverse=True)
+
+        return output[:20]
 
     except Exception as e:
 

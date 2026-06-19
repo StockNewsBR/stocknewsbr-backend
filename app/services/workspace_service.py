@@ -18,9 +18,15 @@ from app.services.legal_service import get_public_bootstrap
 from app.services.media_service import get_media_status
 from app.services.push_service import get_push_status
 from app.services.ranking import get_ranking
-from app.services.snapshot_contract import is_actionable_snapshot_row, is_blocked_snapshot_row
+from app.services.snapshot_contract import (
+    attach_decision_envelope,
+    is_actionable_snapshot_row,
+    is_blocked_snapshot_row,
+    normalize_ai_tools_for_decision_context,
+)
 from app.services.go_live_status_service import build_go_live_status
 from app.services.snapshot_runtime_status import evaluate_snapshot_runtime_status
+from app.services.symbol_registry import canonical_symbol
 from app.services.ticker_room_service import list_room_messages
 from app.services.workspace_layout_service import get_user_workspace_layout
 from app.social.posts import get_posts
@@ -215,37 +221,48 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         if isinstance(snapshot_info.get("snapshot_runtime"), dict)
         else evaluate_snapshot_runtime_status(snapshot_runtime_input)
     )
+    snapshot_ai_tools = snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None
+    decision_ai_tools = normalize_ai_tools_for_decision_context(snapshot_ai_tools)
     snapshot_signals = ensure_institutional_radar_rows(
         _safe_rows(snapshot.get("signals")),
-        ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
+        ai_tools=decision_ai_tools,
         market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
     )
     snapshot_signals = ensure_institutional_ranking_rows(
         snapshot_signals,
-        ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
+        ai_tools=decision_ai_tools,
         market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
     )
     snapshot_signals = ensure_historical_confidence_rows(snapshot_signals)
     snapshot_signals = ensure_operational_rules_rows(
         snapshot_signals,
-        ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
+        ai_tools=decision_ai_tools,
         market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
     )
     snapshot_signals = ensure_institutional_conviction_rows(
         snapshot_signals,
-        ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
+        ai_tools=decision_ai_tools,
         market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
     )
     snapshot_signals = ensure_institutional_priority_rows(
         snapshot_signals,
-        ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
+        ai_tools=decision_ai_tools,
         market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
     )
     snapshot_signals = ensure_final_decision_rows(
         snapshot_signals,
-        ai_tools=snapshot.get("ai_tools") if isinstance(snapshot.get("ai_tools"), dict) else None,
+        ai_tools=decision_ai_tools,
         market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
     )
+    snapshot_signals = [
+        attach_decision_envelope(
+            row,
+            snapshot_stale=bool(snapshot.get("stale") is True),
+            source_snapshot_id=snapshot.get("snapshot_id") or snapshot.get("generated_at"),
+            timestamp=snapshot.get("generated_at"),
+        )
+        for row in snapshot_signals
+    ]
     actionable_signals = [row for row in snapshot_signals if is_actionable_snapshot_row(row)]
     radar_signals = institutional_radar_items(actionable_signals, limit=50)
     ranking_signals = institutional_ranking_items(snapshot_signals, limit=200)
@@ -305,6 +322,8 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "final_decisions": snapshot.get("final_decisions") if isinstance(snapshot.get("final_decisions"), list) else final_decision_rows[:20],
         "final_decision": snapshot.get("final_decision") if isinstance(snapshot.get("final_decision"), dict) else (final_decision_rows[0] if final_decision_rows else {}),
         "final_decision_metrics": snapshot.get("final_decision_metrics") if isinstance(snapshot.get("final_decision_metrics"), dict) else {},
+        "decision_envelopes": snapshot.get("decision_envelopes") if isinstance(snapshot.get("decision_envelopes"), list) else [row.get("decision_envelope") for row in snapshot_signals if isinstance(row.get("decision_envelope"), dict)][:20],
+        "decision_envelope": snapshot.get("decision_envelope") if isinstance(snapshot.get("decision_envelope"), dict) else (snapshot_signals[0].get("decision_envelope") if snapshot_signals else {}),
         "institutional_consistency": snapshot.get("institutional_consistency") if isinstance(snapshot.get("institutional_consistency"), dict) else {},
         "institutional_consistency_metrics": snapshot.get("institutional_consistency_metrics") if isinstance(snapshot.get("institutional_consistency_metrics"), dict) else {},
         "symbol_count": len(symbol_snapshots),
@@ -363,7 +382,8 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
     }
     layout = get_user_workspace_layout(user_id or 0)
     saved_order = layout.get("tabs", [])
-    pinned_ticker = layout.get("pinned_ticker", "PETR4")
+    pinned_ticker = canonical_symbol(layout.get("pinned_ticker", "PETR4")) or "PETR4"
+    layout["pinned_ticker"] = pinned_ticker
 
     base_tabs = {tab["id"]: dict(tab) for tab in get_layout()["tabs"]}
     ordered_ids = [tab_id for tab_id in saved_order if tab_id in base_tabs]

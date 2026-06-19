@@ -10,6 +10,7 @@ MIN_SAMPLE_SIZE = 3
 VALID_RESULTS = {"winner", "loser", "neutral"}
 SCORE_BUCKETS = ("0-4", "4-5", "5-6", "6-7", "7-8", "8-10")
 REGIME_BUCKETS = ("bullish", "bearish", "sideways", "volatile", "low_liquidity")
+DECISION_STATUS_BUCKETS = ("READY", "BLOCKED", "NO_TRADE", "STALE_DATA", "INSUFFICIENT_DATA", "CONFLICT", "ERROR")
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -38,6 +39,12 @@ def _is_released(record: Dict[str, Any]) -> bool:
 
 def _is_blocked(record: Dict[str, Any]) -> bool:
     return str(record.get("status") or "").strip().lower() == "blocked"
+
+
+def decision_status_bucket(record: Dict[str, Any]) -> str:
+    envelope = record.get("decision_envelope") if isinstance(record.get("decision_envelope"), dict) else {}
+    raw = str(record.get("decision_status") or envelope.get("decision_status") or "").strip().upper()
+    return raw if raw in DECISION_STATUS_BUCKETS else "unknown"
 
 
 def _score_value(record: Dict[str, Any]) -> float | None:
@@ -179,6 +186,14 @@ def _ensure_regime_buckets(groups: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[
     return result
 
 
+def _ensure_decision_status_buckets(groups: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    result = {bucket: groups.get(bucket, _empty_group()) for bucket in DECISION_STATUS_BUCKETS}
+    for key, value in groups.items():
+        if key not in result:
+            result[key] = value
+    return result
+
+
 def _auditor_efficiency(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     blocked = [record for record in records if _is_blocked(record) and _is_evaluable(record)]
     blocked_would_have_won = [record for record in blocked if _result(record) == "winner"]
@@ -245,6 +260,7 @@ def calculate_performance_intelligence(state: Dict[str, Any] | None = None) -> D
         "by_asset": _group_by(evaluable_records, _safe_symbol),
         "by_regime": _ensure_regime_buckets(_group_by(evaluable_records, regime_bucket)),
         "by_score_bucket": _ensure_score_buckets(_group_by(evaluable_records, score_bucket)),
+        "by_decision_status": _ensure_decision_status_buckets(_group_by(evaluable_records, decision_status_bucket)),
         "auditor_efficiency": _auditor_efficiency(evaluable_records),
         "released_failed": len([record for record in released if _result(record) == "loser"]),
         "released_won": len([record for record in released if _result(record) == "winner"]),

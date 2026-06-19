@@ -4,6 +4,19 @@ import logging
 from typing import Any, Dict, Tuple
 
 logger = logging.getLogger(__name__)
+_DISPLAY_WARNING_KEYS: set[tuple[str, float, float]] = set()
+
+
+def _warning_key(kind: str, raw_score: float, display_score: float) -> tuple[str, float, float]:
+    return (kind, round(float(raw_score), 4), round(float(display_score), 4))
+
+
+def _log_display_warning_once(message: str, kind: str, raw_score: float, display_score: float) -> None:
+    key = _warning_key(kind, raw_score, display_score)
+    if key in _DISPLAY_WARNING_KEYS:
+        return
+    _DISPLAY_WARNING_KEYS.add(key)
+    logger.warning(message, extra={"raw_score": raw_score, "display_score": display_score})
 
 
 def normalize_master_score_display(value: Any) -> Tuple[float, str | None]:
@@ -14,11 +27,11 @@ def normalize_master_score_display(value: Any) -> Tuple[float, str | None]:
         return 0.0, "master_score_display_invalid"
 
     if numeric < 0:
-        logger.warning("Score Mestre negativo normalizado para display", extra={"raw_score": numeric, "display_score": 0.0})
+        _log_display_warning_once("Score Mestre negativo normalizado para display", "below_0", numeric, 0.0)
         return 0.0, "master_score_display_clamped_below_0"
     if numeric > 10:
         display = min(10.0, round(numeric / 10.0, 1))
-        logger.warning("Score Mestre bruto normalizado para escala 0..10", extra={"raw_score": numeric, "display_score": display})
+        _log_display_warning_once("Score Mestre bruto normalizado para escala 0..10", "raw_100", numeric, display)
         return display, "master_score_normalized_from_raw_100"
     return round(numeric, 1), None
 

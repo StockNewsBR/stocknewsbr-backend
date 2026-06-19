@@ -8,6 +8,7 @@ import {
   getWorkspace,
 } from "@/lib/api";
 import { formatNumber, formatPercent, formatRelativeSeconds } from "@/lib/format";
+import { canonicalSymbol } from "@/lib/symbolRegistry";
 import { Button, Card, Divider, EmptyState, Field, Pill, SectionHeader, StatTile, theme } from "@/components/ui";
 import { useSession } from "@/lib/session";
 
@@ -136,7 +137,7 @@ export default function HomeTab() {
         <SectionHeader
           title="Ticker rapido"
           subtitle="Abre o detalhe completo do ativo com grafico, news, feed e poll."
-          action={<Button label="Abrir" onPress={() => router.push(`/ticker/${ticker.trim().toUpperCase() || "PETR4"}`)} />}
+          action={<Button label="Abrir" onPress={() => router.push(`/ticker/${canonicalSymbol(ticker) || "PETR4"}`)} />}
         />
         <Field value={ticker} onChangeText={(value) => setTicker(value.toUpperCase())} placeholder="PETR4" />
       </Card>
@@ -167,7 +168,7 @@ export default function HomeTab() {
           topSignals.slice(0, 5).map((row: any) => (
             <Pressable
               key={`${row.ticker || row.symbol || row.id || "signal"}`}
-              onPress={() => router.push(`/ticker/${String(row.ticker || row.symbol || "PETR4").toUpperCase()}`)}
+              onPress={() => router.push(`/ticker/${canonicalSymbol(row.ticker || row.symbol || "PETR4") || "PETR4"}`)}
               style={{
                 paddingVertical: 10,
                 borderBottomWidth: 1,

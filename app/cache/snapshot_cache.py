@@ -10,10 +10,11 @@ import tempfile
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
-from app.services.snapshot_contract import summarize_snapshot_rows
+from app.services.snapshot_contract import attach_decision_envelope, summarize_snapshot_rows
 from app.services.go_live_status_service import attach_go_live_status, build_go_live_status
 from app.services.snapshot_runtime_status import evaluate_snapshot_runtime_status
 from app.services.score_display import canonicalize_master_score_row, master_score_sort_value
+from app.services.symbol_registry import canonical_symbol, canonicalize_symbol_row, dedupe_canonical_rows
 from app.system.system_metrics import record_cache_lookup, record_snapshot_write_metric, update_cache_timestamp
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -144,7 +145,7 @@ class SnapshotCache:
             if not isinstance(item, dict):
                 continue
 
-            row = dict(item)
+            row = canonicalize_symbol_row(dict(item))
             ticker = row.get("ticker") or row.get("symbol")
 
             if ticker:
@@ -152,6 +153,8 @@ class SnapshotCache:
                 row["symbol"] = ticker
 
             normalized.append(canonicalize_master_score_row(row))
+
+        normalized = dedupe_canonical_rows(normalized)
 
         normalized.sort(
             key=master_score_sort_value,
@@ -164,10 +167,11 @@ class SnapshotCache:
         by_ticker: Dict[str, Dict[str, Any]] = {}
 
         for signal in signals:
-            ticker = signal.get("ticker") or signal.get("symbol")
+            ticker = canonical_symbol(signal.get("ticker") or signal.get("symbol"))
 
             if ticker:
-                by_ticker[ticker] = dict(signal)
+                item = canonicalize_symbol_row(dict(signal))
+                by_ticker[ticker] = item
 
         return by_ticker
 
@@ -200,6 +204,25 @@ class SnapshotCache:
         else:
             return self._empty_payload()
 
+        source_snapshot_id = (
+            payload.get("source_snapshot_id")
+            or payload.get("snapshot_id")
+            or payload.get("generated_at")
+            or payload.get("updated_at")
+            or payload.get("timestamp")
+            or payload.get("source")
+            or "snapshot_cache"
+        )
+        envelope_timestamp = payload.get("generated_at") or payload.get("updated_at") or payload.get("timestamp") or source_snapshot_id
+        signals = [
+            attach_decision_envelope(
+                row,
+                snapshot_stale=bool(payload.get("stale") is True),
+                source_snapshot_id=source_snapshot_id,
+                timestamp=envelope_timestamp,
+            )
+            for row in signals
+        ]
         derived_stats = summarize_snapshot_rows(signals)
         existing_stats = payload.get("stats") if isinstance(payload.get("stats"), dict) else {}
         payload["signals"] = signals
@@ -213,6 +236,7 @@ class SnapshotCache:
             "institutional_conviction",
             "institutional_priority",
             "final_decision",
+            "decision_envelope",
         ):
             if isinstance(payload.get(key), dict):
                 payload[key] = canonicalize_master_score_row(dict(payload[key]))
@@ -226,6 +250,7 @@ class SnapshotCache:
             "institutional_convictions",
             "institutional_priorities",
             "final_decisions",
+            "decision_envelopes",
         ):
             if isinstance(payload.get(key), list):
                 payload[key] = [
@@ -273,10 +298,11 @@ class SnapshotCache:
             "institutional_priority",
             "final_decision",
             "institutional_consistency",
+            "decision_envelope",
         ):
             if isinstance(payload.get(key), dict):
                 cloned[key] = canonicalize_master_score_row(dict(payload.get(key, {})))
-        for key in ("master_scores", "strategic_panels", "institutional_radar", "institutional_ranking", "historical_confidences", "operational_rules", "institutional_convictions", "institutional_priorities", "final_decisions"):
+        for key in ("master_scores", "strategic_panels", "institutional_radar", "institutional_ranking", "historical_confidences", "operational_rules", "institutional_convictions", "institutional_priorities", "final_decisions", "decision_envelopes"):
             if isinstance(payload.get(key), list):
                 cloned[key] = [canonicalize_master_score_row(dict(row)) for row in payload.get(key, []) if isinstance(row, dict)]
         for key in ("radar_metrics", "ranking_metrics", "historical_confidence_metrics", "operational_rules_metrics", "conviction_metrics", "priority_metrics", "final_decision_metrics", "institutional_consistency_metrics"):
@@ -431,7 +457,8 @@ class SnapshotCache:
             size = len(by_ticker)
 
             for ticker in tickers or []:
-                row = by_ticker.get(ticker)
+                canonical_ticker = canonical_symbol(ticker)
+                row = by_ticker.get(canonical_ticker) or by_ticker.get(ticker)
                 if isinstance(row, dict):
                     result = dict(row)
                     break
@@ -542,7 +569,8 @@ class SnapshotCache:
             size = len(by_ticker)
 
             for ticker in tickers or []:
-                row = by_ticker.get(ticker)
+                canonical_ticker = canonical_symbol(ticker)
+                row = by_ticker.get(canonical_ticker) or by_ticker.get(ticker)
                 if isinstance(row, dict):
                     result = dict(row)
                     break

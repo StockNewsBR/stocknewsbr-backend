@@ -22,7 +22,8 @@ from app.cache.snapshot_cache import get_snapshot_info, get_snapshot_signals
 from app.config import SYMBOLS
 from app.dependencies import require_active_plan
 from app.services.score_display import attach_master_score_display_contract
-from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score, is_actionable_snapshot_row
+from app.services.snapshot_contract import build_decision_envelope, coerce_data_quality, data_quality_label, data_quality_score, is_actionable_snapshot_row
+from app.services.symbol_registry import canonical_symbol
 from app.system.system_metrics import current_provider_call_source
 
 logger = logging.getLogger("stocknewsbr.ranking")
@@ -252,7 +253,7 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
         if not is_actionable_snapshot_row(row):
             continue
 
-        symbol = row.get("ticker") or row.get("symbol")
+        symbol = canonical_symbol(row.get("canonical_symbol") or row.get("ticker") or row.get("symbol"))
 
         if not symbol:
             continue
@@ -272,6 +273,7 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
                 "master_score_raw": row.get("master_score_raw"),
             }
         )
+        decision_envelope = build_decision_envelope(row)
 
         results.append(
             {
@@ -283,6 +285,8 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
                 "master_score_display_warning": display_contract.get("master_score_display_warning"),
                 "master_score_raw": display_contract.get("master_score_raw"),
                 "source_score": row.get("score"),
+                "decision_status": decision_envelope.get("decision_status"),
+                "decision_envelope": decision_envelope,
                 "ranking_opportunity_score": row.get("ranking_opportunity_score", ranking_score),
                 "ranking_classification": row.get("ranking_classification"),
                 "ranking_reason": row.get("ranking_reason"),
@@ -370,8 +374,21 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
             }
         )
 
-    results.sort(key=lambda item: item.get("ranking_opportunity_score") or item["score"], reverse=True)
-    return results
+    deduped: dict[str, dict] = {}
+    for item in results:
+        symbol = canonical_symbol(item.get("ticker") or item.get("symbol"))
+        if not symbol:
+            continue
+        item["ticker"] = symbol
+        item["symbol"] = symbol
+        item["canonical_symbol"] = symbol
+        current = deduped.get(symbol)
+        if current is None or (item.get("ranking_opportunity_score") or item["score"]) > (current.get("ranking_opportunity_score") or current["score"]):
+            deduped[symbol] = item
+
+    output = list(deduped.values())
+    output.sort(key=lambda item: item.get("ranking_opportunity_score") or item["score"], reverse=True)
+    return output
 
 
 def _snapshot_signature(snapshot_info: dict) -> str:

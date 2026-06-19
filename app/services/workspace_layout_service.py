@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from app.Frontend.layout import get_layout
+from app.services.symbol_registry import canonical_symbol
 
 
 LAYOUT_STORE_PATH = Path("data/workspace_layouts.json")
@@ -64,7 +65,7 @@ def get_user_workspace_layout(user_id: int):
     key = str(user_id)
     layout = store.get(key) or _default_layout()
     layout.setdefault("tabs", _default_layout()["tabs"])
-    layout.setdefault("pinned_ticker", "PETR4")
+    layout["pinned_ticker"] = canonical_symbol(layout.get("pinned_ticker", "PETR4")) or "PETR4"
     layout.setdefault("opened_popouts", [])
     layout["chart_settings"] = _normalize_chart_settings(layout.get("chart_settings"))
     layout.setdefault("updated_at", int(time.time()))
@@ -92,7 +93,7 @@ def save_user_workspace_layout(user_id: int, layout: dict):
 
     pinned_ticker = payload.get("pinned_ticker")
     if pinned_ticker:
-        safe_layout["pinned_ticker"] = str(pinned_ticker).upper()
+        safe_layout["pinned_ticker"] = canonical_symbol(pinned_ticker) or "PETR4"
 
     opened_popouts = payload.get("opened_popouts")
     if isinstance(opened_popouts, list):

@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.score_display import normalize_master_score_display
+from app.services.symbol_registry import canonical_symbol
 
 
 def _strip_visual(value: Any) -> str:
@@ -74,7 +75,7 @@ def format_signal_alert(signal, regime=None):
     if not isinstance(signal, dict):
         return ""
 
-    ticker = signal.get("ticker") or signal.get("symbol") or "N/A"
+    ticker = canonical_symbol(signal.get("canonical_symbol") or signal.get("ticker") or signal.get("symbol")) or "N/A"
     final_decision = _strip_visual(signal.get("final_decision")) or "ALERTA INSTITUCIONAL"
     master_score = _score(signal.get("master_score", signal.get("score")))
     audit_status = _audit_label(signal.get("audit_status") or signal.get("auditor_status") or "N/A")

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import unquote
 
+from app.services.symbol_registry import canonical_symbol
 from app.services.news_service import (
     get_cached_symbol_news,
     get_news_cache_info,
@@ -16,14 +17,7 @@ _SYMBOL_NEWS_ALIASES = {
 
 
 def _normalize_symbol(symbol: str | None) -> str:
-    value = str(symbol or "").upper().strip()
-    if value.endswith(".SA"):
-        value = value[:-3]
-    if value.endswith("-USD"):
-        value = value.replace("-USD", "USD")
-    if value.endswith("USDT"):
-        value = f"{value[:-4]}USD"
-    return value
+    return canonical_symbol(symbol)
 
 
 def _news_item_symbol(item: dict[str, Any]) -> str:
@@ -121,6 +115,68 @@ def _fix_portuguese_news_text(value: Any) -> Any:
     return text
 
 
+def _looks_like_english_news(value: str) -> bool:
+    normalized = _normalize_news_text(value)
+    return bool(
+        normalized
+        and re.search(
+            r"\b(results?|improves?|benefits?|stronger|pricing|earnings?|shares?|stocks?|market|guidance|revenue|profit|oil|trader|wait|price|volume|confirmation|from|with|as)\b",
+            normalized,
+        )
+    )
+
+
+def _translate_english_news_text(value: Any, ticker: str, field: str) -> Any:
+    if not isinstance(value, str) or not value.strip():
+        return value
+
+    text = _fix_portuguese_news_text(value.strip())
+    if not _looks_like_english_news(text):
+        return text
+
+    normalized = re.sub(r"\s+", " ", text.replace("’", "'")).strip()
+    oil_result = re.match(r"^(.+?)\s+results?\s+improves?\s+as\s+(.+?)\s+benefits?\s+from\s+stronger\s+oil\s+pricing$", normalized, flags=re.IGNORECASE)
+    if oil_result:
+        return f"Resultados de {oil_result.group(1)} melhoram com {oil_result.group(2)} beneficiada por petróleo mais forte"
+
+    replacements = [
+        (r"\bresults?\s+improves?\b", "resultados melhoram"),
+        (r"\bbenefits?\s+from\b", "se beneficia de"),
+        (r"\bstronger\s+oil\s+pricing\b", "petróleo mais forte"),
+        (r"\boil\s+pricing\b", "preços do petróleo"),
+        (r"\bearnings?\b", "resultados"),
+        (r"\bguidance\b", "projeções"),
+        (r"\brevenue\b", "receita"),
+        (r"\bprofit\b", "lucro"),
+        (r"\btrader\s+note:?\b", "Para trader:"),
+        (r"\bwait\b", "aguarde"),
+        (r"\bprice\b", "preço"),
+        (r"\bvolume\b", "volume"),
+        (r"\bconfirmation\b", "confirmação"),
+        (r"\bshares?\b", "ações"),
+        (r"\bstocks?\b", "ações"),
+        (r"\bmarket\b", "mercado"),
+        (r"\bpricing\b", "precificação"),
+        (r"\bstronger\b", "mais forte"),
+        (r"\bfrom\b", "de"),
+        (r"\bwith\b", "com"),
+        (r"\bas\b", "com"),
+        (r"\band\b", "e"),
+    ]
+    translated = normalized
+    for source, target in replacements:
+        translated = re.sub(source, target, translated, flags=re.IGNORECASE)
+
+    translated = _fix_portuguese_news_text(translated)
+    still_english = _looks_like_english_news(translated)
+    if still_english:
+        if field == "title":
+            return f"Notícia relevante em {ticker}: impacto deve ser confirmado em preço e volume"
+        return f"Leitura relevante para {ticker}; confirme impacto em preço, volume e contexto setorial antes de agir."
+
+    return translated[:1].upper() + translated[1:]
+
+
 def _normalize_public_news_item(item: dict[str, Any], ticker: str) -> dict[str, Any]:
     normalized = dict(item)
     title = normalized.get("title") or normalized.get("headline")
@@ -129,9 +185,9 @@ def _normalize_public_news_item(item: dict[str, Any], ticker: str) -> dict[str, 
         if url_title:
             normalized["title"] = url_title
             normalized["headline"] = url_title
-    for field in ("summary", "card_summary", "impact_reason", "why_it_matters", "editorial", "market_context", "trader_takeaway"):
+    for field in ("title", "headline", "summary", "card_summary", "impact_reason", "why_it_matters", "editorial", "market_context", "trader_takeaway"):
         if field in normalized:
-            normalized[field] = _fix_portuguese_news_text(normalized.get(field))
+            normalized[field] = _translate_english_news_text(normalized.get(field), ticker, field)
     return normalized
 
 

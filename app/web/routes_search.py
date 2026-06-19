@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 import logging
 
 from app.dependencies import require_channel_access
+from app.services.symbol_registry import canonical_symbol
 from app.watchlists.watchlist_default import (
     WATCHLIST_B3,
     WATCHLIST_US_GLOBAL,
@@ -50,7 +51,7 @@ CRYPTO_BASES = {
 
 
 def _normalize_query(value: str) -> str:
-    return str(value or "").upper().strip().replace(" ", "").replace(".SA", "").replace("-USD", "USD")
+    return canonical_symbol(value) or str(value or "").upper().strip().replace(" ", "").replace(".SA", "").replace("-USD", "USD")
 
 
 def _synthetic_candidates(query: str) -> list[str]:
@@ -104,7 +105,7 @@ def search_ticker(query: str):
         seen: set[str] = set()
 
         for ticker in [*_synthetic_candidates(normalized), *results]:
-            clean = _normalize_query(ticker)
+            clean = canonical_symbol(ticker) or _normalize_query(ticker)
 
             if not clean or clean in seen:
                 continue

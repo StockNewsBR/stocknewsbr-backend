@@ -8,7 +8,8 @@ from app.database import SessionLocal
 from app.models import User
 from app.services.push_service import get_push_token_store, send_push_notification
 from app.services.score_display import normalize_master_score_display
-from app.services.snapshot_contract import is_actionable_snapshot_row
+from app.services.snapshot_contract import build_decision_envelope, is_actionable_snapshot_row
+from app.services.symbol_registry import canonical_symbol
 
 
 PUSH_DISPATCH_STATE_PATH = Path("data/push_dispatch_state.json")
@@ -56,7 +57,7 @@ def _eligible_signals(signals):
         if score < PUSH_SCORE_THRESHOLD:
             continue
 
-        ticker = item.get("ticker") or item.get("symbol")
+        ticker = canonical_symbol(item.get("canonical_symbol") or item.get("ticker") or item.get("symbol"))
 
         if not ticker:
             continue
@@ -103,7 +104,8 @@ def dispatch_signal_pushes(signals):
         )
 
         for signal in candidates:
-            ticker = str(signal.get("ticker") or signal.get("symbol"))
+            ticker = canonical_symbol(signal.get("canonical_symbol") or signal.get("ticker") or signal.get("symbol"))
+            decision_envelope = build_decision_envelope(signal)
             last_sent = int(state.get(ticker, 0) or 0)
 
             if now - last_sent < PUSH_SIGNAL_COOLDOWN_SECONDS:
@@ -126,6 +128,7 @@ def dispatch_signal_pushes(signals):
                     body=body,
                     data={
                         "ticker": ticker,
+                        "canonical_symbol": ticker,
                         "score": str(signal.get("score", "")),
                         "master_score": str(signal.get("master_score", "")),
                         "master_direction": str(signal.get("master_direction", "")),
@@ -138,6 +141,8 @@ def dispatch_signal_pushes(signals):
                         "price": str(signal.get("price", "")),
                         "volume": str(signal.get("volume", "")),
                         "data_quality": str(signal.get("data_quality", "")),
+                        "decision_status": str(decision_envelope.get("decision_status", "")),
+                        "decision_envelope": json.dumps(decision_envelope, ensure_ascii=True, default=str),
                         "decision_state": str(signal.get("decision_state", "")),
                         "trade_action": str(signal.get("trade_action") or signal.get("signal") or ""),
                         "audit_status": str(signal.get("audit_status", "")),

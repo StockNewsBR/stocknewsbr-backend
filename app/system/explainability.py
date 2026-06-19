@@ -4,6 +4,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 from app.cache.snapshot_cache import get_snapshot
 from app.services.score_display import attach_master_score_display_contract
+from app.services.snapshot_contract import build_decision_envelope
 from app.system.system_metrics import record_explainability_metrics
 
 BREAKDOWN_CATEGORIES: Dict[str, Tuple[str, ...]] = {
@@ -206,6 +207,10 @@ def why_this_score(row: Dict[str, Any]) -> Dict[str, List[str]]:
     for field in ("operational_warnings", "audit_warnings"):
         neutral.extend(_listify(row.get(field)))
 
+    envelope = build_decision_envelope(row)
+    negative.extend(_listify(envelope.get("blockers")))
+    neutral.extend(_listify(envelope.get("warnings")))
+
     summary = _text(row.get("master_summary") or row.get("final_decision_reason") or row.get("strategic_panel_summary"))
     if summary and not positive and not negative and not neutral:
         neutral.append(summary)
@@ -271,6 +276,7 @@ def decision_explainability_score(row: Dict[str, Any], why: Dict[str, List[str]]
 
 def explain_signal(row: Dict[str, Any]) -> Dict[str, Any]:
     display_row = attach_master_score_display_contract(row)
+    envelope = build_decision_envelope(display_row)
     why = why_this_score(row)
     change_mind = what_would_change_my_mind(row)
     breakdown = score_breakdown(row)
@@ -283,6 +289,11 @@ def explain_signal(row: Dict[str, Any]) -> Dict[str, Any]:
         "master_score_display_warning": display_row.get("master_score_display_warning"),
         "master_direction": row.get("master_direction"),
         "final_decision": row.get("final_decision"),
+        "decision_status": envelope.get("decision_status"),
+        "decision_envelope": envelope,
+        "human_message": envelope.get("human_message"),
+        "blockers": envelope.get("blockers") or [],
+        "warnings": envelope.get("warnings") or [],
         "conviction_level": row.get("conviction_level"),
         "priority_level": row.get("priority_level"),
         "operational_status": row.get("operational_status"),

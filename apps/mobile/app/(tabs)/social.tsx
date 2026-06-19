@@ -4,6 +4,7 @@ import { router } from "expo-router";
 
 import { createTickerPost, getTickerFeed } from "@/lib/api";
 import { formatRelativeSeconds } from "@/lib/format";
+import { canonicalSymbol } from "@/lib/symbolRegistry";
 import { Button, Card, EmptyState, Field, Pill, SectionHeader, theme } from "@/components/ui";
 import { useSession } from "@/lib/session";
 
@@ -26,7 +27,7 @@ export default function SocialTab() {
 
     setLoading(true);
     try {
-      const nextFeed = await getTickerFeed(token, ticker.trim().toUpperCase()).catch(() => null);
+      const nextFeed = await getTickerFeed(token, canonicalSymbol(ticker) || "PETR4").catch(() => null);
       setFeed(nextFeed);
     } finally {
       setLoading(false);
@@ -46,7 +47,7 @@ export default function SocialTab() {
     setStatus(null);
 
     try {
-      const published = await createTickerPost(token, ticker.trim().toUpperCase(), {
+      const published = await createTickerPost(token, canonicalSymbol(ticker) || "PETR4", {
         text: draft.trim(),
         sentiment,
       });
@@ -82,7 +83,7 @@ export default function SocialTab() {
         <SectionHeader title="Ticker" subtitle="Troque o ativo e a tela recarrega o feed associado." />
         <Field value={ticker} onChangeText={(value) => setTicker(value.toUpperCase())} placeholder="PETR4" />
         <View style={{ flexDirection: "row", gap: 10 }}>
-          <Button label="Abrir ticker" onPress={() => router.push(`/ticker/${ticker.trim().toUpperCase() || "PETR4"}`)} variant="secondary" />
+          <Button label="Abrir ticker" onPress={() => router.push(`/ticker/${canonicalSymbol(ticker) || "PETR4"}`)} variant="secondary" />
           <Button label="Atualizar" onPress={loadFeed} loading={loading} />
         </View>
       </Card>
