@@ -201,6 +201,9 @@ export function WorkspaceNewsPanel({
     isEnglish && normalizedNewsState.includes("sem noticia") && normalizedNewsState.includes("reaproveitada")
       ? `No real news for ${selectedTicker} right now; no other ticker news was reused.`
       : newsStateText;
+  const emptyNewsText = isEnglish
+    ? `No relevant news for ${selectedTicker} right now. Try refreshing later.`
+    : "Sem notícias relevantes para este ativo agora. Tente atualizar mais tarde.";
   return (
     <section id="panel-news" className="snbr-two-column">
       <div className="snbr-plain-panel">
@@ -213,7 +216,7 @@ export function WorkspaceNewsPanel({
         <p className="snbr-assistive-copy" aria-live="polite">
           {newsRows.length
             ? `${newsRows.length} ${isEnglish ? `useful news items prepared for ${selectedTicker}.` : `notícias úteis preparadas para ${selectedTicker}.`}`
-            : localizedNewsStateText || (isEnglish ? `No relevant news available for ${selectedTicker} today.` : `Sem notícias relevantes para ${selectedTicker} hoje.`)}
+            : emptyNewsText}
         </p>
         <div className="snbr-headline-list">
           {newsRows.map((item) => {
@@ -299,8 +302,8 @@ export function WorkspaceNewsPanel({
           })}
           {!newsRows.length ? (
             <div className="snbr-empty-thread">
-              <strong>{isEnglish ? `No relevant news found for ${selectedTicker} today.` : "Sem notícias relevantes hoje."}</strong>
-              <p>{localizedNewsStateText || (isEnglish ? "As soon as the ticker feed brings a useful headline, it appears here with source, original time and sentiment." : "Assim que o feed do ticker trouxer uma manchete útil, ela aparece aqui com fonte, horário original e sentimento.")}</p>
+              <strong>{isEnglish ? `No relevant news for ${selectedTicker} right now.` : "Sem notícias relevantes para este ativo agora."}</strong>
+              <p>{localizedNewsStateText || (isEnglish ? "Try refreshing later. As soon as the ticker feed brings a useful headline, it appears here with source, original time and sentiment." : "Tente atualizar mais tarde. Assim que o feed do ticker trouxer uma manchete útil, ela aparece aqui com fonte, horário original e sentimento.")}</p>
             </div>
           ) : null}
         </div>

@@ -162,17 +162,44 @@ class PublicMarketRouteTests(unittest.TestCase):
         self.assertTrue(is_usable_quote_payload({"symbol": "WINM26", "price": 179000, "source": "reference_proxy"}))
 
     def test_live_batch_quote_does_not_return_partial_cache_as_valid(self):
-        payload = routes_public_market_live._resolve_cached_quote(
-            {"F": {"symbol": "F", "volume": 1000, "change": 0.12, "source": "market_cache"}},
-            "F",
-        )
+        with patch.object(routes_public_market_live, "get_cached_quote_payload", return_value=None):
+            payload = routes_public_market_live._resolve_cached_quote(
+                {"F": {"symbol": "F", "volume": 1000, "change": 0.12, "source": "market_cache"}},
+                "F",
+            )
 
         self.assertEqual(payload["symbol"], "F")
         self.assertEqual(payload["source"], "empty")
         self.assertIsNone(payload["price"])
 
+    def test_public_bundle_quote_uses_valid_alias_payload_when_key_differs(self):
+        payload = routes_public_market_live._resolve_cached_quote(
+            {"SNAPSHOT:B3SA3": {"symbol": "B3SA3.SA", "price": 15.23, "volume": 2_056_800, "source": "snapshot"}},
+            "B3SA3",
+        )
+
+        self.assertEqual(payload["symbol"], "B3SA3")
+        self.assertEqual(payload["price"], 15.23)
+        self.assertEqual(payload["source"], "snapshot")
+
+    def test_public_bundle_quote_falls_back_to_shared_quote_snapshot(self):
+        with patch.object(
+            routes_public_market_live,
+            "get_cached_quote_payload",
+            return_value={"symbol": "B3SA3", "price": 15.23, "volume": 2_056_800, "source": "snapshot"},
+        ):
+            payload = routes_public_market_live._resolve_cached_quote({}, "B3SA3")
+
+        self.assertEqual(payload["symbol"], "B3SA3")
+        self.assertEqual(payload["price"], 15.23)
+        self.assertEqual(payload["source"], "snapshot")
+
     def test_live_batch_quote_does_not_request_background_warmup_for_empty_symbols(self):
-        with patch.object(routes_public_market_live, "cached_price_payloads", return_value={}):
+        with patch.object(routes_public_market_live, "cached_price_payloads", return_value={}), patch.object(
+            routes_public_market_live,
+            "get_cached_quote_payload",
+            return_value=None,
+        ):
             payload = routes_public_market_live.public_quotes("BA")
 
         self.assertEqual(payload["items"][0]["symbol"], "BA")
@@ -222,6 +249,10 @@ class PublicMarketRouteTests(unittest.TestCase):
 
     def test_public_bundle_does_not_request_quote_warmup_when_cache_is_empty(self):
         with patch.object(routes_public_market_live, "cached_price_payloads", return_value={}), patch.object(
+            routes_public_market_live,
+            "get_cached_quote_payload",
+            return_value=None,
+        ), patch.object(
             routes_public_market_live,
             "public_market_insight",
             return_value={"symbol": "BA", "status": "empty"},

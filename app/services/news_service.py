@@ -45,6 +45,7 @@ def _project_runtime_path(env_name: str, default_relative: str) -> Path:
 
 _NEWS_CACHE_FILE = _project_runtime_path("NEWS_CACHE_FILE", "runtime/cache/news_cache.json")
 _NEWS_CACHE_LOADED = False
+_NEWS_CACHE_FILE_MTIME: float | None = None
 
 
 def _get_yfinance():
@@ -59,40 +60,81 @@ def _get_yfinance():
 
 
 def _load_news_cache_once() -> None:
-    global _NEWS_CACHE_LOADED
-    if _NEWS_CACHE_LOADED:
-        return
+    global _NEWS_CACHE_FILE_MTIME, _NEWS_CACHE_LOADED
     with _CACHE_LOCK:
-        if _NEWS_CACHE_LOADED:
+        try:
+            cache_mtime = _NEWS_CACHE_FILE.stat().st_mtime
+        except FileNotFoundError:
+            _NEWS_CACHE_LOADED = True
+            _NEWS_CACHE_FILE_MTIME = None
+            return
+        if _NEWS_CACHE_LOADED and _NEWS_CACHE_FILE_MTIME == cache_mtime:
             return
         try:
             payload = json.loads(_NEWS_CACHE_FILE.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            _NEWS_CACHE_LOADED = True
-            return
         except Exception as exc:
             logger.warning("News cache load failed: %s", exc)
             _NEWS_CACHE_LOADED = True
             return
 
+        next_cache: dict[str, dict[str, Any]] = {}
         cached = payload.get("news_cache") if isinstance(payload, dict) else None
         if isinstance(cached, dict):
             for key, value in cached.items():
                 if isinstance(value, dict) and isinstance(value.get("items"), list):
-                    _NEWS_CACHE[str(key).upper()] = value
+                    next_cache[str(key).upper()] = value
 
+        next_provider_status: dict[str, dict[str, Any]] = {}
         provider_status = payload.get("provider_status") if isinstance(payload, dict) else None
         if isinstance(provider_status, dict):
             for key, value in provider_status.items():
                 if isinstance(value, dict):
-                    _NEWS_PROVIDER_STATUS[str(key).upper()] = value
+                    next_provider_status[str(key).upper()] = value
 
+        _NEWS_CACHE.clear()
+        _NEWS_CACHE.update(next_cache)
+        _NEWS_PROVIDER_STATUS.clear()
+        _NEWS_PROVIDER_STATUS.update(next_provider_status)
+        _NEWS_CACHE_FILE_MTIME = cache_mtime
         _NEWS_CACHE_LOADED = True
 
 
 def _persist_news_cache_locked() -> None:
+    global _NEWS_CACHE_FILE_MTIME, _NEWS_CACHE_LOADED
     try:
         _NEWS_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            disk_mtime = _NEWS_CACHE_FILE.stat().st_mtime
+            if _NEWS_CACHE_FILE_MTIME is None or disk_mtime != _NEWS_CACHE_FILE_MTIME:
+                disk_payload = json.loads(_NEWS_CACHE_FILE.read_text(encoding="utf-8"))
+                disk_cache = disk_payload.get("news_cache") if isinstance(disk_payload, dict) else None
+                if isinstance(disk_cache, dict):
+                    for key, value in disk_cache.items():
+                        normalized_key = str(key).upper()
+                        if not isinstance(value, dict) or not isinstance(value.get("items"), list):
+                            continue
+                        existing = _NEWS_CACHE.get(normalized_key)
+                        disk_timestamp = float(value.get("timestamp", 0.0) or 0.0)
+                        existing_timestamp = float(existing.get("timestamp", 0.0) or 0.0) if isinstance(existing, dict) else 0.0
+                        if existing is None or disk_timestamp > existing_timestamp:
+                            _NEWS_CACHE[normalized_key] = value
+
+                disk_provider_status = disk_payload.get("provider_status") if isinstance(disk_payload, dict) else None
+                if isinstance(disk_provider_status, dict):
+                    for key, value in disk_provider_status.items():
+                        normalized_key = str(key).upper()
+                        if not isinstance(value, dict):
+                            continue
+                        existing = _NEWS_PROVIDER_STATUS.get(normalized_key)
+                        disk_checked_at = float(value.get("checked_at", 0.0) or 0.0)
+                        existing_checked_at = float(existing.get("checked_at", 0.0) or 0.0) if isinstance(existing, dict) else 0.0
+                        if existing is None or disk_checked_at > existing_checked_at:
+                            _NEWS_PROVIDER_STATUS[normalized_key] = value
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            logger.debug("News cache merge-before-persist failed: %s", exc)
+
         tmp_file = _NEWS_CACHE_FILE.with_suffix(".tmp")
         tmp_file.write_text(
             json.dumps(
@@ -106,6 +148,8 @@ def _persist_news_cache_locked() -> None:
             encoding="utf-8",
         )
         tmp_file.replace(_NEWS_CACHE_FILE)
+        _NEWS_CACHE_FILE_MTIME = _NEWS_CACHE_FILE.stat().st_mtime
+        _NEWS_CACHE_LOADED = True
     except Exception as exc:
         logger.debug("News cache persist failed: %s", exc)
 

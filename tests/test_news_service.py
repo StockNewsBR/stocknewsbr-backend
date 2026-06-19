@@ -1,4 +1,8 @@
+import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from app.services import news_service
@@ -7,6 +11,7 @@ from app.services.news_service import (
     build_news_quality_report,
     build_symbol_news,
     compare_news_runs,
+    get_cached_symbol_news,
     get_news_cache_info,
     get_news_cached_report,
     get_symbol_news,
@@ -16,6 +21,12 @@ from app.services.news_service import (
 class NewsServiceTests(unittest.TestCase):
     def setUp(self):
         news_service._NEWS_CACHE.clear()
+        news_service._NEWS_PROVIDER_STATUS.clear()
+        news_service._NEWS_CACHE_LOADED = True
+        try:
+            news_service._NEWS_CACHE_FILE_MTIME = news_service._NEWS_CACHE_FILE.stat().st_mtime
+        except FileNotFoundError:
+            news_service._NEWS_CACHE_FILE_MTIME = None
 
     def test_build_symbol_news_dedupes_and_labels_useful_items(self):
         raw_items = [
@@ -350,6 +361,104 @@ class NewsServiceTests(unittest.TestCase):
 
         self.assertEqual(report["ticker"], "PETR4")
         self.assertEqual(report["top_story_title"], cached_report["top_story_title"])
+
+    def test_cached_news_reloads_when_shared_cache_file_changes(self):
+        first_item = {
+            "id": "aapl-1",
+            "story_key": "aapl-1",
+            "title": "AAPL supplier update supports Apple demand",
+            "summary": "Apple demand remains relevant for the stock.",
+            "ticker": "AAPL",
+            "relatedTickers": ["AAPL"],
+        }
+        second_item = {
+            **first_item,
+            "id": "aapl-2",
+            "story_key": "aapl-2",
+            "title": "AAPL services revenue keeps Apple in focus",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_file = Path(tmpdir) / "news_cache.json"
+            with patch("app.services.news_service._NEWS_CACHE_FILE", cache_file):
+                news_service._NEWS_CACHE.clear()
+                news_service._NEWS_PROVIDER_STATUS.clear()
+                news_service._NEWS_CACHE_LOADED = False
+                news_service._NEWS_CACHE_FILE_MTIME = None
+
+                self.assertEqual(get_cached_symbol_news("AAPL", limit=6), [])
+
+                cache_file.write_text(
+                    json.dumps(
+                        {
+                            "news_cache": {"AAPL": {"timestamp": 1.0, "items": [first_item], "raw_count": 1, "status": "ok"}},
+                            "provider_status": {"AAPL": {"provider": "yfinance", "ticker": "AAPL", "status": "ok", "raw_count": 1}},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                loaded = get_cached_symbol_news("AAPL", limit=6)
+                self.assertEqual(loaded[0]["title"], first_item["title"])
+
+                cache_file.write_text(
+                    json.dumps(
+                        {
+                            "news_cache": {"AAPL": {"timestamp": 2.0, "items": [second_item], "raw_count": 1, "status": "ok"}},
+                            "provider_status": {"AAPL": {"provider": "yfinance", "ticker": "AAPL", "status": "ok", "raw_count": 1}},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                next_mtime = cache_file.stat().st_mtime + 10
+                os.utime(cache_file, (next_mtime, next_mtime))
+
+                reloaded = get_cached_symbol_news("AAPL", limit=6)
+                self.assertEqual(reloaded[0]["title"], second_item["title"])
+
+    def test_persist_news_cache_merges_shared_file_before_write(self):
+        aapl_item = {
+            "id": "aapl-1",
+            "story_key": "aapl-1",
+            "title": "AAPL services revenue keeps Apple in focus",
+            "summary": "Apple remains relevant for the market.",
+            "ticker": "AAPL",
+            "relatedTickers": ["AAPL"],
+        }
+        nvda_item = {
+            "id": "nvda-1",
+            "story_key": "nvda-1",
+            "title": "NVDA demand update keeps Nvidia in focus",
+            "summary": "Nvidia remains relevant for the market.",
+            "ticker": "NVDA",
+            "relatedTickers": ["NVDA"],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_file = Path(tmpdir) / "news_cache.json"
+            cache_file.write_text(
+                json.dumps(
+                    {
+                        "news_cache": {"NVDA": {"timestamp": 2.0, "items": [nvda_item], "raw_count": 1, "status": "ok"}},
+                        "provider_status": {"NVDA": {"provider": "yfinance", "ticker": "NVDA", "status": "ok", "raw_count": 1, "checked_at": 2.0}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            disk_mtime = cache_file.stat().st_mtime
+
+            with patch("app.services.news_service._NEWS_CACHE_FILE", cache_file):
+                news_service._NEWS_CACHE.clear()
+                news_service._NEWS_PROVIDER_STATUS.clear()
+                news_service._NEWS_CACHE["AAPL"] = {"timestamp": 3.0, "items": [aapl_item], "raw_count": 1, "status": "ok"}
+                news_service._NEWS_PROVIDER_STATUS["AAPL"] = {"provider": "yfinance", "ticker": "AAPL", "status": "ok", "raw_count": 1, "checked_at": 3.0}
+                news_service._NEWS_CACHE_LOADED = True
+                news_service._NEWS_CACHE_FILE_MTIME = disk_mtime - 10
+
+                news_service._persist_news_cache_locked()
+
+                payload = json.loads(cache_file.read_text(encoding="utf-8"))
+                self.assertIn("AAPL", payload["news_cache"])
+                self.assertIn("NVDA", payload["news_cache"])
 
 
 if __name__ == "__main__":

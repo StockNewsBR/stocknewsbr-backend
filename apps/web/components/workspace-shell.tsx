@@ -346,6 +346,7 @@ const TAB_ORDER = [
 
 const TOP_BAR_TAB_IDS = TAB_ORDER.filter((id) => id !== "busca");
 const SIMPLE_TOP_TAB_IDS = new Set(["grafico", "news", "referrals", "education"]);
+const INTERNAL_AI_TAB_IDS = new Set(["risk", "news-ia", "macro", "regime"]);
 const WORKSPACE_MODE_STORAGE_KEY = "stocknewsbr.workspace_mode";
 const DETACHABLE_IA_TABS = new Set([
   "grafico",
@@ -2190,6 +2191,24 @@ function formatMarketMovementText(item: {
   return trend ? localizeUiText(trend, locale) : locale === "en-US" ? "data unavailable" : "dados indisponíveis";
 }
 
+function hasWatchlistSnapshotData(item: {
+  price?: number | null;
+  changePct?: number | null;
+}) {
+  const price = Number(item.price);
+  const changePct = Number(item.changePct);
+  return Number.isFinite(price) && price > 0 && Number.isFinite(changePct);
+}
+
+function shouldShowTopBarTabId(
+  id: string,
+  advancedMode: boolean,
+) {
+  if (INTERNAL_AI_TAB_IDS.has(id)) return false;
+  if (!advancedMode && !SIMPLE_TOP_TAB_IDS.has(id)) return false;
+  return true;
+}
+
 function deriveChangePercent(change?: number | null, price?: number | null) {
   const numericChange = Number(change);
   const numericPrice = Number(price);
@@ -3810,7 +3829,14 @@ function buildOperationalDecision(input: {
         isEnglish ? "Entry must happen only after clean price confirmation" : "Entrada somente depois de confirmação limpa no preço",
       ];
     }
-    if (tone === "bearish" || tone === "exit") {
+    if (tone === "exit") {
+      return [
+        isEnglish ? "Entry flow is not confirmed" : "Fluxo de entrada não está confirmado",
+        isEnglish ? "Protection of the current position is the main decision zone" : "Proteção da posição atual é a principal zona de decisão",
+        isEnglish ? "Wait for price and volume trigger before any new execution" : "Aguardar gatilho de preço e volume antes de qualquer nova execução",
+      ];
+    }
+    if (tone === "bearish") {
       return [
         flowTone === "bearish"
           ? (isEnglish ? "Seller flow is stronger now" : "Fluxo vendedor está mais forte agora")
@@ -3828,14 +3854,18 @@ function buildOperationalDecision(input: {
 
   const supportText = zones.support != null ? formatLocalePrice(zones.support, input.locale) : (isEnglish ? "No level" : "Sem nível");
   const resistanceText = zones.resistance != null ? formatLocalePrice(zones.resistance, input.locale) : (isEnglish ? "No level" : "Sem nível");
-  const invalidation = tone === "bullish"
+  const invalidation = tone === "exit"
+    ? (zones.support != null ? `${isEnglish ? "Below protection level" : "Abaixo do nível de proteção"} ${supportText}` : (isEnglish ? "After confirmed protection-level failure" : "Após perda confirmada do nível de proteção"))
+    : tone === "bullish"
     ? (zones.support != null ? `${isEnglish ? "Below" : "Abaixo de"} ${supportText}` : (isEnglish ? "Below confirmed support/VWAP" : "Abaixo do suporte/VWAP confirmado"))
-    : tone === "bearish" || tone === "exit"
+    : tone === "bearish"
       ? (zones.resistance != null ? `${isEnglish ? "Above" : "Acima de"} ${resistanceText}` : (isEnglish ? "Above confirmed resistance/VWAP" : "Acima da resistência/VWAP confirmada"))
       : (isEnglish ? "After confirmed range break" : "Após rompimento confirmado da faixa");
-  const tradeZone = tone === "bullish"
+  const tradeZone = tone === "exit"
+    ? (zones.support != null ? `${isEnglish ? "Protection zone" : "Zona de proteção"}: ${supportText}` : (isEnglish ? "Protection zone: wait for trigger" : "Zona de proteção: aguardar gatilho"))
+    : tone === "bullish"
     ? (zones.support != null ? `${isEnglish ? "Buy zone" : "Zona de compra"}: ${supportText}` : (isEnglish ? "Buy zone: wait for trigger" : "Zona de compra: aguardar gatilho"))
-    : tone === "bearish" || tone === "exit"
+    : tone === "bearish"
       ? (zones.resistance != null ? `${isEnglish ? "Sell zone" : "Zona de venda"}: ${resistanceText}` : (isEnglish ? "Sell zone: wait for trigger" : "Zona de venda: aguardar gatilho"))
       : (isEnglish ? "No active zone" : "Sem zona ativa");
 
@@ -4323,14 +4353,19 @@ function strategicSectionsForRender(conclusion: StrategicConclusion, locale: App
   const incompleteRead =
     /incomplete|incompleta|sem leitura confirmada|no confirmed reading|n\/a|indispon/i.test(`${conclusion.headline} ${basisText}`) ||
     !Number.isFinite(scoreValue);
+  const finalToneRequiresProtection = conclusion.tone === "bearish" || conclusion.tone === "exit";
+  const directionalBuyBlocked = finalToneRequiresProtection || regimeBear || sellerFlow;
+  const directionalSellBlocked = conclusion.tone === "bullish" || (!finalToneRequiresProtection && (regimeBull || buyerFlow));
   const bullishSetup =
     !incompleteRead &&
+    !directionalBuyBlocked &&
     (conclusion.tone === "bullish" ||
       (strongConviction && riskLevel === "low" && !sellerFlow) ||
       (regimeBull && buyerFlow && !sellerFlow));
   const bearishSetup =
     !bullishSetup &&
     !incompleteRead &&
+    !directionalSellBlocked &&
     (conclusion.tone === "bearish" ||
       conclusion.tone === "exit" ||
       sellerFlow ||
@@ -4697,19 +4732,109 @@ function textHasSellSide(value: string) {
   return /\b(venda|vender|vendido|vendedora|vendedores|baixa|queda|vendedor|short|sell|seller|sellers|bearish)\b/i.test(value);
 }
 
-function tradeAlignedFallback(side: "buy" | "sell", locale: AppLocale) {
+function tradeAlignedFallback(side: "buy" | "sell" | "wait" | "exit", locale: AppLocale) {
   if (side === "buy") {
     return locale === "en-US"
       ? "Keep the buy read only with confirmation; if it fails, return to Wait."
       : "Manter a leitura de compra somente com confirmação; se falhar, voltar para Aguardar.";
+  }
+  if (side === "exit") {
+    return locale === "en-US"
+      ? "Prioritize position protection: reduce exposure and wait for a clear trigger before any new execution."
+      : "Priorizar proteção da posição: reduzir exposição e aguardar gatilho claro antes de qualquer nova execução.";
+  }
+  if (side === "wait") {
+    return locale === "en-US"
+      ? "Mixed scenario: wait for price, volume and flow to align before choosing a side."
+      : "Cenário misto: aguardar preço, volume e fluxo alinharem antes de escolher um lado.";
   }
   return locale === "en-US"
     ? "Keep the sell read only with confirmation; if it fails, return to Wait."
     : "Manter a leitura de venda somente com confirmação; se falhar, voltar para Aguardar.";
 }
 
+function sectionTitleFallback(side: "buy" | "sell" | "wait" | "exit", locale: AppLocale) {
+  if (side === "exit") return locale === "en-US" ? "Position protection" : "Proteção da posição";
+  if (side === "wait") return locale === "en-US" ? "Wait for confirmation" : "Aguardar confirmação";
+  return side === "buy"
+    ? (locale === "en-US" ? "Buy confirmation" : "Confirmação da compra")
+    : (locale === "en-US" ? "Sell confirmation" : "Confirmação da venda");
+}
+
+function positionProtectionSections(locale: AppLocale): NonNullable<StrategicConclusion["sections"]> {
+  if (locale === "en-US") {
+    return [
+      {
+        title: "Current Scenario",
+        body: "The final decision is to close or protect the current exposure. Do not open a new directional trade until price, volume and flow confirm again.",
+      },
+      {
+        title: "Strategic Directive",
+        items: [
+          "Reduce exposure and protect capital first.",
+          "Wait for a clean 5-minute trigger before any new execution.",
+          "Keep invalidation objective around the protection level.",
+        ],
+      },
+      {
+        title: "Between Buy And Sell",
+        items: [
+          "No new side has priority while the decision is protection.",
+          "The next trade only becomes valid after price, volume and flow align.",
+          "Avoid changing from protection to aggression without a fresh confirmed snapshot.",
+        ],
+      },
+      {
+        title: "Interpretation",
+        body: "Score and risk can remain useful context, but the active action is defensive: protect, reduce exposure and wait for confirmation.",
+      },
+      {
+        title: "Focus now",
+        body: "Preserve capital and wait for the next confirmed structure before acting again.",
+      },
+    ];
+  }
+  return [
+    {
+      title: "Cenário Atual",
+      body: "A decisão final é encerrar ou proteger a exposição atual. Não abrir nova operação direcional até preço, volume e fluxo confirmarem de novo.",
+    },
+    {
+      title: "Direção da Estratégia",
+      items: [
+        "Reduzir exposição e proteger capital primeiro.",
+        "Aguardar gatilho limpo de 5 minutos antes de qualquer nova execução.",
+        "Manter invalidação objetiva perto do nível de proteção.",
+      ],
+    },
+    {
+      title: "Entre Venda e Compra",
+      items: [
+        "Nenhum lado novo tem prioridade enquanto a decisão for proteção.",
+        "A próxima operação só fica válida depois que preço, volume e fluxo alinharem.",
+        "Evitar trocar proteção por agressividade sem novo snapshot confirmado.",
+      ],
+    },
+    {
+      title: "Interpretação",
+      body: "Score e risco podem seguir como contexto, mas a ação ativa é defensiva: proteger, reduzir exposição e aguardar confirmação.",
+    },
+    {
+      title: "Foco Agora",
+      body: "Preservar capital e aguardar a próxima estrutura confirmada antes de agir de novo.",
+    },
+  ];
+}
+
 function alignTextWithTradeSide(value: string, side: "buy" | "sell" | "wait" | "exit", locale: AppLocale) {
-  if (side !== "buy" && side !== "sell") return value;
+  if (side === "exit") {
+    const conflicts = textHasBuySide(value) || textHasSellSide(value);
+    return conflicts ? tradeAlignedFallback(side, locale) : value;
+  }
+  if (side === "wait") {
+    const conflicts = textHasBuySide(value) && textHasSellSide(value);
+    return conflicts ? tradeAlignedFallback(side, locale) : value;
+  }
   const conflicts = side === "buy" ? textHasSellSide(value) : textHasBuySide(value);
   return conflicts ? tradeAlignedFallback(side, locale) : value;
 }
@@ -4720,12 +4845,20 @@ function alignStrategicSectionsWithTrade(
   locale: AppLocale,
 ) {
   const side = tradeActionSide(action);
-  if (!sections?.length || (side !== "buy" && side !== "sell")) return sections || [];
+  if (!sections?.length) return sections || [];
+  if (side === "exit") return positionProtectionSections(locale);
+  if (side !== "buy" && side !== "sell" && side !== "wait") return sections || [];
   const alignedTitle = side === "buy"
     ? (locale === "en-US" ? "Buy confirmation" : "Confirmação da compra")
-    : (locale === "en-US" ? "Sell confirmation" : "Confirmação da venda");
+    : side === "sell"
+      ? (locale === "en-US" ? "Sell confirmation" : "Confirmação da venda")
+      : sectionTitleFallback(side, locale);
   return sections.map((section) => {
-    const titleHasConflict = side === "buy" ? textHasSellSide(section.title) : textHasBuySide(section.title);
+    const titleHasConflict = side === "buy"
+      ? textHasSellSide(section.title)
+      : side === "sell"
+        ? textHasBuySide(section.title)
+        : false;
     return {
       ...section,
       title: titleHasConflict ? alignedTitle : section.title,
@@ -4737,6 +4870,7 @@ function alignStrategicSectionsWithTrade(
 
 function alignStrategicBasisWithTrade(items: string[], action: string, locale: AppLocale) {
   const side = tradeActionSide(action);
+  if (side !== "buy" && side !== "sell") return items || [];
   return (items || []).map((item) => alignTextWithTradeSide(item, side, locale));
 }
 
@@ -7388,18 +7522,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const currentTab = focusedTab || activeTab;
   const currentTabs = useMemo(() => (tabs.length ? tabs : buildTabs()), [tabs]);
   const tabsById = useMemo(() => new Map(currentTabs.map((tab) => [tab.id, tab] as const)), [currentTabs]);
-  const visibleTabs = useMemo(
-    () => TOP_BAR_TAB_IDS
-      .filter((id) => advancedMode || SIMPLE_TOP_TAB_IDS.has(id))
-      .map((id) => tabsById.get(id))
-      .filter(Boolean) as WorkspaceTab[],
-    [advancedMode, tabsById],
-  );
-
-  useEffect(() => {
-    if (focusedTab || advancedMode || SIMPLE_TOP_TAB_IDS.has(currentTab)) return;
-    setActiveTab("grafico");
-  }, [advancedMode, currentTab, focusedTab]);
 
   const activeChart = useMemo(
     () => {
@@ -7494,6 +7616,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     ),
     [activeWatchlist, appLocale, watchCategory],
   );
+  const availableActiveWatchlist = useMemo(
+    () => filteredActiveWatchlist.filter(hasWatchlistSnapshotData),
+    [filteredActiveWatchlist],
+  );
+  const unavailableActiveWatchlist = useMemo(
+    () => filteredActiveWatchlist.filter((item) => !hasWatchlistSnapshotData(item)),
+    [filteredActiveWatchlist],
+  );
   const activeWatchCategoryCounts = useMemo(
     () => CATEGORY_ORDER.reduce((counts, category) => {
       counts[category] = activeWatchlist.filter((item) => item.category === category).length;
@@ -7540,9 +7670,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     () =>
       CATEGORY_ORDER.map((category) => ({
         category,
-        items: filteredActiveWatchlist.filter((item) => item.category === category),
+        items: availableActiveWatchlist.filter((item) => item.category === category),
       })).filter((group) => group.items.length),
-    [filteredActiveWatchlist],
+    [availableActiveWatchlist],
+  );
+  const unavailableGroupedActiveWatchlist = useMemo(
+    () =>
+      CATEGORY_ORDER.map((category) => ({
+        category,
+        items: unavailableActiveWatchlist.filter((item) => item.category === category),
+      })).filter((group) => group.items.length),
+    [unavailableActiveWatchlist],
   );
   const searchResults = useMemo(
     () =>
@@ -7931,6 +8069,19 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     },
     [activeNews?.items, selectedTicker, appLocale, isUsLocale],
   );
+  const visibleTabs = useMemo(
+    () => TOP_BAR_TAB_IDS
+      .filter((id) => shouldShowTopBarTabId(id, advancedMode))
+      .map((id) => tabsById.get(id))
+      .filter(Boolean) as WorkspaceTab[],
+    [advancedMode, tabsById],
+  );
+
+  useEffect(() => {
+    if (focusedTab || visibleTabs.some((tab) => tab.id === currentTab)) return;
+    setActiveTab("grafico");
+  }, [currentTab, focusedTab, visibleTabs]);
+
   const stats = useMemo(() => {
     const emptyChangeText = isUsLocale ? "no confirmed change" : "sem variação confirmada";
     const emptyScoreText = isUsLocale ? "no confirmed score" : "sem Score confirmado";
@@ -8941,6 +9092,44 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }
 
   function renderWatchlist() {
+    const renderWatchRow = (item: WatchlistItem, unavailable = false) => {
+      const itemLabel = displayWatchlistLabel(item, appLocale);
+      return (
+        <div key={item.symbol} className={cx("snbr-watch-row", unavailable && "unavailable", item.symbol === selectedTicker && "active")}>
+          <button
+            className="snbr-watch-open"
+            onClick={() => selectTicker(item.symbol)}
+            type="button"
+            aria-label={isUsLocale ? `Open ${item.symbol} on chart` : `Abrir ${item.symbol} no gráfico`}
+            title={`${item.symbol} • ${itemLabel}`}
+          >
+            <div className="snbr-watch-main">
+              <strong>{item.symbol}</strong>
+              <span>{itemLabel}</span>
+            </div>
+            <div className="snbr-watch-side">
+              <span>{formatWatchlistPrimaryValue(item, appLocale)}</span>
+              <span className={cx("snbr-watch-change", movementClass(item.changePct, item.trend, item.score))}>
+                {movementArrow(movementClass(item.changePct, item.trend, item.score))}{" "}
+                {formatMarketMovementText(item, appLocale)}
+              </span>
+            </div>
+          </button>
+          <button
+            className="snbr-watch-remove"
+            onClick={() => handleRemoveFromActiveList(item.symbol)}
+            type="button"
+            aria-label={isUsLocale ? `Remove ${item.symbol} from active list` : `Excluir ${item.symbol} da lista ativa`}
+            title={isUsLocale ? `Remove ${item.symbol} from active list` : `Remover ${item.symbol} da lista ativa`}
+          >
+            {isUsLocale ? "Remove" : "Excluir"}
+          </button>
+        </div>
+      );
+    };
+
+    const unavailableCount = unavailableActiveWatchlist.length;
+
     return (
       <div className="snbr-watchlist">
         {groupedActiveWatchlist.length ? groupedActiveWatchlist.map((group) => (
@@ -8950,48 +9139,39 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               <span>{group.items.length} {isUsLocale ? "assets" : "ativos"}</span>
             </header>
             <div className="snbr-watch-group-list">
-              {group.items.map((item) => {
-                const itemLabel = displayWatchlistLabel(item, appLocale);
-                return (
-                <div key={item.symbol} className={cx("snbr-watch-row", item.symbol === selectedTicker && "active")}>
-                  <button
-                    className="snbr-watch-open"
-                    onClick={() => selectTicker(item.symbol)}
-                    type="button"
-                    aria-label={isUsLocale ? `Open ${item.symbol} on chart` : `Abrir ${item.symbol} no gráfico`}
-                    title={`${item.symbol} • ${itemLabel}`}
-                  >
-                    <div className="snbr-watch-main">
-                      <strong>{item.symbol}</strong>
-                      <span>{itemLabel}</span>
-                    </div>
-                    <div className="snbr-watch-side">
-                      <span>{formatWatchlistPrimaryValue(item, appLocale)}</span>
-                      <span className={cx("snbr-watch-change", movementClass(item.changePct, item.trend, item.score))}>
-                        {movementArrow(movementClass(item.changePct, item.trend, item.score))}{" "}
-                        {formatMarketMovementText(item, appLocale)}
-                      </span>
-                    </div>
-                  </button>
-                  <button
-                    className="snbr-watch-remove"
-                    onClick={() => handleRemoveFromActiveList(item.symbol)}
-                    type="button"
-                    aria-label={isUsLocale ? `Remove ${item.symbol} from active list` : `Excluir ${item.symbol} da lista ativa`}
-                    title={isUsLocale ? `Remove ${item.symbol} from active list` : `Remover ${item.symbol} da lista ativa`}
-                  >
-                    {isUsLocale ? "Remove" : "Excluir"}
-                  </button>
-                </div>
-              );})}
+              {group.items.map((item) => renderWatchRow(item))}
             </div>
           </section>
         )) : (
           <div className="snbr-empty-thread">
-            <strong>{isUsLocale ? "No asset in your list." : "Nenhum ativo na sua lista."}</strong>
-            <p>{isUsLocale ? "Use the search above to add any B3, BDR, crypto or USA asset to your active list." : "Use a busca acima para incluir qualquer ativo da B3 na sua lista ativa."}</p>
+            <strong>{isUsLocale ? "No asset with data in this filter." : "Nenhum ativo com dados neste filtro."}</strong>
+            <p>{isUsLocale ? "Assets without a confirmed snapshot are grouped below and do not pollute the main list." : "Ativos sem snapshot confirmado ficam agrupados abaixo e não poluem a lista principal."}</p>
           </div>
         )}
+        {unavailableCount ? (
+          <details className="snbr-watch-unavailable-section">
+            <summary>
+              <span>{isUsLocale ? "Assets temporarily without data" : "Ativos temporariamente sem dados"}</span>
+              <strong>{unavailableCount}</strong>
+            </summary>
+            <p>
+              {isUsLocale
+                ? "These assets stay searchable and removable, but are not mixed with working quotes until a valid snapshot returns."
+                : "Eles continuam disponíveis para busca e remoção, mas não ficam misturados com cotações funcionando até o snapshot voltar."}
+            </p>
+            {unavailableGroupedActiveWatchlist.map((group) => (
+              <section key={`unavailable-${group.category}`} className="snbr-watch-group">
+                <header className="snbr-watch-group-head">
+                  <strong>{group.category}</strong>
+                  <span>{group.items.length} {isUsLocale ? "without data" : "sem dados"}</span>
+                </header>
+                <div className="snbr-watch-group-list">
+                  {group.items.map((item) => renderWatchRow(item, true))}
+                </div>
+              </section>
+            ))}
+          </details>
+        ) : null}
       </div>
     );
   }
@@ -11005,17 +11185,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                     title={meta.label}
                   >
                     <span>{topTabText(tab.id, meta.short, appLocale)}</span>
-                    {isAiTab ? (
+                    {isAiTab && aiCount > 0 ? (
                       <span
                         className="snbr-tab-count-badge"
-                        aria-label={aiCount === 0
-                          ? (isUsLocale ? "No relevant finding for this asset now" : "Sem evento relevante para este ativo agora")
-                          : (isUsLocale ? `${aiCount} findings` : `${aiCount} achados`)}
-                        title={aiCount === 0
-                          ? (isUsLocale ? "No relevant finding for this asset now." : "Sem evento relevante para este ativo agora.")
-                          : undefined}
+                        aria-label={isUsLocale ? `${aiCount} findings` : `${aiCount} achados`}
                       >
-                        {aiCount === 0 ? (isUsLocale ? "no data" : "sem dados") : aiCount}
+                        {aiCount}
                       </span>
                     ) : null}
                   </button>
