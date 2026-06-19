@@ -213,7 +213,7 @@ export function WorkspaceNewsPanel({
         <p className="snbr-assistive-copy" aria-live="polite">
           {newsRows.length
             ? `${newsRows.length} ${isEnglish ? `useful news items prepared for ${selectedTicker}.` : `notícias úteis preparadas para ${selectedTicker}.`}`
-            : localizedNewsStateText || (isEnglish ? `No relevant news available for ${selectedTicker} right now.` : `Sem notícias relevantes disponíveis para ${selectedTicker} agora.`)}
+            : localizedNewsStateText || (isEnglish ? `No relevant news available for ${selectedTicker} today.` : `Sem notícias relevantes para ${selectedTicker} hoje.`)}
         </p>
         <div className="snbr-headline-list">
           {newsRows.map((item) => {
@@ -299,7 +299,7 @@ export function WorkspaceNewsPanel({
           })}
           {!newsRows.length ? (
             <div className="snbr-empty-thread">
-              <strong>{isEnglish ? `No news found for ${selectedTicker} right now.` : "Nenhuma notícia encontrada para este ativo no momento."}</strong>
+              <strong>{isEnglish ? `No relevant news found for ${selectedTicker} today.` : "Sem notícias relevantes hoje."}</strong>
               <p>{localizedNewsStateText || (isEnglish ? "As soon as the ticker feed brings a useful headline, it appears here with source, original time and sentiment." : "Assim que o feed do ticker trouxer uma manchete útil, ela aparece aqui com fonte, horário original e sentimento.")}</p>
             </div>
           ) : null}

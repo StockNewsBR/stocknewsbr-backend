@@ -101,7 +101,7 @@ export function WorkspaceLeftRail({
     Crypto: "Crypto",
     USA: "USA",
   };
-  const activeCountLabel = `${categoryLabels[watchCategory]} — ${activeWatchCount} ${isEnglish ? "assets" : "ativos"}`;
+  const activeCountLabel = `${categoryLabels[watchCategory]}: ${activeWatchCount} ${isEnglish ? "assets" : "ativos"}`;
 
   return (
     <aside className="snbr-left-rail" ref={railRef}>

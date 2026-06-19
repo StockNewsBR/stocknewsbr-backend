@@ -108,6 +108,8 @@ def _fix_portuguese_news_text(value: Any) -> Any:
         "Nao ": "Não ",
         "noticia": "notícia",
         "Noticia": "Notícia",
+        "Petroleo": "Petróleo",
+        "petroleo": "petróleo",
     }
     text = value
     for source, target in replacements.items():
@@ -120,7 +122,7 @@ def _looks_like_english_news(value: str) -> bool:
     return bool(
         normalized
         and re.search(
-            r"\b(results?|improves?|benefits?|stronger|pricing|earnings?|shares?|stocks?|market|guidance|revenue|profit|oil|trader|wait|price|volume|confirmation|from|with|as)\b",
+            r"\b(results?|improves?|benefits?|stronger|pricing|earnings?|shares?|stocks?|market|reads?|supportive|variant|live|guidance|revenue|profit|oil|trader|wait|price|volume|confirmation|from|with|as)\b",
             normalized,
         )
     )
@@ -144,6 +146,12 @@ def _translate_english_news_text(value: Any, ticker: str, field: str) -> Any:
         (r"\bbenefits?\s+from\b", "se beneficia de"),
         (r"\bstronger\s+oil\s+pricing\b", "petróleo mais forte"),
         (r"\boil\s+pricing\b", "preços do petróleo"),
+        (r"\bmarket\s+reads?\b", "mercado lê"),
+        (r"\breads?\b", "lê"),
+        (r"\bsupportive\b", "favorável"),
+        (r"\bthe\s+B3\s+variant\b", "a versão B3"),
+        (r"\bB3\s+variant\b", "versão B3"),
+        (r"\blive\b", "dado ao vivo"),
         (r"\bearnings?\b", "resultados"),
         (r"\bguidance\b", "projeções"),
         (r"\brevenue\b", "receita"),
@@ -185,7 +193,7 @@ def _normalize_public_news_item(item: dict[str, Any], ticker: str) -> dict[str, 
         if url_title:
             normalized["title"] = url_title
             normalized["headline"] = url_title
-    for field in ("title", "headline", "summary", "card_summary", "impact_reason", "why_it_matters", "editorial", "market_context", "trader_takeaway"):
+    for field in ("title", "headline", "summary", "card_summary", "impact_reason", "why_it_matters", "editorial", "market_context", "trader_takeaway", "sector", "industry"):
         if field in normalized:
             normalized[field] = _translate_english_news_text(normalized.get(field), ticker, field)
     return normalized

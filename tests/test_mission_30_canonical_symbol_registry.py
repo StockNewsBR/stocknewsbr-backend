@@ -226,15 +226,19 @@ class Mission30CanonicalSymbolRegistryTests(unittest.TestCase):
             {
                 "ticker": "PETR4",
                 "title": "PETR4 results improve as Petrobras benefits from stronger oil pricing",
-                "summary": "Market reads stronger oil pricing as supportive for Petrobras results.",
+                "summary": "Market reads the B3 variant with live supportive pricing.",
                 "trader_takeaway": "Trader note: wait for price and volume confirmation.",
+                "industry": "Petroleo e gás",
             },
             "PETR4",
         )
 
         self.assertIn("Resultados", item["title"])
         self.assertNotIn("results improve", item["title"].lower())
+        self.assertNotIn("market reads", item["summary"].lower())
+        self.assertNotIn("live", item["summary"].lower())
         self.assertNotIn("Trader note", item["trader_takeaway"])
+        self.assertEqual(item["industry"], "Petróleo e gás")
 
     def test_mission30_complement_score_warning_logs_once_per_value(self):
         from app.services import score_display

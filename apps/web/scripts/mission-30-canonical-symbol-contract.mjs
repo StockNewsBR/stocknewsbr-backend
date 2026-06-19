@@ -30,6 +30,7 @@ function priceToY(price, minPrice, maxPrice) {
 const registry = read("apps/web/lib/symbol-registry.ts");
 const tickerChart = read("apps/web/components/ticker-chart.tsx");
 const workspaceShell = read("apps/web/components/workspace-shell.tsx");
+const workspaceRails = read("apps/web/components/workspace-rails.tsx");
 const css = read("apps/web/app/globals.css");
 const mobileRegistry = read("apps/mobile/lib/symbolRegistry.ts");
 const mobileApi = read("apps/mobile/lib/api.ts");
@@ -65,6 +66,7 @@ assertIncludes(workspaceShell, "sem snapshot", "watchlist has clear missing-pric
 assertIncludes(workspaceShell, "sem cotação confirmada", "symbol header avoids R$ n/a for missing quotes");
 assertIncludes(workspaceShell, "activeWatchCategoryCounts", "active list counts by canonical category");
 assertIncludes(workspaceShell, "CATEGORY_ORDER.reduce((total, category)", "Todos equals B3 + BDR + Crypto + USA");
+assertIncludes(workspaceRails, "}: ${activeWatchCount}", "active list count label cannot be mistaken for a negative number");
 assertIncludes(workspaceShell, "decisionTradeLabel(tradeTone", "mixed/conflicting scenarios render Aguardar instead of a forced side");
 assertIncludes(workspaceShell, "alignStrategicSectionsWithTrade", "strategic conclusion is aligned with suggested trade side");
 assertIncludes(workspaceShell, "alignOperationalDecisionWithTrade", "operational decision copy is aligned with suggested trade side");
