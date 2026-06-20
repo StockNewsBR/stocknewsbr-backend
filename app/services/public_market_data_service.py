@@ -78,6 +78,27 @@ def _symbol_aliases(symbol: str) -> list[str]:
     return result
 
 
+def _payload_matches_symbol(payload: dict, symbol: str) -> bool:
+    allowed: set[str] = set()
+    for alias in _symbol_aliases(symbol):
+        normalized = str(alias or "").upper().strip()
+        if not normalized:
+            continue
+        allowed.add(normalized)
+        allowed.add(normalized.replace(".SA", ""))
+
+    identities: set[str] = set()
+    for key in ("symbol", "display_symbol", "provider_symbol", "reference_symbol", "exact_contract"):
+        value = payload.get(key)
+        normalized = str(value or "").upper().strip()
+        if not normalized:
+            continue
+        identities.add(normalized)
+        identities.add(normalized.replace(".SA", ""))
+
+    return not identities or bool(allowed.intersection(identities))
+
+
 def _direct_cached_price_payloads(symbols: list[str], allow_stale: bool) -> dict:
     raw_cache = _read_json_cache(_QUOTE_CACHE_FILE)
     if not isinstance(raw_cache, dict):
@@ -93,6 +114,8 @@ def _direct_cached_price_payloads(symbols: list[str], allow_stale: bool) -> dict
                 continue
             payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else entry
             if not isinstance(payload, dict) or _finite_positive(payload.get("price")) is None:
+                continue
+            if not _payload_matches_symbol(payload, symbol):
                 continue
 
             enriched = dict(payload)

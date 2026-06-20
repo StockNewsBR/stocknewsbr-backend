@@ -2238,14 +2238,36 @@ function quoteHasMarketValue(quote?: QuotePayload | null) {
   return Number.isFinite(price) && price > 0;
 }
 
+function quoteMatchesSymbol(quote: QuotePayload | null | undefined, symbol?: string | null) {
+  const expectedAliases = new Set(symbolAliases(symbol).map((alias) => normalizeSymbol(alias)).filter(Boolean));
+  if (!expectedAliases.size) return false;
+  const identityCandidates = [
+    quote?.symbol,
+    (quote as any)?.provider_symbol,
+    (quote as any)?.display_symbol,
+    (quote as any)?.reference_symbol,
+    (quote as any)?.exact_contract,
+  ].map((value) => normalizeSymbol(String(value || ""))).filter(Boolean);
+  if (!identityCandidates.length) return true;
+  return identityCandidates.some((candidate) => expectedAliases.has(candidate));
+}
+
 function mergeQuoteState(current: Record<string, QuotePayload>, incoming: Record<string, QuotePayload>) {
   const next = { ...current };
 
   for (const [symbol, quote] of Object.entries(incoming)) {
     if (!symbol) continue;
-    const normalized = normalizeSymbol(symbol);
-    const normalizedQuote = { ...quote, symbol: normalized || quote.symbol || symbol };
-    for (const alias of symbolAliases(symbol)) {
+    const quoteIdentity = normalizeSymbol(String(
+      quote?.symbol ||
+      (quote as any)?.display_symbol ||
+      (quote as any)?.provider_symbol ||
+      symbol ||
+      "",
+    ));
+    const storageSymbol = quoteIdentity && quoteMatchesSymbol(quote, symbol) ? symbol : quoteIdentity || symbol;
+    const normalized = normalizeSymbol(storageSymbol);
+    const normalizedQuote = { ...quote, symbol: normalized || quote.symbol || storageSymbol };
+    for (const alias of symbolAliases(storageSymbol)) {
       const normalizedAlias = normalizeSymbol(alias);
       const existing = next[alias] || next[normalizedAlias];
       if (quoteHasMarketValue(normalizedQuote) || !quoteHasMarketValue(existing)) {
@@ -4387,11 +4409,72 @@ function strategicSectionsForRender(conclusion: StrategicConclusion, locale: App
         focus: "Foco Agora",
       };
 
+  if (incompleteRead) {
+    return isEnglish
+      ? [
+          {
+            title: standardTitles.scenario,
+            body: `${assetLabel}: the operational read is incomplete. Use the panel as context and do not execute until price, volume, Master Score and chart structure are confirmed.`,
+          },
+          {
+            title: standardTitles.directive,
+            items: [
+              "Block every directional setup while quote and volume are incomplete.",
+              "Wait for the next confirmed snapshot before evaluating any entry.",
+              "Use chart levels only as context, not as an execution trigger.",
+            ],
+          },
+          {
+            title: standardTitles.between,
+            items: [
+              "Buy remains blocked until real price, volume and Master Score are confirmed.",
+              "Sell/short remains blocked too; incomplete data cannot create an operational edge.",
+              "Waiting is the only valid decision until the real snapshot updates.",
+            ],
+          },
+          {
+            title: standardTitles.interpretation,
+            body: "There is not enough real data for an operational decision. The professional choice is to wait until price, volume and score are confirmed.",
+          },
+          {
+            title: standardTitles.focus,
+            body: focusText || "Do not execute operational trades until real price and volume are confirmed.",
+          },
+        ]
+      : [
+          {
+            title: standardTitles.scenario,
+            body: `${assetLabel}: a leitura operacional está incompleta. Use o painel como contexto e não execute até preço, volume, Score Mestre e estrutura do gráfico ficarem confirmados.`,
+          },
+          {
+            title: standardTitles.directive,
+            items: [
+              "Bloquear qualquer setup direcional enquanto cotação e volume estiverem incompletos.",
+              "Aguardar o próximo snapshot confirmado antes de avaliar qualquer entrada.",
+              "Usar níveis do gráfico apenas como contexto, não como gatilho de execução.",
+            ],
+          },
+          {
+            title: standardTitles.between,
+            items: [
+              "Compra fica bloqueada até preço, volume e Score Mestre reais confirmarem.",
+              "Venda/short também fica bloqueada; dado incompleto não gera vantagem operacional.",
+              "Aguardar é a única decisão válida até o snapshot real atualizar.",
+            ],
+          },
+          {
+            title: standardTitles.interpretation,
+            body: "Não há dados reais suficientes para decisão operacional. A escolha profissional é aguardar até preço, volume e score ficarem confirmados.",
+          },
+          {
+            title: standardTitles.focus,
+            body: focusText || "Não executar operação até preço e volume reais ficarem confirmados.",
+          },
+        ];
+  }
+
   const scenarioBody = (() => {
     if (isEnglish) {
-      if (incompleteRead) {
-        return `${assetLabel}: the operational read is incomplete. Treat the panel as context and do not execute until price, volume, Master Score and chart structure are confirmed.`;
-      }
       if (bullishSetup) {
         if (riskLevel === "low") return `${assetLabel}: low-risk constructive read. The buy side has priority, but execution still needs a clean 5-minute candle, volume and flow confirmation.`;
         if (riskLevel === "medium") return `${assetLabel}: constructive but not free risk. The buy thesis exists, yet size must be reduced until confirmation improves.`;
@@ -4407,9 +4490,6 @@ function strategicSectionsForRender(conclusion: StrategicConclusion, locale: App
       return `${assetLabel}: neutral read with high risk. No operational side has enough quality for aggressive execution.`;
     }
 
-    if (incompleteRead) {
-      return `${assetLabel}: a leitura operacional está incompleta. Use o painel como contexto e não execute até preço, volume, Score Mestre e estrutura do gráfico ficarem confirmados.`;
-    }
     if (bullishSetup) {
       if (riskLevel === "low") return `${assetLabel}: leitura construtiva com risco baixo. A compra tem prioridade, mas a execução ainda precisa de vela de 5 minutos limpa, volume e fluxo confirmando.`;
       if (riskLevel === "medium") return `${assetLabel}: leitura construtiva, porém com risco médio. A tese de compra existe, mas o tamanho deve ser reduzido até a confirmação melhorar.`;
@@ -4732,6 +4812,10 @@ function textHasSellSide(value: string) {
   return /\b(venda|vender|vendido|vendedora|vendedores|baixa|queda|vendedor|short|sell|seller|sellers|bearish)\b/i.test(value);
 }
 
+function textHasStandAsideSide(value: string) {
+  return /\b(ficar de fora|nenhum lado operacional|nenhum lado tem|sem nova opera[cç][aã]o|preservar capital primeiro|reduzir exposi[cç][aã]o|aguardar (a )?decis[aã]o dominante|evitar entradas agressivas|stand aside|no operational side|no new trade|no side has|reduce exposure|waiting is the dominant decision|avoid aggressive entries)\b/i.test(value);
+}
+
 function tradeAlignedFallback(side: "buy" | "sell" | "wait" | "exit", locale: AppLocale) {
   if (side === "buy") {
     return locale === "en-US"
@@ -4826,6 +4910,82 @@ function positionProtectionSections(locale: AppLocale): NonNullable<StrategicCon
   ];
 }
 
+function noDataStrategicSections(locale: AppLocale, symbol: string, focus?: string | null): NonNullable<StrategicConclusion["sections"]> {
+  const isEnglish = locale === "en-US";
+  const assetLabel = normalizeSymbol(symbol) || (isEnglish ? "the asset" : "o ativo");
+  const normalizedFocus = sentenceCaseFirst(
+    String(focus || "")
+      .replace(/^Focus now:\s*/i, "")
+      .replace(/^Foco agora:\s*/i, "")
+      .trim(),
+    locale,
+  );
+
+  if (isEnglish) {
+    return [
+      {
+        title: "Current Scenario",
+        body: `${assetLabel}: the operational read is incomplete. Use the panel as context and do not execute until price, volume, Master Score and chart structure are confirmed.`,
+      },
+      {
+        title: "Strategic Directive",
+        items: [
+          "Block every directional setup while quote and volume are incomplete.",
+          "Wait for the next confirmed snapshot before evaluating any entry.",
+          "Use chart levels only as context, not as an execution trigger.",
+        ],
+      },
+      {
+        title: "Between Buy And Sell",
+        items: [
+          "Buy remains blocked until real price, volume and Master Score are confirmed.",
+          "Sell/short remains blocked too; incomplete data cannot create an operational edge.",
+          "Waiting is the only valid decision until the real snapshot updates.",
+        ],
+      },
+      {
+        title: "Interpretation",
+        body: "There is not enough real data for an operational decision. The professional choice is to wait until price, volume and score are confirmed.",
+      },
+      {
+        title: "Focus now",
+        body: normalizedFocus || "Do not execute operational trades until real price and volume are confirmed.",
+      },
+    ];
+  }
+
+  return [
+    {
+      title: "Cenário Atual",
+      body: `${assetLabel}: a leitura operacional está incompleta. Use o painel como contexto e não execute até preço, volume, Score Mestre e estrutura do gráfico ficarem confirmados.`,
+    },
+    {
+      title: "Direção da Estratégia",
+      items: [
+        "Bloquear qualquer setup direcional enquanto cotação e volume estiverem incompletos.",
+        "Aguardar o próximo snapshot confirmado antes de avaliar qualquer entrada.",
+        "Usar níveis do gráfico apenas como contexto, não como gatilho de execução.",
+      ],
+    },
+    {
+      title: "Entre Venda e Compra",
+      items: [
+        "Compra fica bloqueada até preço, volume e Score Mestre reais confirmarem.",
+        "Venda/short também fica bloqueada; dado incompleto não gera vantagem operacional.",
+        "Aguardar é a única decisão válida até o snapshot real atualizar.",
+      ],
+    },
+    {
+      title: "Interpretação",
+      body: "Não há dados reais suficientes para decisão operacional. A escolha profissional é aguardar até preço, volume e score ficarem confirmados.",
+    },
+    {
+      title: "Foco Agora",
+      body: normalizedFocus || "Não executar operação até preço e volume reais ficarem confirmados.",
+    },
+  ];
+}
+
 function alignTextWithTradeSide(value: string, side: "buy" | "sell" | "wait" | "exit", locale: AppLocale) {
   if (side === "exit") {
     const conflicts = textHasBuySide(value) || textHasSellSide(value);
@@ -4835,7 +4995,9 @@ function alignTextWithTradeSide(value: string, side: "buy" | "sell" | "wait" | "
     const conflicts = textHasBuySide(value) && textHasSellSide(value);
     return conflicts ? tradeAlignedFallback(side, locale) : value;
   }
-  const conflicts = side === "buy" ? textHasSellSide(value) : textHasBuySide(value);
+  const conflicts = side === "buy"
+    ? textHasSellSide(value) || textHasStandAsideSide(value)
+    : textHasBuySide(value) || textHasStandAsideSide(value);
   return conflicts ? tradeAlignedFallback(side, locale) : value;
 }
 
@@ -4911,7 +5073,7 @@ function quoteFromMap(quotes: Record<string, QuotePayload>, symbol?: string | nu
   if (!normalized) return null;
   for (const alias of symbolAliases(symbol)) {
     const quote = quotes[alias] || quotes[normalizeSymbol(alias)];
-    if (quote) return quote;
+    if (quote && quoteMatchesSymbol(quote, symbol)) return quote;
   }
   return null;
 }
@@ -5555,10 +5717,61 @@ function formatAiUpdatedAt(value?: string | null, locale: AppLocale = "pt-BR") {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return locale === "en-US" ? "no time" : "sem horário";
 
-  return parsed.toLocaleTimeString(locale === "en-US" ? "en-US" : "pt-BR", {
+  return parsed.toLocaleString(locale === "en-US" ? "en-US" : "pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function saoPauloDateKey(value: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value || "";
+  return `${pick("year")}-${pick("month")}-${pick("day")}`;
+}
+
+function aiFreshnessStatus(detectedAt?: string | null, viewedAt?: string | null, locale: AppLocale = "pt-BR") {
+  const detectedDate = detectedAt ? new Date(detectedAt) : null;
+  const viewedDate = viewedAt ? new Date(viewedAt) : new Date();
+  const isEnglish = locale === "en-US";
+  if (!detectedDate || Number.isNaN(detectedDate.getTime()) || Number.isNaN(viewedDate.getTime())) {
+    return {
+      label: isEnglish ? "Status: no confirmed timestamp" : "Status: sem horário confirmado",
+      tone: "stale",
+    };
+  }
+
+  const detectedKey = saoPauloDateKey(detectedDate);
+  const viewedKey = saoPauloDateKey(viewedDate);
+  if (detectedKey === viewedKey) {
+    return {
+      label: isEnglish ? "Status: updated today" : "Status: atualizado hoje",
+      tone: "fresh",
+    };
+  }
+
+  const viewedParts = getSaoPauloParts(viewedDate);
+  const afterDailyReset = viewedParts.hour >= 7;
+  if (afterDailyReset) {
+    return {
+      label: isEnglish
+        ? "Status: previous-day read · waiting for today's new read"
+        : "Status: leitura do dia anterior · aguardando nova leitura do dia",
+      tone: "stale",
+    };
+  }
+
+  return {
+    label: isEnglish ? "Status: old read" : "Status: leitura antiga",
+    tone: "stale",
+  };
 }
 
 function playSyntheticMoneyFindingSound() {
@@ -7716,7 +7929,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       if (!candidate || typeof candidate !== "object") continue;
       const panel = candidate as StrategicPanel;
       const panelSymbol = normalizeSymbol(String(panel.symbol || panel.ticker || ""));
-      if (!panelSymbol || panelSymbol === selectedTicker) return panel;
+      if (panelSymbol && panelSymbol === selectedTicker) return panel;
     }
     return null;
   }, [currentRanking?.strategic_panel, currentSnapshotRow?.strategic_panel, currentTopSignal?.strategic_panel, selectedTicker, workspace?.strategic_panel]);
@@ -7730,38 +7943,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   );
   const currentWatchItem = useMemo(() => watchUniverse.find((item) => item.symbol === selectedTicker), [watchUniverse, selectedTicker]);
   const currentPublicQuote = resolveQuoteForSymbol(selectedTicker, publicQuotes, tickerTapeQuotes);
-  const watchlistQuoteFallback = useMemo<QuotePayload | null>(() => {
-    const watchPrice = firstFiniteNumber(currentWatchItem?.price);
-    if (watchPrice == null || watchPrice <= 0) return null;
-    return {
-      ...(activeQuote || currentPublicQuote || {}),
-      symbol: selectedTicker,
-      price: watchPrice,
-      change_pct: currentWatchItem?.changePct ?? activeQuote?.change_pct ?? currentPublicQuote?.change_pct ?? null,
-      volume: currentWatchItem?.volume ?? activeQuote?.volume ?? currentPublicQuote?.volume ?? null,
-      average_volume: currentWatchItem?.averageVolume ?? (activeQuote as any)?.average_volume ?? (currentPublicQuote as any)?.average_volume ?? null,
-      avg_volume: currentWatchItem?.averageVolume ?? (activeQuote as any)?.avg_volume ?? (currentPublicQuote as any)?.avg_volume ?? null,
-      rel_volume: currentWatchItem?.relVolume ?? (activeQuote as any)?.rel_volume ?? (currentPublicQuote as any)?.rel_volume ?? null,
-      source: "watchlist_fallback",
-      quote_status: "reference",
-    } as QuotePayload;
-  }, [
-    activeQuote,
-    currentPublicQuote,
-    currentWatchItem?.averageVolume,
-    currentWatchItem?.changePct,
-    currentWatchItem?.price,
-    currentWatchItem?.relVolume,
-    currentWatchItem?.volume,
-    selectedTicker,
-  ]);
-  const displayQuote = quoteHasMarketValue(snapshotQuote)
-    ? snapshotQuote
-    : quoteHasMarketValue(currentPublicQuote)
-      ? currentPublicQuote
-      : quoteHasMarketValue(activeQuote)
-        ? activeQuote
-        : watchlistQuoteFallback || snapshotQuote || activeQuote || currentPublicQuote;
+  const displayQuote = quoteHasMarketValue(activeQuote)
+    ? activeQuote
+    : quoteHasMarketValue(snapshotQuote)
+      ? snapshotQuote
+      : activeQuote || snapshotQuote || null;
   const displayQuoteHasCoreData = quoteHasMarketValue(displayQuote) && firstPositiveFiniteNumber(displayQuote?.volume) != null;
   const currentPublicInsight = normalizeSymbol(publicInsight?.symbol || "") === selectedTicker ? publicInsight : null;
   useEffect(() => {
@@ -8878,7 +9064,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const priceMovementLabel = marketSessionLabel(selectedTicker, appLocale);
   const hasPriceMovement = priceMovementValue != null || priceMovementPercent != null;
   const essentialDecisionCards = useMemo<EssentialDecisionCard[]>(() => {
-    if (currentStrategicPanel) {
+    if (displayQuoteHasCoreData && currentStrategicPanel) {
       return strategicPanelDecisionCards(currentStrategicPanel, appLocale);
     }
     const rawScoreValue = effectiveAiScore != null && Number.isFinite(Number(effectiveAiScore))
@@ -8966,7 +9152,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     workspace?.ai_tools,
   ]);
   const strategicConclusion = useMemo(() => {
-    if (currentStrategicPanel) {
+    if (displayQuoteHasCoreData && currentStrategicPanel) {
       return strategicConclusionFromPanel(currentStrategicPanel, appLocale);
     }
     const hasCoreData = Boolean(displayQuoteHasCoreData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
@@ -9035,7 +9221,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     [appLocale, selectedTicker, strategicConclusion],
   );
   const rawOperationalDecision = useMemo(() => {
-    if (currentStrategicPanel) {
+    if (displayQuoteHasCoreData && currentStrategicPanel) {
       return operationalDecisionFromPanel(currentStrategicPanel, appLocale);
     }
     const hasCoreData = Boolean(displayQuoteHasCoreData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
@@ -9061,8 +9247,20 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     [appLocale, rawOperationalDecision],
   );
   const strategicConclusionSections = useMemo(
-    () => alignStrategicSectionsWithTrade(rawStrategicConclusionSections, operationalDecision.action, appLocale),
-    [appLocale, operationalDecision.action, rawStrategicConclusionSections],
+    () => {
+      if (!displayQuoteHasCoreData) {
+        return noDataStrategicSections(appLocale, selectedTicker, strategicConclusion.focus);
+      }
+      return alignStrategicSectionsWithTrade(rawStrategicConclusionSections, operationalDecision.action, appLocale);
+    },
+    [
+      appLocale,
+      displayQuoteHasCoreData,
+      operationalDecision.action,
+      rawStrategicConclusionSections,
+      selectedTicker,
+      strategicConclusion.focus,
+    ],
   );
   const strategicConclusionBasis = useMemo(
     () => alignStrategicBasisWithTrade(strategicConclusion.basis, operationalDecision.action, appLocale),
@@ -9940,6 +10138,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 const mainReadLines = formatAiMainReadText(mainReadText, appLocale);
                 const detectedAt = resolveAiFindingTimestamp(item);
                 const publishedAt = resolveAiPublishedTimestamp(item);
+                const freshness = aiFreshnessStatus(detectedAt, viewedAtIso, appLocale);
 
                 return (
                   <div key={`${currentTab}-${item.ticker}-${index}`} className="snbr-tool-row">
@@ -9950,9 +10149,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                           <p>{isUsLocale ? "Daily alert from the current lens, with detection time and execution criteria." : "Alerta diário da lente atual, com horário detectado e critérios de execução."}</p>
                         </div>
                         <div className="snbr-news-chip-row snbr-temporal-chip-row">
-                          <span className="snbr-chip">{isUsLocale ? "Detected at" : "Detectado às"}: {formatAiUpdatedAt(detectedAt, appLocale)}</span>
+                          <span className="snbr-chip">{isUsLocale ? "Detected" : "Detectado"}: {formatAiUpdatedAt(detectedAt, appLocale)}</span>
                           {publishedAt ? <span className="snbr-chip">{isUsLocale ? "Published at" : "Publicado às"}: {formatAiUpdatedAt(publishedAt, appLocale)}</span> : null}
-                          <span className="snbr-chip">{isUsLocale ? "Viewed at" : "Visualizado às"}: {formatAiUpdatedAt(viewedAtIso, appLocale)}</span>
+                          <span className="snbr-chip">{isUsLocale ? "Viewed" : "Visualizado"}: {formatAiUpdatedAt(viewedAtIso, appLocale)}</span>
+                          <span className={cx("snbr-chip", freshness.tone)}>{freshness.label}</span>
                         </div>
                       </div>
                       <button className="snbr-asset-box snbr-asset-box-large" onClick={() => selectTicker(item.ticker)} type="button">
@@ -10094,6 +10294,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 ? "bearish"
                 : "neutral";
             const detectedAt = normalizeAlertTimestamp(item.timestamp);
+            const freshness = aiFreshnessStatus(detectedAt, viewedAtIso, appLocale);
 
             return (
               <div key={`${currentTab}-${item.id}-${index}`} className="snbr-tool-row">
@@ -10115,8 +10316,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       <p>{isUsLocale ? "Alert from the current lens, with detection time and setup parameters." : "Alerta da lente atual, com horário detectado e parâmetros do setup."}</p>
                     </div>
                     <div className="snbr-news-chip-row snbr-temporal-chip-row">
-                      <span className="snbr-chip">{isUsLocale ? "Detected at" : "Detectado às"}: {formatAiUpdatedAt(detectedAt, appLocale)}</span>
-                      <span className="snbr-chip">{isUsLocale ? "Viewed at" : "Visualizado às"}: {formatAiUpdatedAt(viewedAtIso, appLocale)}</span>
+                      <span className="snbr-chip">{isUsLocale ? "Detected" : "Detectado"}: {formatAiUpdatedAt(detectedAt, appLocale)}</span>
+                      <span className="snbr-chip">{isUsLocale ? "Viewed" : "Visualizado"}: {formatAiUpdatedAt(viewedAtIso, appLocale)}</span>
+                      <span className={cx("snbr-chip", freshness.tone)}>{freshness.label}</span>
                     </div>
                   </div>
                   <button className="snbr-asset-box snbr-asset-box-large" onClick={() => selectTicker(item.symbol)} type="button">
@@ -11332,7 +11534,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           {error ? <div className="snbr-empty">Erro: {error}</div> : null}
           {loading && token ? <div className="snbr-empty">Carregando contexto do usuário...</div> : null}
           {showSymbolHeader ? (
-            <section className="snbr-decision-panel" aria-label={isUsLocale ? "Strategic Analysis Panel" : "Painel de Análise Estratégica"}>
+            <section
+              className="snbr-decision-panel"
+              aria-label={isUsLocale ? "Strategic Analysis Panel" : "Painel de Análise Estratégica"}
+              data-core-data={displayQuoteHasCoreData ? "true" : "false"}
+              data-selected-symbol={selectedTicker}
+            >
               <div className="snbr-decision-head">
                 <strong>{isUsLocale ? "Strategic Analysis Panel" : "Painel de Análise Estratégica"}</strong>
                 <div className="snbr-decision-mode-actions">
@@ -11430,19 +11637,24 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                         <div className="snbr-conclusion-copy">
                           {strategicConclusionSections.length ? (
                             <div className="snbr-conclusion-sections">
-                              {strategicConclusionSections.map((section) => (
-                                <section key={section.title}>
-                                  <strong>{section.title}</strong>
-                                  {section.body ? <p>{section.body}</p> : null}
-                                  {section.items?.length ? (
-                                    <ul>
-                                      {section.items.map((item: string) => (
-                                        <li key={item}>{item}</li>
-                                      ))}
-                                    </ul>
-                                  ) : null}
-                                </section>
-                              ))}
+                              {strategicConclusionSections.map((section) => {
+                                const renderedItems = section.items?.filter((item: string) => (
+                                  normalizeUiText(item) !== "manter a leitura de compra somente com confirmacao; se falhar, voltar para aguardar."
+                                ));
+                                return (
+                                  <section key={section.title}>
+                                    <strong>{section.title}</strong>
+                                    {section.body ? <p>{section.body}</p> : null}
+                                    {renderedItems?.length ? (
+                                      <ul>
+                                        {renderedItems.map((item: string) => (
+                                          <li key={item}>{item}</li>
+                                        ))}
+                                      </ul>
+                                    ) : null}
+                                  </section>
+                                );
+                              })}
                             </div>
                           ) : (
                             <strong>{strategicConclusion.headline}</strong>

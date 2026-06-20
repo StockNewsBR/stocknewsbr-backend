@@ -3857,6 +3857,18 @@ a {
   justify-content: flex-end;
 }
 
+.snbr-chip.fresh {
+  border-color: rgba(46, 214, 147, 0.45);
+  color: var(--positive);
+  background: rgba(46, 214, 147, 0.1);
+}
+
+.snbr-chip.stale {
+  border-color: rgba(255, 190, 92, 0.48);
+  color: var(--warning);
+  background: rgba(255, 190, 92, 0.12);
+}
+
 .snbr-news-chip,
 .snbr-news-entity-chip {
   display: inline-flex;

@@ -87,10 +87,22 @@ assertIncludes(workspaceShell, "alignStrategicSectionsWithTrade", "strategic con
 assertIncludes(workspaceShell, "alignOperationalDecisionWithTrade", "operational decision copy is aligned with suggested trade side");
 assertIncludes(workspaceShell, "directionalBuyBlocked", "buy-side conclusion cannot override bearish/exit final decision");
 assertIncludes(workspaceShell, "positionProtectionSections", "exit/close-position decisions render dedicated protection copy");
+assertIncludes(workspaceShell, "textHasStandAsideSide", "buy/sell conclusions cannot fall back to stand-aside language");
 assertIncludes(workspaceShell, "Zona de proteção", "exit decisions use protection zone instead of buy/sell zone");
 assertIncludes(workspaceShell, "Fluxo de entrada não está confirmado", "exit decisions avoid buyer/seller wording in primary reasons");
 assertIncludes(workspaceShell, "Resultados de ${oilResults[1]}", "BR news headlines translate common English market title");
 assertIncludes(workspaceShell, "Nenhum achado desta IA para este ativo agora", "AI empty-state remains available inside the panel");
+assertIncludes(workspaceShell, "function formatAiUpdatedAt", "AI freshness uses a centralized timestamp formatter");
+assertIncludes(workspaceShell, "day: \"2-digit\"", "AI timestamps show the full day");
+assertIncludes(workspaceShell, "year: \"numeric\"", "AI timestamps show the full year");
+assertIncludes(workspaceShell, "function aiFreshnessStatus", "AI freshness status is computed explicitly");
+assertIncludes(workspaceShell, "Status: atualizado hoje", "current AI reads are labeled as updated today");
+assertIncludes(workspaceShell, "Status: leitura do dia anterior · aguardando nova leitura do dia", "previous-day AI reads after reset are labeled clearly");
+assertIncludes(workspaceShell, "Detectado", "AI findings show detection timestamp");
+assertIncludes(workspaceShell, "Visualizado", "AI findings show viewer timestamp");
+assertIncludes(workspaceSections, "data-news-state-count={newsRows.length}", "news panel exposes frontend state count for DOM audit");
+assertIncludes(css, ".snbr-chip.fresh", "fresh AI status has visual styling");
+assertIncludes(css, ".snbr-chip.stale", "stale AI status has visual styling");
 assertIncludes(workspaceShell, "getNews(token, deferredTicker, Date.now())", "common news tab fetches the ticker-specific public news route when bundle is empty");
 assertIncludes(webApi, "/public/market/news/${encodeURIComponent(ticker)}?limit=6", "frontend uses the public ticker-specific news endpoint");
 assertIncludes(publicNewsService, "_item_belongs_to_symbol(item, ticker)", "public news payload filters items by requested ticker");
@@ -130,4 +142,4 @@ assertIncludes(mobileRegistry, "AXIA6: [\"AXIA6.SA\", \"AXIA6 B3\", \"ELET6\"", 
 assertIncludes(mobileApi, "tickerPathValue", "mobile API canonicalizes ticker path values");
 assertIncludes(mobileApi, "canonicalSymbol(ticker)", "mobile API uses canonical symbol resolver");
 
-console.log(JSON.stringify({ ok: true, mission: "30", checks: 66 }, null, 2));
+console.log(JSON.stringify({ ok: true, mission: "30", checks: 78 }, null, 2));

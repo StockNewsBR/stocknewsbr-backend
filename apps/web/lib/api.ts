@@ -312,9 +312,17 @@ function quoteSymbolAliases(symbol?: string | null) {
 }
 
 function storeQuoteAliases(bySymbol: Map<string, QuotePayload>, item: QuotePayload, requestedSymbol?: string) {
+  const normalizedItemSymbol = normalizeQuoteSymbol(item.symbol || "");
+  const normalizedRequestedSymbol = normalizeQuoteSymbol(requestedSymbol || "");
   const normalized = normalizeQuoteSymbol(item.symbol || requestedSymbol || "");
   const normalizedItem = { ...item, symbol: normalized || item.symbol };
-  const aliases = [...quoteSymbolAliases(item.symbol), ...quoteSymbolAliases(requestedSymbol)];
+  const itemAliases = quoteSymbolAliases(item.symbol || requestedSymbol);
+  const requestedAliases = quoteSymbolAliases(requestedSymbol);
+  const requestMatchesItem =
+    !normalizedItemSymbol ||
+    !normalizedRequestedSymbol ||
+    requestedAliases.map(normalizeQuoteSymbol).includes(normalizedItemSymbol);
+  const aliases = requestMatchesItem ? [...itemAliases, ...requestedAliases] : itemAliases;
   for (const alias of aliases) {
     if (!alias) continue;
     const normalizedAlias = normalizeQuoteSymbol(alias);

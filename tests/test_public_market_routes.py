@@ -182,6 +182,37 @@ class PublicMarketRouteTests(unittest.TestCase):
         self.assertEqual(payload["price"], 15.23)
         self.assertEqual(payload["source"], "snapshot")
 
+    def test_live_batch_quote_rejects_cross_symbol_cache_payload(self):
+        with patch.object(
+            routes_public_market_live,
+            "cached_price_payloads",
+            return_value={
+                "ASAI3": {
+                    "symbol": "PETR4",
+                    "provider_symbol": "PETR4.SA",
+                    "display_symbol": "PETR4",
+                    "price": 38.8,
+                    "volume": 12_000_000,
+                    "source": "market_cache",
+                },
+                "PETR4": {
+                    "symbol": "PETR4",
+                    "provider_symbol": "PETR4.SA",
+                    "display_symbol": "PETR4",
+                    "price": 38.8,
+                    "volume": 12_000_000,
+                    "source": "market_cache",
+                },
+            },
+        ), patch.object(routes_public_market_live, "get_cached_quote_payload", return_value=None):
+            payload = routes_public_market_live.public_quotes("ASAI3,PETR4")
+
+        self.assertEqual(payload["items"][0]["symbol"], "ASAI3")
+        self.assertEqual(payload["items"][0]["source"], "empty")
+        self.assertIsNone(payload["items"][0]["price"])
+        self.assertEqual(payload["items"][1]["symbol"], "PETR4")
+        self.assertEqual(payload["items"][1]["price"], 38.8)
+
     def test_public_bundle_quote_falls_back_to_shared_quote_snapshot(self):
         with patch.object(
             routes_public_market_live,

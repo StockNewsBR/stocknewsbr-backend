@@ -119,6 +119,40 @@ def _symbol_aliases(symbol: str) -> list[str]:
     return _dedupe_alias_symbols(aliases)
 
 
+def _identity_forms(value) -> set[str]:
+    raw = str(value or "").upper().strip()
+    if not raw:
+        return set()
+
+    without_suffix = raw[:-3] if raw.endswith(".SA") else raw
+    compact = without_suffix.replace("-USD", "USD")
+    if compact.endswith("USDT"):
+        compact = f"{compact[:-4]}USD"
+
+    forms = {raw, without_suffix, compact}
+    if compact.endswith("USD"):
+        forms.add(compact.replace("USD", "-USD"))
+        forms.add(compact.replace("USD", "USDT"))
+    return {form for form in forms if form}
+
+
+def _payload_matches_requested_symbol(payload, symbol: str, *, require_identity: bool = False) -> bool:
+    if not isinstance(payload, dict):
+        return False
+
+    allowed: set[str] = set()
+    for alias in [*_symbol_aliases(symbol), _response_symbol(symbol)]:
+        allowed.update(_identity_forms(alias))
+
+    identities: set[str] = set()
+    for key in ("symbol", "display_symbol", "provider_symbol", "reference_symbol", "exact_contract", "ticker"):
+        identities.update(_identity_forms(payload.get(key)))
+
+    if not identities:
+        return not require_identity
+    return bool(allowed.intersection(identities))
+
+
 def _snapshot_master_context(symbol: str) -> dict:
     row = get_snapshot_ticker(_symbol_aliases(symbol))
     if not isinstance(row, dict):
@@ -337,6 +371,8 @@ def _resolve_cached_quote(cached_payloads, symbol: str, chart_quote_cache: dict 
         candidate = cached_payloads.get(alias)
         if not isinstance(candidate, dict):
             continue
+        if not _payload_matches_requested_symbol(candidate, symbol):
+            continue
         if _has_usable_quote_payload(candidate, allow_stale=False) and not _quote_needs_background_refresh(candidate):
             payload = {**candidate, "symbol": _response_symbol(symbol)}
             if payload.get("source") is None:
@@ -347,6 +383,8 @@ def _resolve_cached_quote(cached_payloads, symbol: str, chart_quote_cache: dict 
     for alias in _symbol_aliases(symbol):
         candidate = cached_payloads.get(alias)
         if not isinstance(candidate, dict):
+            continue
+        if not _payload_matches_requested_symbol(candidate, symbol):
             continue
         if _has_usable_quote_payload(candidate, allow_stale=True):
             payload = {**candidate, "symbol": _response_symbol(symbol)}
@@ -359,6 +397,8 @@ def _resolve_cached_quote(cached_payloads, symbol: str, chart_quote_cache: dict 
     for candidate in cached_payloads.values():
         if not isinstance(candidate, dict):
             continue
+        if not _payload_matches_requested_symbol(candidate, symbol, require_identity=True):
+            continue
         if _has_usable_quote_payload(candidate, allow_stale=True):
             payload = {**candidate, "symbol": _response_symbol(symbol)}
             if payload.get("source") is None:
@@ -368,7 +408,7 @@ def _resolve_cached_quote(cached_payloads, symbol: str, chart_quote_cache: dict 
             return payload
 
     snapshot_payload = get_cached_quote_payload(symbol)
-    if _has_usable_quote_payload(snapshot_payload, allow_stale=True):
+    if _payload_matches_requested_symbol(snapshot_payload, symbol) and _has_usable_quote_payload(snapshot_payload, allow_stale=True):
         payload = {**snapshot_payload, "symbol": _response_symbol(symbol)}
         payload["quote_status"] = classify_quote_payload(payload)
         return payload
@@ -450,12 +490,18 @@ def _resolve_quote_for_chart(symbol: str):
         payload = cached_payloads.get(alias)
         if not isinstance(payload, dict):
             continue
+        if not _payload_matches_requested_symbol(payload, symbol):
+            continue
         price = _safe_float(payload.get("price"))
         if price > 0:
             return {**payload, "symbol": _response_symbol(symbol)}
 
     for payload in cached_payloads.values():
-        if isinstance(payload, dict) and _safe_float(payload.get("price")) > 0:
+        if (
+            isinstance(payload, dict)
+            and _payload_matches_requested_symbol(payload, symbol, require_identity=True)
+            and _safe_float(payload.get("price")) > 0
+        ):
             return {**payload, "symbol": _response_symbol(symbol)}
 
     return None

@@ -205,7 +205,12 @@ export function WorkspaceNewsPanel({
     ? `No relevant news for ${selectedTicker} right now. Try refreshing later.`
     : "Sem notícias relevantes para este ativo agora. Tente atualizar mais tarde.";
   return (
-    <section id="panel-news" className="snbr-two-column">
+    <section
+      id="panel-news"
+      className="snbr-two-column"
+      data-news-symbol={selectedTicker}
+      data-news-state-count={newsRows.length}
+    >
       <div className="snbr-plain-panel">
         <div className="snbr-section-head">
           <div>
