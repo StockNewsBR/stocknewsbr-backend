@@ -1345,6 +1345,7 @@ function formatNewsClock(value?: string | null, locale: AppLocale = "pt-BR") {
   return new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     month: "2-digit",
+    year: "numeric",
     timeZone: "America/Sao_Paulo",
     hour: "2-digit",
     minute: "2-digit",
@@ -1371,6 +1372,7 @@ function normalizeSourceTimestamp(value: unknown): string | null {
 function newsSourceTimestamp(item: NewsItem): string | null {
   const raw = item as any;
   return (
+    normalizeSourceTimestamp(raw.published_at_source) ||
     normalizeSourceTimestamp(raw.published_at) ||
     normalizeSourceTimestamp(raw.provider_publish_time) ||
     normalizeSourceTimestamp(raw.providerPublishTime) ||
@@ -1382,6 +1384,36 @@ function newsSourceTimestamp(item: NewsItem): string | null {
     normalizeSourceTimestamp(raw.content?.publishedAt) ||
     normalizeSourceTimestamp(raw.content?.displayTime)
   );
+}
+
+function formatNewsAge(ageMinutes?: number | null, publishedAtIso?: string | null, locale: AppLocale = "pt-BR") {
+  const missing = locale === "en-US" ? "unknown age" : "idade não informada";
+  let minutes = Number(ageMinutes);
+  if (!Number.isFinite(minutes) && publishedAtIso) {
+    const parsed = Date.parse(publishedAtIso);
+    if (Number.isFinite(parsed)) minutes = Math.max(0, Math.floor((Date.now() - parsed) / 60000));
+  }
+  if (!Number.isFinite(minutes)) return missing;
+  if (minutes < 60) return locale === "en-US" ? `${Math.round(minutes)} min` : `${Math.round(minutes)} min`;
+  if (minutes < 1440) {
+    const hours = Math.floor(minutes / 60);
+    return locale === "en-US" ? `${hours} h` : `${hours} h`;
+  }
+  const days = Math.floor(minutes / 1440);
+  return locale === "en-US" ? `${days} d` : `${days} d`;
+}
+
+function sourceDateIsToday(publishedAtIso?: string | null) {
+  if (!publishedAtIso) return false;
+  const parsed = new Date(publishedAtIso);
+  if (Number.isNaN(parsed.getTime())) return false;
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return formatter.format(parsed) === formatter.format(new Date());
 }
 
 function expandPortugueseMarketTerms(value?: string | null) {
@@ -1963,6 +1995,19 @@ function getAlertResetKey(date = new Date()) {
   const saoPaulo = new Date(date.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
   if (saoPaulo.getHours() < 7) saoPaulo.setDate(saoPaulo.getDate() - 1);
   return saoPaulo.toISOString().slice(0, 10);
+}
+
+function aiFindingResetKey(row?: Partial<AiToolRow> | null) {
+  const timestamp = row ? resolveAiFindingTimestamp(row as AiToolRow) : null;
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  return saoPauloDateKey(date);
+}
+
+function isFreshAiFindingForReset(row?: Partial<AiToolRow> | null, now = new Date()) {
+  const rowKey = aiFindingResetKey(row);
+  return Boolean(rowKey && rowKey === getAlertResetKey(now));
 }
 
 function symbolFamilyKey(symbol?: string | null) {
@@ -3249,6 +3294,17 @@ function companyAliasesForSymbol(symbol: string) {
     aliases.add("Ford");
     aliases.add("Ford Motor");
   }
+  if (normalized === "BULL") {
+    aliases.add("Webull");
+    aliases.add("Webull Corp");
+    aliases.add("Webull Corporation");
+  }
+  if (normalized === "BYDDY") {
+    aliases.add("BYD");
+    aliases.add("BYD Co");
+    aliases.add("BYD Company");
+    aliases.add("BYD Co Ltd");
+  }
   if (normalized.startsWith("PETR")) {
     aliases.add("Petrobras");
     aliases.add("Petrobras PN");
@@ -3262,11 +3318,26 @@ function companyAliasesForSymbol(symbol: string) {
   if (normalized.startsWith("ITUB")) {
     aliases.add("Itau");
     aliases.add("Itaú");
+    aliases.add("Itau Unibanco");
+    aliases.add("Itaú Unibanco");
     aliases.add("ITUB");
+  }
+  if (normalized.startsWith("BBAS")) {
+    aliases.add("Banco do Brasil");
+    aliases.add("BBAS");
   }
   if (normalized.startsWith("VALE")) {
     aliases.add("Vale");
     aliases.add("VALE");
+  }
+  if (normalized === "BTCUSD") {
+    aliases.add("Bitcoin");
+    aliases.add("BTC");
+  }
+  if (normalized === "ETHUSD") {
+    aliases.add("Ethereum");
+    aliases.add("Ether");
+    aliases.add("ETH");
   }
 
   return Array.from(aliases).filter(Boolean);
@@ -3293,7 +3364,11 @@ function newsMatchesSelectedTicker(item: NewsItem, symbol: string) {
   const aliases = companyAliasesForSymbol(normalized);
   const aliasHit = aliases.some((alias) => haystack.includes(String(alias).toLowerCase()));
   const titleAliasHit = aliases.some((alias) => titleLower.includes(String(alias).toLowerCase()));
-  const tickerMatches = normalizeSymbol(item.ticker || "") === normalized;
+  const directMarker = item.direct_ticker_match;
+  const backendMatchedSymbol = normalizeSymbol((item as any).matched_symbol || "");
+  const tickerMatches =
+    backendMatchedSymbol === normalized ||
+    (directMarker !== false && normalizeSymbol(item.ticker || "") === normalized);
   const foreignTickerInTitle = Array.from(title.matchAll(/\(([A-Z]{1,6}\d{0,2})\)/g))
     .map((match) => normalizeSymbol(match[1]))
     .some((ticker) => ticker && ticker !== normalized && !aliases.map(normalizeSymbol).includes(ticker));
@@ -3631,6 +3706,25 @@ type OperationalDecision = {
   risk: string;
   reasons: string[];
   levels: OperationalDecisionLevel[];
+};
+
+type StrategicDecisionSide = "buy" | "sell" | "wait" | "exit" | "no_data";
+
+type StrategicDecisionContract = {
+  side: StrategicDecisionSide;
+  tone: DecisionTone;
+  decisionNow: string;
+  tradeSuggested: string;
+  direction: string;
+  regime: string;
+  bias: string;
+  risk: string;
+  confidence: number | null;
+  confidenceLabel: string;
+  reasons: string[];
+  levels: OperationalDecisionLevel[];
+  sections: NonNullable<StrategicConclusion["sections"]>;
+  basis: string[];
 };
 
 function currentFiveMinuteBucket() {
@@ -5068,6 +5162,274 @@ function alignOperationalDecisionWithTrade(decision: OperationalDecision, locale
   };
 }
 
+function decisionCardByLabel(cards: EssentialDecisionCard[], pattern: RegExp) {
+  return cards.find((card) => pattern.test(normalizeUiText(card.label)));
+}
+
+function decisionSideFromCards(cards: EssentialDecisionCard[], fallbackAction: string): StrategicDecisionSide {
+  const tradeCard =
+    decisionCardByLabel(cards, /trade sugerido|suggested trade|acao recomendada|recommended action/) ||
+    cards[2];
+  const fromTrade = tradeActionSide(tradeCard?.value);
+  if (fromTrade === "buy" || fromTrade === "sell" || fromTrade === "exit") return fromTrade;
+  const fromAction = tradeActionSide(fallbackAction);
+  if (fromAction === "buy" || fromAction === "sell" || fromAction === "exit") return fromAction;
+  return "wait";
+}
+
+function strategicDecisionLabels(side: StrategicDecisionSide, locale: AppLocale) {
+  const isEnglish = locale === "en-US";
+  if (side === "no_data") {
+    return {
+      decisionNow: isEnglish ? "WAIT FOR REAL DATA" : "AGUARDAR DADOS REAIS",
+      tradeSuggested: isEnglish ? "Wait" : "Aguardar",
+      direction: isEnglish ? "Range" : "Lateral",
+      regime: isEnglish ? "Monitoring" : "Monitorando",
+      bias: isEnglish ? "Monitoring" : "Monitorando",
+      tone: "watch" as DecisionTone,
+    };
+  }
+  if (side === "buy") {
+    return {
+      decisionNow: isEnglish ? "BUY WITH CONFIRMATION" : "COMPRA COM CONFIRMAÇÃO",
+      tradeSuggested: isEnglish ? "Buy/Long" : "Compra",
+      direction: isEnglish ? "Up" : "Alta",
+      regime: isEnglish ? "Up" : "Alta",
+      bias: isEnglish ? "Up" : "Alta",
+      tone: "bullish" as DecisionTone,
+    };
+  }
+  if (side === "sell") {
+    return {
+      decisionNow: isEnglish ? "WAIT FOR SELL/SHORT CONFIRMATION" : "AGUARDAR VENDA / SHORT COM CONFIRMAÇÃO",
+      tradeSuggested: isEnglish ? "Sell/Short" : "Venda / Short",
+      direction: isEnglish ? "Down" : "Baixa",
+      regime: isEnglish ? "Down" : "Baixa",
+      bias: isEnglish ? "Down" : "Baixa",
+      tone: "bearish" as DecisionTone,
+    };
+  }
+  if (side === "exit") {
+    return {
+      decisionNow: isEnglish ? "CLOSE / PROTECT POSITION" : "ENCERRAR / PROTEGER POSIÇÃO",
+      tradeSuggested: isEnglish ? "Close position" : "Encerrar posição",
+      direction: isEnglish ? "Exit" : "Saída",
+      regime: isEnglish ? "Protection" : "Proteção",
+      bias: isEnglish ? "Defensive" : "Defensivo",
+      tone: "exit" as DecisionTone,
+    };
+  }
+  return {
+    decisionNow: isEnglish ? "WAIT FOR CONFIRMATION" : "AGUARDAR CONFIRMAÇÃO",
+    tradeSuggested: isEnglish ? "Wait" : "Aguardar",
+    direction: isEnglish ? "Range" : "Lateral",
+    regime: isEnglish ? "Neutral" : "Neutro",
+    bias: isEnglish ? "Neutral" : "Neutro",
+    tone: "watch" as DecisionTone,
+  };
+}
+
+function strategicDecisionSections(
+  side: StrategicDecisionSide,
+  locale: AppLocale,
+  symbol: string,
+): NonNullable<StrategicConclusion["sections"]> {
+  const isEnglish = locale === "en-US";
+  const assetLabel = normalizeSymbol(symbol) || (isEnglish ? "the asset" : "o ativo");
+
+  if (side === "no_data") return noDataStrategicSections(locale, symbol);
+
+  if (isEnglish) {
+    if (side === "buy") {
+      return [
+        { title: "Current Scenario", body: `${assetLabel}: controlled long thesis. Execution is valid only after a clean price trigger, real volume and confirmed flow.` },
+        { title: "Strategic Directive", items: ["Use the Master Score as strength context.", "Act only after price confirms the trigger.", "Keep invalidation objective below the defended structure."] },
+        { title: "Buy Confirmation", items: ["Long execution needs a defended pullback or clean breakout.", "Volume must support the entry candle.", "If the trigger fails, return to Wait."] },
+        { title: "Interpretation", body: "The final read is constructive, but the panel is not authorizing anticipation. Confirmation comes first." },
+        { title: "Focus now", body: "Wait for the buyer trigger, confirm volume, then execute with defined invalidation." },
+      ];
+    }
+    if (side === "sell") {
+      return [
+        { title: "Current Scenario", body: `${assetLabel}: downside thesis is active, but execution needs a clear trigger. The panel is not authorizing late action.` },
+        { title: "Strategic Directive", items: ["Plan short-side execution only after support failure or resistance rejection.", "Require price, volume and flow confirmation.", "Keep invalidation tight and objective."] },
+        { title: "Sell Confirmation", items: ["The sell/short side has priority only with confirmation.", "Avoid late execution into support.", "If the trigger fails, return to Wait."] },
+        { title: "Interpretation", body: "The final read is bearish. Action is conditional: sell/short only after the chart confirms the downside trigger." },
+        { title: "Focus now", body: "Wait for support loss, resistance rejection or seller flow confirmation before any sell/short execution." },
+      ];
+    }
+    if (side === "exit") {
+      return [
+        { title: "Current Scenario", body: `${assetLabel}: the active decision is protection of the current exposure.` },
+        { title: "Strategic Directive", items: ["Reduce exposure first.", "Keep capital protection as the priority.", "Wait for a fresh confirmed snapshot before acting again."] },
+        { title: "Position Protection", items: ["No additional execution while protection is the active decision.", "Use the next confirmed structure to reassess.", "Keep risk limits objective."] },
+        { title: "Interpretation", body: "The final read is defensive. The correct action is to protect exposure and wait for a new confirmed setup." },
+        { title: "Focus now", body: "Protect capital and reassess only after the next confirmed structure." },
+      ];
+    }
+    return [
+      { title: "Current Scenario", body: `${assetLabel}: mixed read. The panel is waiting for price, volume and flow to align.` },
+      { title: "Strategic Directive", items: ["Do not anticipate execution.", "Wait for the next confirmed 5-minute structure.", "Use price and volume as context until a clean trigger appears."] },
+      { title: "Wait For Confirmation", items: ["No operational side has enough confirmation yet.", "The next trigger must be confirmed by price and volume.", "If signals stay mixed, the correct action remains Wait."] },
+      { title: "Interpretation", body: "The final read is neutral. The panel is intentionally blocking directional execution until confirmation improves." },
+      { title: "Focus now", body: "Wait for price, volume and flow to align before choosing a side." },
+    ];
+  }
+
+  if (side === "buy") {
+    return [
+      { title: "Cenário Atual", body: `${assetLabel}: tese compradora controlada. A execução só fica válida depois de gatilho limpo no preço, volume real e fluxo confirmado.` },
+      { title: "Direção da Estratégia", items: ["Usar o Score Mestre como contexto de força.", "Agir apenas depois de confirmação clara no preço.", "Manter invalidação objetiva abaixo da estrutura defendida."] },
+      { title: "Confirmação da compra", items: ["A execução compradora precisa de pullback defendido ou rompimento limpo.", "O volume precisa sustentar a vela de entrada.", "Se o gatilho falhar, voltar para Aguardar."] },
+      { title: "Interpretação", body: "A leitura final é construtiva, mas o painel não autoriza antecipação. Confirmação vem primeiro." },
+      { title: "Foco Agora", body: "Aguardar gatilho comprador, confirmar volume e executar com invalidação definida." },
+    ];
+  }
+  if (side === "sell") {
+    return [
+      { title: "Cenário Atual", body: `${assetLabel}: tese vendedora ativa, mas a execução precisa de gatilho claro. O painel não autoriza atuação atrasada.` },
+      { title: "Direção da Estratégia", items: ["Planejar venda/short apenas após perda de suporte ou rejeição em resistência.", "Exigir confirmação de preço, volume e fluxo.", "Manter invalidação curta e objetiva."] },
+      { title: "Confirmação da venda", items: ["Venda/short tem prioridade somente com confirmação.", "Evitar execução atrasada em cima do suporte.", "Se o gatilho falhar, voltar para Aguardar."] },
+      { title: "Interpretação", body: "A leitura final é baixista. A ação é condicional: venda/short apenas depois que o gráfico confirmar o gatilho vendedor." },
+      { title: "Foco Agora", body: "Aguardar perda de suporte, rejeição em resistência ou confirmação de fluxo vendedor antes de qualquer venda/short." },
+    ];
+  }
+  if (side === "exit") {
+    return [
+      { title: "Cenário Atual", body: `${assetLabel}: a decisão ativa é proteger a exposição atual.` },
+      { title: "Direção da Estratégia", items: ["Reduzir exposição primeiro.", "Manter proteção de capital como prioridade.", "Aguardar novo snapshot confirmado antes de agir novamente."] },
+      { title: "Proteção da posição", items: ["Sem execução adicional enquanto proteção for a decisão ativa.", "Usar a próxima estrutura confirmada para reavaliar.", "Manter limites de risco objetivos."] },
+      { title: "Interpretação", body: "A leitura final é defensiva. A ação correta é proteger exposição e aguardar novo setup confirmado." },
+      { title: "Foco Agora", body: "Proteger capital e reavaliar apenas depois da próxima estrutura confirmada." },
+    ];
+  }
+  return [
+    { title: "Cenário Atual", body: `${assetLabel}: leitura mista. O painel aguarda preço, volume e fluxo alinharem.` },
+    { title: "Direção da Estratégia", items: ["Não antecipar execução.", "Aguardar a próxima estrutura de 5 minutos confirmada.", "Usar preço e volume como contexto até aparecer gatilho limpo."] },
+    { title: "Aguardar confirmação", items: ["Nenhum lado operacional tem confirmação suficiente ainda.", "O próximo gatilho precisa ser confirmado por preço e volume.", "Se os sinais continuarem mistos, a ação correta permanece Aguardar."] },
+    { title: "Interpretação", body: "A leitura final é neutra. O painel bloqueia execução direcional até a confirmação melhorar." },
+    { title: "Foco Agora", body: "Aguardar preço, volume e fluxo alinharem antes de escolher um lado." },
+  ];
+}
+
+function strategicDecisionBasis(contract: Pick<StrategicDecisionContract, "bias" | "risk" | "tradeSuggested" | "decisionNow">, locale: AppLocale) {
+  if (locale === "en-US") {
+    return [
+      `Final decision: ${contract.decisionNow}`,
+      `Suggested trade: ${contract.tradeSuggested}`,
+      `Bias: ${contract.bias}`,
+      `Risk: ${contract.risk}`,
+    ];
+  }
+  return [
+    `Decisão final: ${contract.decisionNow}`,
+    `Trade sugerido: ${contract.tradeSuggested}`,
+    `Viés: ${contract.bias}`,
+    `Risco: ${contract.risk}`,
+  ];
+}
+
+function buildStrategicDecisionContract(input: {
+  locale: AppLocale;
+  symbol: string;
+  cards: EssentialDecisionCard[];
+  operationalDecision: OperationalDecision;
+  hasCoreData: boolean;
+}): StrategicDecisionContract {
+  const side = input.hasCoreData
+    ? decisionSideFromCards(input.cards, input.operationalDecision.action)
+    : "no_data";
+  const labels = strategicDecisionLabels(side, input.locale);
+  const risk = input.operationalDecision.risk || (input.locale === "en-US" ? "No read" : "Sem leitura");
+  const reasons = (() => {
+    if (side === "no_data") {
+      return input.locale === "en-US"
+        ? ["Price, volume or Master Score are not complete", "Operational trade remains blocked", "Wait for the next confirmed snapshot"]
+        : ["Preço, volume ou Score Mestre ainda não estão completos", "Trade operacional permanece bloqueado", "Aguardar o próximo snapshot confirmado"];
+    }
+    if (side === "buy") {
+      return input.locale === "en-US"
+        ? ["Buy thesis is active only with confirmation", "Price and volume must validate the trigger", "Risk stays controlled by objective invalidation"]
+        : ["Tese compradora ativa somente com confirmação", "Preço e volume precisam validar o gatilho", "Risco segue controlado por invalidação objetiva"];
+    }
+    if (side === "sell") {
+      return input.locale === "en-US"
+        ? ["Bearish bias is active only with confirmation", "Price and volume must validate the sell/short trigger", "Invalidation stays objective above the failed level"]
+        : ["Viés vendedor ativo somente com confirmação", "Preço e volume precisam validar o gatilho de venda/short", "Invalidação segue objetiva acima do nível que falhar"];
+    }
+    if (side === "exit") {
+      return input.locale === "en-US"
+        ? ["Protection is the active decision", "Reduce exposure before reassessing", "Wait for a fresh confirmed structure"]
+        : ["Proteção é a decisão ativa", "Reduzir exposição antes de reavaliar", "Aguardar nova estrutura confirmada"];
+    }
+    return input.locale === "en-US"
+      ? ["No side has enough confirmation", "Price, volume and flow must align", "Waiting is the professional decision now"]
+      : ["Nenhum lado tem confirmação suficiente", "Preço, volume e fluxo precisam alinhar", "Aguardar é a decisão profissional agora"];
+  })();
+
+  const levels = input.operationalDecision.levels.map((level) => ({
+    ...level,
+    value: alignTextWithTradeSide(level.value, side === "no_data" ? "wait" : side, input.locale),
+  }));
+  const contract = {
+    side,
+    tone: labels.tone,
+    decisionNow: labels.decisionNow,
+    tradeSuggested: labels.tradeSuggested,
+    direction: labels.direction,
+    regime: labels.regime,
+    bias: labels.bias,
+    risk,
+    confidence: input.operationalDecision.confidence,
+    confidenceLabel: input.operationalDecision.confidenceLabel,
+    reasons,
+    levels,
+    sections: strategicDecisionSections(side, input.locale, input.symbol),
+    basis: [] as string[],
+  };
+  return {
+    ...contract,
+    basis: strategicDecisionBasis(contract, input.locale),
+  };
+}
+
+function operationalDecisionFromStrategicContract(contract: StrategicDecisionContract): OperationalDecision {
+  return {
+    action: contract.decisionNow,
+    tone: contract.tone,
+    confidence: contract.confidence,
+    confidenceLabel: contract.confidenceLabel,
+    bias: contract.bias,
+    risk: contract.risk,
+    reasons: contract.reasons,
+    levels: contract.levels,
+  };
+}
+
+function alignDecisionCardsWithStrategicContract(
+  cards: EssentialDecisionCard[],
+  contract: StrategicDecisionContract,
+  locale: AppLocale,
+) {
+  const tone = contract.tone;
+  return cards.map((card, index) => {
+    const label = normalizeUiText(card.label);
+    if (/direcao provavel|likely direction/.test(label)) {
+      return { ...card, value: contract.direction, tone };
+    }
+    if (/trade sugerido|suggested trade|acao recomendada|recommended action/.test(label) || index === 2) {
+      return { ...card, label: locale === "en-US" ? "Suggested Trade" : "Trade Sugerido", value: contract.tradeSuggested, tone };
+    }
+    if (/regime/.test(label)) {
+      return { ...card, value: contract.regime, tone };
+    }
+    if (/risco|risk/.test(label)) {
+      return { ...card, value: contract.risk, tone: strategicRiskLevelFromText(contract.risk) === "high" ? "bearish" : tone };
+    }
+    return card;
+  });
+}
+
 function quoteFromMap(quotes: Record<string, QuotePayload>, symbol?: string | null) {
   const normalized = normalizeSymbol(String(symbol || ""));
   if (!normalized) return null;
@@ -5749,8 +6111,8 @@ function aiFreshnessStatus(detectedAt?: string | null, viewedAt?: string | null,
   }
 
   const detectedKey = saoPauloDateKey(detectedDate);
-  const viewedKey = saoPauloDateKey(viewedDate);
-  if (detectedKey === viewedKey) {
+  const activeResetKey = getAlertResetKey(viewedDate);
+  if (detectedKey === activeResetKey) {
     return {
       label: isEnglish ? "Status: updated today" : "Status: atualizado hoje",
       tone: "fresh",
@@ -8142,6 +8504,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         const ticker = normalizeSymbol(String((row as any).ticker || (row as any).symbol || ""));
         if (!ticker) return;
         const candidate = { ...(row as AiToolRow), tool: toolKey, ticker };
+        if (!isFreshAiFindingForReset(candidate)) return;
         if (!isAiDealFinding(candidate)) return;
         unique.add(aiAlertSignalKey(candidate));
       });
@@ -8162,6 +8525,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         const ticker = normalizeSymbol(String((row as any).ticker || (row as any).symbol || ""));
         if (!ticker) return;
         const candidate = { ...(row as AiToolRow), tool: toolKey, ticker };
+        if (!isFreshAiFindingForReset(candidate)) return;
         if (!isAiDealFinding(candidate)) return;
         signatures.push(aiAlertComparableSignature(candidate));
       });
@@ -8201,7 +8565,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       return matchedNews.map((item, index) => {
         const publishedAtIso = newsSourceTimestamp(item);
         const publishedTime = formatNewsClock(publishedAtIso, appLocale);
-        const age = publishedTime;
+        const ageMinutes = Number.isFinite(Number(item.age_minutes)) ? Number(item.age_minutes) : null;
+        const age = formatNewsAge(ageMinutes, publishedAtIso, appLocale);
+        const sourceName = item.source_name || item.source || "Yahoo Finance";
+        const sourceUrl = item.source_url || item.url || null;
+        const matchedSymbol = normalizeSymbol(item.matched_symbol || item.ticker || selectedTicker) || selectedTicker;
+        const isToday = typeof item.is_today === "boolean" ? item.is_today : sourceDateIsToday(publishedAtIso);
+        const isStale = typeof item.is_stale === "boolean" ? item.is_stale : !isToday;
+        const isIncomplete = Boolean(item.is_incomplete || !publishedAtIso || !sourceName || !sourceUrl);
         const labels = Array.isArray(item.labels) ? item.labels.filter(Boolean) : [];
         const entities = Array.isArray(item.entities)
           ? item.entities.filter(Boolean).map((entity) => appLocale === "en-US" ? localizeUiText(entity, appLocale, selectedTicker) : expandPortugueseMarketTerms(entity))
@@ -8221,13 +8592,23 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         const quality = isUsLocale ? (item.useful !== false ? "Useful" : "Noise") : (item.useful !== false ? "Útil" : "Ruído");
         return {
           id: item.id || `${selectedTicker}-${index}`,
-          symbol: item.ticker || selectedTicker,
+          symbol: matchedSymbol,
           headline,
           title,
-          source: item.source || "Yahoo Finance",
+          source: sourceName,
+          sourceName,
+          sourceUrl,
           age,
           publishedTime,
           publishedAtIso,
+          fetchedAt: item.fetched_at || item.detected_at || null,
+          ageMinutes,
+          isToday,
+          isStale,
+          matchedSymbol,
+          language: item.language || null,
+          publicationStatus: item.publication_status || (publishedAtIso ? "ok" : "missing_source_time"),
+          isIncomplete,
           sector,
           industry,
           labels: labelsForLocale,
@@ -8236,7 +8617,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           sentiment,
           quality,
           useful: item.useful !== false,
-          relevanceScore: item.relevance_score,
+          relevanceScore: item.relevance_score ?? item.relevance,
           rankingScore: item.ranking_score,
           confidenceScore: item.confidence_score,
           sameStoryCount: item.same_story_count || 1,
@@ -8623,6 +9004,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         };
       });
       return [...backendRows]
+        .filter((row) => isFreshAiFindingForReset(row))
         .filter(isAiDealFinding)
         .sort((a, b) => {
           const bTime = Date.parse(resolveAiAlertTimestamp(b) || "");
@@ -8792,6 +9174,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           tool: currentAiKey,
           ticker: normalizeSymbol(String((row as any).ticker || (row as any).symbol || "")),
         }))
+        .filter((row) => isFreshAiFindingForReset(row))
         .filter(isAiDealFinding)
         .map((row) => aiAlertSignalKey(row)),
     );
@@ -8881,7 +9264,26 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     aiAlertHistory[currentTab]?.rows.length
       ? aiAlertHistory[currentTab].rows
       : null;
-  const currentTabAlertRows = (currentTabHistory?.length ? currentTabHistory : visibleAiRowsWithTimestamps).filter(isAiDealFinding);
+  const currentTabAlertRows = (currentTabHistory?.length ? currentTabHistory : visibleAiRowsWithTimestamps)
+    .filter((row) => isFreshAiFindingForReset(row))
+    .filter(isAiDealFinding);
+  const currentAiStaleRows = useMemo(
+    () => currentAiRows
+      .map((row) => ({
+        ...(row as AiToolRow),
+        tool: currentAiKey || (row as AiToolRow).tool,
+        ticker: normalizeSymbol(String((row as any).ticker || (row as any).symbol || selectedTicker)),
+      }))
+      .filter((row) => aiFindingResetKey(row) && !isFreshAiFindingForReset(row)),
+    [currentAiKey, currentAiRows, selectedTicker],
+  );
+  const currentAiFreshnessStatus = currentTabAlertRows.length
+    ? "updated_today"
+    : currentAiStaleRows.length
+      ? "awaiting_new_daily_read"
+      : currentAiRows.length
+        ? "no_current_asset_finding"
+        : "no_payload_rows";
   const currentAiPayloadAvailable = Boolean(
     currentAiKey &&
     (
@@ -8903,6 +9305,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         body: isUsLocale ? "No payload was received for this lens yet." : "Nenhum payload foi recebido para esta lente ainda.",
       };
     }
+    if (currentAiStaleRows.length > 0 && currentTabAlertRows.length === 0) {
+      return {
+        title: isUsLocale ? "Waiting for today's new read." : "Aguardando nova leitura do dia.",
+        body: isUsLocale
+          ? "Previous reads are visible only as stale context and do not count as current AI findings after the 07:00 reset."
+          : "Leituras anteriores ficam apenas como contexto antigo e não contam como achados atuais depois do reset das 07:00.",
+      };
+    }
     if (currentAiRows.length > 0 && currentTabAlertRows.length === 0) {
       return {
         title: isUsLocale ? "No finding for this asset right now." : "Nenhum achado desta IA para este ativo agora.",
@@ -8916,7 +9326,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       };
     }
     return null;
-  }, [currentAiKey, currentAiPayloadAvailable, currentAiRows.length, currentTabAlertRows.length, isUsLocale, loading]);
+  }, [currentAiKey, currentAiPayloadAvailable, currentAiRows.length, currentAiStaleRows.length, currentTabAlertRows.length, isUsLocale, loading]);
   const showSymbolHeader = currentTab === "grafico";
   const profileName = access?.display_name || access?.email || "Trader";
   const activePoll = useMemo(
@@ -9081,7 +9491,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       keys.flatMap((key) => [
         ...(workspace?.ai_tools?.[key] || []),
         ...(publicAiTools?.tools?.[key] || []),
-      ]).filter(sameTicker);
+      ])
+        .map((row) => ({
+          ...(row as AiToolRow),
+          ticker: normalizeSymbol(String((row as any).ticker || (row as any).symbol || selectedTicker)),
+        }))
+        .filter((row) => isFreshAiFindingForReset(row))
+        .filter(sameTicker);
     const flowCard = resolveFlowCard(toolRows(["flow", "smart_money"]), appLocale);
     const flowTone = flowCard.tone;
     const baseTone = trendTone !== "neutral"
@@ -9220,51 +9636,56 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     () => strategicSectionsForRender(strategicConclusion, appLocale, selectedTicker),
     [appLocale, selectedTicker, strategicConclusion],
   );
+  const hasStrategicCoreData = Boolean(displayQuoteHasCoreData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
   const rawOperationalDecision = useMemo(() => {
     if (displayQuoteHasCoreData && currentStrategicPanel) {
       return operationalDecisionFromPanel(currentStrategicPanel, appLocale);
     }
-    const hasCoreData = Boolean(displayQuoteHasCoreData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
     return buildOperationalDecision({
       locale: appLocale,
       cards: essentialDecisionCards,
       conclusion: strategicConclusion,
       chart: chartForOperationalLevels,
-      hasCoreData,
+      hasCoreData: hasStrategicCoreData,
     });
   }, [
     appLocale,
     chartForOperationalLevels,
     currentStrategicPanel,
-    displayQuote?.price,
     displayQuoteHasCoreData,
     essentialDecisionCards,
-    headerVolume,
+    hasStrategicCoreData,
     strategicConclusion,
   ]);
-  const operationalDecision = useMemo(
+  const alignedOperationalDecision = useMemo(
     () => alignOperationalDecisionWithTrade(rawOperationalDecision, appLocale),
     [appLocale, rawOperationalDecision],
   );
+  const strategicDecisionContract = useMemo(
+    () => buildStrategicDecisionContract({
+      locale: appLocale,
+      symbol: selectedTicker,
+      cards: essentialDecisionCards,
+      operationalDecision: alignedOperationalDecision,
+      hasCoreData: hasStrategicCoreData,
+    }),
+    [alignedOperationalDecision, appLocale, essentialDecisionCards, hasStrategicCoreData, selectedTicker],
+  );
+  const operationalDecision = useMemo(
+    () => operationalDecisionFromStrategicContract(strategicDecisionContract),
+    [strategicDecisionContract],
+  );
+  const decisionCardsForRender = useMemo(
+    () => alignDecisionCardsWithStrategicContract(essentialDecisionCards, strategicDecisionContract, appLocale),
+    [appLocale, essentialDecisionCards, strategicDecisionContract],
+  );
   const strategicConclusionSections = useMemo(
-    () => {
-      if (!displayQuoteHasCoreData) {
-        return noDataStrategicSections(appLocale, selectedTicker, strategicConclusion.focus);
-      }
-      return alignStrategicSectionsWithTrade(rawStrategicConclusionSections, operationalDecision.action, appLocale);
-    },
-    [
-      appLocale,
-      displayQuoteHasCoreData,
-      operationalDecision.action,
-      rawStrategicConclusionSections,
-      selectedTicker,
-      strategicConclusion.focus,
-    ],
+    () => strategicDecisionContract.sections,
+    [strategicDecisionContract.sections],
   );
   const strategicConclusionBasis = useMemo(
-    () => alignStrategicBasisWithTrade(strategicConclusion.basis, operationalDecision.action, appLocale),
-    [appLocale, operationalDecision.action, strategicConclusion.basis],
+    () => strategicDecisionContract.basis,
+    [strategicDecisionContract.basis],
   );
   useEffect(() => {
     if (currentTab !== "education" || !educationAnchor) return;
@@ -10070,7 +10491,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       const currentAiSoundEnabled = aiToolSoundEnabled(aiToolSoundSettings, currentAiKey);
       const aiSoundLocked = proModeLocked && currentAiKey !== "risk";
       return (
-        <section id={`panel-${currentTab}`} className="snbr-tool-shell">
+        <section
+          id={`panel-${currentTab}`}
+          className="snbr-tool-shell"
+          data-ai-freshness-status={currentAiFreshnessStatus}
+          data-ai-visible-count={currentTabAlertRows.length}
+          data-ai-stale-count={currentAiStaleRows.length}
+          data-ai-badge-count={aiToolFindingCounts[currentTab] || 0}
+        >
           <div className="snbr-tool-head">
             <div>
               <h3>{copy.title}</h3>
@@ -10413,7 +10841,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }
 
   function renderGrafico() {
-    const chartNews = newsRows[0];
+    const chartNews = newsRows.find((item) => !item.isIncomplete);
     const chartNewsTime = chartNews?.publishedTime || "";
     const chartNewsTitle = chartNews
       ? chartNews.headline
@@ -11538,7 +11966,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               className="snbr-decision-panel"
               aria-label={isUsLocale ? "Strategic Analysis Panel" : "Painel de Análise Estratégica"}
               data-core-data={displayQuoteHasCoreData ? "true" : "false"}
+              data-decision-now={operationalDecision.action}
+              data-decision-side={strategicDecisionContract.side}
               data-selected-symbol={selectedTicker}
+              data-trade-suggested={strategicDecisionContract.tradeSuggested}
             >
               <div className="snbr-decision-head">
                 <strong>{isUsLocale ? "Strategic Analysis Panel" : "Painel de Análise Estratégica"}</strong>
@@ -11606,7 +12037,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                     </div>
                   </article>
                   <div className="snbr-decision-grid">
-                    {essentialDecisionCards.map((card) => (
+                    {decisionCardsForRender.map((card) => (
                       <article key={`${card.label}-${card.value}`} className={cx("snbr-decision-card", card.tone)}>
                         <span>{card.label}</span>
                         <strong>{card.value}</strong>
@@ -11619,7 +12050,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       </article>
                     ))}
                   </div>
-                  <article className={cx("snbr-decision-conclusion", strategicConclusion.tone, !strategicConclusionExpanded && "collapsed")}>
+                  <article className={cx("snbr-decision-conclusion", strategicDecisionContract.tone, !strategicConclusionExpanded && "collapsed")}>
                     <div className="snbr-conclusion-topline">
                       <span>{isUsLocale ? "Conclusion" : "Conclusão"}</span>
                       <small>{isUsLocale ? `AI Analysis Time ${strategicConclusion.stamp}` : `IA Análise Hora ${strategicConclusion.stamp}`}</small>

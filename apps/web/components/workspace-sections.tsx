@@ -82,9 +82,19 @@ export type WorkspaceNewsRow = {
   headline: string;
   title: string;
   source: string;
+  sourceName?: string | null;
+  sourceUrl?: string | null;
   age: string;
   publishedTime: string;
   publishedAtIso?: string | null;
+  fetchedAt?: string | null;
+  ageMinutes?: number | null;
+  isToday?: boolean | null;
+  isStale?: boolean | null;
+  matchedSymbol?: string | null;
+  language?: string | null;
+  publicationStatus?: string | null;
+  isIncomplete?: boolean | null;
   sector: string;
   industry: string;
   labels: string[];
@@ -238,9 +248,30 @@ export function WorkspaceNewsPanel({
                 ? "negative"
                 : "neutral";
             const sentimentVisual = newsSentimentVisual(item.sentiment, locale);
+            const sourceName = item.sourceName || item.source || (isEnglish ? "Unknown source" : "Fonte não informada");
+            const sourceUrl = item.sourceUrl || item.url || "";
+            const matchedSymbol = item.matchedSymbol || item.symbol;
+            const staleStatus = item.isStale
+              ? (isEnglish ? "Previous news / Yesterday" : "Notícia anterior / Ontem")
+              : (isEnglish ? "News from today" : "Notícia de hoje");
+            const incompleteStatus = item.isIncomplete
+              ? (isEnglish ? "Incomplete news: source time missing" : "Notícia incompleta: sem hora da fonte")
+              : null;
 
             return (
-            <article key={item.id} className={cx("snbr-headline-row", "snbr-news-row", !item.useful && "noise")}>
+            <article
+              key={item.id}
+              className={cx("snbr-headline-row", "snbr-news-row", !item.useful && "noise")}
+              data-news-card="true"
+              data-news-symbol={item.symbol}
+              data-news-source={sourceName}
+              data-news-url={sourceUrl}
+              data-news-published-source={item.publishedAtIso || ""}
+              data-news-age-minutes={item.ageMinutes == null ? "" : String(item.ageMinutes)}
+              data-news-matched-symbol={matchedSymbol}
+              data-news-stale={item.isStale ? "true" : "false"}
+              data-news-incomplete={item.isIncomplete ? "true" : "false"}
+            >
               <div className="snbr-news-copy">
                 <div className="snbr-news-headline">
                   <strong>{item.headline}</strong>
@@ -258,8 +289,14 @@ export function WorkspaceNewsPanel({
                   <div key={`${item.id}-${line}`} className="snbr-news-why">{line}</div>
                 ))}
                 <div className="snbr-news-meta-row">
-                  <span>{isEnglish ? "Source" : "Fonte"}: {item.source}</span>
-                  <span>{isEnglish ? "Original time" : "Horário original"}: {item.publishedTime}</span>
+                  <span>{isEnglish ? "Source" : "Fonte"}: {sourceName}</span>
+                  <span>{isEnglish ? "Original URL" : "URL original"}: {sourceUrl || (isEnglish ? "not available" : "não disponível")}</span>
+                  <span>{isEnglish ? "Published at source" : "Publicado em"}: {item.publishedTime}</span>
+                  <span>{isEnglish ? "Age" : "Idade"}: {item.age}</span>
+                  <span>Ticker: {matchedSymbol}</span>
+                  {item.language ? <span>{isEnglish ? "Language" : "Idioma"}: {item.language}</span> : null}
+                  <span>{staleStatus}</span>
+                  {incompleteStatus ? <span>{incompleteStatus}</span> : null}
                   <span>{isEnglish ? "Sentiment" : "Sentimento"}: {sentimentVisual.icon} {sentimentVisual.label}</span>
                   {item.sector ? <span>{item.sector}</span> : null}
                   {item.industry ? <span>{item.industry}</span> : null}

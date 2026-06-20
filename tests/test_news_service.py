@@ -132,8 +132,12 @@ class NewsServiceTests(unittest.TestCase):
 
         self.assertEqual(len(items), 1)
         self.assertIsNone(items[0]["published_at"])
+        self.assertIsNone(items[0]["published_at_source"])
         self.assertFalse(items[0]["source_published_at"])
+        self.assertEqual(items[0]["publication_status"], "missing_source_time")
+        self.assertTrue(items[0]["is_incomplete"])
         self.assertRegex(items[0]["detected_at"], r"^\d{4}-\d{2}-\d{2}T")
+        self.assertRegex(items[0]["fetched_at"], r"^\d{4}-\d{2}-\d{2}T")
 
     def test_build_symbol_news_keeps_source_publication_time_separate_from_detection_time(self):
         raw_items = [
@@ -152,8 +156,19 @@ class NewsServiceTests(unittest.TestCase):
 
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["published_at"], "2025-03-29T01:00:00+00:00")
+        self.assertEqual(items[0]["published_at_source"], "2025-03-29T01:00:00+00:00")
         self.assertEqual(items[0]["detected_at"], "2025-03-30T02:00:00+00:00")
+        self.assertEqual(items[0]["fetched_at"], "2025-03-30T02:00:00+00:00")
         self.assertTrue(items[0]["source_published_at"])
+        self.assertEqual(items[0]["source_name"], "Reuters")
+        self.assertEqual(items[0]["source_url"], "https://example.com/aapl-source-time")
+        self.assertEqual(items[0]["age_minutes"], 1500)
+        self.assertFalse(items[0]["is_today"])
+        self.assertTrue(items[0]["is_stale"])
+        self.assertEqual(items[0]["matched_symbol"], "AAPL")
+        self.assertEqual(items[0]["language"], "en-US")
+        self.assertEqual(items[0]["publication_status"], "ok")
+        self.assertFalse(items[0]["is_incomplete"])
 
     def test_build_symbol_news_counts_multiple_sources_per_story(self):
         raw_items = [

@@ -15,6 +15,8 @@ from app.services.symbol_registry import (
     canonical_symbol,
     canonical_symbol_aliases,
     provider_symbol,
+    resolve_tradingview_symbol,
+    resolve_tradingview_symbol_candidates,
     symbol_category,
     tradingview_symbol,
 )
@@ -78,6 +80,21 @@ class Mission30CanonicalSymbolRegistryTests(unittest.TestCase):
         self.assertEqual(tradingview_symbol("BTCUSDT"), "BINANCE:BTCUSDT")
         self.assertEqual(tradingview_symbol("NASDAQ:AAPL"), "NASDAQ:AAPL")
         self.assertEqual(tradingview_symbol("WINFUT"), "BMFBOVESPA:WIN1!")
+
+    def test_mission30f_tradingview_uses_real_exchange_for_us_symbols(self):
+        cases = {
+            "CRM": "NYSE:CRM",
+            "NYSE:CRM": "NYSE:CRM",
+            "F": "NYSE:F",
+            "BULL": "NASDAQ:BULL",
+            "BYDDY": "OTC:BYDDY",
+            "AAPL": "NASDAQ:AAPL",
+            "NVDA": "NASDAQ:NVDA",
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(resolve_tradingview_symbol(raw), expected)
+                self.assertEqual(tradingview_symbol(raw), expected)
 
     def test_search_normalizes_aliases_to_single_result(self):
         self.assertEqual(search_ticker("PETR")[0], "PETR4")
@@ -197,8 +214,10 @@ class Mission30CanonicalSymbolRegistryTests(unittest.TestCase):
         self.assertEqual(canonical_symbol("BMFBOVESPA:ELET6"), "AXIA6")
         self.assertEqual(provider_symbol("ELET6"), "AXIA6.SA")
         self.assertEqual(provider_symbol("AXIA6"), "AXIA6.SA")
-        self.assertEqual(tradingview_symbol("ELET6"), "BMFBOVESPA:AXIA6")
-        self.assertEqual(tradingview_symbol("AXIA6"), "BMFBOVESPA:AXIA6")
+        self.assertEqual(tradingview_symbol("ELET6"), "BMFBOVESPA:ELET6")
+        self.assertEqual(tradingview_symbol("AXIA6"), "BMFBOVESPA:ELET6")
+        self.assertEqual(resolve_tradingview_symbol_candidates("AXIA6")[0], "BMFBOVESPA:ELET6")
+        self.assertIn("BMFBOVESPA:AXIA6", resolve_tradingview_symbol_candidates("AXIA6"))
         self.assertEqual(market_data_loader._normalize_symbol("ELET6"), "AXIA6.SA")
         self.assertEqual(market_data_loader.get_display_symbol("ELET6"), "AXIA6")
         self.assertEqual(market_data_loader.get_display_symbol("AXIA6.SA"), "AXIA6")
@@ -208,7 +227,9 @@ class Mission30CanonicalSymbolRegistryTests(unittest.TestCase):
             with self.subTest(symbol=symbol):
                 self.assertEqual(canonical_symbol(f"{symbol}.SA"), symbol)
                 self.assertEqual(provider_symbol(symbol), f"{symbol}.SA")
-                self.assertEqual(tradingview_symbol(symbol), f"BMFBOVESPA:{symbol}")
+                expected_tradingview = "BMFBOVESPA:ELET6" if symbol == "AXIA6" else f"BMFBOVESPA:{symbol}"
+                self.assertEqual(tradingview_symbol(symbol), expected_tradingview)
+                self.assertIn(f"BMFBOVESPA:{symbol}", resolve_tradingview_symbol_candidates(symbol))
                 self.assertEqual(symbol_category(symbol), "B3")
                 self.assertEqual(sanitize_market_symbol(symbol), symbol)
 

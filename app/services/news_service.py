@@ -14,6 +14,7 @@ from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases
 from app.system.system_metrics import record_cache_access, record_cache_lookup, record_external_provider_call, record_worker_stage_duration
@@ -32,7 +33,22 @@ _REQUEST_LOCKS: dict[str, threading.Lock] = {}
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _TICKER_NEWS_ALIASES = {
     "F": ("ford", "ford motor", "ford motor company"),
+    "AAPL": ("apple", "apple inc"),
+    "NVDA": ("nvidia", "nvidia corp", "nvidia corporation"),
+    "TSLA": ("tesla", "tesla inc"),
+    "MSFT": ("microsoft", "microsoft corp", "microsoft corporation"),
+    "AMD": ("advanced micro devices",),
+    "BULL": ("webull", "webull corp", "webull corporation"),
+    "BYDDY": ("byd", "byd co", "byd company", "byd co ltd", "byd company limited"),
+    "PETR4": ("petrobras", "petróleo brasileiro"),
+    "PETR3": ("petrobras", "petróleo brasileiro"),
+    "VALE3": ("vale", "vale s.a", "vale sa"),
+    "ITUB4": ("itau", "itaú", "itau unibanco", "itaú unibanco"),
+    "BBAS3": ("banco do brasil",),
+    "BTCUSD": ("bitcoin", "btc"),
+    "ETHUSD": ("ethereum", "ether", "eth"),
 }
+_NEWS_LOCAL_TZ = ZoneInfo("America/Sao_Paulo")
 
 
 def _project_runtime_path(env_name: str, default_relative: str) -> Path:
@@ -587,6 +603,34 @@ def _to_iso(dt: datetime | None) -> str | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat()
+
+
+def _news_age_minutes(published_at: datetime | None, now_ts: float | None = None) -> int | None:
+    if published_at is None:
+        return None
+    current_ts = _now_ts() if now_ts is None else now_ts
+    try:
+        return max(0, int((current_ts - published_at.timestamp()) // 60))
+    except Exception:
+        return None
+
+
+def _is_news_today(published_at: datetime | None, now_dt: datetime | None = None) -> bool:
+    if published_at is None:
+        return False
+    current = now_dt or datetime.fromtimestamp(_now_ts(), tz=timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    if published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=timezone.utc)
+    return published_at.astimezone(_NEWS_LOCAL_TZ).date() == current.astimezone(_NEWS_LOCAL_TZ).date()
+
+
+def _detect_news_language(title: str, summary: str) -> str:
+    text = _safe_lower(f"{title} {summary}")
+    if re.search(r"\b(acao|acoes|noticia|mercado|lucro|receita|resultado|banco|petroleo|juros|empresa)\b", text):
+        return "pt-BR"
+    return "en-US"
 
 
 def _extract_title(raw_item: dict[str, Any]) -> str:
@@ -1196,7 +1240,8 @@ def _normalize_raw_item(raw_item: dict[str, Any], ticker: str) -> dict[str, Any]
     url = _extract_url(raw_item)
     related_tickers = _extract_related_tickers(raw_item)
     published_at = _parse_published_at(raw_item)
-    detected_at = datetime.fromtimestamp(_now_ts(), tz=timezone.utc)
+    detected_ts = _now_ts()
+    detected_at = datetime.fromtimestamp(detected_ts, tz=timezone.utc)
     sector, industry = _asset_sector(ticker, f"{title} {summary}")
     labels = _classify_labels(f"{title} {summary}")
     entities = _extract_entities(ticker, title, summary, related_tickers, labels)
@@ -1221,6 +1266,13 @@ def _normalize_raw_item(raw_item: dict[str, Any], ticker: str) -> dict[str, Any]
 
     useful = _should_keep_item(relevance_score, labels, title, summary, direct_match, ambiguity_score)
 
+    published_at_source = _to_iso(published_at)
+    fetched_at = _to_iso(detected_at)
+    source_url = url
+    age_minutes = _news_age_minutes(published_at, detected_ts)
+    is_today = _is_news_today(published_at, detected_at)
+    is_incomplete = published_at is None or not source or not source_url
+
     return {
         "id": raw_item.get("id") or story_key,
         "ticker": ticker,
@@ -1228,15 +1280,27 @@ def _normalize_raw_item(raw_item: dict[str, Any], ticker: str) -> dict[str, Any]
         "summary": summary or title,
         "card_summary": _build_card_summary(title, summary, labels, impact),
         "source": source,
+        "source_name": source,
         "source_domain": _extract_domain(url),
         "url": url,
-        "published_at": _to_iso(published_at),
-        "detected_at": _to_iso(detected_at),
+        "source_url": source_url,
+        "published_at": published_at_source,
+        "published_at_source": published_at_source,
+        "detected_at": fetched_at,
+        "fetched_at": fetched_at,
+        "age_minutes": age_minutes,
+        "is_today": is_today,
+        "is_stale": not is_today,
         "source_published_at": bool(published_at),
+        "matched_symbol": ticker,
+        "language": _detect_news_language(title, summary),
+        "publication_status": "ok" if published_at else "missing_source_time",
+        "is_incomplete": is_incomplete,
         "sector": sector,
         "industry": industry,
         "labels": labels,
         "entities": entities,
+        "related_tickers": related_tickers,
         "impact": impact,
         "impact_label": _impact_label(impact),
         "impact_reason": impact_reason,
@@ -1245,6 +1309,7 @@ def _normalize_raw_item(raw_item: dict[str, Any], ticker: str) -> dict[str, Any]
         "market_context": _safe_market_context(ticker, labels, sector, industry, direct_match, ambiguity_score),
         "trader_takeaway": _build_trader_takeaway(ticker, title, summary, impact, labels, ambiguity_score, direct_match),
         "relevance_score": round(relevance_score, 2),
+        "relevance": round(relevance_score, 2),
         "ranking_score": ranking_score,
         "confidence_score": round(confidence, 2),
         "direct_ticker_match": direct_match,

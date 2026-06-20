@@ -2,6 +2,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import unquote
+from zoneinfo import ZoneInfo
 
 from app.services.symbol_registry import canonical_symbol
 from app.services.news_service import (
@@ -13,7 +14,23 @@ from app.services.news_service import (
 
 _SYMBOL_NEWS_ALIASES = {
     "F": ("ford", "ford motor", "ford motor company"),
+    "AAPL": ("apple", "apple inc"),
+    "NVDA": ("nvidia", "nvidia corp", "nvidia corporation"),
+    "TSLA": ("tesla", "tesla inc"),
+    "MSFT": ("microsoft", "microsoft corp", "microsoft corporation"),
+    "AMD": ("advanced micro devices",),
+    "BULL": ("webull", "webull corp", "webull corporation"),
+    "BYDDY": ("byd", "byd co", "byd company", "byd co ltd", "byd company limited"),
+    "PETR4": ("petrobras", "petróleo brasileiro"),
+    "PETR3": ("petrobras", "petróleo brasileiro"),
+    "VALE3": ("vale", "vale s.a", "vale sa"),
+    "ITUB4": ("itau", "itaú", "itau unibanco", "itaú unibanco"),
+    "BBAS3": ("banco do brasil",),
+    "BTCUSD": ("bitcoin", "btc"),
+    "ETHUSD": ("ethereum", "ether", "eth"),
 }
+_NEWS_LOCAL_TZ = ZoneInfo("America/Sao_Paulo")
+_TITLE_TOKEN_STOPWORDS = {"AI", "CEO", "CFO", "IPO", "ETF", "EV", "US", "UK", "F1", "S&P", "DJIA"}
 
 
 def _normalize_symbol(symbol: str | None) -> str:
@@ -24,13 +41,59 @@ def _news_item_symbol(item: dict[str, Any]) -> str:
     return _normalize_symbol(str(item.get("ticker") or item.get("symbol") or ""))
 
 
+def _symbol_news_aliases(symbol: str) -> set[str]:
+    normalized = _normalize_symbol(symbol)
+    aliases = {normalized}
+    aliases.update(_SYMBOL_NEWS_ALIASES.get(normalized, ()))
+    return {_normalize_news_text(alias) for alias in aliases if alias}
+
+
+def _text_has_news_alias(text: str, alias: str) -> bool:
+    normalized_alias = _normalize_news_text(alias)
+    if not normalized_alias:
+        return False
+    return bool(re.search(rf"\b{re.escape(normalized_alias)}\b", text))
+
+
+def _title_has_symbol_alias(item: dict[str, Any], symbol: str) -> bool:
+    title = _normalize_news_text(item.get("title") or item.get("headline") or "")
+    return any(_text_has_news_alias(title, alias) for alias in _symbol_news_aliases(symbol))
+
+
+def _title_mentions_other_symbol_without_requested_alias(item: dict[str, Any], symbol: str) -> bool:
+    raw_title = str(item.get("title") or item.get("headline") or "")
+    title = _normalize_news_text(raw_title)
+    if not title or _title_has_symbol_alias(item, symbol):
+        return False
+    normalized = _normalize_symbol(symbol)
+    for token in re.findall(r"\b[A-Z]{2,6}\d{0,2}\b", raw_title):
+        if token in _TITLE_TOKEN_STOPWORDS:
+            continue
+        token_symbol = _normalize_symbol(token)
+        if token_symbol and token_symbol != normalized and _normalize_news_text(token_symbol) not in _symbol_news_aliases(normalized):
+            return True
+    for candidate, aliases in _SYMBOL_NEWS_ALIASES.items():
+        if candidate == normalized:
+            continue
+        candidate_aliases = {candidate, *aliases}
+        if any(_text_has_news_alias(title, alias) for alias in candidate_aliases):
+            return True
+    return False
+
+
 def _item_belongs_to_symbol(item: dict[str, Any], symbol: str) -> bool:
     normalized = _normalize_symbol(symbol)
+    if _title_mentions_other_symbol_without_requested_alias(item, normalized):
+        return False
     item_symbol = _news_item_symbol(item)
-    if item_symbol and item_symbol == normalized:
+    direct_marker = item.get("direct_ticker_match")
+    if item_symbol and item_symbol == normalized and direct_marker is not False:
         return True
 
-    related = item.get("related_tickers") or item.get("relatedTickers") or item.get("entities") or []
+    related = item.get("related_tickers") or item.get("relatedTickers")
+    if not related and direct_marker is not False:
+        related = item.get("entities")
+    related = related or []
     if isinstance(related, list):
         normalized_related: set[str] = set()
         for value in related:
@@ -65,6 +128,43 @@ def _normalize_news_text(value: Any) -> str:
     text = re.sub(r"https?://\S+", "", text)
     text = re.sub(r"[^a-z0-9\u00c0-\u024f]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _iso_from_news_epoch(epoch: float) -> str | None:
+    if not epoch:
+        return None
+    try:
+        return datetime.fromtimestamp(float(epoch), tz=timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+def _public_news_age_minutes(epoch: float) -> int | None:
+    if not epoch:
+        return None
+    try:
+        now = datetime.now(timezone.utc).timestamp()
+        return max(0, int((now - float(epoch)) // 60))
+    except Exception:
+        return None
+
+
+def _public_news_is_today(epoch: float) -> bool:
+    if not epoch:
+        return False
+    try:
+        published = datetime.fromtimestamp(float(epoch), tz=timezone.utc).astimezone(_NEWS_LOCAL_TZ)
+        current = datetime.now(timezone.utc).astimezone(_NEWS_LOCAL_TZ)
+        return published.date() == current.date()
+    except Exception:
+        return False
+
+
+def _public_news_language(item: dict[str, Any]) -> str:
+    text = _normalize_news_text(" ".join(str(item.get(field) or "") for field in ("title", "headline", "summary", "card_summary")))
+    if re.search(r"\b(acao|acoes|noticia|mercado|lucro|receita|resultado|banco|petroleo|juros|empresa)\b", text):
+        return "pt-BR"
+    return "en-US"
 
 
 def _is_generic_news_title(title: Any, ticker: str) -> bool:
@@ -232,6 +332,7 @@ def _dedupe_news_items(items: list[dict[str, Any]], limit: int) -> list[dict[str
 
 def _news_timestamp_epoch(item: dict[str, Any]) -> float:
     candidates = (
+        item.get("published_at_source"),
         item.get("published_at"),
         item.get("provider_publish_time"),
         item.get("providerPublishTime"),
@@ -269,7 +370,58 @@ def _news_timestamp_epoch(item: dict[str, Any]) -> float:
     return 0.0
 
 
-def _build_news_state(symbol: str, items: list[dict[str, Any]], cache: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
+def _enrich_public_news_item(item: dict[str, Any], ticker: str) -> dict[str, Any]:
+    normalized = dict(item)
+    epoch = _news_timestamp_epoch(normalized)
+    published_at_source = normalized.get("published_at_source") or _iso_from_news_epoch(epoch)
+    source_name = normalized.get("source_name") or normalized.get("source") or "Yahoo Finance"
+    source_url = normalized.get("source_url") or normalized.get("url")
+    fetched_at = normalized.get("fetched_at") or normalized.get("detected_at")
+    age_minutes = normalized.get("age_minutes")
+    if age_minutes is None:
+        age_minutes = _public_news_age_minutes(epoch)
+    is_today = normalized.get("is_today")
+    if is_today is None:
+        is_today = _public_news_is_today(epoch)
+    is_stale = normalized.get("is_stale")
+    if is_stale is None:
+        is_stale = not bool(is_today)
+
+    normalized["source"] = source_name
+    normalized["source_name"] = source_name
+    normalized["source_url"] = source_url
+    normalized["published_at_source"] = published_at_source
+    normalized["published_at"] = normalized.get("published_at") or published_at_source
+    normalized["fetched_at"] = fetched_at
+    normalized["age_minutes"] = age_minutes
+    normalized["is_today"] = bool(is_today)
+    normalized["is_stale"] = bool(is_stale)
+    normalized["matched_symbol"] = _normalize_symbol(normalized.get("matched_symbol") or ticker)
+    normalized["language"] = normalized.get("language") or _public_news_language(normalized)
+    normalized["publication_status"] = normalized.get("publication_status") or ("ok" if published_at_source else "missing_source_time")
+    normalized["is_incomplete"] = bool(normalized.get("is_incomplete") or not published_at_source or not source_name or not source_url)
+    normalized["relevance"] = normalized.get("relevance") if normalized.get("relevance") is not None else normalized.get("relevance_score")
+    return normalized
+
+
+def _request_news_warmup_safe(symbol: str, limit: int) -> bool:
+    try:
+        from app.system.news_warmup import request_news_warmup
+
+        request_news_warmup(symbol, limit=limit)
+        return True
+    except Exception:
+        return False
+
+
+def _build_news_state(
+    symbol: str,
+    items: list[dict[str, Any]],
+    cache: dict[str, Any],
+    report: dict[str, Any],
+    *,
+    warmup_requested: bool = False,
+) -> dict[str, Any]:
     cache_status = str(cache.get("status") or "cold")
     provider_status = str(cache.get("provider_status") or "not_checked")
     provider_error = cache.get("provider_error")
@@ -294,6 +446,8 @@ def _build_news_state(symbol: str, items: list[dict[str, Any]], cache: dict[str,
             message = f"Provider encontrou {raw_count} notícia(s) bruta(s) para {symbol}, mas o cache final ficou vazio por {discard_reason}."
         elif provider_status in {"empty", "no_news", "error"}:
             message = f"Provider retornou {provider_status} para {symbol}; tela deve mostrar estado vazio explicito."
+        elif warmup_requested:
+            message = f"Busca de notícias reais para {symbol} foi agendada; tente atualizar em instantes."
 
     return {
         "symbol": symbol,
@@ -308,23 +462,37 @@ def _build_news_state(symbol: str, items: list[dict[str, Any]], cache: dict[str,
         "discard_reasons": cache.get("discard_reasons") if isinstance(cache.get("discard_reasons"), dict) else {},
         "report_status": report.get("status") or ("ok" if items else "empty"),
         "items": len(items),
+        "warmup_requested": warmup_requested,
     }
 
 
-def build_public_news_payload(symbol: str, limit: int = 6, source: str | None = None, allow_fetch: bool = False) -> dict:
+def build_public_news_payload(
+    symbol: str,
+    limit: int = 6,
+    source: str | None = None,
+    allow_fetch: bool = False,
+    schedule_warmup: bool = False,
+) -> dict:
     ticker = _normalize_symbol(symbol)
     safe_limit = max(1, min(int(limit or 6), 20))
     cached_items = get_cached_symbol_news(ticker, limit=safe_limit)
     fetched_items = cached_items
     if allow_fetch and len(cached_items) < safe_limit:
         fetched_items = get_symbol_news(ticker, limit=safe_limit)
-    normalized_items = [_normalize_public_news_item(item, ticker) for item in fetched_items if isinstance(item, dict)]
+    warmup_requested = False
+    if not allow_fetch and schedule_warmup and len(cached_items) < safe_limit:
+        warmup_requested = _request_news_warmup_safe(ticker, safe_limit)
+    normalized_items = [
+        _enrich_public_news_item(_normalize_public_news_item(item, ticker), ticker)
+        for item in fetched_items
+        if isinstance(item, dict)
+    ]
     scoped_items = [item for item in normalized_items if _item_belongs_to_symbol(item, ticker)]
     scoped_items = sorted(scoped_items, key=_news_timestamp_epoch, reverse=True)
     items = _dedupe_news_items(scoped_items, safe_limit)
     report = get_news_cached_report(ticker, items)
     cache = get_news_cache_info(ticker)
-    state = _build_news_state(ticker, items, cache, report)
+    state = _build_news_state(ticker, items, cache, report, warmup_requested=warmup_requested)
     payload = {
         "symbol": ticker,
         "requested_symbol": str(symbol or "").upper().strip(),
@@ -344,6 +512,7 @@ def build_public_news_payload(symbol: str, limit: int = 6, source: str | None = 
         "report": report,
         "cache": cache,
         "cache_only": not allow_fetch,
+        "warmup_requested": warmup_requested,
     }
     if source:
         payload["source"] = source

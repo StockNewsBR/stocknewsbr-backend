@@ -3046,77 +3046,6 @@ a {
   height: 100% !important;
 }
 
-.snbr-chart-level-lines {
-  position: absolute;
-  inset: 72px 28px 94px 28px;
-  z-index: 3;
-  pointer-events: none;
-  border-radius: 12px;
-  overflow: hidden;
-  background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.06), rgba(15, 23, 42, 0.015)),
-    repeating-linear-gradient(0deg, rgba(148, 163, 184, 0.12) 0 1px, transparent 1px 20%);
-}
-
-.snbr-chart-level-line {
-  stroke: rgba(245, 158, 11, 0.78);
-  stroke-width: 0.55;
-  stroke-dasharray: 2.4 1.6;
-  vector-effect: non-scaling-stroke;
-  filter: drop-shadow(0 5px 10px rgba(15, 23, 42, 0.2));
-}
-
-.snbr-chart-level-line.resistance {
-  stroke: rgba(248, 113, 113, 0.92);
-}
-
-.snbr-chart-level-line.support {
-  stroke: rgba(52, 211, 153, 0.9);
-}
-
-.snbr-chart-level-svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.snbr-chart-level-area {
-  fill: rgba(59, 130, 246, 0.12);
-}
-
-.snbr-chart-level-price-path {
-  fill: none;
-  stroke: rgba(14, 165, 233, 0.88);
-  stroke-width: 0.7;
-  vector-effect: non-scaling-stroke;
-}
-
-.snbr-chart-level-label {
-  dominant-baseline: auto;
-  fill: #0f172a;
-  font-size: 3px;
-  font-weight: 900;
-  letter-spacing: 0.01em;
-  paint-order: stroke;
-  stroke: rgba(255, 255, 255, 0.86);
-  stroke-width: 0.45px;
-}
-
-.snbr-chart-level-label.support {
-  fill: #047857;
-}
-
-.snbr-chart-level-label.resistance {
-  fill: #b91c1c;
-}
-
-.snbr-chart-level-latest-dot {
-  fill: #38bdf8;
-  stroke: #0f172a;
-  stroke-width: 0.2;
-  vector-effect: non-scaling-stroke;
-}
-
 .snbr-chart-top-overlays {
   position: absolute;
   top: 52px;
@@ -3377,28 +3306,6 @@ a {
 .snbr-app.theme-dark .snbr-chart-level-overlay span {
   background: rgba(30, 41, 59, 0.94);
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
-}
-
-.snbr-app.theme-dark .snbr-chart-level-line {
-  filter: drop-shadow(0 5px 14px rgba(0, 0, 0, 0.34));
-}
-
-.snbr-app.theme-dark .snbr-chart-level-lines {
-  background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.34), rgba(15, 23, 42, 0.14)),
-    repeating-linear-gradient(0deg, rgba(226, 232, 240, 0.12) 0 1px, transparent 1px 20%);
-}
-
-.snbr-app.theme-dark .snbr-chart-level-label {
-  stroke: rgba(15, 23, 42, 0.92);
-}
-
-.snbr-app.theme-dark .snbr-chart-level-label.support {
-  fill: #bbf7d0;
-}
-
-.snbr-app.theme-dark .snbr-chart-level-label.resistance {
-  fill: #fecaca;
 }
 
 .snbr-app.theme-dark .snbr-chart-level-overlay.support span {

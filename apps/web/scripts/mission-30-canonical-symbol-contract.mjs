@@ -22,11 +22,6 @@ function assertNotIncludes(source, needle, label) {
   }
 }
 
-function priceToY(price, minPrice, maxPrice) {
-  const span = Math.max(maxPrice - minPrice, Math.abs(price) * 0.0001, 0.0001);
-  return 92 - ((price - minPrice) / span) * 84;
-}
-
 const registry = read("apps/web/lib/symbol-registry.ts");
 const tickerChart = read("apps/web/components/ticker-chart.tsx");
 const workspaceShell = read("apps/web/components/workspace-shell.tsx");
@@ -48,8 +43,14 @@ for (const expected of [
   "XBTUSD",
   "NASDAQ:AAPL",
   "AAPL.US",
+  "BULL: [\"NASDAQ:BULL\"",
+  "BYDDY: [\"OTC:BYDDY\"",
+  "CRM: [\"NYSE:CRM\"",
+  "F: [\"NYSE:F\"",
   "WINFUT",
   "export function canonicalSymbol",
+  "export function resolveTradingViewSymbolCandidates",
+  "export function resolveTradingViewSymbol",
   "export function tradingViewSymbolFor",
   "export function providerSymbolFor",
   "export function symbolCategoryFor",
@@ -57,6 +58,9 @@ for (const expected of [
   "BMFBOVESPA:AXIA6",
   "BINANCE:${canonical.slice(0, -3)}USDT",
   "NASDAQ:AAPL",
+  "NYSE:CRM",
+  "NYSE:F",
+  "OTC:BYDDY",
 ]) {
   assertIncludes(registry, expected, `web registry contains ${expected}`);
 }
@@ -85,6 +89,13 @@ assertIncludes(css, "clamp(360px, 24vw, 420px)", "left rail is wide enough for f
 assertIncludes(workspaceShell, "decisionTradeLabel(tradeTone", "mixed/conflicting scenarios render Aguardar instead of a forced side");
 assertIncludes(workspaceShell, "alignStrategicSectionsWithTrade", "strategic conclusion is aligned with suggested trade side");
 assertIncludes(workspaceShell, "alignOperationalDecisionWithTrade", "operational decision copy is aligned with suggested trade side");
+assertIncludes(workspaceShell, "StrategicDecisionContract", "strategic panel uses a single visual decision contract");
+assertIncludes(workspaceShell, "buildStrategicDecisionContract", "strategic panel contract is built once for all visual fields");
+assertIncludes(workspaceShell, "operationalDecisionFromStrategicContract", "operational decision renders from the same final contract");
+assertIncludes(workspaceShell, "alignDecisionCardsWithStrategicContract", "decision cards render from the same final contract");
+assertIncludes(workspaceShell, "AGUARDAR VENDA / SHORT COM CONFIRMAÇÃO", "bearish trade decision no longer renders generic protection copy");
+assertIncludes(workspaceShell, "data-decision-side", "strategic panel exposes final decision side for Playwright");
+assertIncludes(workspaceShell, "data-trade-suggested", "strategic panel exposes final suggested trade for Playwright");
 assertIncludes(workspaceShell, "directionalBuyBlocked", "buy-side conclusion cannot override bearish/exit final decision");
 assertIncludes(workspaceShell, "positionProtectionSections", "exit/close-position decisions render dedicated protection copy");
 assertIncludes(workspaceShell, "textHasStandAsideSide", "buy/sell conclusions cannot fall back to stand-aside language");
@@ -107,39 +118,40 @@ assertIncludes(workspaceShell, "getNews(token, deferredTicker, Date.now())", "co
 assertIncludes(webApi, "/public/market/news/${encodeURIComponent(ticker)}?limit=6", "frontend uses the public ticker-specific news endpoint");
 assertIncludes(publicNewsService, "_item_belongs_to_symbol(item, ticker)", "public news payload filters items by requested ticker");
 assertIncludes(publicNewsService, "\"mixed_ticker_allowed\": False", "public news payload forbids cross-ticker reuse");
+assertIncludes(publicNewsService, "schedule_warmup", "public news can request background cache warmup without direct HTTP provider calls");
+assertIncludes(publicNewsService, "published_at_source", "public news exposes source publication time");
+assertIncludes(publicNewsService, "source_name", "public news exposes source name");
+assertIncludes(publicNewsService, "source_url", "public news exposes original source URL");
+assertIncludes(publicNewsService, "matched_symbol", "public news exposes matched symbol");
+assertIncludes(workspaceShell, "formatNewsAge", "frontend renders news age from source time");
+assertIncludes(workspaceShell, "sourceDateIsToday", "frontend classifies source date freshness");
+assertIncludes(workspaceSections, "data-news-published-source", "news DOM exposes source publication time for Playwright");
+assertIncludes(workspaceSections, "data-news-matched-symbol", "news DOM exposes matched symbol for Playwright");
+assertIncludes(workspaceSections, "Notícia incompleta: sem hora da fonte", "news DOM marks incomplete source-time cards");
 assertNotIncludes(workspaceShell, "setError(requestError.message)", "raw fetch errors are not shown to users");
 assertNotIncludes(workspaceShell, "setError(requestError instanceof Error ? requestError.message", "raw request errors are not shown to users");
 assertNotIncludes(workspaceShell, "Failed to fetch", "literal fetch failure is not rendered in the UI");
 assertNotIncludes(workspaceShell, "\"ELET3.SA\", \"ELET6.SA\"", "retired ELET6 is not preloaded as active B3 item");
-assertIncludes(tickerChart, "tradingViewSymbolFor(sourceSymbol)", "ticker chart uses centralized TradingView mapping");
-assertIncludes(tickerChart, "function priceToY", "support/resistance uses price-to-y projection");
-assertIncludes(tickerChart, "buildPriceAnchoredLevelChart", "support/resistance chart layer is price anchored");
-assertIncludes(tickerChart, "viewBox=\"0 0 100 100\"", "level layer uses scalable SVG viewBox");
-assertIncludes(tickerChart, "preserveAspectRatio=\"none\"", "level layer resizes with fullscreen/container changes");
-assertIncludes(tickerChart, "data-price={level.price}", "level line stores the invariant price");
-assertIncludes(tickerChart, "y1={level.y}", "line y coordinate comes from price");
-assertIncludes(tickerChart, "y2={level.y}", "line y coordinate is shared by the full line");
-assertIncludes(tickerChart, "snbr-chart-level-label", "labels move with the same level group");
-assertIncludes(css, "vector-effect: non-scaling-stroke", "price lines remain crisp during zoom/resize");
-assertIncludes(css, ".snbr-chart-level-svg", "SVG level layer is styled");
-assertIncludes(css, ".snbr-chart-level-label", "line labels are styled");
+assertIncludes(tickerChart, "resolveTradingViewSymbolCandidates(sourceSymbol)", "ticker chart uses centralized TradingView resolver candidates");
+assertIncludes(tickerChart, "data-tradingview-symbol={tradingViewSymbol}", "ticker chart exposes TradingView symbol for DOM audit");
+assertIncludes(tickerChart, "data-tradingview-candidates={tradingViewCandidates.join", "ticker chart exposes TradingView fallback candidates for DOM audit");
+assertIncludes(tickerChart, "data-chart-status", "ticker chart exposes chart status for DOM audit");
+assertIncludes(tickerChart, "data-support-anchor-mode=\"card_only\"", "support level is card-only until it can be anchored by TradingView price scale");
+assertIncludes(tickerChart, "data-resistance-anchor-mode=\"card_only\"", "resistance level is card-only until it can be anchored by TradingView price scale");
+assertIncludes(tickerChart, "data-support-overlay-status={supportOverlayStatus}", "support overlay state is explicit for Playwright");
+assertIncludes(tickerChart, "data-resistance-overlay-status={resistanceOverlayStatus}", "resistance overlay state is explicit for Playwright");
+assertNotIncludes(tickerChart, "snbr-chart-level-lines", "custom HTML/SVG support-resistance layer is removed");
+assertNotIncludes(tickerChart, "snbr-chart-level-area", "blue mist fill is removed");
+assertNotIncludes(tickerChart, "snbr-chart-level-price-path", "fake price path overlay is removed");
+assertNotIncludes(css, ".snbr-chart-level-lines", "custom chart level CSS layer is removed");
+assertNotIncludes(css, ".snbr-chart-level-area", "blue mist CSS fill is removed");
 assertNotIncludes(css, "top: 26%", "resistance is not fixed to viewport percentage");
 assertNotIncludes(css, "top: 55%", "support is not fixed to viewport percentage");
 assertNotIncludes(tickerChart, "style={{ top:", "component does not position levels by local top style");
-
-const resistanceY = priceToY(14.79, 14.7, 14.9);
-const supportY = priceToY(14.77, 14.7, 14.9);
-for (const viewportWidth of [320, 768, 1440, 2560]) {
-  const zoomedResistanceY = priceToY(14.79, 14.7, 14.9);
-  const zoomedSupportY = priceToY(14.77, 14.7, 14.9);
-  if (zoomedResistanceY !== resistanceY || zoomedSupportY !== supportY || viewportWidth <= 0) {
-    throw new Error("Mission 30 regression: support/resistance changed under viewport zoom simulation");
-  }
-}
 
 assertIncludes(mobileRegistry, "export function canonicalSymbol", "mobile has canonical symbol resolver");
 assertIncludes(mobileRegistry, "AXIA6: [\"AXIA6.SA\", \"AXIA6 B3\", \"ELET6\"", "mobile registry resolves retired ELET6 to AXIA6");
 assertIncludes(mobileApi, "tickerPathValue", "mobile API canonicalizes ticker path values");
 assertIncludes(mobileApi, "canonicalSymbol(ticker)", "mobile API uses canonical symbol resolver");
 
-console.log(JSON.stringify({ ok: true, mission: "30", checks: 78 }, null, 2));
+console.log(JSON.stringify({ ok: true, mission: "30", checks: 101 }, null, 2));

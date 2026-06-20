@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { ChartPayload } from "@/lib/types";
-import { canonicalSymbol, tradingViewSymbolFor } from "@/lib/symbol-registry";
+import { canonicalSymbol, resolveTradingViewSymbolCandidates } from "@/lib/symbol-registry";
 
 type Props = {
   chart: ChartPayload | null;
@@ -136,57 +136,6 @@ function buildLevelOverlays(
   return overlays;
 }
 
-function priceToY(price: number, minPrice: number, maxPrice: number) {
-  const span = Math.max(maxPrice - minPrice, Math.abs(price) * 0.0001, 0.0001);
-  return 92 - ((price - minPrice) / span) * 84;
-}
-
-function buildPriceAnchoredLevelChart(
-  chart: ChartPayload | null,
-  levels: ChartLevelOverlay[],
-) {
-  const rows = (chart?.series?.length ? chart.series : chart?.ohlc || [])
-    .map((row) => ({
-      time: String(row.time || ""),
-      close: Number(row.close),
-      high: Number(row.high ?? row.close),
-      low: Number(row.low ?? row.close),
-    }))
-    .filter((row) => Number.isFinite(row.close) && row.close > 0)
-    .slice(-160);
-
-  if (!rows.length) return null;
-
-  const levelPrices = levels.map((level) => level.price).filter((price) => Number.isFinite(price) && price > 0);
-  const rawMin = Math.min(...rows.map((row) => Number.isFinite(row.low) && row.low > 0 ? row.low : row.close), ...levelPrices);
-  const rawMax = Math.max(...rows.map((row) => Number.isFinite(row.high) && row.high > 0 ? row.high : row.close), ...levelPrices);
-  const padding = Math.max((rawMax - rawMin) * 0.08, rawMax * 0.001, 0.0001);
-  const minPrice = Math.max(0, rawMin - padding);
-  const maxPrice = rawMax + padding;
-
-  const points = rows.map((row, index) => {
-    const x = rows.length === 1 ? 50 : (index / (rows.length - 1)) * 100;
-    const y = priceToY(row.close, minPrice, maxPrice);
-    return { x, y, close: row.close, time: row.time };
-  });
-
-  const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(3)} ${point.y.toFixed(3)}`).join(" ");
-  const areaPath = `${path} L 100 96 L 0 96 Z`;
-  const levelRows = levels.map((level) => ({
-    ...level,
-    y: priceToY(level.price, minPrice, maxPrice),
-  }));
-
-  return {
-    path,
-    areaPath,
-    levels: levelRows,
-    minPrice,
-    maxPrice,
-    latest: points[points.length - 1],
-  };
-}
-
 export function TickerChart({
   chart,
   ticker,
@@ -207,7 +156,8 @@ export function TickerChart({
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [loadFailed, setLoadFailed] = useState(false);
   const sourceSymbol = cleanSymbol(ticker || chart?.ticker);
-  const tradingViewSymbol = useMemo(() => tradingViewSymbolFor(sourceSymbol), [sourceSymbol]);
+  const tradingViewCandidates = useMemo(() => resolveTradingViewSymbolCandidates(sourceSymbol), [sourceSymbol]);
+  const tradingViewSymbol = tradingViewCandidates[0] || "BMFBOVESPA:PETR4";
   const timeframe = TIMEFRAME_TO_TRADING_VIEW[interval] || TIMEFRAME_TO_TRADING_VIEW["1D"];
   const tradingViewUrl = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tradingViewSymbol)}`;
   const levelOverlays = useMemo(
@@ -221,10 +171,8 @@ export function TickerChart({
       }),
     [showSupport, showResistance, supportLevel, resistanceLevel, locale],
   );
-  const priceAnchoredChart = useMemo(
-    () => buildPriceAnchoredLevelChart(chart, levelOverlays),
-    [chart, levelOverlays],
-  );
+  const supportOverlayStatus = showSupport && firstFiniteNumber(supportLevel) != null ? "card_only" : "hidden";
+  const resistanceOverlayStatus = showResistance && firstFiniteNumber(resistanceLevel) != null ? "card_only" : "hidden";
   const institutionalRsi = useMemo(() => {
     const numeric = firstFiniteNumber(institutionalRsiValue);
     if (numeric == null || numeric <= 0 || numeric > 100) return null;
@@ -311,7 +259,17 @@ export function TickerChart({
   }, [tradingViewSymbol, timeframe.interval, timeframe.range, theme, locale, showVwap, showAverages, showMacd, showVolume]);
 
   return (
-    <div className="snbr-chart-shell snbr-tv-widget-shell">
+    <div
+      className="snbr-chart-shell snbr-tv-widget-shell"
+      data-chart-status={loadFailed ? "load_failed" : "requested"}
+      data-source-symbol={sourceSymbol}
+      data-tradingview-symbol={tradingViewSymbol}
+      data-tradingview-candidates={tradingViewCandidates.join(",")}
+      data-support-anchor-mode="card_only"
+      data-resistance-anchor-mode="card_only"
+      data-support-overlay-status={supportOverlayStatus}
+      data-resistance-overlay-status={resistanceOverlayStatus}
+    >
       <div className="snbr-tv-plot-area">
         <div className="tradingview-widget-container snbr-tv-widget" ref={containerRef} />
         {rsiPanelLabel || levelOverlays.length ? (
@@ -333,46 +291,6 @@ export function TickerChart({
                 ))}
               </div>
             ) : null}
-          </div>
-        ) : null}
-        {priceAnchoredChart ? (
-          <div
-            className="snbr-chart-level-lines"
-            data-price-anchored="true"
-            data-support-price={supportLevel ?? undefined}
-            data-resistance-price={resistanceLevel ?? undefined}
-            aria-hidden="true"
-          >
-            <svg className="snbr-chart-level-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
-              <path className="snbr-chart-level-area" d={priceAnchoredChart.areaPath} />
-              <path className="snbr-chart-level-price-path" d={priceAnchoredChart.path} />
-              {priceAnchoredChart.levels.map((level) => (
-                <g key={level.key} className={`snbr-chart-level-group ${level.key}`}>
-                  <line
-                    className={`snbr-chart-level-line ${level.key}`}
-                    x1="0"
-                    x2="100"
-                    y1={level.y}
-                    y2={level.y}
-                    data-price={level.price}
-                  />
-                  <text
-                    className={`snbr-chart-level-label ${level.key}`}
-                    x="98"
-                    y={Math.max(7, level.y - 1)}
-                    textAnchor="end"
-                  >
-                    {level.label}: {formatLevelPrice(level.price, locale)}
-                  </text>
-                </g>
-              ))}
-              <circle
-                className="snbr-chart-level-latest-dot"
-                cx={priceAnchoredChart.latest.x}
-                cy={priceAnchoredChart.latest.y}
-                r="0.9"
-              />
-            </svg>
           </div>
         ) : null}
         {loadFailed ? (

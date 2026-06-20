@@ -76,7 +76,7 @@ class PublicMarketRouteTests(unittest.TestCase):
         self.assertEqual(payload["symbol"], "AAPL")
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["source"], "public")
-        build_payload.assert_called_once_with("AAPL", limit=3, source="public", allow_fetch=False)
+        build_payload.assert_called_once_with("AAPL", limit=3, source="public", allow_fetch=False, schedule_warmup=True)
 
     def test_public_ai_tools_returns_visible_history_contract(self):
         with patch.object(

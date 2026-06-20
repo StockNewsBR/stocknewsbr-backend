@@ -81,7 +81,7 @@ def public_quote(symbol: str):
 
 @router.get("/market/news/{symbol}")
 def public_news(symbol: str, limit: int = 6):
-    return build_public_news_payload(_normalize_symbol(symbol), limit=limit, source="public", allow_fetch=False)
+    return build_public_news_payload(_normalize_symbol(symbol), limit=limit, source="public", allow_fetch=False, schedule_warmup=True)
 
 
 @router.get("/market/ai-tools")

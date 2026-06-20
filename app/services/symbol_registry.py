@@ -27,21 +27,34 @@ CRYPTO_BASES = {
 US_EXCHANGE_BY_SYMBOL = {
     "AAL": "NASDAQ",
     "AAPL": "NASDAQ",
+    "ADBE": "NASDAQ",
     "AMD": "NASDAQ",
     "AMZN": "NASDAQ",
     "AVGO": "NASDAQ",
+    "BABA": "NYSE",
+    "BULL": "NASDAQ",
+    "BYDDY": "OTC",
+    "COIN": "NASDAQ",
     "COST": "NASDAQ",
+    "CRM": "NYSE",
     "GOOGL": "NASDAQ",
     "INTC": "NASDAQ",
     "META": "NASDAQ",
     "MSFT": "NASDAQ",
+    "NFLX": "NASDAQ",
     "NVDA": "NASDAQ",
+    "ORCL": "NYSE",
+    "PDD": "NASDAQ",
     "PLTR": "NASDAQ",
+    "PYPL": "NASDAQ",
     "QCOM": "NASDAQ",
+    "SHOP": "NYSE",
     "SPY": "NYSEARCA",
     "QQQ": "NASDAQ",
+    "SPCX": "NASDAQ",
     "SNOW": "NYSE",
     "TSLA": "NASDAQ",
+    "UBER": "NYSE",
     "BA": "NYSE",
     "BAC": "NYSE",
     "CVX": "NYSE",
@@ -67,11 +80,19 @@ _CURATED_ALIASES: dict[str, tuple[str, ...]] = {
     "BBAS3": ("BBAS3.SA", "BBAS3 B3", "BBAS", "BVMF:BBAS3", "BMFBOVESPA:BBAS3"),
     "WIN": ("WIN$", "WINFUT", "WIN1!", "BMFBOVESPA:WIN1!"),
     "AAPL": ("NASDAQ:AAPL", "AAPL.US"),
+    "BULL": ("NASDAQ:BULL", "BULL.US"),
+    "BYDDY": ("OTC:BYDDY", "BYDDY.US"),
+    "CRM": ("NYSE:CRM", "CRM.US"),
+    "F": ("NYSE:F", "F.US"),
     "MSFT": ("NASDAQ:MSFT", "MSFT.US"),
     "NVDA": ("NASDAQ:NVDA", "NVDA.US"),
     "TSLA": ("NASDAQ:TSLA", "TSLA.US"),
     "SPY": ("NYSEARCA:SPY", "SPY.US"),
     "QQQ": ("NASDAQ:QQQ", "QQQ.US"),
+}
+
+_TRADINGVIEW_SYMBOL_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "AXIA6": ("BMFBOVESPA:ELET6", "BMFBOVESPA:AXIA6", "BMFBOVESPA:ELET3"),
 }
 
 
@@ -224,21 +245,33 @@ def canonical_symbol_aliases(value: Any) -> list[str]:
     return list(dict.fromkeys(alias for alias in aliases if alias))
 
 
-def tradingview_symbol(value: Any) -> str:
+def resolve_tradingview_symbol_candidates(value: Any) -> tuple[str, ...]:
     canonical = canonical_symbol(value)
     if not canonical:
-        return "BMFBOVESPA:PETR4"
+        return ("BMFBOVESPA:PETR4",)
+
+    curated_fallbacks = _TRADINGVIEW_SYMBOL_FALLBACKS.get(canonical)
+    if curated_fallbacks:
+        return curated_fallbacks
 
     if canonical == "WIN":
-        return "BMFBOVESPA:WIN1!"
+        return ("BMFBOVESPA:WIN1!",)
 
     if canonical.endswith("USD") and canonical[:-3] in CRYPTO_BASES:
-        return f"BINANCE:{canonical[:-3]}USDT"
+        return (f"BINANCE:{canonical[:-3]}USDT",)
 
     if _B3_RE.match(canonical):
-        return f"BMFBOVESPA:{canonical}"
+        return (f"BMFBOVESPA:{canonical}",)
 
-    return f"{US_EXCHANGE_BY_SYMBOL.get(canonical, 'NASDAQ')}:{canonical}"
+    return (f"{US_EXCHANGE_BY_SYMBOL.get(canonical, 'NASDAQ')}:{canonical}",)
+
+
+def resolve_tradingview_symbol(value: Any) -> str:
+    return resolve_tradingview_symbol_candidates(value)[0]
+
+
+def tradingview_symbol(value: Any) -> str:
+    return resolve_tradingview_symbol(value)
 
 
 def provider_symbol(value: Any) -> str:
@@ -281,6 +314,9 @@ def canonicalize_symbol_row(row: dict[str, Any]) -> dict[str, Any]:
         item["symbol"] = resolved
         item["provider_symbol"] = item.get("provider_symbol") or provider_symbol(resolved)
         item["tradingview_symbol"] = item.get("tradingview_symbol") or tradingview_symbol(resolved)
+        item["tradingview_symbol_candidates"] = item.get("tradingview_symbol_candidates") or list(
+            resolve_tradingview_symbol_candidates(resolved)
+        )
         item["symbol_category"] = item.get("symbol_category") or symbol_category(resolved)
     return item
 

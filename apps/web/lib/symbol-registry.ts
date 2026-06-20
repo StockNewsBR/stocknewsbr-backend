@@ -10,21 +10,34 @@ const CRYPTO_BASES = new Set(["BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", 
 const US_EXCHANGE_BY_SYMBOL: Record<string, string> = {
   AAL: "NASDAQ",
   AAPL: "NASDAQ",
+  ADBE: "NASDAQ",
   AMD: "NASDAQ",
   AMZN: "NASDAQ",
   AVGO: "NASDAQ",
+  BABA: "NYSE",
+  BULL: "NASDAQ",
+  BYDDY: "OTC",
+  COIN: "NASDAQ",
   COST: "NASDAQ",
+  CRM: "NYSE",
   GOOGL: "NASDAQ",
   INTC: "NASDAQ",
   META: "NASDAQ",
   MSFT: "NASDAQ",
+  NFLX: "NASDAQ",
   NVDA: "NASDAQ",
+  ORCL: "NYSE",
+  PDD: "NASDAQ",
   PLTR: "NASDAQ",
+  PYPL: "NASDAQ",
   QCOM: "NASDAQ",
+  SHOP: "NYSE",
   QQQ: "NASDAQ",
   SPY: "NYSEARCA",
+  SPCX: "NASDAQ",
   SNOW: "NYSE",
   TSLA: "NASDAQ",
+  UBER: "NYSE",
   BA: "NYSE",
   BAC: "NYSE",
   CVX: "NYSE",
@@ -50,11 +63,19 @@ const CURATED_ALIASES: Record<string, string[]> = {
   BBAS3: ["BBAS3.SA", "BBAS3 B3", "BBAS", "BVMF:BBAS3", "BMFBOVESPA:BBAS3"],
   WIN: ["WIN$", "WINFUT", "WIN1!", "BMFBOVESPA:WIN1!"],
   AAPL: ["NASDAQ:AAPL", "AAPL.US"],
+  BULL: ["NASDAQ:BULL", "BULL.US"],
+  BYDDY: ["OTC:BYDDY", "BYDDY.US"],
+  CRM: ["NYSE:CRM", "CRM.US"],
+  F: ["NYSE:F", "F.US"],
   MSFT: ["NASDAQ:MSFT", "MSFT.US"],
   NVDA: ["NASDAQ:NVDA", "NVDA.US"],
   TSLA: ["NASDAQ:TSLA", "TSLA.US"],
   SPY: ["NYSEARCA:SPY", "SPY.US"],
   QQQ: ["NASDAQ:QQQ", "QQQ.US"],
+};
+
+const TRADING_VIEW_SYMBOL_FALLBACKS: Record<string, string[]> = {
+  AXIA6: ["BMFBOVESPA:ELET6", "BMFBOVESPA:AXIA6", "BMFBOVESPA:ELET3"],
 };
 
 function aliasKey(value: unknown) {
@@ -179,15 +200,25 @@ export function canonicalSymbolAliases(value: unknown) {
   return Array.from(aliases);
 }
 
-export function tradingViewSymbolFor(value: unknown) {
+export function resolveTradingViewSymbolCandidates(value: unknown) {
   const canonical = canonicalSymbol(value);
-  if (!canonical) return "BMFBOVESPA:PETR4";
-  if (canonical === "WIN") return "BMFBOVESPA:WIN1!";
+  if (!canonical) return ["BMFBOVESPA:PETR4"];
+  const curatedFallbacks = TRADING_VIEW_SYMBOL_FALLBACKS[canonical];
+  if (curatedFallbacks?.length) return curatedFallbacks;
+  if (canonical === "WIN") return ["BMFBOVESPA:WIN1!"];
   if (canonical.endsWith("USD") && CRYPTO_BASES.has(canonical.slice(0, -3))) {
-    return `BINANCE:${canonical.slice(0, -3)}USDT`;
+    return [`BINANCE:${canonical.slice(0, -3)}USDT`];
   }
-  if (B3_RE.test(canonical)) return `BMFBOVESPA:${canonical}`;
-  return `${US_EXCHANGE_BY_SYMBOL[canonical] || "NASDAQ"}:${canonical}`;
+  if (B3_RE.test(canonical)) return [`BMFBOVESPA:${canonical}`];
+  return [`${US_EXCHANGE_BY_SYMBOL[canonical] || "NASDAQ"}:${canonical}`];
+}
+
+export function resolveTradingViewSymbol(value: unknown) {
+  return resolveTradingViewSymbolCandidates(value)[0] || "BMFBOVESPA:PETR4";
+}
+
+export function tradingViewSymbolFor(value: unknown) {
+  return resolveTradingViewSymbol(value);
 }
 
 export function providerSymbolFor(value: unknown) {

@@ -758,7 +758,13 @@ def public_market_bundle(
         "quote": quote,
         "insight": public_market_insight(ticker, interval=chart_interval),
         "chart": public_market_chart(ticker, interval=chart_interval, range_value=None),
-        "news": build_public_news_payload(response_symbol, limit=safe_limit, source="public_bundle", allow_fetch=False),
+        "news": build_public_news_payload(
+            response_symbol,
+            limit=safe_limit,
+            source="public_bundle",
+            allow_fetch=False,
+            schedule_warmup=True,
+        ),
         "ai_tools": build_public_ai_tools_payload([ticker, response_symbol]),
         "source": "cache_snapshot_bundle",
     }
