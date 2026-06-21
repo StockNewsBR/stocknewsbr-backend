@@ -4,7 +4,13 @@ from fastapi import APIRouter
 
 from app.services.public_ai_tools_service import build_public_ai_tools_payload
 from app.services.public_news_service import build_public_news_payload
-from app.services.quote_service import empty_quote_payload, get_cached_quote_payload, is_usable_quote_payload
+from app.services.quote_service import (
+    empty_quote_payload,
+    get_cached_quote_payload,
+    get_quote_payload,
+    is_usable_quote_payload,
+    with_quote_diagnostics,
+)
 
 
 router = APIRouter(prefix="/public", tags=["Public Market"])
@@ -66,22 +72,28 @@ def _has_quote_value(payload: dict | None) -> bool:
 
 
 @router.get("/market/quote/{symbol}")
-def public_quote(symbol: str):
+def public_quote(symbol: str, refresh: str | None = None):
     query_symbol = _normalize_symbol(symbol)
     response_symbol = _response_symbol(symbol)
     for alias in _symbol_aliases(query_symbol):
-        payload = get_cached_quote_payload(alias)
+        payload = get_quote_payload(alias, allow_fetch=True) if refresh is not None else get_cached_quote_payload(alias)
         if not payload:
             continue
         normalized_payload = {**payload, "symbol": response_symbol}
         if _has_quote_value(payload):
-            return normalized_payload
+            return with_quote_diagnostics(normalized_payload) or normalized_payload
     return empty_quote_payload(response_symbol)
 
 
 @router.get("/market/news/{symbol}")
-def public_news(symbol: str, limit: int = 6):
-    return build_public_news_payload(_normalize_symbol(symbol), limit=limit, source="public", allow_fetch=False, schedule_warmup=True)
+def public_news(symbol: str, limit: int = 6, refresh: str | None = None):
+    return build_public_news_payload(
+        _normalize_symbol(symbol),
+        limit=limit,
+        source="public",
+        allow_fetch=refresh is not None,
+        schedule_warmup=True,
+    )
 
 
 @router.get("/market/ai-tools")

@@ -227,8 +227,9 @@ export function getNews(token: string | null | undefined, ticker: string, refres
   return request<NewsPayload>(route, token ? { token, cacheTtlMs: refreshKey == null ? 30000 : 0 } : { cacheTtlMs: refreshKey == null ? 30000 : 0 });
 }
 
-export function getPublicQuote(ticker: string) {
-  return request<QuotePayload>(`/public/market/quote/${encodeURIComponent(ticker)}`, { cacheTtlMs: 5000 });
+export function getPublicQuote(ticker: string, options?: { refresh?: boolean }) {
+  const suffix = options?.refresh ? `?refresh=${Date.now()}` : "";
+  return request<QuotePayload>(`/public/market/quote/${encodeURIComponent(ticker)}${suffix}`, { cacheTtlMs: options?.refresh ? 0 : 5000 });
 }
 
 export function getPublicQuotes(symbols: string[]) {
@@ -342,7 +343,7 @@ function getQuoteAlias(bySymbol: Map<string, QuotePayload>, symbol: string) {
   return null;
 }
 
-async function getPublicQuotesIndividually(symbols: string[], concurrency = 4) {
+async function getPublicQuotesIndividually(symbols: string[], concurrency = 4, refresh = true) {
   const uniqueSymbols = Array.from(new Set(symbols.map(normalizeQuoteSymbol).filter(Boolean)));
   const items: QuotePayload[] = [];
   let cursor = 0;
@@ -352,7 +353,7 @@ async function getPublicQuotesIndividually(symbols: string[], concurrency = 4) {
       const symbol = uniqueSymbols[cursor];
       cursor += 1;
       try {
-        items.push(await getPublicQuote(symbol));
+        items.push(await getPublicQuote(symbol, { refresh }));
       } catch {
         // Partial market-provider failures should not block the whole board.
       }
@@ -363,7 +364,7 @@ async function getPublicQuotesIndividually(symbols: string[], concurrency = 4) {
   return items;
 }
 
-export async function getPublicQuotesRobust(symbols: string[], chunkSize = 32, fallbackConcurrency = 0) {
+export async function getPublicQuotesRobust(symbols: string[], chunkSize = 32, fallbackConcurrency = 0, refreshFallback = true) {
   const uniqueSymbols = Array.from(new Set(symbols.map(normalizeQuoteSymbol).filter(Boolean)));
   const bulk = await getPublicQuotesChunked(uniqueSymbols, chunkSize);
   const bySymbol = new Map<string, QuotePayload>();
@@ -376,7 +377,7 @@ export async function getPublicQuotesRobust(symbols: string[], chunkSize = 32, f
   const missingOrEmpty = uniqueSymbols.filter((symbol) => !hasMarketQuoteValue(getQuoteAlias(bySymbol, symbol)));
 
   if (missingOrEmpty.length && fallbackConcurrency > 0) {
-    const fallbackItems = await getPublicQuotesIndividually(missingOrEmpty, fallbackConcurrency);
+    const fallbackItems = await getPublicQuotesIndividually(missingOrEmpty, fallbackConcurrency, refreshFallback);
     for (const item of fallbackItems) {
       if (!item?.symbol) continue;
       storeQuoteAliases(bySymbol, item, item.symbol);
@@ -479,12 +480,12 @@ export function muteUser(token: string, target: number) {
   });
 }
 
-export function reportPost(token: string, post_id: number, reason = "community") {
+export function reportPost(token: string, post_id: number, reason = "community", note?: string | null) {
   return request<{ status: string }>("/report", {
     method: "POST",
     token,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ post_id, reason }),
+    body: JSON.stringify({ post_id, reason, note }),
   });
 }
 

@@ -77,7 +77,8 @@ assertIncludes(workspaceRails, "}: ${activeWatchCount}", "active list count labe
 assertIncludes(workspaceShell, "INTERNAL_AI_TAB_IDS", "internal AI tools remain hidden from top tabs");
 assertIncludes(workspaceShell, "shouldShowTopBarTabId", "top bar has explicit visibility rules");
 assertIncludes(workspaceShell, "if (INTERNAL_AI_TAB_IDS.has(id)) return false", "Risk, News AI, Macro and Regime tabs are hidden visually");
-assertIncludes(workspaceShell, "aiCount > 0", "top bar only renders AI count badges with real findings");
+assertIncludes(workspaceShell, "tabCount != null", "top bar renders explicit ticker-scoped counters for news and visible AI tabs");
+assertIncludes(workspaceShell, "aiToolFindingCounts[tab.id] ?? 0", "AI tabs expose zero-count badges instead of looking broken");
 assertNotIncludes(workspaceShell, "no data\" : \"sem dados", "top bar does not render no-data AI badges");
 assertIncludes(workspaceShell, "news: { label: \"📰 Notícias\"", "common news tab remains available");
 assertIncludes(workspaceSections, "Sem notícias relevantes para este ativo agora. Tente atualizar mais tarde.", "empty common news tab explains absence inside the panel");
@@ -102,7 +103,7 @@ assertIncludes(workspaceShell, "textHasStandAsideSide", "buy/sell conclusions ca
 assertIncludes(workspaceShell, "Zona de proteção", "exit decisions use protection zone instead of buy/sell zone");
 assertIncludes(workspaceShell, "Fluxo de entrada não está confirmado", "exit decisions avoid buyer/seller wording in primary reasons");
 assertIncludes(workspaceShell, "Resultados de ${oilResults[1]}", "BR news headlines translate common English market title");
-assertIncludes(workspaceShell, "Nenhum achado desta IA para este ativo agora", "AI empty-state remains available inside the panel");
+assertIncludes(workspaceShell, "0 eventos atuais para este ativo.", "AI empty-state remains available inside the panel");
 assertIncludes(workspaceShell, "function formatAiUpdatedAt", "AI freshness uses a centralized timestamp formatter");
 assertIncludes(workspaceShell, "day: \"2-digit\"", "AI timestamps show the full day");
 assertIncludes(workspaceShell, "year: \"numeric\"", "AI timestamps show the full year");
@@ -136,14 +137,14 @@ assertIncludes(tickerChart, "resolveTradingViewSymbolCandidates(sourceSymbol)", 
 assertIncludes(tickerChart, "data-tradingview-symbol={tradingViewSymbol}", "ticker chart exposes TradingView symbol for DOM audit");
 assertIncludes(tickerChart, "data-tradingview-candidates={tradingViewCandidates.join", "ticker chart exposes TradingView fallback candidates for DOM audit");
 assertIncludes(tickerChart, "data-chart-status", "ticker chart exposes chart status for DOM audit");
-assertIncludes(tickerChart, "data-support-anchor-mode=\"card_only\"", "support level is card-only until it can be anchored by TradingView price scale");
-assertIncludes(tickerChart, "data-resistance-anchor-mode=\"card_only\"", "resistance level is card-only until it can be anchored by TradingView price scale");
+assertIncludes(tickerChart, "data-support-anchor-mode={supportOverlayStatus}", "support level exposes price-scale overlay anchor status");
+assertIncludes(tickerChart, "data-resistance-anchor-mode={resistanceOverlayStatus}", "resistance level exposes price-scale overlay anchor status");
 assertIncludes(tickerChart, "data-support-overlay-status={supportOverlayStatus}", "support overlay state is explicit for Playwright");
 assertIncludes(tickerChart, "data-resistance-overlay-status={resistanceOverlayStatus}", "resistance overlay state is explicit for Playwright");
-assertNotIncludes(tickerChart, "snbr-chart-level-lines", "custom HTML/SVG support-resistance layer is removed");
+assertIncludes(tickerChart, "snbr-chart-level-lines", "support/resistance lines render when badges are visible");
+assertIncludes(css, ".snbr-chart-level-lines", "support/resistance level CSS is present");
 assertNotIncludes(tickerChart, "snbr-chart-level-area", "blue mist fill is removed");
 assertNotIncludes(tickerChart, "snbr-chart-level-price-path", "fake price path overlay is removed");
-assertNotIncludes(css, ".snbr-chart-level-lines", "custom chart level CSS layer is removed");
 assertNotIncludes(css, ".snbr-chart-level-area", "blue mist CSS fill is removed");
 assertNotIncludes(css, "top: 26%", "resistance is not fixed to viewport percentage");
 assertNotIncludes(css, "top: 55%", "support is not fixed to viewport percentage");

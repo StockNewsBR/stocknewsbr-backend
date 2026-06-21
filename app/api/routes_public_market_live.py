@@ -17,7 +17,13 @@ from app.services.public_market_data_service import (
     load_public_chart_rows,
 )
 from app.services.public_news_service import build_public_news_payload
-from app.services.quote_service import classify_quote_payload, get_cached_quote_payload, is_usable_quote_payload
+from app.services.quote_service import (
+    classify_quote_payload,
+    empty_quote_payload,
+    get_cached_quote_payload,
+    is_usable_quote_payload,
+    with_quote_diagnostics,
+)
 from app.services.snapshot_contract import build_decision_envelope
 from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases
 from app.services.symbol_sanitizer import mark_symbol_cooldown, sanitize_market_symbol
@@ -378,7 +384,7 @@ def _resolve_cached_quote(cached_payloads, symbol: str, chart_quote_cache: dict 
             if payload.get("source") is None:
                 payload = {**payload, "source": "market_cache"}
             payload["quote_status"] = classify_quote_payload(payload)
-            return payload
+            return with_quote_diagnostics(payload) or payload
 
     for alias in _symbol_aliases(symbol):
         candidate = cached_payloads.get(alias)
@@ -392,7 +398,7 @@ def _resolve_cached_quote(cached_payloads, symbol: str, chart_quote_cache: dict 
                 payload = {**payload, "source": "market_cache_stale"}
             payload["quote_status"] = classify_quote_payload(payload)
             payload["stale"] = True
-            return payload
+            return with_quote_diagnostics(payload) or payload
 
     for candidate in cached_payloads.values():
         if not isinstance(candidate, dict):
@@ -405,26 +411,15 @@ def _resolve_cached_quote(cached_payloads, symbol: str, chart_quote_cache: dict 
                 payload = {**payload, "source": "market_cache_alias_fallback"}
             payload["quote_status"] = classify_quote_payload(payload)
             payload["stale"] = True
-            return payload
+            return with_quote_diagnostics(payload) or payload
 
     snapshot_payload = get_cached_quote_payload(symbol)
     if _payload_matches_requested_symbol(snapshot_payload, symbol) and _has_usable_quote_payload(snapshot_payload, allow_stale=True):
         payload = {**snapshot_payload, "symbol": _response_symbol(symbol)}
         payload["quote_status"] = classify_quote_payload(payload)
-        return payload
+        return with_quote_diagnostics(payload) or payload
 
-    return {
-        "symbol": _response_symbol(symbol),
-        "price": None,
-        "change": None,
-        "change_pct": None,
-        "volume": None,
-        "high": None,
-        "low": None,
-        "source": "empty",
-        "quote_status": "empty",
-        "stale": False,
-    }
+    return empty_quote_payload(_response_symbol(symbol))
 
 
 def _quote_from_chart_cache(symbol: str, chart_quote_cache: dict | None = None):
@@ -474,6 +469,7 @@ def _quote_from_chart_cache(symbol: str, chart_quote_cache: dict | None = None):
         "quote_status": "stale_chart",
         "stale": True,
     }
+    payload = with_quote_diagnostics(payload) or payload
     if chart_quote_cache is not None:
         chart_quote_cache[cache_key] = payload
     return payload

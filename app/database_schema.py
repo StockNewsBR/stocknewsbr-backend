@@ -225,6 +225,10 @@ SCHEMA_PATCHES = {
             "sqlite": "ALTER TABLE users ADD COLUMN last_access_at DATETIME",
             "default": "ALTER TABLE users ADD COLUMN last_access_at TIMESTAMP",
         },
+        "updated_at": {
+            "sqlite": "ALTER TABLE users ADD COLUMN updated_at DATETIME",
+            "default": "ALTER TABLE users ADD COLUMN updated_at TIMESTAMP",
+        },
     },
     "referrals": {
         "reward_processed": {

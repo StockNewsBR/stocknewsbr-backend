@@ -345,7 +345,17 @@ const TAB_ORDER = [
 ];
 
 const TOP_BAR_TAB_IDS = TAB_ORDER.filter((id) => id !== "busca");
-const SIMPLE_TOP_TAB_IDS = new Set(["grafico", "news", "referrals", "education"]);
+const SIMPLE_TOP_TAB_IDS = new Set([
+  "grafico",
+  "news",
+  "flow",
+  "liquidity",
+  "trend",
+  "momentum",
+  "smart-money",
+  "referrals",
+  "education",
+]);
 const INTERNAL_AI_TAB_IDS = new Set(["risk", "news-ia", "macro", "regime"]);
 const WORKSPACE_MODE_STORAGE_KEY = "stocknewsbr.workspace_mode";
 const DETACHABLE_IA_TABS = new Set([
@@ -1170,6 +1180,14 @@ const HELP_GUIDES = [
 const TIMEFRAME_OPTIONS = ["1D", "1W", "1M", "3M", "6M", "YTD", "1Y", "All"];
 const COMPOSER_EMOJIS = ["🔥", "📈", "🚀", "💰", "⚠️", "👀", "✅", "🔻"];
 const QUICK_GIF_TERMS = ["bull market", "bear market", "stocks rally", "market crash"];
+const SOCIAL_REPORT_REASONS = [
+  { key: "spam", labelPt: "Spam", labelEn: "Spam" },
+  { key: "golpe", labelPt: "Golpe", labelEn: "Scam" },
+  { key: "manipulacao", labelPt: "Manipulação", labelEn: "Manipulation" },
+  { key: "ofensivo", labelPt: "Ofensivo", labelEn: "Offensive" },
+  { key: "fake_news", labelPt: "Fake News", labelEn: "Fake News" },
+  { key: "outro", labelPt: "Outro", labelEn: "Other" },
+];
 
 function cx(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
@@ -2564,6 +2582,24 @@ function firstPositiveFiniteNumber(...values: Array<unknown>) {
   return null;
 }
 
+function quoteMissingFieldsForUi(payload?: QuotePayload | null) {
+  const raw = Array.isArray(payload?.missing_fields) ? payload?.missing_fields : [];
+  return Array.from(new Set(raw.map((field) => normalizeUiText(String(field))).filter(Boolean)));
+}
+
+function quoteMissingFieldLabel(field: string, locale: AppLocale = "pt-BR") {
+  const labels: Record<string, { pt: string; en: string }> = {
+    price: { pt: "preço", en: "price" },
+    volume: { pt: "volume", en: "volume" },
+    score: { pt: "Score Mestre", en: "Master Score" },
+    rsi: { pt: "RSI", en: "RSI" },
+    bias: { pt: "Bias", en: "Bias" },
+  };
+  const label = labels[normalizeUiText(field)];
+  if (!label) return field;
+  return locale === "en-US" ? label.en : label.pt;
+}
+
 const DATA_QUALITY_LABELS: Record<string, string> = {
   real_time: "Dados Confiáveis",
   cached: "Dados Confiáveis",
@@ -3394,6 +3430,21 @@ function newsDedupeKey(item: NewsItem, symbol: string) {
   return normalized ? `text:${normalized.slice(0, 180)}` : `id:${item.id || symbol}`;
 }
 
+function validExternalNewsUrl(value?: string | null) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  try {
+    const parsed = new URL(text);
+    const host = parsed.hostname.toLowerCase();
+    if (!["http:", "https:"].includes(parsed.protocol)) return "";
+    if (!host.includes(".") || ["example.com", "www.example.com", "localhost", "127.0.0.1", "0.0.0.0"].includes(host)) return "";
+    if (/(mock|fake|placeholder)/i.test(text)) return "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
 function dedupeNewsForTicker(items: NewsItem[], symbol: string) {
   const seen = new Set<string>();
   return items.filter((item) => {
@@ -3876,6 +3927,7 @@ function buildOperationalDecision(input: {
   conclusion: StrategicConclusion;
   chart: ChartPayload | null;
   hasCoreData: boolean;
+  missingFields?: string[];
 }): OperationalDecision {
   const isEnglish = input.locale === "en-US";
   const [scoreCard, directionCard, tradeCard, regimeCard, flowCard, liquidityCard, riskCard] = input.cards;
@@ -3933,8 +3985,8 @@ function buildOperationalDecision(input: {
   const reasons = (() => {
     if (incomplete) {
       return isEnglish
-        ? ["Real price/volume/score are not complete", "Operational trade remains blocked", "Wait for the next confirmed snapshot"]
-        : ["Preço, volume ou Score Mestre ainda não estão completos", "Trade operacional permanece bloqueado", "Aguardar o próximo snapshot confirmado"];
+        ? ["Critical data fields are incomplete", "No operational conclusion will be generated", "Wait for provider quote/candles and a confirmed snapshot"]
+        : ["Campos críticos de dados estão incompletos", "Nenhuma conclusão operacional será gerada", "Aguardar cotação/candles do provider e snapshot confirmado"];
     }
     if (tone === "bullish") {
       return [
@@ -3967,6 +4019,34 @@ function buildOperationalDecision(input: {
       ? ["No side has enough confirmation", "Price, volume and flow must align", "Waiting is the professional decision now"]
       : ["Nenhum lado tem confirmação suficiente", "Preço, volume e fluxo precisam alinhar", "Aguardar é a decisão profissional agora"];
   })();
+
+  if (incomplete) {
+    return {
+      action,
+      tone,
+      confidence: null,
+      confidenceLabel,
+      bias: isEnglish ? "Monitoring" : "Monitorando",
+      risk: isEnglish ? "Insufficient data" : "Dados insuficientes",
+      reasons,
+      levels: [
+        {
+          label: isEnglish ? "Missing fields" : "Campos faltantes",
+          value: input.missingFields?.length
+            ? input.missingFields.join(", ")
+            : (isEnglish ? "backend field diagnostics unavailable" : "diagnóstico de campos indisponível no backend"),
+        },
+        {
+          label: isEnglish ? "Provider" : "Provider",
+          value: isEnglish ? "Awaiting confirmed quote/candles" : "Aguardando cotação/candles confirmados",
+        },
+        {
+          label: isEnglish ? "Snapshot" : "Snapshot",
+          value: isEnglish ? "Incomplete" : "Incompleto",
+        },
+      ],
+    };
+  }
 
   const supportText = zones.support != null ? formatLocalePrice(zones.support, input.locale) : (isEnglish ? "No level" : "Sem nível");
   const resistanceText = zones.resistance != null ? formatLocalePrice(zones.resistance, input.locale) : (isEnglish ? "No level" : "Sem nível");
@@ -5007,75 +5087,51 @@ function positionProtectionSections(locale: AppLocale): NonNullable<StrategicCon
 function noDataStrategicSections(locale: AppLocale, symbol: string, focus?: string | null): NonNullable<StrategicConclusion["sections"]> {
   const isEnglish = locale === "en-US";
   const assetLabel = normalizeSymbol(symbol) || (isEnglish ? "the asset" : "o ativo");
-  const normalizedFocus = sentenceCaseFirst(
-    String(focus || "")
-      .replace(/^Focus now:\s*/i, "")
-      .replace(/^Foco agora:\s*/i, "")
-      .trim(),
-    locale,
-  );
+  const normalizedFocus = sentenceCaseFirst(String(focus || "").trim(), locale);
 
   if (isEnglish) {
     return [
       {
-        title: "Current Scenario",
-        body: `${assetLabel}: the operational read is incomplete. Use the panel as context and do not execute until price, volume, Master Score and chart structure are confirmed.`,
+        title: "Real data pending",
+        body: `${assetLabel}: there is not enough real data for an operational analysis of this asset.`,
       },
       {
-        title: "Strategic Directive",
+        title: "Missing fields",
         items: [
-          "Block every directional setup while quote and volume are incomplete.",
-          "Wait for the next confirmed snapshot before evaluating any entry.",
-          "Use chart levels only as context, not as an execution trigger.",
+          "price",
+          "variation",
+          "volume",
+          "RSI",
+          "Bias",
+          "Master Score",
         ],
       },
       {
-        title: "Between Buy And Sell",
-        items: [
-          "Buy remains blocked until real price, volume and Master Score are confirmed.",
-          "Sell/short remains blocked too; incomplete data cannot create an operational edge.",
-          "Waiting is the only valid decision until the real snapshot updates.",
-        ],
-      },
-      {
-        title: "Interpretation",
-        body: "There is not enough real data for an operational decision. The professional choice is to wait until price, volume and score are confirmed.",
-      },
-      {
-        title: "Focus now",
-        body: normalizedFocus || "Do not execute operational trades until real price and volume are confirmed.",
+        title: "Next action",
+        body: normalizedFocus || "Wait for a new provider quote/candle set or try refreshing again.",
       },
     ];
   }
 
   return [
     {
-      title: "Cenário Atual",
-      body: `${assetLabel}: a leitura operacional está incompleta. Use o painel como contexto e não execute até preço, volume, Score Mestre e estrutura do gráfico ficarem confirmados.`,
+      title: "Dados reais pendentes",
+      body: `${assetLabel}: ainda não há dados reais suficientes para análise operacional deste ativo.`,
     },
     {
-      title: "Direção da Estratégia",
+      title: "Campos faltantes",
       items: [
-        "Bloquear qualquer setup direcional enquanto cotação e volume estiverem incompletos.",
-        "Aguardar o próximo snapshot confirmado antes de avaliar qualquer entrada.",
-        "Usar níveis do gráfico apenas como contexto, não como gatilho de execução.",
+        "preço",
+        "variação",
+        "volume",
+        "RSI",
+        "Bias",
+        "Score Mestre",
       ],
     },
     {
-      title: "Entre Venda e Compra",
-      items: [
-        "Compra fica bloqueada até preço, volume e Score Mestre reais confirmarem.",
-        "Venda/short também fica bloqueada; dado incompleto não gera vantagem operacional.",
-        "Aguardar é a única decisão válida até o snapshot real atualizar.",
-      ],
-    },
-    {
-      title: "Interpretação",
-      body: "Não há dados reais suficientes para decisão operacional. A escolha profissional é aguardar até preço, volume e score ficarem confirmados.",
-    },
-    {
-      title: "Foco Agora",
-      body: normalizedFocus || "Não executar operação até preço e volume reais ficarem confirmados.",
+      title: "Próxima ação",
+      body: normalizedFocus || "Aguardar nova cotação/candles do provider ou tentar atualizar novamente.",
     },
   ];
 }
@@ -6722,6 +6778,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [commentDrafts, setCommentDrafts] = useState<Record<number, string>>({});
   const [commentingPostId, setCommentingPostId] = useState<number | null>(null);
   const [postMenuId, setPostMenuId] = useState<number | null>(null);
+  const [reportTargetPost, setReportTargetPost] = useState<FeedPost | null>(null);
+  const [reportReason, setReportReason] = useState("spam");
+  const [reportNote, setReportNote] = useState("");
+  const [reportingPostId, setReportingPostId] = useState<number | null>(null);
   const [silencedUserIds, setSilencedUserIds] = useState<number[]>([]);
   const [blockedUsers, setBlockedUsers] = useState<UserListEntry[]>([]);
   const [silencedUsers, setSilencedUsers] = useState<UserListEntry[]>([]);
@@ -6913,7 +6973,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
     let cancelled = false;
     const timeout = window.setTimeout(() => {
-      getPublicQuotesRobust([symbol], 1, 0)
+      getPublicQuotesRobust([symbol], 1, 1)
         .then((nextQuotes) => {
           if (cancelled) return;
           const quoteMap = Object.fromEntries((nextQuotes?.items || []).map((item) => [item.symbol, item]));
@@ -7632,7 +7692,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     let quote = resolveQuoteForSymbol(symbol, publicQuotesRef.current, tickerTapeQuotesRef.current);
     if (typedInput && !quoteHasMarketValue(quote)) {
       try {
-        const nextQuotes = await getPublicQuotesRobust([symbol], 1, 0);
+        const nextQuotes = await getPublicQuotesRobust([symbol], 1, 1);
         const quoteMap = Object.fromEntries((nextQuotes?.items || []).map((item) => [item.symbol, item]));
         if (Object.keys(quoteMap).length) {
           setTickerTapeQuotes((current) => mergeQuoteState(current, quoteMap));
@@ -7654,7 +7714,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     let quote = resolveQuoteForSymbol(symbol, publicQuotesRef.current, tickerTapeQuotesRef.current);
     if (!quoteHasMarketValue(quote)) {
       try {
-        const nextQuotes = await getPublicQuotesRobust([symbol], 1, 0);
+        const nextQuotes = await getPublicQuotesRobust([symbol], 1, 1);
         const quoteMap = Object.fromEntries((nextQuotes?.items || []).map((item) => [item.symbol, item]));
         if (Object.keys(quoteMap).length) {
           setTickerTapeQuotes((current) => mergeQuoteState(current, quoteMap));
@@ -7890,17 +7950,34 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }
   }
 
-  async function handleReport(postId: number) {
+  function openReportDialog(post: FeedPost) {
     if (!token) {
-      promptLogin("reportar posts");
+      promptLogin("denunciar posts");
+      return;
+    }
+    setReportTargetPost(post);
+    setReportReason("spam");
+    setReportNote("");
+    setPostMenuId(null);
+  }
+
+  async function handleReport(postId: number, reason = reportReason, note = reportNote) {
+    if (!token) {
+      promptLogin("denunciar posts");
       return;
     }
 
     try {
-      await reportPost(token, postId, "community_review");
+      setReportingPostId(postId);
+      await reportPost(token, postId, reason, note || null);
       setPostMenuId(null);
+      setReportTargetPost(null);
+      setReportNote("");
+      await refreshFeedState();
     } catch (requestError) {
       setError(friendlyNetworkErrorMessage(requestError, appLocale));
+    } finally {
+      setReportingPostId(null);
     }
   }
 
@@ -7911,7 +7988,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }
 
     try {
-      await reportPost(token, postId, "report_and_block");
+      await reportPost(token, postId, "golpe", "report_and_block");
       await blockUser(token, post.user_id);
       setPostMenuId(null);
       setBlockedUsers((current) => rememberUser(current, buildUserListEntry(post.user_id, post.user, post.user_email, post.user_avatar_url)));
@@ -8307,10 +8384,15 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const currentPublicQuote = resolveQuoteForSymbol(selectedTicker, publicQuotes, tickerTapeQuotes);
   const displayQuote = quoteHasMarketValue(activeQuote)
     ? activeQuote
-    : quoteHasMarketValue(snapshotQuote)
-      ? snapshotQuote
-      : activeQuote || snapshotQuote || null;
-  const displayQuoteHasCoreData = quoteHasMarketValue(displayQuote) && firstPositiveFiniteNumber(displayQuote?.volume) != null;
+      : quoteHasMarketValue(snapshotQuote)
+        ? snapshotQuote
+      : quoteHasMarketValue(currentPublicQuote)
+        ? currentPublicQuote
+        : currentPublicQuote || activeQuote || snapshotQuote || null;
+  const backendQuoteCoreData = typeof displayQuote?.core_data === "boolean" ? displayQuote.core_data : null;
+  const displayQuoteHasCoreData = backendQuoteCoreData === false
+    ? false
+    : quoteHasMarketValue(displayQuote) && firstPositiveFiniteNumber(displayQuote?.volume) != null;
   const currentPublicInsight = normalizeSymbol(publicInsight?.symbol || "") === selectedTicker ? publicInsight : null;
   useEffect(() => {
     if (token || quoteHasMarketValue(currentPublicQuote)) return;
@@ -8319,7 +8401,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const retryDelays = [1800, 6000];
     const timers = retryDelays.map((delay) =>
       window.setTimeout(() => {
-        getPublicQuotesRobust([deferredTicker], 1, 0)
+        getPublicQuotesRobust([deferredTicker], 1, 1)
           .then((nextQuotes) => {
             const nextQuote = (nextQuotes?.items || [])[0];
             if (cancelled || normalizeSymbol(nextQuote?.symbol || "") !== deferredTicker) return;
@@ -8484,6 +8566,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const priceMovementValue = firstFiniteNumber(displayQuote?.change) ?? null;
   const priceMovementPercent = firstFiniteNumber(displayQuote?.change_pct) ?? null;
   const headerVolume = firstPositiveFiniteNumber(displayQuote?.volume);
+  const backendMissingFields = useMemo(
+    () => quoteMissingFieldsForUi(displayQuote),
+    [displayQuote],
+  );
+  const backendMissingFieldLabels = useMemo(
+    () => backendMissingFields.map((field) => quoteMissingFieldLabel(field, appLocale)),
+    [appLocale, backendMissingFields],
+  );
   const symbolLabel = currentWatchItem?.label || symbolName(selectedTicker);
   const selectedTickerMarketLabel = currentWatchItem?.category || guessCategory(selectedTicker);
   const currentAiKey = AI_TOOL_TAB_MAP[currentTab as keyof typeof AI_TOOL_TAB_MAP];
@@ -8502,7 +8592,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       const unique = new Set<string>();
       rows.forEach((row) => {
         const ticker = normalizeSymbol(String((row as any).ticker || (row as any).symbol || ""));
-        if (!ticker) return;
+        if (!ticker || ticker !== selectedTicker) return;
         const candidate = { ...(row as AiToolRow), tool: toolKey, ticker };
         if (!isFreshAiFindingForReset(candidate)) return;
         if (!isAiDealFinding(candidate)) return;
@@ -8511,7 +8601,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       counts[tabId] = unique.size;
     }
     return counts;
-  }, [publicAiTools?.tools, workspace?.ai_tools]);
+  }, [publicAiTools?.tools, selectedTicker, workspace?.ai_tools]);
   const aiFindingSignalKey = useMemo(() => {
     const signatures: string[] = [];
     for (const [, toolKey] of Object.entries(AI_TOOL_TAB_MAP)) {
@@ -8568,10 +8658,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         const ageMinutes = Number.isFinite(Number(item.age_minutes)) ? Number(item.age_minutes) : null;
         const age = formatNewsAge(ageMinutes, publishedAtIso, appLocale);
         const sourceName = item.source_name || item.source || "Yahoo Finance";
-        const sourceUrl = item.source_url || item.url || null;
+        const sourceUrl = validExternalNewsUrl(item.source_url || item.url || null) || null;
+        const itemUrl = validExternalNewsUrl(item.url || item.source_url || null) || null;
         const matchedSymbol = normalizeSymbol(item.matched_symbol || item.ticker || selectedTicker) || selectedTicker;
         const isToday = typeof item.is_today === "boolean" ? item.is_today : sourceDateIsToday(publishedAtIso);
         const isStale = typeof item.is_stale === "boolean" ? item.is_stale : !isToday;
+        const freshnessBucket = typeof item.freshness_bucket === "string" ? item.freshness_bucket : null;
+        const freshnessLabel = typeof item.freshness_label === "string" ? item.freshness_label : null;
         const isIncomplete = Boolean(item.is_incomplete || !publishedAtIso || !sourceName || !sourceUrl);
         const labels = Array.isArray(item.labels) ? item.labels.filter(Boolean) : [];
         const entities = Array.isArray(item.entities)
@@ -8605,6 +8698,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           ageMinutes,
           isToday,
           isStale,
+          freshnessBucket,
+          freshnessLabel,
           matchedSymbol,
           language: item.language || null,
           publicationStatus: item.publication_status || (publishedAtIso ? "ok" : "missing_source_time"),
@@ -8630,7 +8725,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           editorial: localizeUiText(item.editorial || "", appLocale, selectedTicker),
           marketContext,
           impactReason: localizeUiText(item.impact_reason || "", appLocale, selectedTicker),
-          url: item.url || null,
+          url: itemUrl,
         };
       });
     },
@@ -8705,7 +8800,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       : (isUsLocale ? "No Master Score confirmed for this asset yet." : "Sem Score Mestre confirmado para este ativo ainda.");
     const rsiHint = rsiDescriptor.hint;
 
-    return [
+    const quoteStats = [
       {
         label: isUsLocale ? "Price" : "Preço",
         value: displayQuoteHasCoreData ? formatLocalePrice(displayQuote?.price, appLocale) : (isUsLocale ? "no confirmed quote" : "sem cotação confirmada"),
@@ -8726,6 +8821,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         hint: isUsLocale ? `${volumeValue}; ${volumeContext}.` : `${volumeValue}, ${volumeContext}.`,
         tone: relVolume != null && relVolume > 1.2 ? "up" : relVolume != null && relVolume < 0.8 ? "down" : "neutral",
       },
+    ];
+    if (!displayQuoteHasCoreData) return quoteStats;
+    return [
+      ...quoteStats,
       {
         label: isUsLocale ? "Master Score" : "Score Mestre",
         value: aiScoreValue,
@@ -9004,6 +9103,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         };
       });
       return [...backendRows]
+        .filter((row) => normalizeSymbol(row.ticker) === selectedTicker)
         .filter((row) => isFreshAiFindingForReset(row))
         .filter(isAiDealFinding)
         .sort((a, b) => {
@@ -9018,6 +9118,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const sourceCandidates = expandedToolCandidates
       .map((item) => {
         const normalizedItemSymbol = normalizeSymbol(item.symbol);
+        if (normalizedItemSymbol !== selectedTicker) return null;
         const quote = resolveQuoteForSymbol(normalizedItemSymbol, publicQuotes, tickerTapeQuotes);
         const watchItem = watchUniverse.find((candidate) => candidate.symbol === normalizedItemSymbol);
         const changePct = quote?.change_pct ?? watchItem?.changePct ?? null;
@@ -9055,6 +9156,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           atr_pct: atrPct,
         };
       })
+      .filter((item): item is NonNullable<typeof item> => item != null)
       .filter((item) => isAiDealFinding({ ...(item as Partial<AiToolRow>), tool: currentAiKey }) && scoreToolCandidateForTab(currentTab, item) > -999)
       .sort((a, b) => {
         return scoreToolCandidateForTab(currentTab, b) - scoreToolCandidateForTab(currentTab, a);
@@ -9274,6 +9376,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         tool: currentAiKey || (row as AiToolRow).tool,
         ticker: normalizeSymbol(String((row as any).ticker || (row as any).symbol || selectedTicker)),
       }))
+      .filter((row) => row.ticker === selectedTicker)
       .filter((row) => aiFindingResetKey(row) && !isFreshAiFindingForReset(row)),
     [currentAiKey, currentAiRows, selectedTicker],
   );
@@ -9315,14 +9418,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }
     if (currentAiRows.length > 0 && currentTabAlertRows.length === 0) {
       return {
-        title: isUsLocale ? "No finding for this asset right now." : "Nenhum achado desta IA para este ativo agora.",
-        body: isUsLocale ? "The AI has global data, but nothing actionable matched this ticker/filter." : "A IA tem dados globais, mas nenhum achado acionável casou com este ticker/filtro.",
+        title: isUsLocale ? "0 current events for this asset." : "0 eventos atuais para este ativo.",
+        body: isUsLocale ? "Waiting for a new read." : "Aguardando nova leitura.",
       };
     }
     if (currentAiRows.length === 0) {
       return {
-        title: isUsLocale ? "AI temporarily has no data." : "IA temporariamente sem dados.",
-        body: isUsLocale ? "The payload exists, but it is empty for this lens." : "O payload existe, mas está vazio para esta lente.",
+        title: isUsLocale ? "0 current events for this asset." : "0 eventos atuais para este ativo.",
+        body: isUsLocale ? "Waiting for a new read." : "Aguardando nova leitura.",
       };
     }
     return null;
@@ -9647,9 +9750,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       conclusion: strategicConclusion,
       chart: chartForOperationalLevels,
       hasCoreData: hasStrategicCoreData,
+      missingFields: backendMissingFieldLabels,
     });
   }, [
     appLocale,
+    backendMissingFieldLabels,
     chartForOperationalLevels,
     currentStrategicPanel,
     displayQuoteHasCoreData,
@@ -9679,6 +9784,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     () => alignDecisionCardsWithStrategicContract(essentialDecisionCards, strategicDecisionContract, appLocale),
     [appLocale, essentialDecisionCards, strategicDecisionContract],
   );
+  const shouldRenderStrategicDetails = hasStrategicCoreData;
   const strategicConclusionSections = useMemo(
     () => strategicDecisionContract.sections,
     [strategicDecisionContract.sections],
@@ -10304,6 +10410,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 <span className={cx("snbr-tone-tag", post.sentiment || "neutral")}>
                   <SentimentLabel sentiment={post.sentiment} locale={appLocale} />
                 </span>
+                <span
+                  className={cx(
+                    "snbr-social-guardian-pill",
+                    String(post.social_guardian_label || "Amarelo").toLowerCase(),
+                  )}
+                  data-social-guardian-score={post.social_guardian_score ?? ""}
+                  data-social-guardian-label={post.social_guardian_label || "Amarelo"}
+                >
+                  {isUsLocale ? "Guardian" : "Guardian"} {post.social_guardian_label || "Amarelo"}
+                </span>
                 {post.user_id !== access?.id ? (
                   <button
                     className={cx("snbr-follow-pill", post.is_followed_by_me && "active")}
@@ -10333,7 +10449,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                         </button>
                       ) : null}
                       <button onClick={() => void handleMuteTrader(post)} type="button" role="menuitem">{isUsLocale ? "Mute" : "Silenciar"}</button>
-                      <button onClick={() => void handleReport(post.id)} type="button" role="menuitem">{isUsLocale ? "Report to StockNewsBR" : "Reportar para StockNewsBR"}</button>
+                      <button onClick={() => openReportDialog(post)} type="button" role="menuitem">{isUsLocale ? "Report to StockNewsBR" : "Denunciar para StockNewsBR"}</button>
                       <button onClick={() => void handleBlockTrader(post)} type="button" role="menuitem">{isUsLocale ? "Block trader" : "Bloquear trader"}</button>
                       <button onClick={() => void handleReportAndBlock(post.id, post)} type="button" role="menuitem">{isUsLocale ? "Report and block" : "Reportar e bloquear"}</button>
                       {access?.id === post.user_id ? (
@@ -10382,6 +10498,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 <span aria-hidden="true">{(post.liked_by_me || (post.likes || 0) > 0) ? "♥" : "♡"}</span>
                 <span>{isUsLocale ? "Like" : "Curtir"}</span>
                 <span>{post.likes ?? 0}</span>
+              </button>
+              <button
+                className="snbr-post-action snbr-feed-action snbr-report-action"
+                onClick={() => openReportDialog(post)}
+                aria-label={isUsLocale ? `Report ${post.user}'s post` : `Denunciar post de ${post.user}`}
+                data-social-report-button="true"
+                type="button"
+              >
+                <span aria-hidden="true">!</span>
+                <span>{isUsLocale ? "Report" : "Denunciar"}</span>
               </button>
             </div>
 
@@ -10934,7 +11060,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 {isUsLocale ? "Open news" : "Abrir notícia"}
               </a>
             ) : (
-              <span className="snbr-chip">{isUsLocale ? "Ticker filtered" : "Ticker filtrado"}</span>
+              <span className="snbr-chip">{isUsLocale ? "Real URL unavailable" : "URL real indisponível"}</span>
             )}
           </div>
 
@@ -11739,6 +11865,63 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     setStrategicConclusionOpen(true);
   }
 
+  function renderReportDialog() {
+    if (!reportTargetPost) return null;
+
+    return (
+      <div className="snbr-report-panel" role="dialog" aria-modal="true" aria-label={isUsLocale ? "Report post" : "Denunciar post"} data-social-report-dialog="true">
+        <div className="snbr-report-panel-card">
+          <div className="snbr-report-panel-head">
+            <strong>{isUsLocale ? "Report to StockNewsBR" : "Denunciar para StockNewsBR"}</strong>
+            <button
+              className="snbr-toolbar-icon"
+              onClick={() => setReportTargetPost(null)}
+              type="button"
+              aria-label={isUsLocale ? "Close report" : "Fechar denúncia"}
+            >
+              x
+            </button>
+          </div>
+          <p>{isUsLocale ? "Choose the reason so moderation can audit this post." : "Escolha o motivo para a moderação auditar este post."}</p>
+          <div className="snbr-report-reasons">
+            {SOCIAL_REPORT_REASONS.map((reason) => (
+              <button
+                key={reason.key}
+                className={cx("snbr-report-reason", reportReason === reason.key && "active")}
+                onClick={() => setReportReason(reason.key)}
+                type="button"
+                aria-pressed={reportReason === reason.key}
+                data-report-reason={reason.key}
+              >
+                {isUsLocale ? reason.labelEn : reason.labelPt}
+              </button>
+            ))}
+          </div>
+          <textarea
+            className="snbr-input snbr-report-note"
+            value={reportNote}
+            onChange={(event) => setReportNote(event.target.value)}
+            placeholder={isUsLocale ? "Optional note" : "Observação opcional"}
+          />
+          <div className="snbr-report-actions">
+            <button className="snbr-button subtle" onClick={() => setReportTargetPost(null)} type="button">
+              {isUsLocale ? "Cancel" : "Cancelar"}
+            </button>
+            <button
+              className="snbr-button danger"
+              disabled={reportingPostId === reportTargetPost.id}
+              onClick={() => void handleReport(reportTargetPost.id)}
+              type="button"
+              data-social-report-submit="true"
+            >
+              {reportingPostId === reportTargetPost.id ? (isUsLocale ? "Reporting..." : "Denunciando...") : (isUsLocale ? "Report" : "Denunciar")}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (focusedTab) {
     const focusedLabel = getTabMeta(currentTabs.find((tab) => tab.id === currentTab) || FALLBACK_TABS[0], appLocale);
 
@@ -11758,6 +11941,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           {error ? <div className="snbr-empty">{isUsLocale ? "Error" : "Erro"}: {error}</div> : null}
           {renderCenterPanel()}
         </div>
+        {renderReportDialog()}
       </div>
     );
   }
@@ -11765,6 +11949,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   return (
     <div className={cx("snbr-app", darkMode && "theme-dark")}>
       <a className="snbr-skip-link" href="#snbr-main-content">{isUsLocale ? "Skip to main content" : "Pular para o conteúdo principal"}</a>
+      {renderReportDialog()}
       <WorkspaceLeftRail
           locale={appLocale}
           railRef={leftRailRef}
@@ -11800,7 +11985,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             {visibleTabs.map((tab) => {
               const meta = getTabMeta(tab, appLocale);
               const isAiTab = Boolean(AI_TOOL_TAB_MAP[tab.id as keyof typeof AI_TOOL_TAB_MAP]);
-              const aiCount = aiToolFindingCounts[tab.id] ?? 0;
+              const tabCount = tab.id === "news"
+                ? newsRows.length
+                : isAiTab
+                  ? aiToolFindingCounts[tab.id] ?? 0
+                  : 0;
+              const showTabCount = tabCount != null && (tab.id === "news" || isAiTab);
 
               return (
                 <div key={tab.id} className="snbr-symbol-tab-shell">
@@ -11813,14 +12003,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                     role="tab"
                     type="button"
                     title={meta.label}
+                    data-tab-id={tab.id}
+                    data-tab-count={String(tabCount)}
                   >
                     <span>{topTabText(tab.id, meta.short, appLocale)}</span>
-                    {isAiTab && aiCount > 0 ? (
+                    {showTabCount ? (
                       <span
                         className="snbr-tab-count-badge"
-                        aria-label={isUsLocale ? `${aiCount} findings` : `${aiCount} achados`}
+                        aria-label={isUsLocale ? `${tabCount} current items` : `${tabCount} itens atuais`}
                       >
-                        {aiCount}
+                        {tabCount}
                       </span>
                     ) : null}
                   </button>
@@ -11966,6 +12158,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               className="snbr-decision-panel"
               aria-label={isUsLocale ? "Strategic Analysis Panel" : "Painel de Análise Estratégica"}
               data-core-data={displayQuoteHasCoreData ? "true" : "false"}
+              data-missing-fields={backendMissingFields.join(",")}
               data-decision-now={operationalDecision.action}
               data-decision-side={strategicDecisionContract.side}
               data-selected-symbol={selectedTicker}
@@ -12036,21 +12229,24 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       </div>
                     </div>
                   </article>
-                  <div className="snbr-decision-grid">
-                    {decisionCardsForRender.map((card) => (
-                      <article key={`${card.label}-${card.value}`} className={cx("snbr-decision-card", card.tone)}>
-                        <span>{card.label}</span>
-                        <strong>{card.value}</strong>
-                        {card.meta ? <small>{card.meta}</small> : null}
-                        {card.meter != null ? (
-                          <div className="snbr-decision-meter" aria-hidden="true">
-                            <i style={{ width: `${card.meter}%` }} />
-                          </div>
-                        ) : null}
-                      </article>
-                    ))}
-                  </div>
-                  <article className={cx("snbr-decision-conclusion", strategicDecisionContract.tone, !strategicConclusionExpanded && "collapsed")}>
+                  {shouldRenderStrategicDetails ? (
+                    <div className="snbr-decision-grid">
+                      {decisionCardsForRender.map((card) => (
+                        <article key={`${card.label}-${card.value}`} className={cx("snbr-decision-card", card.tone)}>
+                          <span>{card.label}</span>
+                          <strong>{card.value}</strong>
+                          {card.meta ? <small>{card.meta}</small> : null}
+                          {card.meter != null ? (
+                            <div className="snbr-decision-meter" aria-hidden="true">
+                              <i style={{ width: `${card.meter}%` }} />
+                            </div>
+                          ) : null}
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
+                  {shouldRenderStrategicDetails ? (
+                    <article className={cx("snbr-decision-conclusion", strategicDecisionContract.tone, !strategicConclusionExpanded && "collapsed")}>
                     <div className="snbr-conclusion-topline">
                       <span>{isUsLocale ? "Conclusion" : "Conclusão"}</span>
                       <small>{isUsLocale ? `AI Analysis Time ${strategicConclusion.stamp}` : `IA Análise Hora ${strategicConclusion.stamp}`}</small>
@@ -12107,7 +12303,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                         <strong>{strategicConclusionPreview}</strong>
                       </div>
                     )}
-                  </article>
+                    </article>
+                  ) : null}
                 </>
               ) : null}
             </section>

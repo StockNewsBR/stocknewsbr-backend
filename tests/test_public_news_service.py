@@ -222,7 +222,7 @@ class PublicNewsServiceTests(unittest.TestCase):
                 "ticker": "AAPL",
                 "title": "AAPL raises guidance",
                 "source": "Reuters",
-                "url": "https://example.com/aapl",
+                "url": "https://finance.yahoo.com/news/aapl-source-time",
                 "published_at": "2026-06-20T12:00:00+00:00",
                 "direct_ticker_match": True,
                 "relevance_score": 92,
@@ -246,7 +246,7 @@ class PublicNewsServiceTests(unittest.TestCase):
 
         item = payload["items"][0]
         self.assertEqual(item["source_name"], "Reuters")
-        self.assertEqual(item["source_url"], "https://example.com/aapl")
+        self.assertEqual(item["source_url"], "https://finance.yahoo.com/news/aapl-source-time")
         self.assertEqual(item["published_at_source"], "2026-06-20T12:00:00+00:00")
         self.assertIn("age_minutes", item)
         self.assertIn("is_today", item)
@@ -254,6 +254,74 @@ class PublicNewsServiceTests(unittest.TestCase):
         self.assertEqual(item["matched_symbol"], "AAPL")
         self.assertEqual(item["publication_status"], "ok")
         self.assertFalse(item["is_incomplete"])
+
+    def test_public_payload_classifies_old_news_as_older_than_seven_days(self):
+        fetched_items = [
+            {
+                "id": "1",
+                "ticker": "PETR4",
+                "title": "Petrobras divulga atualização antiga para PETR4",
+                "source": "Reuters",
+                "url": "https://finance.yahoo.com/news/petr4-old",
+                "published_at_source": "2026-06-10T12:00:00+00:00",
+                "age_minutes": 10 * 24 * 60,
+                "direct_ticker_match": True,
+            }
+        ]
+
+        with patch.object(public_news_service, "get_cached_symbol_news", return_value=[]), patch.object(
+            public_news_service,
+            "get_symbol_news",
+            return_value=fetched_items,
+        ), patch.object(
+            public_news_service,
+            "get_news_cached_report",
+            return_value={"status": "ok"},
+        ), patch.object(
+            public_news_service,
+            "get_news_cache_info",
+            return_value={"status": "warm", "provider_status": "ok", "provider": "yfinance"},
+        ):
+            payload = public_news_service.build_public_news_payload("PETR4", limit=6, allow_fetch=True)
+
+        item = payload["items"][0]
+        self.assertEqual(item["freshness_bucket"], "older_7_days")
+        self.assertEqual(item["freshness_label"], "Notícia antiga / 7+ dias")
+        self.assertNotIn("Ontem", item["freshness_label"])
+
+    def test_public_payload_blocks_fake_news_urls(self):
+        fetched_items = [
+            {
+                "id": "1",
+                "ticker": "PETR4",
+                "title": "Petrobras divulga atualização para PETR4",
+                "source": "Reuters",
+                "url": "https://example.com/petr4",
+                "published_at_source": "2026-06-20T12:00:00+00:00",
+                "direct_ticker_match": True,
+            }
+        ]
+
+        with patch.object(public_news_service, "get_cached_symbol_news", return_value=[]), patch.object(
+            public_news_service,
+            "get_symbol_news",
+            return_value=fetched_items,
+        ), patch.object(
+            public_news_service,
+            "get_news_cached_report",
+            return_value={"status": "ok"},
+        ), patch.object(
+            public_news_service,
+            "get_news_cache_info",
+            return_value={"status": "warm", "provider_status": "ok", "provider": "yfinance"},
+        ):
+            payload = public_news_service.build_public_news_payload("PETR4", limit=6, allow_fetch=True)
+
+        item = payload["items"][0]
+        self.assertIsNone(item["url"])
+        self.assertIsNone(item["source_url"])
+        self.assertTrue(item["is_incomplete"])
+        self.assertEqual(item["publication_status"], "missing_source_url")
 
     def test_rejects_foreign_company_title_even_when_summary_mentions_requested_symbol(self):
         fetched_items = [
@@ -265,7 +333,7 @@ class PublicNewsServiceTests(unittest.TestCase):
                 "direct_ticker_match": True,
                 "published_at_source": "2026-06-20T12:00:00+00:00",
                 "source": "TheStreet",
-                "url": "https://example.com/apple",
+                "url": "https://finance.yahoo.com/news/apple",
             },
             {
                 "id": "2",
@@ -275,7 +343,7 @@ class PublicNewsServiceTests(unittest.TestCase):
                 "direct_ticker_match": True,
                 "published_at_source": "2026-06-20T12:10:00+00:00",
                 "source": "Reuters",
-                "url": "https://example.com/msft",
+                "url": "https://finance.yahoo.com/news/msft",
             },
         ]
 

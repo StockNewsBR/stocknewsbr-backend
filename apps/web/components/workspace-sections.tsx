@@ -19,6 +19,21 @@ function normalizeText(value?: string | null) {
     .toLowerCase();
 }
 
+function validExternalNewsUrl(value?: string | null) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  try {
+    const parsed = new URL(text);
+    const host = parsed.hostname.toLowerCase();
+    if (!["http:", "https:"].includes(parsed.protocol)) return "";
+    if (!host.includes(".") || ["example.com", "www.example.com", "localhost", "127.0.0.1", "0.0.0.0"].includes(host)) return "";
+    if (/(mock|fake|placeholder)/i.test(text)) return "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
 function uniqueNewsLines(title: string, values: string[]) {
   const seen = new Set([normalizeText(title)]);
   return values.filter((value) => {
@@ -91,6 +106,8 @@ export type WorkspaceNewsRow = {
   ageMinutes?: number | null;
   isToday?: boolean | null;
   isStale?: boolean | null;
+  freshnessBucket?: string | null;
+  freshnessLabel?: string | null;
   matchedSymbol?: string | null;
   language?: string | null;
   publicationStatus?: string | null;
@@ -118,6 +135,23 @@ export type WorkspaceNewsRow = {
   impactReason: string;
   url?: string | null;
 };
+
+function newsFreshnessStatus(item: WorkspaceNewsRow, isEnglish: boolean) {
+  const bucket = String(item.freshnessBucket || "").toLowerCase();
+  if (bucket === "today") return isEnglish ? "News from today" : "Notícia de hoje";
+  if (bucket === "yesterday") return isEnglish ? "Previous news / Yesterday" : "Notícia anterior / Ontem";
+  if (bucket === "2_7_days") return isEnglish ? "Previous news / 2-7 days" : "Notícia anterior / 2-7 dias";
+  if (bucket === "older_7_days") return isEnglish ? "Old news / 7+ days" : "Notícia antiga / 7+ dias";
+  if (typeof item.ageMinutes === "number" && Number.isFinite(item.ageMinutes)) {
+    if (item.ageMinutes < 24 * 60) return isEnglish ? "News from today" : "Notícia de hoje";
+    if (item.ageMinutes < 48 * 60) return isEnglish ? "Previous news / Yesterday" : "Notícia anterior / Ontem";
+    if (item.ageMinutes <= 7 * 24 * 60) return isEnglish ? "Previous news / 2-7 days" : "Notícia anterior / 2-7 dias";
+    return isEnglish ? "Old news / 7+ days" : "Notícia antiga / 7+ dias";
+  }
+  return item.isStale
+    ? (isEnglish ? "Previous news" : "Notícia anterior")
+    : (isEnglish ? "News from today" : "Notícia de hoje");
+}
 
 export type WorkspaceHelpSection = {
   id?: string;
@@ -249,11 +283,10 @@ export function WorkspaceNewsPanel({
                 : "neutral";
             const sentimentVisual = newsSentimentVisual(item.sentiment, locale);
             const sourceName = item.sourceName || item.source || (isEnglish ? "Unknown source" : "Fonte não informada");
-            const sourceUrl = item.sourceUrl || item.url || "";
+            const sourceUrl = validExternalNewsUrl(item.sourceUrl || item.url || "");
+            const itemUrl = validExternalNewsUrl(item.url || item.sourceUrl || "");
             const matchedSymbol = item.matchedSymbol || item.symbol;
-            const staleStatus = item.isStale
-              ? (isEnglish ? "Previous news / Yesterday" : "Notícia anterior / Ontem")
-              : (isEnglish ? "News from today" : "Notícia de hoje");
+            const staleStatus = newsFreshnessStatus(item, isEnglish);
             const incompleteStatus = item.isIncomplete
               ? (isEnglish ? "Incomplete news: source time missing" : "Notícia incompleta: sem hora da fonte")
               : null;
@@ -268,6 +301,7 @@ export function WorkspaceNewsPanel({
               data-news-url={sourceUrl}
               data-news-published-source={item.publishedAtIso || ""}
               data-news-age-minutes={item.ageMinutes == null ? "" : String(item.ageMinutes)}
+              data-news-freshness-bucket={item.freshnessBucket || ""}
               data-news-matched-symbol={matchedSymbol}
               data-news-stale={item.isStale ? "true" : "false"}
               data-news-incomplete={item.isIncomplete ? "true" : "false"}
@@ -290,7 +324,7 @@ export function WorkspaceNewsPanel({
                 ))}
                 <div className="snbr-news-meta-row">
                   <span>{isEnglish ? "Source" : "Fonte"}: {sourceName}</span>
-                  <span>{isEnglish ? "Original URL" : "URL original"}: {sourceUrl || (isEnglish ? "not available" : "não disponível")}</span>
+                  <span>{isEnglish ? "Original URL" : "URL original"}: {sourceUrl || (isEnglish ? "real URL unavailable" : "URL real indisponível")}</span>
                   <span>{isEnglish ? "Published at source" : "Publicado em"}: {item.publishedTime}</span>
                   <span>{isEnglish ? "Age" : "Idade"}: {item.age}</span>
                   <span>Ticker: {matchedSymbol}</span>
@@ -326,10 +360,10 @@ export function WorkspaceNewsPanel({
                   </div>
                 ) : null}
               </div>
-              {item.url ? (
+              {itemUrl ? (
                 <a
                   className="snbr-headline-symbol"
-                  href={item.url}
+                  href={itemUrl}
                   rel="noreferrer"
                   target="_blank"
                   aria-label={isEnglish ? `Open external news: ${item.headline}` : `Abrir notícia externa: ${item.headline}`}
@@ -337,7 +371,7 @@ export function WorkspaceNewsPanel({
                   {isEnglish ? "Open" : "Abrir"}
                 </a>
               ) : (
-                <span className="snbr-headline-symbol">{item.symbol}</span>
+                <span className="snbr-headline-symbol disabled">{isEnglish ? "Real URL unavailable" : "URL real indisponível"}</span>
               )}
             </article>
             );

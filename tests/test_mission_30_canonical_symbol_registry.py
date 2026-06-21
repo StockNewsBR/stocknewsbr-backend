@@ -90,6 +90,10 @@ class Mission30CanonicalSymbolRegistryTests(unittest.TestCase):
             "BYDDY": "OTC:BYDDY",
             "AAPL": "NASDAQ:AAPL",
             "NVDA": "NASDAQ:NVDA",
+            "BNY": "NYSE:BNY",
+            "DIA": "NYSEARCA:DIA",
+            "IWM": "NYSEARCA:IWM",
+            "VOO": "NYSEARCA:VOO",
         }
         for raw, expected in cases.items():
             with self.subTest(raw=raw):

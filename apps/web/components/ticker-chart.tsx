@@ -31,6 +31,10 @@ type ChartLevelOverlay = {
   price: number;
 };
 
+type ChartLevelLine = ChartLevelOverlay & {
+  y: number;
+};
+
 const TIMEFRAME_TO_TRADING_VIEW: Record<string, { interval: string; range: string }> = {
   "1D": { interval: "5", range: "1D" },
   "1W": { interval: "30", range: "5D" },
@@ -136,6 +140,46 @@ function buildLevelOverlays(
   return overlays;
 }
 
+function chartNumber(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function chartScaleBounds(chart: ChartPayload | null, levels: ChartLevelOverlay[]) {
+  const rows = Array.isArray(chart?.ohlc) && chart?.ohlc?.length
+    ? chart.ohlc
+    : Array.isArray(chart?.series)
+      ? chart.series
+      : [];
+  const prices: number[] = [];
+
+  rows.forEach((row: any) => {
+    for (const key of ["high", "low", "close", "open"]) {
+      const value = chartNumber(row?.[key]);
+      if (value != null) prices.push(value);
+    }
+  });
+  levels.forEach((level) => {
+    const value = chartNumber(level.price);
+    if (value != null) prices.push(value);
+  });
+
+  if (!prices.length) return null;
+  const min = Math.min(...prices);
+  const max = Math.max(...prices);
+  const span = Math.max(max - min, max * 0.004, 0.01);
+  const padding = span * 0.12;
+  return {
+    min: Math.max(0, min - padding),
+    max: max + padding,
+  };
+}
+
+function priceToPlotYPercent(price: number, bounds: { min: number; max: number }) {
+  const span = Math.max(bounds.max - bounds.min, 0.01);
+  return Math.min(96, Math.max(4, ((bounds.max - price) / span) * 100));
+}
+
 export function TickerChart({
   chart,
   ticker,
@@ -171,8 +215,20 @@ export function TickerChart({
       }),
     [showSupport, showResistance, supportLevel, resistanceLevel, locale],
   );
-  const supportOverlayStatus = showSupport && firstFiniteNumber(supportLevel) != null ? "card_only" : "hidden";
-  const resistanceOverlayStatus = showResistance && firstFiniteNumber(resistanceLevel) != null ? "card_only" : "hidden";
+  const levelLines = useMemo<ChartLevelLine[]>(() => {
+    const bounds = chartScaleBounds(chart, levelOverlays);
+    if (!bounds) return [];
+    return levelOverlays.map((level) => ({
+      ...level,
+      y: priceToPlotYPercent(level.price, bounds),
+    }));
+  }, [chart, levelOverlays]);
+  const supportOverlayStatus = showSupport && firstFiniteNumber(supportLevel) != null
+    ? (levelLines.some((level) => level.key === "support") ? "price_scaled_overlay" : "pending_chart_scale")
+    : "hidden";
+  const resistanceOverlayStatus = showResistance && firstFiniteNumber(resistanceLevel) != null
+    ? (levelLines.some((level) => level.key === "resistance") ? "price_scaled_overlay" : "pending_chart_scale")
+    : "hidden";
   const institutionalRsi = useMemo(() => {
     const numeric = firstFiniteNumber(institutionalRsiValue);
     if (numeric == null || numeric <= 0 || numeric > 100) return null;
@@ -241,14 +297,18 @@ export function TickerChart({
       hide_volume: !showVolume,
       support_host: "https://www.tradingview.com",
       studies: buildStudies(showVwap, showAverages, showMacd),
-      studies_overrides: JSON.stringify({
+      studies_overrides: {
         "vwap.plot.color": "#f59e0b",
-        "vwap.plot.linewidth": 3,
+        "vwap.plot.color.0": "#f59e0b",
+        "vwap.plot.linewidth": 4,
+        "vwap.plot.linewidth.0": 4,
         "VWAP.plot.color": "#f59e0b",
-        "VWAP.plot.linewidth": 3,
+        "VWAP.plot.color.0": "#f59e0b",
+        "VWAP.plot.linewidth": 4,
+        "VWAP.plot.linewidth.0": 4,
         "moving average.length": 9,
         "moving average.ma.color": "#38bdf8",
-      }),
+      },
     });
 
     container.appendChild(script);
@@ -265,13 +325,32 @@ export function TickerChart({
       data-source-symbol={sourceSymbol}
       data-tradingview-symbol={tradingViewSymbol}
       data-tradingview-candidates={tradingViewCandidates.join(",")}
-      data-support-anchor-mode="card_only"
-      data-resistance-anchor-mode="card_only"
+      data-support-anchor-mode={supportOverlayStatus}
+      data-resistance-anchor-mode={resistanceOverlayStatus}
       data-support-overlay-status={supportOverlayStatus}
       data-resistance-overlay-status={resistanceOverlayStatus}
+      data-vwap-color="#f59e0b"
+      data-vwap-width="4"
     >
       <div className="snbr-tv-plot-area">
         <div className="tradingview-widget-container snbr-tv-widget" ref={containerRef} />
+        {levelLines.length ? (
+          <div className="snbr-chart-level-lines" aria-hidden="true">
+            {levelLines.map((level) => (
+              <div
+                key={`${level.key}-line`}
+                className={`snbr-chart-level-line ${level.key}`}
+                data-chart-level-line={level.key}
+                data-chart-level-price={String(level.price)}
+                style={{ "--snbr-level-y": `${level.y}%` } as CSSProperties}
+              >
+                <span>
+                  {level.label}: {formatLevelPrice(level.price, locale)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
         {rsiPanelLabel || levelOverlays.length ? (
           <div className="snbr-chart-top-overlays" aria-hidden="true">
             <div className={`snbr-chart-panel-rsi-badge ${showRsi && rsiPanelLabel ? "" : "hidden"}`}>

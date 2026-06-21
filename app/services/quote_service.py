@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from app.cache.snapshot_cache import get_last_good_snapshot_ticker, get_snapshot_ticker
-from app.market.market_data_loader import get_cached_price_snapshots, get_display_symbol
+from app.market.market_data_loader import get_cached_price_snapshots, get_display_symbol, get_price_snapshot
 from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases
 from app.services.symbol_sanitizer import mark_symbol_cooldown, sanitize_market_symbol
 from app.system.system_metrics import record_cache_access
@@ -63,6 +63,67 @@ def _safe_price(payload: dict[str, Any] | None) -> float | None:
     return price
 
 
+def _safe_positive_number(payload: dict[str, Any] | None, field: str) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+    try:
+        value = float(payload.get(field))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value) or value <= 0:
+        return None
+    return value
+
+
+def _safe_finite_number(payload: dict[str, Any] | None, field: str) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+    try:
+        value = float(payload.get(field))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return value
+
+
+def quote_field_diagnostics(payload: dict[str, Any] | None) -> dict[str, Any]:
+    field_status = {
+        "price": _safe_price(payload) is not None,
+        "volume": _safe_positive_number(payload, "volume") is not None,
+        "score": _safe_finite_number(payload, "score") is not None
+        or _safe_finite_number(payload, "master_score") is not None,
+        "rsi": _safe_finite_number(payload, "rsi") is not None,
+        "bias": bool(str((payload or {}).get("bias") or (payload or {}).get("trend_bias") or "").strip()),
+        "snapshot": isinstance(payload, dict)
+        and str(payload.get("source") or "").lower()
+        in {"snapshot", "last_good_snapshot", "stale_last_good_snapshot", "market_cache", "market_cache_stale"},
+        "quote": is_usable_quote_payload(payload, allow_stale=True),
+    }
+    missing_fields = [field for field in ("price", "volume", "score", "rsi", "bias") if not field_status[field]]
+    quote_missing_fields = [field for field in ("price", "volume") if not field_status[field]]
+    return {
+        "field_status": field_status,
+        "missing_fields": missing_fields,
+        "quote_missing_fields": quote_missing_fields,
+        "core_data": not quote_missing_fields,
+        "strategic_core_data": not missing_fields,
+        "snapshot_exists": field_status["snapshot"],
+        "quote_exists": field_status["quote"],
+    }
+
+
+def with_quote_diagnostics(payload: dict[str, Any] | None, symbol: str | None = None) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    normalized_payload = dict(payload)
+    if symbol:
+        normalized_payload["symbol"] = get_display_symbol(_normalize_symbol(symbol))
+    diagnostics = quote_field_diagnostics(normalized_payload)
+    normalized_payload.update(diagnostics)
+    return normalized_payload
+
+
 def classify_quote_payload(payload: dict[str, Any] | None) -> str:
     if not isinstance(payload, dict) or not payload:
         return "empty"
@@ -101,7 +162,7 @@ def _payload_from_row(display_symbol: str, row: dict[str, Any], source: str) -> 
         or row.get("last_seen_at")
         or row.get("created_at")
     )
-    return {
+    return with_quote_diagnostics({
         "symbol": display_symbol,
         "price": row.get("price"),
         "change": row.get("change"),
@@ -123,7 +184,7 @@ def _payload_from_row(display_symbol: str, row: dict[str, Any], source: str) -> 
         "market_data_updated_at": timestamp,
         "quote_time": timestamp,
         "provider_timestamp": timestamp,
-    }
+    })
 
 
 def get_cached_quote_payload(symbol: str) -> dict[str, Any] | None:
@@ -164,9 +225,31 @@ def get_cached_quote_payload(symbol: str) -> dict[str, Any] | None:
     return None
 
 
+def get_quote_payload(symbol: str, *, allow_fetch: bool = False) -> dict[str, Any] | None:
+    cached = get_cached_quote_payload(symbol)
+    if cached or not allow_fetch:
+        return cached
+
+    ticker = _normalize_symbol(symbol)
+    if not ticker:
+        return None
+
+    for candidate in _quote_candidates(ticker):
+        fresh = get_price_snapshot(candidate)
+        if not fresh:
+            continue
+        payload = _payload_from_row(get_display_symbol(ticker), fresh, fresh.get("source") or "on_demand_snapshot")
+        if payload:
+            payload["source"] = payload.get("source") or "on_demand_snapshot"
+            payload["snapshot_status"] = "generated_on_demand"
+            return payload
+
+    return get_cached_quote_payload(symbol)
+
+
 def empty_quote_payload(symbol: str) -> dict[str, Any]:
     display_symbol = get_display_symbol(_normalize_symbol(symbol))
-    return {
+    return with_quote_diagnostics({
         "symbol": display_symbol,
         "price": None,
         "change": None,
@@ -179,4 +262,16 @@ def empty_quote_payload(symbol: str) -> dict[str, Any]:
         "source": "empty",
         "quote_status": "empty",
         "stale": False,
+    }) or {
+        "symbol": display_symbol,
+        "price": None,
+        "change": None,
+        "change_pct": None,
+        "source": "empty",
+        "quote_status": "empty",
+        "stale": False,
+        "core_data": False,
+        "strategic_core_data": False,
+        "missing_fields": ["price", "volume", "score", "rsi", "bias"],
+        "quote_missing_fields": ["price", "volume"],
     }

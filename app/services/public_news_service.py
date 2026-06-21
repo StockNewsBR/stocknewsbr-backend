@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 from zoneinfo import ZoneInfo
 
 from app.services.symbol_registry import canonical_symbol
@@ -19,6 +19,13 @@ _SYMBOL_NEWS_ALIASES = {
     "TSLA": ("tesla", "tesla inc"),
     "MSFT": ("microsoft", "microsoft corp", "microsoft corporation"),
     "AMD": ("advanced micro devices",),
+    "AMZN": ("amazon", "amazon.com", "amazon com", "amazon.com inc"),
+    "META": ("meta", "meta platforms", "facebook"),
+    "NFLX": ("netflix",),
+    "CRM": ("salesforce", "salesforce inc"),
+    "JPM": ("jpmorgan", "jp morgan", "jpmorgan chase"),
+    "BAC": ("bank of america",),
+    "BNY": ("bank of new york mellon", "bny mellon"),
     "BULL": ("webull", "webull corp", "webull corporation"),
     "BYDDY": ("byd", "byd co", "byd company", "byd co ltd", "byd company limited"),
     "PETR4": ("petrobras", "petróleo brasileiro"),
@@ -31,6 +38,14 @@ _SYMBOL_NEWS_ALIASES = {
 }
 _NEWS_LOCAL_TZ = ZoneInfo("America/Sao_Paulo")
 _TITLE_TOKEN_STOPWORDS = {"AI", "CEO", "CFO", "IPO", "ETF", "EV", "US", "UK", "F1", "S&P", "DJIA"}
+_FORBIDDEN_NEWS_HOSTS = {
+    "example.com",
+    "www.example.com",
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+}
+_FORBIDDEN_NEWS_URL_MARKERS = ("mock", "fake", "placeholder")
 
 
 def _normalize_symbol(symbol: str | None) -> str:
@@ -90,9 +105,7 @@ def _item_belongs_to_symbol(item: dict[str, Any], symbol: str) -> bool:
     if item_symbol and item_symbol == normalized and direct_marker is not False:
         return True
 
-    related = item.get("related_tickers") or item.get("relatedTickers")
-    if not related and direct_marker is not False:
-        related = item.get("entities")
+    related = item.get("related_tickers") or item.get("relatedTickers") or item.get("entities")
     related = related or []
     if isinstance(related, list):
         normalized_related: set[str] = set()
@@ -130,6 +143,28 @@ def _normalize_news_text(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _valid_external_news_url(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    try:
+        parsed = urlparse(text)
+    except Exception:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = str(parsed.netloc or "").split("@")[-1].split(":")[0].lower().strip()
+    if not host or "." not in host or host in _FORBIDDEN_NEWS_HOSTS:
+        return False
+    normalized = text.lower()
+    return not any(marker in normalized for marker in _FORBIDDEN_NEWS_URL_MARKERS)
+
+
+def _sanitize_news_url(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text if _valid_external_news_url(text) else None
+
+
 def _iso_from_news_epoch(epoch: float) -> str | None:
     if not epoch:
         return None
@@ -158,6 +193,20 @@ def _public_news_is_today(epoch: float) -> bool:
         return published.date() == current.date()
     except Exception:
         return False
+
+
+def _public_news_freshness_bucket(epoch: float, age_minutes: int | None, is_today: bool) -> tuple[str, str]:
+    if is_today:
+        return "today", "Notícia de hoje"
+    if age_minutes is None and epoch:
+        age_minutes = _public_news_age_minutes(epoch)
+    if age_minutes is None:
+        return "unknown", "Data da fonte indisponível"
+    if age_minutes < 48 * 60:
+        return "yesterday", "Notícia anterior / Ontem"
+    if age_minutes <= 7 * 24 * 60:
+        return "2_7_days", "Notícia anterior / 2-7 dias"
+    return "older_7_days", "Notícia antiga / 7+ dias"
 
 
 def _public_news_language(item: dict[str, Any]) -> str:
@@ -375,7 +424,7 @@ def _enrich_public_news_item(item: dict[str, Any], ticker: str) -> dict[str, Any
     epoch = _news_timestamp_epoch(normalized)
     published_at_source = normalized.get("published_at_source") or _iso_from_news_epoch(epoch)
     source_name = normalized.get("source_name") or normalized.get("source") or "Yahoo Finance"
-    source_url = normalized.get("source_url") or normalized.get("url")
+    source_url = _sanitize_news_url(normalized.get("source_url") or normalized.get("url"))
     fetched_at = normalized.get("fetched_at") or normalized.get("detected_at")
     age_minutes = normalized.get("age_minutes")
     if age_minutes is None:
@@ -386,19 +435,29 @@ def _enrich_public_news_item(item: dict[str, Any], ticker: str) -> dict[str, Any
     is_stale = normalized.get("is_stale")
     if is_stale is None:
         is_stale = not bool(is_today)
+    freshness_bucket, freshness_label = _public_news_freshness_bucket(epoch, age_minutes, bool(is_today))
 
     normalized["source"] = source_name
     normalized["source_name"] = source_name
     normalized["source_url"] = source_url
+    normalized["url"] = source_url
     normalized["published_at_source"] = published_at_source
     normalized["published_at"] = normalized.get("published_at") or published_at_source
     normalized["fetched_at"] = fetched_at
     normalized["age_minutes"] = age_minutes
     normalized["is_today"] = bool(is_today)
     normalized["is_stale"] = bool(is_stale)
+    normalized["freshness_bucket"] = freshness_bucket
+    normalized["freshness_label"] = freshness_label
     normalized["matched_symbol"] = _normalize_symbol(normalized.get("matched_symbol") or ticker)
     normalized["language"] = normalized.get("language") or _public_news_language(normalized)
-    normalized["publication_status"] = normalized.get("publication_status") or ("ok" if published_at_source else "missing_source_time")
+    normalized["publication_status"] = (
+        "missing_source_url"
+        if not source_url
+        else "missing_source_time"
+        if not published_at_source
+        else normalized.get("publication_status") or "ok"
+    )
     normalized["is_incomplete"] = bool(normalized.get("is_incomplete") or not published_at_source or not source_name or not source_url)
     normalized["relevance"] = normalized.get("relevance") if normalized.get("relevance") is not None else normalized.get("relevance_score")
     return normalized
@@ -431,23 +490,23 @@ def _build_news_state(
 
     if items:
         status = "ok"
-        message = f"News filtradas e validadas para {symbol}."
+        message = f"NOTÍCIAS ENCONTRADAS: {len(items)} notícia(s) real(is) validada(s) para {symbol}."
         if cache_status == "stale_fallback":
             status = "stale_fallback"
-            message = f"Usando notícia antiga de {symbol}; provider atual não entregou item novo."
+            message = f"CACHE ANTIGO: usando notícia anterior de {symbol}; provider atual não entregou item novo."
     else:
         status = "empty"
-        message = f"Sem notícia real para {symbol} agora; nenhuma notícia de outro ticker foi reaproveitada."
+        message = f"SEM NOTÍCIA REAL AGORA: Sem notícia real para {symbol} agora; nenhuma notícia de outro ticker foi reaproveitada."
         if provider_error:
             status = "provider_error"
-            message = f"Provider de news falhou para {symbol}: {provider_error}."
+            message = f"PROVIDER INDISPONÍVEL: provider de news falhou para {symbol}: {provider_error}."
         elif raw_count > 0 and discard_reason:
             status = "empty"
-            message = f"Provider encontrou {raw_count} notícia(s) bruta(s) para {symbol}, mas o cache final ficou vazio por {discard_reason}."
+            message = f"FILTROS REMOVERAM TODAS AS NOTÍCIAS: {raw_count} notícia(s) bruta(s) para {symbol}; motivo: {discard_reason}."
         elif provider_status in {"empty", "no_news", "error"}:
-            message = f"Provider retornou {provider_status} para {symbol}; tela deve mostrar estado vazio explicito."
+            message = f"TICKER SEM COBERTURA: provider retornou {provider_status} para {symbol}; tela deve mostrar estado vazio explícito."
         elif warmup_requested:
-            message = f"Busca de notícias reais para {symbol} foi agendada; tente atualizar em instantes."
+            message = f"BUSCANDO NOTÍCIAS: busca real para {symbol} foi agendada; tente atualizar em instantes."
 
     return {
         "symbol": symbol,

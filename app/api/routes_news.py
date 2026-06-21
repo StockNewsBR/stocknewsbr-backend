@@ -12,7 +12,8 @@ router = APIRouter(tags=["News"])
 def symbol_news(
     symbol: str,
     limit: int = 6,
+    refresh: str | None = None,
     current_user: User = Depends(require_any_channel_access("app", "web")),
 ):
     del current_user
-    return build_public_news_payload(symbol, limit=limit, allow_fetch=False, schedule_warmup=True)
+    return build_public_news_payload(symbol, limit=limit, allow_fetch=refresh is not None, schedule_warmup=True)

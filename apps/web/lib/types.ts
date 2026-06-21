@@ -463,6 +463,8 @@ export type FeedComment = {
   text: string;
   image_url?: string | null;
   timestamp?: number;
+  social_guardian_score?: number | null;
+  social_guardian_label?: string | null;
 };
 
 export type FeedPost = {
@@ -485,6 +487,8 @@ export type FeedPost = {
   comments?: FeedComment[];
   discussion_relevance_score?: number;
   discussion_relevance_reason?: string[];
+  social_guardian_score?: number | null;
+  social_guardian_label?: string | null;
 };
 
 export type ChatMessage = {
@@ -731,6 +735,8 @@ export type NewsItem = {
     age_minutes?: number | null;
     is_today?: boolean | null;
     is_stale?: boolean | null;
+    freshness_bucket?: string | null;
+    freshness_label?: string | null;
     matched_symbol?: string | null;
     language?: string | null;
     relevance?: number | null;
@@ -872,6 +878,13 @@ export type QuotePayload = {
   quote_status?: "valid" | "partial" | "empty" | "stale" | string;
   status?: string | null;
   stale?: boolean;
+  core_data?: boolean | null;
+  strategic_core_data?: boolean | null;
+  missing_fields?: string[] | null;
+  quote_missing_fields?: string[] | null;
+  field_status?: Record<string, boolean> | null;
+  snapshot_exists?: boolean | null;
+  quote_exists?: boolean | null;
   market_data_updated_at?: string | number | null;
   quote_time?: string | number | null;
   provider_timestamp?: string | number | null;

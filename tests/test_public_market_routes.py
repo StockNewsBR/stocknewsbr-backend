@@ -3,7 +3,8 @@ from unittest.mock import patch
 
 from app.api import routes_public_market
 from app.api import routes_public_market_live
-from app.services.quote_service import classify_quote_payload, is_usable_quote_payload
+from app.services import quote_service
+from app.services.quote_service import classify_quote_payload, empty_quote_payload, is_usable_quote_payload
 
 
 class PublicMarketRouteTests(unittest.TestCase):
@@ -41,6 +42,38 @@ class PublicMarketRouteTests(unittest.TestCase):
         self.assertEqual(payload["symbol"], "AAPL")
         self.assertEqual(payload["source"], "empty")
         self.assertIsNone(payload["price"])
+
+    def test_empty_quote_payload_exposes_missing_fields_contract(self):
+        payload = empty_quote_payload("BNY")
+
+        self.assertFalse(payload["core_data"])
+        self.assertFalse(payload["strategic_core_data"])
+        self.assertEqual(payload["missing_fields"], ["price", "volume", "score", "rsi", "bias"])
+        self.assertEqual(payload["quote_missing_fields"], ["price", "volume"])
+        self.assertFalse(payload["field_status"]["quote"])
+
+    def test_on_demand_quote_skips_empty_alias_before_valid_provider_symbol(self):
+        with patch.object(quote_service, "get_cached_quote_payload", return_value=None), patch.object(
+            quote_service,
+            "get_price_snapshot",
+            side_effect=[
+                None,
+                {
+                    "symbol": "AXIA6.SA",
+                    "price": 55.78,
+                    "change": 0.0,
+                    "change_pct": 0.0,
+                    "volume": 91863885,
+                    "source": "market_cache",
+                },
+            ],
+        ):
+            payload = quote_service.get_quote_payload("AXIA6", allow_fetch=True)
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["symbol"], "AXIA6")
+        self.assertEqual(payload["price"], 55.78)
+        self.assertTrue(payload["core_data"])
 
     def test_public_quote_rejects_partial_cache_without_price(self):
         with patch.object(
@@ -235,6 +268,8 @@ class PublicMarketRouteTests(unittest.TestCase):
 
         self.assertEqual(payload["items"][0]["symbol"], "BA")
         self.assertEqual(payload["items"][0]["source"], "empty")
+        self.assertFalse(payload["items"][0]["core_data"])
+        self.assertIn("price", payload["items"][0]["missing_fields"])
 
     def test_public_chart_accepts_range_query_alias(self):
         ohlc = [{"time": 1, "open": 9.8, "close": 10.0, "high": 11.0, "low": 9.5}]
