@@ -96,7 +96,7 @@ def _payload_matches_symbol(payload: dict, symbol: str) -> bool:
         identities.add(normalized)
         identities.add(normalized.replace(".SA", ""))
 
-    return not identities or bool(allowed.intersection(identities))
+    return bool(identities and allowed.intersection(identities))
 
 
 def _direct_cached_price_payloads(symbols: list[str], allow_stale: bool) -> dict:

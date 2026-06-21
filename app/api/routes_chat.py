@@ -8,7 +8,6 @@ from app.security import resolve_token_user
 from app.services.access_service import has_channel_access, refresh_user_access
 from app.services.symbol_registry import canonical_symbol
 from app.services.ticker_room_service import append_room_message, list_room_messages
-from app.social.moderation import can_publish
 from app.system.room_websocket_manager import room_ws_manager
 
 
@@ -65,11 +64,6 @@ async def chat_message(
     current_user: User = Depends(require_active_plan),
 ):
     symbol = canonical_symbol(symbol)
-    allowed, reason = can_publish(current_user.id, payload.text)
-
-    if not allowed:
-        raise HTTPException(status_code=429, detail=reason)
-
     item = append_room_message(
         symbol=symbol,
         user_id=current_user.id,
@@ -80,6 +74,8 @@ async def chat_message(
 
     if item is None:
         raise HTTPException(status_code=400, detail="chat_message_failed")
+    if isinstance(item, dict) and item.get("error"):
+        raise HTTPException(status_code=429, detail=item.get("reason", "chat_message_blocked"))
 
     await room_ws_manager.broadcast(
         symbol,
@@ -121,11 +117,6 @@ async def websocket_chat(websocket: WebSocket, symbol: str):
 
             text = str(payload.get("text") or "").strip()
             image_url = payload.get("image_url")
-            allowed, reason = can_publish(user["id"], text)
-
-            if not allowed:
-                await websocket.send_json({"type": "error", "detail": reason})
-                continue
 
             item = append_room_message(
                 symbol=symbol,
@@ -137,6 +128,9 @@ async def websocket_chat(websocket: WebSocket, symbol: str):
 
             if item is None:
                 await websocket.send_json({"type": "error", "detail": "chat_message_failed"})
+                continue
+            if isinstance(item, dict) and item.get("error"):
+                await websocket.send_json({"type": "error", "detail": item.get("reason", "chat_message_blocked")})
                 continue
 
             await room_ws_manager.broadcast(

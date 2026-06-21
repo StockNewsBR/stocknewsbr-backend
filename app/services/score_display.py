@@ -19,11 +19,19 @@ def _log_display_warning_once(message: str, kind: str, raw_score: float, display
     logger.warning(message, extra={"raw_score": raw_score, "display_score": display_score})
 
 
+def _numeric_score_or_none(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def normalize_master_score_display(value: Any) -> Tuple[float, str | None]:
     """Canonical product contract: Score Mestre exposed to users is always 0..10."""
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
+    numeric = _numeric_score_or_none(value)
+    if numeric is None:
         return 0.0, "master_score_display_invalid"
 
     if numeric < 0:
@@ -44,10 +52,7 @@ def attach_master_score_display_contract(row: Dict[str, Any]) -> Dict[str, Any]:
         raw = row.get("score")
     display, warning = normalize_master_score_display(raw)
     next_row = dict(row)
-    try:
-        raw_numeric = float(raw)
-    except (TypeError, ValueError):
-        raw_numeric = None
+    raw_numeric = _numeric_score_or_none(raw)
     if raw_numeric is not None:
         next_row["master_score_raw"] = round(raw_numeric, 1)
         next_row["master_score"] = display
@@ -60,9 +65,13 @@ def attach_master_score_display_contract(row: Dict[str, Any]) -> Dict[str, Any]:
             block_raw = block.get("raw_score")
         if block_raw in (None, ""):
             block_raw = block.get("score")
+        block_numeric = _numeric_score_or_none(block_raw)
         block_score, block_warning = normalize_master_score_display(block_raw)
         next_block = dict(block)
-        next_block["score_raw"] = block_raw
+        if block_numeric is None:
+            next_block.pop("score_raw", None)
+        else:
+            next_block["score_raw"] = round(block_numeric, 1)
         next_block["score"] = block_score
         if block_warning:
             next_block["score_warning"] = block_warning

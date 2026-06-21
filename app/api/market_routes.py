@@ -3,6 +3,7 @@
 # =====================================================
 
 import logging
+import threading
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,6 +25,7 @@ router = APIRouter(
 )
 
 QUOTE_CACHE = {}
+QUOTE_CACHE_LOCK = threading.Lock()
 QUOTE_CACHE_TTL = 30
 MAX_CACHE_SIZE = 100
 
@@ -35,26 +37,49 @@ def _safe_float(value, default=0.0):
         return default
 
 
+def _float_or_none(value):
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _first_present_float(*values, default=0.0):
+    for value in values:
+        numeric = _float_or_none(value)
+        if numeric is not None:
+            return numeric
+    return default
+
+
+def _market_mover_intensity(row):
+    return abs(_first_present_float(row.get("change"), row.get("change_pct"), row.get("momentum")))
+
+
 def _get_cached_quote(ticker):
-    cached = QUOTE_CACHE.get(ticker)
+    with QUOTE_CACHE_LOCK:
+        cached = QUOTE_CACHE.get(ticker)
 
-    if not cached:
-        return None
+        if not cached:
+            return None
 
-    payload, timestamp = cached
+        payload, timestamp = cached
 
-    if time.time() - timestamp > QUOTE_CACHE_TTL:
-        QUOTE_CACHE.pop(ticker, None)
-        return None
+        if time.time() - timestamp > QUOTE_CACHE_TTL:
+            QUOTE_CACHE.pop(ticker, None)
+            return None
 
-    return payload
+        return payload
 
 
 def _set_cached_quote(ticker, payload):
-    if len(QUOTE_CACHE) >= MAX_CACHE_SIZE:
-        QUOTE_CACHE.clear()
+    with QUOTE_CACHE_LOCK:
+        if len(QUOTE_CACHE) >= MAX_CACHE_SIZE:
+            QUOTE_CACHE.clear()
 
-    QUOTE_CACHE[ticker] = (payload, time.time())
+        QUOTE_CACHE[ticker] = (payload, time.time())
 
 
 @router.get("/quote/{ticker}")
@@ -69,7 +94,7 @@ def get_quote(
 
     cached = _get_cached_quote(ticker)
 
-    if cached:
+    if cached is not None:
         return {
             **cached,
             "plan": getattr(current_user, "plan", "unknown"),
@@ -110,11 +135,7 @@ def get_top_movers(current_user=Depends(require_active_plan)):
             if not isinstance(row, dict):
                 continue
 
-            intensity = abs(
-                _safe_float(row.get("change"))
-                or _safe_float(row.get("change_pct"))
-                or _safe_float(row.get("momentum"))
-            )
+            intensity = _market_mover_intensity(row)
 
             item = dict(row)
             item["intensity"] = intensity

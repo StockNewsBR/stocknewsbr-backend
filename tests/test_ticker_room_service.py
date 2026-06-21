@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from app.social import moderation
 from app.services import ticker_room_service
 
 
@@ -9,10 +10,13 @@ class TickerRoomServiceTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.original_path = ticker_room_service.ROOM_STORE_PATH
+        self.original_moderation_path = moderation.MODERATION_STORE_PATH
         ticker_room_service.ROOM_STORE_PATH = Path(self.tempdir.name) / "ticker_rooms.json"
+        moderation.MODERATION_STORE_PATH = Path(self.tempdir.name) / "moderation_state.json"
 
     def tearDown(self):
         ticker_room_service.ROOM_STORE_PATH = self.original_path
+        moderation.MODERATION_STORE_PATH = self.original_moderation_path
         self.tempdir.cleanup()
 
     def test_appends_and_lists_messages_with_image(self):

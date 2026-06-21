@@ -5,10 +5,11 @@ from datetime import datetime
 from app.database import SessionLocal
 from app.models import SocialComment
 from app.social.db import ensure_social_tables
-from app.social.moderation import can_publish
+from app.social.moderation import can_publish, get_user_guardian_score, record_content_approved, validate_attachment_url
 
 
 def _serialize_comment(comment: SocialComment) -> dict:
+    guardian_score = get_user_guardian_score(comment.user_id)
     return {
         "id": comment.id,
         "post_id": comment.post_id,
@@ -19,6 +20,8 @@ def _serialize_comment(comment: SocialComment) -> dict:
         "text": comment.text,
         "image_url": comment.image_url,
         "timestamp": int((comment.created_at or datetime.utcnow()).timestamp()),
+        "social_guardian_score": guardian_score.get("score"),
+        "social_guardian_label": guardian_score.get("label"),
     }
 
 
@@ -27,7 +30,8 @@ def add_comment(post_id, user_id, text, image_url=None, display_name=None, email
     if post_id is None or not user_id or not text:
         return None
 
-    allowed, reason = can_publish(int(user_id), str(text))
+    resolved_user_id = int(user_id)
+    allowed, reason = can_publish(resolved_user_id, str(text))
 
     if not allowed:
         return {
@@ -35,12 +39,19 @@ def add_comment(post_id, user_id, text, image_url=None, display_name=None, email
             "reason": reason,
         }
 
+    attachment_allowed, attachment_reason = validate_attachment_url(resolved_user_id, image_url)
+    if not attachment_allowed:
+        return {
+            "error": "comment_blocked",
+            "reason": attachment_reason,
+        }
+
     db = SessionLocal()
 
     try:
         comment = SocialComment(
             post_id=post_id,
-            user_id=int(user_id),
+            user_id=resolved_user_id,
             text=str(text)[:600],
             image_url=image_url,
             display_name=display_name or f"user_{user_id}",
@@ -50,6 +61,12 @@ def add_comment(post_id, user_id, text, image_url=None, display_name=None, email
         db.add(comment)
         db.commit()
         db.refresh(comment)
+        record_content_approved(
+            resolved_user_id,
+            content_type="comment",
+            content_id=comment.id,
+            post_id=post_id,
+        )
         return _serialize_comment(comment)
     finally:
         db.close()

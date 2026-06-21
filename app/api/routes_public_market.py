@@ -76,7 +76,7 @@ def public_quote(symbol: str, refresh: str | None = None):
     query_symbol = _normalize_symbol(symbol)
     response_symbol = _response_symbol(symbol)
     for alias in _symbol_aliases(query_symbol):
-        payload = get_quote_payload(alias, allow_fetch=True) if refresh is not None else get_cached_quote_payload(alias)
+        payload = get_cached_quote_payload(alias)
         if not payload:
             continue
         normalized_payload = {**payload, "symbol": response_symbol}
@@ -91,7 +91,7 @@ def public_news(symbol: str, limit: int = 6, refresh: str | None = None):
         _normalize_symbol(symbol),
         limit=limit,
         source="public",
-        allow_fetch=refresh is not None,
+        allow_fetch=False,
         schedule_warmup=True,
     )
 

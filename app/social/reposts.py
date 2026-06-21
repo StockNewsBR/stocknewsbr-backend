@@ -7,7 +7,7 @@ from sqlalchemy import func
 from app.database import SessionLocal
 from app.models import SocialRepost
 from app.social.db import ensure_social_tables
-from app.social.moderation import can_publish
+from app.social.moderation import can_publish, record_content_approved
 
 
 def _normalize_quote_text(text: str | None) -> str | None:
@@ -23,7 +23,8 @@ def create_repost(post_id, user_id, quote_text=None):
     if post_id is None or not user_id:
         return None
 
-    allowed, reason = can_publish(int(user_id), _normalize_quote_text(quote_text) or "repost")
+    resolved_user_id = int(user_id)
+    allowed, reason = can_publish(resolved_user_id, _normalize_quote_text(quote_text) or "repost")
     if not allowed:
         return {
             "error": "repost_blocked",
@@ -37,7 +38,7 @@ def create_repost(post_id, user_id, quote_text=None):
             db.query(SocialRepost)
             .filter(
                 SocialRepost.post_id == int(post_id),
-                SocialRepost.user_id == int(user_id),
+                SocialRepost.user_id == resolved_user_id,
             )
             .first()
         )
@@ -45,12 +46,18 @@ def create_repost(post_id, user_id, quote_text=None):
         if row is None:
             row = SocialRepost(
                 post_id=int(post_id),
-                user_id=int(user_id),
+                user_id=resolved_user_id,
                 quote_text=_normalize_quote_text(quote_text),
             )
             db.add(row)
             db.commit()
             db.refresh(row)
+            record_content_approved(
+                resolved_user_id,
+                content_type="repost",
+                content_id=row.id,
+                post_id=int(post_id),
+            )
 
         return serialize_repost(row)
     finally:

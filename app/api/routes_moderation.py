@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.dependencies import require_any_channel_access
 from app.models import User
 from app.social.moderation import block, mute, report
+from app.social.posts import get_post
 
 
 class ModerationRequest(BaseModel):
@@ -48,10 +49,12 @@ def report_post(
     if payload.post_id is None:
         raise HTTPException(status_code=400, detail="post_id_required")
 
+    post = get_post(payload.post_id)
     report(
         current_user.id,
         payload.post_id,
         reason=payload.reason,
         reporter_note=payload.note,
+        target_user_id=post.get("user_id") if post else None,
     )
     return {"status": "reported"}

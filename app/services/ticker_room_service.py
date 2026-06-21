@@ -1,13 +1,15 @@
 import json
+import os
 import threading
 import time
 from pathlib import Path
 
 from app.services.symbol_registry import canonical_symbol
+from app.social.moderation import can_publish, record_content_approved, validate_attachment_url
 from app.system.system_metrics import increment_chat_messages
 
 
-ROOM_STORE_PATH = Path("data/ticker_rooms.json")
+ROOM_STORE_PATH = Path(os.getenv("ROOM_STORE_PATH", "data/ticker_rooms.json"))
 _lock = threading.RLock()
 MAX_ROOM_MESSAGES = 500
 
@@ -52,6 +54,14 @@ def append_room_message(
     if not symbol or not user_id or not text:
         return None
 
+    allowed, reason = can_publish(int(user_id), text)
+    if not allowed:
+        return {"error": "chat_message_blocked", "reason": reason}
+
+    attachment_allowed, attachment_reason = validate_attachment_url(int(user_id), image_url)
+    if not attachment_allowed:
+        return {"error": "chat_message_blocked", "reason": attachment_reason}
+
     store = _load_store()
     items = list(store.get(symbol, []))
 
@@ -69,4 +79,11 @@ def append_room_message(
     store[symbol] = items[-MAX_ROOM_MESSAGES:]
     _save_store(store)
     increment_chat_messages()
+    record_content_approved(
+        int(user_id),
+        content_type="chat",
+        content_id=message["id"],
+        post_id=message["id"],
+        ticker=symbol,
+    )
     return message

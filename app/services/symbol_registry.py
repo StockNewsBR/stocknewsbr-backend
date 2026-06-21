@@ -108,6 +108,8 @@ def _alias_key(value: Any) -> str:
     raw = str(value or "").strip().upper()
     if not raw or _QUERY_RE.search(raw):
         return ""
+    if ".." in raw or "\\" in raw:
+        return ""
 
     raw = re.sub(r"\s+", " ", raw)
     if ":" in raw:
@@ -256,7 +258,7 @@ def canonical_symbol_aliases(value: Any) -> list[str]:
 def resolve_tradingview_symbol_candidates(value: Any) -> tuple[str, ...]:
     canonical = canonical_symbol(value)
     if not canonical:
-        return ("BMFBOVESPA:PETR4",)
+        return tuple()
 
     curated_fallbacks = _TRADINGVIEW_SYMBOL_FALLBACKS.get(canonical)
     if curated_fallbacks:
@@ -275,7 +277,8 @@ def resolve_tradingview_symbol_candidates(value: Any) -> tuple[str, ...]:
 
 
 def resolve_tradingview_symbol(value: Any) -> str:
-    return resolve_tradingview_symbol_candidates(value)[0]
+    candidates = resolve_tradingview_symbol_candidates(value)
+    return candidates[0] if candidates else ""
 
 
 def tradingview_symbol(value: Any) -> str:

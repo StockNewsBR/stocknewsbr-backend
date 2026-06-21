@@ -32,6 +32,13 @@ def _coerce_float(value: Any) -> float | None:
         return None
 
 
+def _first_present(snapshot: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in snapshot and snapshot.get(key) is not None:
+            return snapshot.get(key)
+    return None
+
+
 def _signal_count(snapshot: Dict[str, Any]) -> int:
     signals = snapshot.get("signals")
     if isinstance(signals, list):
@@ -76,7 +83,7 @@ def evaluate_snapshot_runtime_status(snapshot: Any, *, now: float | None = None)
 
     signals = _signal_count(snapshot)
     source = _source(snapshot)
-    stale = _coerce_bool(snapshot.get("stale") or snapshot.get("is_stale"))
+    stale = _coerce_bool(_first_present(snapshot, "stale", "is_stale"))
     fallback_active = source in _FALLBACK_SOURCES or bool(snapshot.get("using_fallback"))
     timestamp = _timestamp(snapshot)
     age_seconds = snapshot.get("age_seconds")

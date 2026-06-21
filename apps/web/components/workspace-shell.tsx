@@ -9405,7 +9405,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     if (!currentAiPayloadAvailable) {
       return {
         title: isUsLocale ? "AI temporarily has no data." : "IA temporariamente sem dados.",
-        body: isUsLocale ? "No payload was received for this lens yet." : "Nenhum payload foi recebido para esta lente ainda.",
+        body: isUsLocale ? "No AI finding for this asset right now." : "Nenhum achado desta IA para este ativo agora.",
       };
     }
     if (currentAiStaleRows.length > 0 && currentTabAlertRows.length === 0) {
