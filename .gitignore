@@ -28,3 +28,10 @@ test-results/
 apps/mobile/node_modules/
 apps/web/.next_cache_reset*/
 apps/web/.next_stale*/
+apps/web/.next-stale-*/
+apps/web/.next/
+apps/web/test-results/
+output/playwright/
+
+# Local Codex agent config - never commit
+.codex/
