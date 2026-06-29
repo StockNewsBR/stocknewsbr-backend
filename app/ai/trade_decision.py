@@ -99,6 +99,12 @@ def _state(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
+def _provided_action_text(value: Any) -> str:
+    if value in (None, "", False, 0):
+        return ""
+    return str(value).upper().strip()
+
+
 def _is_truthy(value: Any) -> bool:
     if value is True:
         return True
@@ -500,7 +506,7 @@ def _detect_decision_conflicts(
         safe_float(row.get("sell_score"), 0.0),
         bearish,
     )
-    raw_signal = _state(row.get("signal"))
+    raw_signal = _state(row.get("source_signal") or row.get("signal"))
     raw_direction = _state(row.get("trade_direction"))
 
     if action == "SHORT" and (
@@ -1201,12 +1207,22 @@ def summarize_trade_decision(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
             safe_float(row.get("score"), 0.0),
         ),
     )
-    if top.get("trade_action") or top.get("signal") in {"BUY", "SELL", "SHORT", "COVER"}:
+    trade_action = _provided_action_text(top.get("trade_action"))
+    signal = _provided_action_text(top.get("signal"))
+    source_signal = _provided_action_text(top.get("source_signal")) or signal
+    recognized_actions = OPERATIONAL_ACTIONS | {NO_DECISION_ACTION}
+    has_precomputed_action = trade_action in recognized_actions or signal in recognized_actions
+    if has_precomputed_action:
         resolved = dict(top)
-        action = str(resolved.get("trade_action") or resolved.get("signal") or "SELL").upper()
+        if trade_action == NO_DECISION_ACTION:
+            action = trade_action
+        elif trade_action in OPERATIONAL_ACTIONS:
+            action = trade_action
+        else:
+            action = signal
         resolved["signal"] = action
         resolved["trade_action"] = action
-        resolved["trade_direction"] = resolved.get("trade_direction") or {
+        resolved["trade_direction"] = {
             "BUY": "long",
             "SELL": "exit_long",
             "SHORT": "short",
@@ -1228,9 +1244,14 @@ def summarize_trade_decision(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         resolved.setdefault("invalidation", "Sair se o contexto de regime, fluxo ou liquidez virar contra.")
         resolved.setdefault("risk", "Risco nao detalhado no payload original.")
         resolved.setdefault("risk_level", "medio")
+        coherence_row = dict(top)
+        coherence_row["source_signal"] = source_signal
+        coherence_row["signal"] = action
+        coherence_row["trade_action"] = action
+        coherence_row["trade_direction"] = resolved["trade_direction"]
         resolved = _neutralize_operational_decision(
             resolved,
-            top,
+            coherence_row,
             action,
             bullish=safe_float(resolved.get("bullish_pressure"), None),
             bearish=safe_float(resolved.get("bearish_pressure"), None),

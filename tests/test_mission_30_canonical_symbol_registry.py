@@ -33,6 +33,11 @@ def actionable_row(ticker: str, score: float = 90.0, **overrides):
         "score": score,
         "master_score": score,
         "master_score_raw": score,
+        "score_source_scale": "0_100",
+        "master_score_source_scale": "0_100",
+        "ranking_opportunity_score": score,
+        "ranking_opportunity_source_scale": "0_100",
+        "ranking_eligible": True,
         "master_direction": "BULLISH",
         "master_status": "APPROVED",
         "price": 37.5,
@@ -265,16 +270,25 @@ class Mission30CanonicalSymbolRegistryTests(unittest.TestCase):
         self.assertNotIn("Trader note", item["trader_takeaway"])
         self.assertEqual(item["industry"], "Petróleo e gás")
 
-    def test_mission30_complement_score_warning_logs_once_per_value(self):
+    def test_mission30_complement_score_warning_scope_keeps_raw_conversion_non_blocking(self):
         from app.services import score_display
 
-        score_display._DISPLAY_WARNING_KEYS.clear()
-        with patch.object(score_display.logger, "warning") as warning:
-            normalize_master_score_display(86)
-            normalize_master_score_display(86)
-            normalize_master_score_display(86)
+        warning_keys = set()
+        with patch.object(score_display, "_DISPLAY_WARNING_KEYS", warning_keys):
+            with patch.object(score_display.logger, "debug") as debug, patch.object(score_display.logger, "warning") as warning:
+                raw_display, raw_warning = normalize_master_score_display(86, source_scale="0_100")
+                raw_display_repeat, raw_warning_repeat = normalize_master_score_display(86, source_scale="0_100")
+                capped_display, capped_warning = normalize_master_score_display(86, source_scale="0_10")
+                capped_display_repeat, capped_warning_repeat = normalize_master_score_display(86, source_scale="0_10")
 
+        self.assertEqual((raw_display, raw_warning), (8.6, "master_score_normalized_from_raw_100"))
+        self.assertEqual((raw_display_repeat, raw_warning_repeat), (8.6, "master_score_normalized_from_raw_100"))
+        self.assertEqual((capped_display, capped_warning), (10.0, "master_score_display_clamped_above_10"))
+        self.assertEqual((capped_display_repeat, capped_warning_repeat), (10.0, "master_score_display_clamped_above_10"))
+        self.assertTrue(debug.called)
         self.assertEqual(warning.call_count, 1)
+        self.assertIn(("above_10", 86.0, 10.0), warning_keys)
+        self.assertNotIn(("raw_100", 86.0, 8.6), warning_keys)
 
 
 if __name__ == "__main__":

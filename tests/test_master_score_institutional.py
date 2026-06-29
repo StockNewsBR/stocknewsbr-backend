@@ -207,6 +207,8 @@ class InstitutionalMasterScoreTests(unittest.TestCase):
         signal = {
             **_row(),
             "master_score": 84.0,
+            "master_score_raw": 84.0,
+            "master_score_source_scale": "0_100",
             "master_direction": "BULLISH",
             "master_status": "APPROVED",
         }
@@ -227,12 +229,43 @@ class InstitutionalMasterScoreTests(unittest.TestCase):
         ):
             payload = workspace_service.get_workspace_data(user_id=7, channel="web")
 
-        self.assertEqual(payload["top_signals"][0]["master_score"], 84.0)
+        self.assertEqual(payload["top_signals"][0]["master_score"], 8.4)
+        self.assertEqual(payload["top_signals"][0]["master_score_raw"], 84.0)
+        self.assertEqual(payload["top_signals"][0]["master_score_source_scale"], "0_100")
+        self.assertEqual(payload["market_snapshot"]["master_score"]["master_score"], 8.4)
+        self.assertEqual(payload["market_snapshot"]["master_score"]["master_score_raw"], 84.0)
+        self.assertEqual(payload["market_snapshot"]["master_score"]["master_score_source_scale"], "0_100")
         self.assertEqual(payload["market_snapshot"]["master_score"]["master_direction"], "BULLISH")
 
     def test_ranking_and_radar_consume_master_score(self):
-        low_source_high_master = {**_row("PETR4"), "score": 20.0, "master_score": 82.0, "master_direction": "BULLISH", "master_status": "APPROVED", "events": ["momentum"]}
-        high_source_low_master = {**_row("VALE3"), "score": 95.0, "master_score": 61.0, "master_direction": "BULLISH", "master_status": "APPROVED", "events": ["momentum"]}
+        low_source_high_master = {
+            **_row("PETR4"),
+            "score": 20.0,
+            "score_source_scale": "0_100",
+            "master_score": 82.0,
+            "master_score_raw": 82.0,
+            "master_score_source_scale": "0_100",
+            "ranking_opportunity_score": 82.0,
+            "ranking_opportunity_source_scale": "0_100",
+            "ranking_eligible": True,
+            "master_direction": "BULLISH",
+            "master_status": "APPROVED",
+            "events": ["momentum"],
+        }
+        high_source_low_master = {
+            **_row("VALE3"),
+            "score": 95.0,
+            "score_source_scale": "0_100",
+            "master_score": 61.0,
+            "master_score_raw": 61.0,
+            "master_score_source_scale": "0_100",
+            "ranking_opportunity_score": 61.0,
+            "ranking_opportunity_source_scale": "0_100",
+            "ranking_eligible": True,
+            "master_direction": "BULLISH",
+            "master_status": "APPROVED",
+            "events": ["momentum"],
+        }
 
         with patch.object(ranking, "get_snapshot_info", return_value={"signals": 2, "age_seconds": 0, "timestamp": 1, "has_signals": True, "is_empty": False}), patch.object(
             ranking, "get_snapshot_signals", return_value=[low_source_high_master, high_source_low_master]
@@ -242,15 +275,22 @@ class InstitutionalMasterScoreTests(unittest.TestCase):
         with patch.object(web_radar, "get_snapshot_signals", return_value=[high_source_low_master, low_source_high_master]):
             radar = web_radar.get_radar()
 
-        self.assertEqual(ranked[0]["score"], 82.0)
+        self.assertEqual(ranked[0]["score"], 8.2)
         self.assertEqual(ranked[0]["master_score"], 8.2)
         self.assertEqual(ranked[0]["master_score_raw"], 82.0)
+        self.assertEqual(ranked[0]["master_score_source_scale"], "0_100")
         self.assertEqual(radar[0]["ticker"], "PETR4")
+        self.assertEqual(radar[0]["score"], 8.2)
+        self.assertEqual(radar[0]["master_score"], 8.2)
+        self.assertEqual(radar[0]["master_score_raw"], 82.0)
+        self.assertEqual(radar[0]["master_score_source_scale"], "0_100")
 
     def test_public_insight_exposes_master_score(self):
         row = {
             **_row(),
             "master_score": 83.0,
+            "master_score_raw": 83.0,
+            "master_score_source_scale": "0_100",
             "master_direction": "BULLISH",
             "master_status": "APPROVED",
             "master_summary": "Fluxo comprador e regime favorável.",
@@ -260,7 +300,9 @@ class InstitutionalMasterScoreTests(unittest.TestCase):
         ):
             payload = routes_public_market_live.public_market_insight("PETR4")
 
-        self.assertEqual(payload["master_score"], 83.0)
+        self.assertEqual(payload["master_score"], 8.3)
+        self.assertEqual(payload["master_score_raw"], 83.0)
+        self.assertEqual(payload["master_score_source_scale"], "0_100")
         self.assertEqual(payload["master_direction"], "BULLISH")
 
 

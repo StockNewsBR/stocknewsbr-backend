@@ -66,24 +66,41 @@ class Mission28B2RegressionTests(unittest.TestCase):
 
     def test_score_surfaces_expose_canonical_master_score_and_preserve_raw(self):
         payload = {
-            "signals": [{"ticker": "F", "master_score": 87.0, "score": 42.0}],
-            "leaders": [{"ticker": "F", "master_score": 87.0}],
-            "master_scores": [{"ticker": "F", "tool": "master_score", "master_score": 87.0, "score": 87.0}],
-            "master_score": {"ticker": "F", "tool": "master_score", "master_score": 87.0, "score": 87.0},
-            "institutional_radar": [{"ticker": "F", "master_score": 87.0}],
-            "institutional_ranking": [{"ticker": "F", "master_score": 87.0}],
-            "symbol_snapshots": {"F": {"ticker": "F", "master_score": 87.0}},
+            "signals": [{"ticker": "F", "master_score": 87.0, "master_score_raw": 87.0, "master_score_source_scale": "0_100", "score": 42.0}],
+            "leaders": [{"ticker": "F", "master_score": 87.0, "master_score_raw": 87.0, "master_score_source_scale": "0_100"}],
+            "master_scores": [{"ticker": "F", "tool": "master_score", "master_score": 87.0, "master_score_raw": 87.0, "master_score_source_scale": "0_100", "score": 87.0}],
+            "master_score": {"ticker": "F", "tool": "master_score", "master_score": 87.0, "master_score_raw": 87.0, "master_score_source_scale": "0_100", "score": 87.0},
+            "institutional_radar": [{"ticker": "F", "master_score": 87.0, "master_score_raw": 87.0, "master_score_source_scale": "0_100"}],
+            "institutional_ranking": [{"ticker": "F", "master_score": 87.0, "master_score_raw": 87.0, "master_score_source_scale": "0_100"}],
+            "symbol_snapshots": {"F": {"ticker": "F", "master_score": 87.0, "master_score_raw": 87.0, "master_score_source_scale": "0_100"}},
         }
 
         normalized = _canonicalize_master_score_surfaces(payload)
 
         self.assertEqual(normalized["signals"][0]["master_score"], 8.7)
         self.assertEqual(normalized["signals"][0]["master_score_raw"], 87.0)
+        self.assertEqual(normalized["signals"][0]["master_score_source_scale"], "0_100")
         self.assertEqual(normalized["signals"][0]["score"], 42.0)
+        self.assertEqual(normalized["leaders"][0]["master_score"], 8.7)
+        self.assertEqual(normalized["leaders"][0]["master_score_raw"], 87.0)
+        self.assertEqual(normalized["leaders"][0]["master_score_source_scale"], "0_100")
+        self.assertEqual(normalized["master_scores"][0]["master_score"], 8.7)
+        self.assertEqual(normalized["master_scores"][0]["master_score_raw"], 87.0)
+        self.assertEqual(normalized["master_scores"][0]["score"], 8.7)
+        self.assertEqual(normalized["master_scores"][0]["master_score_source_scale"], "0_100")
         self.assertEqual(normalized["master_score"]["master_score"], 8.7)
+        self.assertEqual(normalized["master_score"]["master_score_raw"], 87.0)
         self.assertEqual(normalized["master_score"]["score"], 8.7)
+        self.assertEqual(normalized["master_score"]["master_score_source_scale"], "0_100")
+        self.assertEqual(normalized["institutional_radar"][0]["master_score"], 8.7)
+        self.assertEqual(normalized["institutional_radar"][0]["master_score_raw"], 87.0)
+        self.assertEqual(normalized["institutional_radar"][0]["master_score_source_scale"], "0_100")
         self.assertEqual(normalized["institutional_ranking"][0]["master_score"], 8.7)
+        self.assertEqual(normalized["institutional_ranking"][0]["master_score_raw"], 87.0)
+        self.assertEqual(normalized["institutional_ranking"][0]["master_score_source_scale"], "0_100")
         self.assertEqual(normalized["symbol_snapshots"]["F"]["master_score"], 8.7)
+        self.assertEqual(normalized["symbol_snapshots"]["F"]["master_score_raw"], 87.0)
+        self.assertEqual(normalized["symbol_snapshots"]["F"]["master_score_source_scale"], "0_100")
 
     def test_telegram_alert_uses_canonical_master_score(self):
         message = format_signal_alert(
@@ -91,6 +108,8 @@ class Mission28B2RegressionTests(unittest.TestCase):
                 "ticker": "F",
                 "final_decision": "OPORTUNIDADE CONFIRMADA",
                 "master_score": 87.0,
+                "master_score_raw": 87.0,
+                "master_score_source_scale": "0_100",
                 "audit_status": "APPROVED",
                 "conviction_level": "ALTA",
                 "priority_level": "ALTA",

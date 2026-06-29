@@ -22,6 +22,13 @@ def _row(ticker="PETR4"):
         "ticker": ticker,
         "symbol": ticker,
         "score": 91.0,
+        "score_source_scale": "0_100",
+        "master_score": 91.0,
+        "master_score_raw": 91.0,
+        "master_score_source_scale": "0_100",
+        "ranking_opportunity_score": 91.0,
+        "ranking_opportunity_source_scale": "0_100",
+        "ranking_eligible": True,
         "signal": "BUY",
         "trade_action": "BUY",
         "decision_ready": True,
@@ -31,6 +38,26 @@ def _row(ticker="PETR4"):
         "price": 37.5,
         "volume": 1_800_000,
         "source": "snapshot",
+        "audit_status": "APPROVED",
+        "auditor_status": "APPROVED",
+        "blocked_by_auditor": False,
+        "master_direction": "BULLISH",
+        "master_status": "APPROVED",
+        "master_conviction": "Alta",
+        "master_confidence": "Alta",
+        "strategic_panel": {
+            "recommended_action": "OPORTUNIDADE CONFIRMADA",
+            "strategic_panel_summary": "Contexto institucional favoravel.",
+        },
+        "historical_confidence_score": 74.0,
+        "operational_status": "READY",
+        "operational_ready": True,
+        "operational_blocks": [],
+        "conviction_level": "MUITO ALTA",
+        "priority_level": "CRÍTICA",
+        "radar_no_trade_now": False,
+        "final_decision": "🟢 OPORTUNIDADE CONFIRMADA",
+        "final_decision_blocks": [],
     }
 
 
@@ -157,15 +184,30 @@ class Mission24CGoLiveRuntimeTests(unittest.TestCase):
             "last_good_signals": 1,
             "last_good_timestamp": 2_000_000_000,
         }
+        system_snapshot = {
+            "signals": [_row()],
+            "source": "engine",
+            "stale": False,
+            "generated_at": 2_000_000_000,
+            "go_live_ready": True,
+            "institutional_certified": True,
+            "institutional_consistency_score": 100.0,
+            "contract_coverage": {"total": 1, "complete": 1, "missing": 0, "coverage_pct": 100.0},
+        }
         with patch.object(routes_system, "get_ai_worker_report", return_value={"status": "ok"}), patch.object(
             routes_system, "get_ai_tab_audit_report", return_value={"overall_status": "ok", "release_decision": {"go_live": True}, "batch_summary": {"approved_tools": 1}}
         ), patch.object(routes_system, "get_snapshot_info", return_value=snapshot_info), patch.object(
+            routes_system, "get_snapshot", return_value=system_snapshot
+        ), patch.object(
             routes_system, "get_poll_store_summary", return_value={"current_week_polls": 1}
         ):
             health = routes_system.system_health()
 
         self.assertEqual(health["snapshot"]["snapshot_runtime_status"], SNAPSHOT_RUNTIME_HEALTHY)
         self.assertTrue(health["go_live_ready"])
+        self.assertTrue(health["institutional_certified"])
+        self.assertEqual(health["institutional_consistency_score"], 100.0)
+        self.assertEqual(health["contract_coverage"]["coverage_pct"], 100.0)
 
         snapshot = {"signals": [_row()], "source": "engine", "stale": False, "ai_tools": _tools(), "symbol_snapshots": {}}
         observability = {
@@ -173,7 +215,13 @@ class Mission24CGoLiveRuntimeTests(unittest.TestCase):
             "snapshot_runtime_status": SNAPSHOT_RUNTIME_HEALTHY,
             "snapshot_runtime": {"status": SNAPSHOT_RUNTIME_HEALTHY, "signals": 1, "fallback_active": False},
             "go_live_ready": True,
-            "go_live": {"go_live_ready": True, "reasons": []},
+            "go_live": {
+                "go_live_ready": True,
+                "reasons": [],
+                "institutional_certified": True,
+                "institutional_consistency_score": 100.0,
+                "contract_coverage": {"total": 1, "complete": 1, "missing": 0, "coverage_pct": 100.0},
+            },
             "operational_dashboard": {"worker_status": "ok"},
         }
         bootstrap = {"brand": {}, "pricing": {}, "launch_roadmap": {}, "ai_modules": {}, "social_features": {}}
@@ -196,6 +244,12 @@ class Mission24CGoLiveRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["snapshot_runtime_status"], SNAPSHOT_RUNTIME_HEALTHY)
         self.assertEqual(payload["market_snapshot"]["snapshot_runtime_status"], SNAPSHOT_RUNTIME_HEALTHY)
         self.assertTrue(payload["go_live_ready"])
+        self.assertTrue(payload["institutional_certified"])
+        self.assertTrue(payload["market_snapshot"]["institutional_certified"])
+        self.assertEqual(payload["institutional_consistency_score"], 100.0)
+        self.assertEqual(payload["contract_coverage"]["coverage_pct"], 100.0)
+        self.assertEqual(payload["market_snapshot"]["institutional_consistency_score"], 100.0)
+        self.assertEqual(payload["market_snapshot"]["contract_coverage"]["coverage_pct"], 100.0)
 
 
 if __name__ == "__main__":

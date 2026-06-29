@@ -18,7 +18,7 @@ from app.ai.institutional_conviction import CONVICTION_HIGH, CONVICTION_MODERATE
 from app.ai.institutional_priority import PRIORITY_CRITICAL, PRIORITY_HIGH, PRIORITY_MEDIUM
 from app.ai.operational_rules import OPERATIONAL_BLOCKED, OPERATIONAL_READY
 from app.core.settings import settings
-from app.services.score_display import normalize_master_score_display
+from app.services.score_display import attach_master_score_display_contract
 from app.services.snapshot_contract import DECISION_READY, audit_status_value, build_decision_envelope
 from app.services.symbol_registry import canonical_symbol
 from app.system.observability_engine import record_observability_event
@@ -134,6 +134,28 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _display_score_value(signal: dict[str, Any]) -> float:
+    display_contract = attach_master_score_display_contract(signal if isinstance(signal, dict) else {})
+    return _safe_float(display_contract.get("master_score"), 0.0)
+
+
+def _alert_priority_score_value(signal: dict[str, Any]) -> float:
+    if not isinstance(signal, dict):
+        return 0.0
+    display_contract = attach_master_score_display_contract(signal)
+    source_scale = str(display_contract.get("master_score_source_scale") or "").strip()
+    raw_score = display_contract.get("master_score_raw")
+    try:
+        if isinstance(raw_score, bool):
+            raise TypeError
+        numeric = float(raw_score)
+        if source_scale == "0_100" and 0.0 <= numeric <= 100.0:
+            return numeric
+    except (TypeError, ValueError):
+        pass
+    return _safe_float(display_contract.get("master_score"), 0.0) * 10.0
+
+
 def _event_payload(
     *,
     signal: dict[str, Any] | None,
@@ -145,6 +167,8 @@ def _event_payload(
 ) -> dict[str, Any]:
     safe_signal = signal if isinstance(signal, dict) else {}
     ticker = _ticker(safe_signal)
+    display_contract = attach_master_score_display_contract(safe_signal)
+    raw_master_score = display_contract.get("master_score_raw")
     return {
         "timestamp": time.time(),
         "status": status,
@@ -162,8 +186,10 @@ def _event_payload(
         "reason": reason,
         "message": message,
         "fingerprint": fingerprint,
-        "master_score": normalize_master_score_display(safe_signal.get("master_score", safe_signal.get("score")))[0],
-        "master_score_raw": safe_signal.get("master_score_raw", safe_signal.get("master_score")),
+        "master_score": display_contract.get("master_score"),
+        "master_score_raw": raw_master_score,
+        "master_score_source_scale": display_contract.get("master_score_source_scale"),
+        "master_score_display_warning": display_contract.get("master_score_display_warning"),
         "final_decision_score": safe_signal.get("final_decision_score"),
         "final_decision_confidence": safe_signal.get("final_decision_confidence"),
     }
@@ -501,7 +527,7 @@ def send_bulk_alert(signals, regime=None, *, now: float | None = None, cooldown_
             key=lambda item: (
                 ALERT_ORDER.get(str(item[1].get("alert_level") or ""), 99),
                 -_safe_float(item[0].get("final_decision_score")),
-                -_safe_float(item[0].get("master_score_raw", item[0].get("master_score"))),
+                -_alert_priority_score_value(item[0]),
             )
         )
 

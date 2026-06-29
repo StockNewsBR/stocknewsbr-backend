@@ -92,6 +92,26 @@ def _row(ticker="PETR4", audit_status=AUDIT_APPROVED, **overrides):
         "conviction_conflicts": [],
     }
     row.update(overrides)
+    row.setdefault("score_source_scale", "0_100")
+    if row.get("master_score_source_scale") == "0_10":
+        display_value = float(row.get("master_score") or 0.0)
+        if "master_score_raw" not in row:
+            row["master_score_raw"] = display_value if display_value > 10.0 else display_value * 10.0
+        if display_value > 10.0:
+            row["master_score"] = round(display_value / 10.0, 1)
+        if "score_source_scale" not in overrides:
+            row["score_source_scale"] = "0_10"
+        if "ranking_opportunity_source_scale" not in overrides:
+            row["ranking_opportunity_source_scale"] = "0_10"
+    else:
+        row.setdefault("master_score_raw", row.get("master_score"))
+        row.setdefault("master_score_source_scale", "0_100")
+    row.setdefault("ranking_opportunity_source_scale", "0_100")
+    for score_key, scale_key in (("score", "score_source_scale"), ("ranking_opportunity_score", "ranking_opportunity_source_scale")):
+        if row.get(scale_key) == "0_10" and score_key in row:
+            score_value = float(row.get(score_key) or 0.0)
+            if score_value > 10.0:
+                row[score_key] = round(score_value / 10.0, 1)
     return row
 
 

@@ -58,6 +58,20 @@ def _row(ticker="PETR4", direction="BUY", audit_status=AUDIT_APPROVED, **overrid
         },
     }
     row.update(overrides)
+    row.setdefault("score_source_scale", "0_100")
+    if row.get("master_score") is not None:
+        score_value = float(row.get("master_score") or 0.0)
+        source_scale = row.get("master_score_source_scale")
+        if source_scale not in {"0_10", "0_100"}:
+            source_scale = "0_100" if score_value > 10.0 else "0_10"
+        row["master_score_source_scale"] = source_scale
+        if source_scale == "0_10":
+            if score_value > 10.0:
+                row["master_score"] = round(score_value / 10.0, 1)
+            row.setdefault("master_score_raw", row["master_score"] * 10.0)
+        else:
+            row.setdefault("master_score_raw", score_value)
+    row.setdefault("ranking_opportunity_source_scale", "0_100")
     return row
 
 
@@ -176,6 +190,8 @@ class StrategicPanelTests(unittest.TestCase):
         signal = {
             **_row(),
             "master_score": 84.0,
+            "master_score_raw": 84.0,
+            "master_score_source_scale": "0_100",
             "master_direction": "BULLISH",
             "master_status": "APPROVED",
             "strategic_panel": panel,
@@ -211,12 +227,17 @@ class StrategicPanelTests(unittest.TestCase):
         self.assertEqual(payload["strategic_panel"]["ticker"], "PETR4")
         self.assertEqual(payload["market_snapshot"]["strategic_panel"]["ticker"], "PETR4")
         self.assertEqual(payload["top_signals"][0]["strategic_panel"]["recommended_action"], panel["recommended_action"])
+        self.assertEqual(payload["top_signals"][0]["master_score"], 8.4)
+        self.assertEqual(payload["top_signals"][0]["master_score_raw"], 84.0)
+        self.assertEqual(payload["top_signals"][0]["master_score_source_scale"], "0_100")
 
     def test_public_insight_exposes_strategic_panel_contract(self):
         panel = _panel()
         row = {
             **_row(),
             "master_score": 83.0,
+            "master_score_raw": 83.0,
+            "master_score_source_scale": "0_100",
             "master_direction": "BULLISH",
             "master_status": "APPROVED",
             "strategic_panel": panel,
@@ -230,6 +251,9 @@ class StrategicPanelTests(unittest.TestCase):
 
         self.assertEqual(payload["strategic_panel"]["recommended_action"], panel["recommended_action"])
         self.assertEqual(payload["strategic_panel_summary"], panel["strategic_panel_summary"])
+        self.assertEqual(payload["master_score"], 8.3)
+        self.assertEqual(payload["master_score_raw"], 83.0)
+        self.assertEqual(payload["master_score_source_scale"], "0_100")
 
 
 if __name__ == "__main__":

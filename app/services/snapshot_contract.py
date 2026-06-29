@@ -72,10 +72,13 @@ QUALITY_LABELS = {
     QUALITY_INVALID: "Dados Limitados",
     QUALITY_SCORE_ONLY: "Dados Parciais",
 }
-NON_OPERATIONAL_WARNINGS = {
+NON_BLOCKING_DISPLAY_WARNINGS = {
     "master_score_normalized_from_raw_100",
+}
+BLOCKING_DISPLAY_WARNINGS = {
     "master_score_display_invalid",
     "master_score_display_clamped_below_0",
+    "master_score_display_clamped_above_10",
 }
 
 
@@ -352,6 +355,7 @@ def build_decision_envelope(
             "master_score_raw": None,
             "data_quality": QUALITY_INVALID,
             "blockers": ["invalid_payload"],
+            "blocking_warnings": [],
             "warnings": [],
             "reasons": ["payload invalido"],
             "invalidation_reason": "payload invalido",
@@ -390,7 +394,12 @@ def build_decision_envelope(
     final_decision = display_row.get("final_decision")
     decision_state = snapshot_decision_state(display_row)
     blockers: list[str] = []
-    warnings = _listify(display_row.get("warnings")) + _listify(display_row.get("operational_warnings")) + _listify(display_row.get("audit_warnings"))
+    snapshot_warnings = _listify(display_row.get("warnings"))
+    blocking_warnings = _dedupe(
+        _listify(display_row.get("blocking_warnings"))
+        + _blocking_warning_values(snapshot_warnings)
+    )
+    warnings = snapshot_warnings + _listify(display_row.get("operational_warnings")) + _listify(display_row.get("audit_warnings"))
 
     if stale:
         blockers.append("snapshot_stale")
@@ -416,6 +425,7 @@ def build_decision_envelope(
         blockers.extend(_listify(display_row.get("final_decision_blocks")) or ["final_decision_no_trade"])
     if _has_conflict(display_row, action):
         blockers.append("decision_conflict")
+    blockers.extend(blocking_warnings)
     blockers.extend(_listify(display_row.get("blocked_reasons")))
     blockers = _dedupe(blockers)
 
@@ -471,6 +481,7 @@ def build_decision_envelope(
         "master_score_raw": display_row.get("master_score_raw"),
         "data_quality": quality,
         "blockers": blockers,
+        "blocking_warnings": _dedupe(blocking_warnings),
         "warnings": _dedupe(warnings),
         "reasons": reasons,
         "invalidation_reason": invalidation_reason,
@@ -559,15 +570,36 @@ def has_positive_value(row: dict[str, Any], *keys: str) -> bool:
     return any(safe_float(row.get(key)) > 0 for key in keys)
 
 
-def has_blocking_reasons(row: dict[str, Any]) -> bool:
-    reasons = _listify(row.get("blocked_reasons")) + [
-        warning for warning in _listify(row.get("warnings")) if warning not in NON_OPERATIONAL_WARNINGS
+def _blocking_warning_values(warnings: Any) -> list[str]:
+    return [
+        warning
+        for warning in _listify(warnings)
+        if warning in BLOCKING_DISPLAY_WARNINGS
     ]
-    if isinstance(reasons, str):
-        return bool(reasons.strip())
-    if isinstance(reasons, (list, tuple, set)):
-        return any(str(item).strip() for item in reasons)
-    return bool(reasons)
+
+
+def has_blocking_reasons(row: dict[str, Any]) -> bool:
+    envelope = row.get("decision_envelope") if isinstance(row.get("decision_envelope"), dict) else {}
+    display_warnings = _listify(row.get("warnings"))
+    display_blocking_warnings: list[str] = []
+    if any(key in row for key in ("master_score_raw", "master_score", "score", "master_score_display")):
+        display_row = attach_master_score_display_contract(row)
+        display_warnings = _dedupe(display_warnings + _listify(display_row.get("warnings")))
+        display_blocking_warnings = _listify(display_row.get("blocking_warnings"))
+    blocking_warnings = _dedupe(
+        _listify(row.get("blocking_warnings"))
+        + display_blocking_warnings
+        + _listify(envelope.get("blocking_warnings") if envelope else None)
+        + _blocking_warning_values(envelope.get("warnings") if envelope else None)
+        + _blocking_warning_values(display_warnings)
+    )
+    reasons = (
+        _listify(row.get("blocked_reasons"))
+        + _listify(row.get("blockers"))
+        + _listify(envelope.get("blockers") if envelope else None)
+        + _listify(blocking_warnings)
+    )
+    return any(str(item).strip() for item in reasons)
 
 
 def audit_status_value(row: dict[str, Any]) -> str:

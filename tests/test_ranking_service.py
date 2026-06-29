@@ -29,6 +29,13 @@ class RankingServiceTests(unittest.TestCase):
         row = {
             "ticker": ticker,
             "score": score,
+            "score_source_scale": "0_100",
+            "master_score": score,
+            "master_score_raw": score,
+            "master_score_source_scale": "0_100",
+            "ranking_opportunity_score": score,
+            "ranking_opportunity_source_scale": "0_100",
+            "ranking_eligible": True,
             "trend": 0.12,
             "breakout": True,
             "price": 37.5,
@@ -39,6 +46,12 @@ class RankingServiceTests(unittest.TestCase):
             "decision_state": "BUY_READY",
         }
         row.update(overrides)
+        if row.get("master_score_source_scale") == "0_10" and "master_score_raw" not in overrides:
+            row.pop("master_score_raw", None)
+            if "score_source_scale" not in overrides:
+                row["score_source_scale"] = "0_10"
+            if "ranking_opportunity_source_scale" not in overrides:
+                row["ranking_opportunity_source_scale"] = "0_10"
         return row
 
     def test_uses_snapshot_before_market_download(self):
@@ -60,7 +73,10 @@ class RankingServiceTests(unittest.TestCase):
         fetch_market_data.assert_not_called()
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["symbol"], "PETR4")
-        self.assertEqual(results[0]["score"], 88.0)
+        self.assertEqual(results[0]["score"], 8.8)
+        self.assertEqual(results[0]["master_score"], 8.8)
+        self.assertEqual(results[0]["master_score_raw"], 88.0)
+        self.assertEqual(results[0]["master_score_source_scale"], "0_100")
         self.assertTrue(results[0]["breakout"])
 
     def test_snapshot_ranking_excludes_blocked_and_score_only_rows(self):
@@ -93,6 +109,218 @@ class RankingServiceTests(unittest.TestCase):
 
         fetch_market_data.assert_not_called()
         self.assertEqual([row["symbol"] for row in results], ["PETR4"])
+
+    def test_snapshot_ranking_dedupes_mixed_scale_scores_on_canonical_display(self):
+        normalized_row = self._actionable_row(
+            "PETR4",
+            score=8.7,
+            canonical_symbol="PETR4",
+            master_score=8.7,
+            master_score_source_scale="0_10",
+            ranking_opportunity_score=8.7,
+            ranking_opportunity_source_scale="0_10",
+            ranking_reason="normalized-row",
+        )
+        raw_duplicate = self._actionable_row(
+            "PETR4.SA",
+            score=87.0,
+            canonical_symbol="PETR4",
+            master_score_raw=87.0,
+            master_score=87.0,
+            ranking_opportunity_score=87.0,
+            ranking_reason="raw-scale-duplicate",
+        )
+        lower_row = self._actionable_row(
+            "VALE3",
+            score=86.0,
+            canonical_symbol="VALE3",
+            master_score_raw=86.0,
+            master_score=86.0,
+            ranking_opportunity_score=86.0,
+            ranking_reason="lower-raw-row",
+        )
+
+        pass_through = lambda rows: rows
+        for snapshot_rows in (
+            [normalized_row, raw_duplicate, lower_row],
+            [raw_duplicate, normalized_row, lower_row],
+        ):
+            with self.subTest(order=[row["ticker"] for row in snapshot_rows]):
+                with patch.object(
+                    ranking,
+                    "get_snapshot_info",
+                    return_value={"signals": 3, "age_seconds": 5},
+                ), patch.object(
+                    ranking,
+                    "get_snapshot_signals",
+                    return_value=snapshot_rows,
+                ), patch.object(
+                    ranking, "ensure_institutional_ranking_rows", side_effect=pass_through
+                ), patch.object(
+                    ranking, "ensure_historical_confidence_rows", side_effect=pass_through
+                ), patch.object(
+                    ranking, "ensure_operational_rules_rows", side_effect=pass_through
+                ), patch.object(
+                    ranking, "ensure_institutional_conviction_rows", side_effect=pass_through
+                ), patch.object(
+                    ranking, "ensure_institutional_priority_rows", side_effect=pass_through
+                ), patch.object(
+                    ranking, "ensure_final_decision_rows", side_effect=pass_through
+                ), patch.object(
+                    ranking, "institutional_ranking_items", side_effect=lambda rows, limit=200: rows
+                ), patch.object(ranking, "fetch_market_data") as fetch_market_data:
+                    results = ranking.generate_ranking(force_refresh=True)
+
+                fetch_market_data.assert_not_called()
+                self.assertEqual([row["symbol"] for row in results], ["PETR4", "VALE3"])
+                self.assertEqual(results[0]["score"], 8.7)
+                self.assertEqual(results[0]["ranking_opportunity_score"], 8.7)
+                self.assertEqual(results[0]["ranking_reason"], "normalized-row")
+                self.assertIsNone(results[0].get("master_score_raw"))
+                self.assertEqual(results[0]["master_score_source_scale"], "0_10")
+                self.assertEqual(results[1]["score"], 8.6)
+                self.assertEqual(results[1]["master_score"], 8.6)
+                self.assertEqual(results[1]["master_score_raw"], 86.0)
+                self.assertEqual(results[1]["master_score_source_scale"], "0_100")
+
+        self.assertEqual(ranking._ranking_sort_score({"ranking_opportunity_score": 87.0}), 8.7)
+        self.assertEqual(
+            ranking._ranking_sort_score({"ranking_opportunity_score": 87.0, "ranking_opportunity_source_scale": "0_10"}),
+            0.0,
+        )
+        self.assertEqual(ranking._ranking_sort_score({"ranking_opportunity_score": 8.7}), 8.7)
+        self.assertEqual(
+            ranking._ranking_sort_score({"ranking_opportunity_score": 8.7, "ranking_opportunity_source_scale": "0_100"}),
+            0.9,
+        )
+        self.assertEqual(
+            ranking._ranking_sort_score({"ranking_opportunity_score": 8.7, "ranking_opportunity_source_scale": "0_10"}),
+            8.7,
+        )
+        self.assertLess(
+            ranking._ranking_order_key({"symbol": "ABCD4", "ranking_opportunity_score": 8.7, "ranking_opportunity_source_scale": "0_10"}),
+            ranking._ranking_order_key({"symbol": "ZZZZ4", "ranking_opportunity_score": 8.7, "ranking_opportunity_source_scale": "0_10"}),
+        )
+
+    def test_snapshot_ranking_skips_rows_with_only_invalid_score_candidates(self):
+        snapshot_rows = [
+            self._actionable_row(
+                "BAD1",
+                score=150.0,
+                master_score=150.0,
+                master_score_raw=150.0,
+                ranking_opportunity_score=150.0,
+            )
+        ]
+
+        pass_through = lambda rows: rows
+        with patch.object(
+            ranking,
+            "get_snapshot_info",
+            return_value={"signals": 1, "age_seconds": 5},
+        ), patch.object(
+            ranking,
+            "get_snapshot_signals",
+            return_value=snapshot_rows,
+        ), patch.object(
+            ranking, "ensure_institutional_ranking_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_historical_confidence_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_operational_rules_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_institutional_conviction_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_institutional_priority_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_final_decision_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "institutional_ranking_items", side_effect=lambda rows, limit=200: rows
+        ), patch.object(ranking, "fetch_market_data") as fetch_market_data:
+            results = ranking.generate_ranking(force_refresh=True)
+
+        fetch_market_data.assert_not_called()
+        self.assertEqual(results, [])
+
+    def test_snapshot_ranking_rejects_explicit_invalid_ranking_score(self):
+        snapshot_rows = [
+            self._actionable_row(
+                "BAD1",
+                score=87.0,
+                master_score_raw=87.0,
+                master_score=87.0,
+                ranking_opportunity_score=150.0,
+            )
+        ]
+
+        pass_through = lambda rows: rows
+        with patch.object(
+            ranking,
+            "get_snapshot_info",
+            return_value={"signals": 1, "age_seconds": 5},
+        ), patch.object(
+            ranking,
+            "get_snapshot_signals",
+            return_value=snapshot_rows,
+        ), patch.object(
+            ranking, "ensure_institutional_ranking_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_historical_confidence_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_operational_rules_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_institutional_conviction_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_institutional_priority_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_final_decision_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "institutional_ranking_items", side_effect=lambda rows, limit=200: rows
+        ), patch.object(ranking, "fetch_market_data") as fetch_market_data:
+            results = ranking.generate_ranking(force_refresh=True)
+
+        fetch_market_data.assert_not_called()
+        self.assertEqual(results, [])
+
+    def test_snapshot_ranking_rejects_invalid_canonical_raw_before_fallback(self):
+        snapshot_rows = [
+            self._actionable_row(
+                "BADRAW",
+                score=8.7,
+                master_score_raw=150.0,
+                master_score=8.7,
+                ranking_opportunity_score=None,
+            )
+        ]
+
+        pass_through = lambda rows: rows
+        with patch.object(
+            ranking,
+            "get_snapshot_info",
+            return_value={"signals": 1, "age_seconds": 5},
+        ), patch.object(
+            ranking,
+            "get_snapshot_signals",
+            return_value=snapshot_rows,
+        ), patch.object(
+            ranking, "ensure_institutional_ranking_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_historical_confidence_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_operational_rules_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_institutional_conviction_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_institutional_priority_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "ensure_final_decision_rows", side_effect=pass_through
+        ), patch.object(
+            ranking, "institutional_ranking_items", side_effect=lambda rows, limit=200: rows
+        ), patch.object(ranking, "fetch_market_data") as fetch_market_data:
+            results = ranking.generate_ranking(force_refresh=True)
+
+        fetch_market_data.assert_not_called()
+        self.assertEqual(results, [])
 
     def test_skips_network_download_when_snapshot_is_empty(self):
         with patch.object(

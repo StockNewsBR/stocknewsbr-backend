@@ -76,10 +76,10 @@ class Mission31A3CodeRabbitTriageTests(unittest.TestCase):
         self.assertFalse(status["stale"])
         self.assertEqual(status["status"], SNAPSHOT_RUNTIME_HEALTHY)
 
-    def test_score_display_documents_raw_100_scale_and_hides_invalid_block_raw(self):
+    def test_score_display_documents_explicit_raw_100_scale_and_hides_invalid_block_raw(self):
         expected = {
-            9.5: 9.5,
-            10: 10.0,
+            9.5: 1.0,
+            10: 1.0,
             11: 1.1,
             15: 1.5,
             25: 2.5,
@@ -87,7 +87,14 @@ class Mission31A3CodeRabbitTriageTests(unittest.TestCase):
         }
         for raw, display in expected.items():
             with self.subTest(raw=raw):
-                self.assertEqual(normalize_master_score_display(raw)[0], display)
+                self.assertEqual(normalize_master_score_display(raw, source_scale="0_100")[0], display)
+
+        self.assertEqual(normalize_master_score_display(10.5, source_scale="0_10")[0], 10.0)
+        self.assertEqual(normalize_master_score_display(10.5, source_scale="0_10")[1], "master_score_display_clamped_above_10")
+        self.assertEqual(
+            normalize_master_score_display(10.5, source_scale="0_10"),
+            (10.0, "master_score_display_clamped_above_10"),
+        )
 
         payload = attach_master_score_display_contract(
             {"master_score_block": {"score_raw": "invalid", "score": "invalid"}}

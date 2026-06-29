@@ -32,7 +32,10 @@ def _ready_row(**overrides):
         "price": 37.5,
         "volume": 1_000_000,
         "data_quality": "priced",
+        "score_source_scale": "0_100",
         "master_score": 87.0,
+        "master_score_raw": 87.0,
+        "master_score_source_scale": "0_100",
         "master_direction": "BULLISH",
         "master_status": "APPROVED",
         "master_confidence": "Alta",
@@ -40,6 +43,7 @@ def _ready_row(**overrides):
         "operational_status": "READY",
         "ranking_eligible": True,
         "ranking_opportunity_score": 88.0,
+        "ranking_opportunity_source_scale": "0_100",
         "final_decision": "OPORTUNIDADE CONFIRMADA",
         "final_decision_score": 92.0,
         "final_decision_summary": "Contexto institucional aprovado.",
@@ -141,6 +145,11 @@ class Mission29DecisionEnvelopeTests(unittest.TestCase):
         data = send_push.call_args.kwargs["data"]
         self.assertEqual(data["decision_status"], DECISION_READY)
         self.assertIn('"decision_status": "READY"', data["decision_envelope"])
+        self.assertEqual(data["score"], "8.7")
+        self.assertEqual(data["master_score"], "8.7")
+        self.assertEqual(data["master_score_raw"], "87.0")
+        self.assertEqual(data["master_score_raw_source_scale"], "0_100")
+        self.assertEqual(data["master_score_source_scale"], "0_100")
 
     def test_snapshot_api_payload_keeps_legacy_fields_and_decision_envelope(self):
         cache = SnapshotCache()

@@ -44,6 +44,14 @@ def _row(**overrides):
         "historical_confidence_score": 72.0,
     }
     base.update(overrides)
+    base.setdefault("score_source_scale", "0_100")
+    if base.get("master_score_source_scale") == "0_10":
+        display_value = float(base.get("master_score") or 0.0)
+        base.setdefault("master_score_raw", display_value if display_value > 10.0 else display_value * 10.0)
+    else:
+        base.setdefault("master_score_raw", base.get("master_score"))
+        base.setdefault("master_score_source_scale", "0_100")
+    base.setdefault("ranking_opportunity_source_scale", "0_100")
     return base
 
 
@@ -68,6 +76,33 @@ class TelegramInstitutionalTests(unittest.TestCase):
         self.assertIn("Auditor: APROVADO", message)
         self.assertGreaterEqual(after["sent"], before["sent"] + 1)
         self.assertGreaterEqual(after["critical"], before["critical"] + 1)
+
+    def test_alert_formatter_keeps_display_scale_rows_at_0_10(self):
+        message = format_signal_alert(
+            _row(
+                master_score=8.7,
+                score=8.7,
+                master_score_source_scale="0_10",
+                score_source_scale="0_10",
+                ranking_opportunity_source_scale="0_10",
+            )
+        )
+
+        self.assertIn("Score Mestre: 8.7", message)
+        self.assertNotIn("Score Mestre: 87", message)
+
+        raw_and_display_message = format_signal_alert(
+            _row(
+                master_score=8.7,
+                score=8.7,
+                master_score_raw=87.0,
+                master_score_source_scale="0_10",
+                score_source_scale="0_10",
+                ranking_opportunity_source_scale="0_10",
+            )
+        )
+        self.assertIn("Score Mestre: 8.7", raw_and_display_message)
+        self.assertNotIn("Score Mestre: 87", raw_and_display_message)
 
     def test_alerta_alto_e_medio_are_classified_without_low_alert(self):
         high = build_telegram_alert(

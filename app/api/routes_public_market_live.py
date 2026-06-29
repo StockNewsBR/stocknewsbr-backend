@@ -24,6 +24,7 @@ from app.services.quote_service import (
     is_usable_quote_payload,
     with_quote_diagnostics,
 )
+from app.services.score_display import attach_master_score_display_contract
 from app.services.snapshot_contract import build_decision_envelope
 from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases
 from app.services.symbol_sanitizer import mark_symbol_cooldown, sanitize_market_symbol
@@ -163,10 +164,12 @@ def _snapshot_master_context(symbol: str) -> dict:
     row = get_snapshot_ticker(_symbol_aliases(symbol))
     if not isinstance(row, dict):
         return {}
+    row = attach_master_score_display_contract(dict(row))
     decision_envelope = build_decision_envelope(row)
     return {
         "master_score": row.get("master_score"),
         "master_score_raw": row.get("master_score_raw"),
+        "master_score_source_scale": row.get("master_score_source_scale"),
         "decision_status": decision_envelope.get("decision_status"),
         "decision_envelope": decision_envelope,
         "master_direction": row.get("master_direction"),

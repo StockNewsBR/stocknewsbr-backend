@@ -24,6 +24,7 @@ from app.services.snapshot_contract import (
     is_blocked_snapshot_row,
     normalize_ai_tools_for_decision_context,
 )
+from app.services.score_display import canonicalize_master_score_row
 from app.services.go_live_status_service import build_go_live_status
 from app.services.snapshot_runtime_status import evaluate_snapshot_runtime_status
 from app.services.symbol_registry import canonical_symbol
@@ -57,6 +58,16 @@ def _safe_rows(value: Any) -> List[Dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+def _score_surface_row(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return canonicalize_master_score_row(dict(value))
+
+
+def _score_surface_rows(value: Any) -> List[Dict[str, Any]]:
+    return [canonicalize_master_score_row(dict(row)) for row in _safe_rows(value)]
 
 
 def _empty_ai_outputs() -> Dict[str, List[Dict[str, Any]]]:
@@ -255,11 +266,13 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         market_pulse=snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else None,
     )
     snapshot_signals = [
-        attach_decision_envelope(
-            row,
-            snapshot_stale=bool(snapshot.get("stale") is True),
-            source_snapshot_id=snapshot.get("snapshot_id") or snapshot.get("generated_at"),
-            timestamp=snapshot.get("generated_at"),
+        canonicalize_master_score_row(
+            attach_decision_envelope(
+                row,
+                snapshot_stale=bool(snapshot.get("stale") is True),
+                source_snapshot_id=snapshot.get("snapshot_id") or snapshot.get("generated_at"),
+                timestamp=snapshot.get("generated_at"),
+            )
         )
         for row in snapshot_signals
     ]
@@ -299,19 +312,19 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "market_pulse": snapshot.get("market_pulse") if isinstance(snapshot.get("market_pulse"), dict) else {},
         "auditor": snapshot.get("auditor") if isinstance(snapshot.get("auditor"), dict) else {},
         "institutional_auditor": snapshot.get("institutional_auditor") if isinstance(snapshot.get("institutional_auditor"), dict) else {},
-        "master_score": snapshot.get("master_score") if isinstance(snapshot.get("master_score"), dict) else {},
-        "master_scores": snapshot.get("master_scores") if isinstance(snapshot.get("master_scores"), list) else [],
+        "master_score": _score_surface_row(snapshot.get("master_score")),
+        "master_scores": _score_surface_rows(snapshot.get("master_scores")),
         "strategic_panel": snapshot.get("strategic_panel") if isinstance(snapshot.get("strategic_panel"), dict) else {},
         "strategic_panels": snapshot.get("strategic_panels") if isinstance(snapshot.get("strategic_panels"), list) else [],
         "strategic_panel_summary": snapshot.get("strategic_panel_summary") or "",
-        "institutional_radar": snapshot.get("institutional_radar") if isinstance(snapshot.get("institutional_radar"), list) else radar_signals[:20],
+        "institutional_radar": _score_surface_rows(snapshot.get("institutional_radar")) if isinstance(snapshot.get("institutional_radar"), list) else radar_signals[:20],
         "radar_metrics": snapshot.get("radar_metrics") if isinstance(snapshot.get("radar_metrics"), dict) else {},
-        "institutional_ranking": snapshot.get("institutional_ranking") if isinstance(snapshot.get("institutional_ranking"), list) else ranking_signals[:20],
+        "institutional_ranking": _score_surface_rows(snapshot.get("institutional_ranking")) if isinstance(snapshot.get("institutional_ranking"), list) else ranking_signals[:20],
         "ranking_metrics": snapshot.get("ranking_metrics") if isinstance(snapshot.get("ranking_metrics"), dict) else {},
         "historical_confidence": snapshot.get("historical_confidence") if isinstance(snapshot.get("historical_confidence"), dict) else (historical_confidence_rows[0] if historical_confidence_rows else {}),
         "historical_confidences": snapshot.get("historical_confidences") if isinstance(snapshot.get("historical_confidences"), list) else historical_confidence_rows[:20],
         "historical_confidence_metrics": snapshot.get("historical_confidence_metrics") if isinstance(snapshot.get("historical_confidence_metrics"), dict) else {},
-        "operational_rules": snapshot.get("operational_rules") if isinstance(snapshot.get("operational_rules"), list) else snapshot_signals[:20],
+        "operational_rules": _score_surface_rows(snapshot.get("operational_rules")) if isinstance(snapshot.get("operational_rules"), list) else snapshot_signals[:20],
         "operational_rules_metrics": snapshot.get("operational_rules_metrics") if isinstance(snapshot.get("operational_rules_metrics"), dict) else {},
         "institutional_convictions": snapshot.get("institutional_convictions") if isinstance(snapshot.get("institutional_convictions"), list) else conviction_rows[:20],
         "institutional_conviction": snapshot.get("institutional_conviction") if isinstance(snapshot.get("institutional_conviction"), dict) else (conviction_rows[0] if conviction_rows else {}),
@@ -319,8 +332,8 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "institutional_priorities": snapshot.get("institutional_priorities") if isinstance(snapshot.get("institutional_priorities"), list) else priority_rows[:20],
         "institutional_priority": snapshot.get("institutional_priority") if isinstance(snapshot.get("institutional_priority"), dict) else (priority_rows[0] if priority_rows else {}),
         "priority_metrics": snapshot.get("priority_metrics") if isinstance(snapshot.get("priority_metrics"), dict) else {},
-        "final_decisions": snapshot.get("final_decisions") if isinstance(snapshot.get("final_decisions"), list) else final_decision_rows[:20],
-        "final_decision": snapshot.get("final_decision") if isinstance(snapshot.get("final_decision"), dict) else (final_decision_rows[0] if final_decision_rows else {}),
+        "final_decisions": _score_surface_rows(snapshot.get("final_decisions")) if isinstance(snapshot.get("final_decisions"), list) else final_decision_rows[:20],
+        "final_decision": _score_surface_row(snapshot.get("final_decision")) if isinstance(snapshot.get("final_decision"), dict) else (final_decision_rows[0] if final_decision_rows else {}),
         "final_decision_metrics": snapshot.get("final_decision_metrics") if isinstance(snapshot.get("final_decision_metrics"), dict) else {},
         "decision_envelopes": snapshot.get("decision_envelopes") if isinstance(snapshot.get("decision_envelopes"), list) else [row.get("decision_envelope") for row in snapshot_signals if isinstance(row.get("decision_envelope"), dict)][:20],
         "decision_envelope": snapshot.get("decision_envelope") if isinstance(snapshot.get("decision_envelope"), dict) else (snapshot_signals[0].get("decision_envelope") if snapshot_signals else {}),

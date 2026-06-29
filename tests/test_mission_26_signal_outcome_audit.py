@@ -29,7 +29,7 @@ def _row(
     master_score=82.0,
     regime="trend",
 ):
-    return {
+    row = {
         "ticker": symbol,
         "symbol": symbol,
         "signal": decision,
@@ -49,11 +49,17 @@ def _row(
         "conviction_level": "ALTA",
         "priority_level": "ALTA",
         "master_score": master_score,
+        "master_score_raw": master_score,
+        "master_score_source_scale": "0_100",
+        "ranking_opportunity_score": master_score,
+        "ranking_opportunity_source_scale": "0_100",
         "master_status": "APPROVED" if audit_status != "BLOCKED" else "BLOCKED",
         "master_direction": "BULLISH" if decision in {"BUY", "COVER", "WAIT"} else "BEARISH",
         "historical_confidence_score": 72.0,
         "market_regime": regime,
     }
+    row["score_source_scale"] = "0_100"
+    return row
 
 
 def _snapshot(rows, *, generated_at=1_000.0, stale=False, market_closed=False):

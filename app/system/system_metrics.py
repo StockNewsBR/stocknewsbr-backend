@@ -2,13 +2,14 @@
 # STOCKNEWSBR SYSTEM METRICS
 # =====================================================
 
+import math
 import threading
 import time
 from collections import deque
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from app.services.score_display import normalize_master_score_display
+from app.services.score_display import resolve_master_score_display_value
 
 # =====================================================
 # ENGINE METRICS
@@ -548,6 +549,12 @@ def get_institutional_auditor_metrics_snapshot():
 def record_master_score_metrics(rows_or_metrics):
     if isinstance(rows_or_metrics, dict):
         safe = rows_or_metrics
+        try:
+            average_master_score = float(safe.get("average_master_score", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            average_master_score = 0.0
+        if not math.isfinite(average_master_score):
+            average_master_score = 0.0
         with _lock:
             _master_score_metrics.update(
                 {
@@ -558,7 +565,7 @@ def record_master_score_metrics(rows_or_metrics):
                     "bullish": int(safe.get("bullish", 0) or 0),
                     "bearish": int(safe.get("bearish", 0) or 0),
                     "neutral": int(safe.get("neutral", 0) or 0),
-                    "average_master_score": round(float(safe.get("average_master_score", 0.0) or 0.0), 2),
+                    "average_master_score": round(average_master_score or 0.0, 2),
                     "updated_at": time.time(),
                 }
             )
@@ -570,7 +577,9 @@ def record_master_score_metrics(rows_or_metrics):
     direction_counts = {"bullish": 0, "bearish": 0, "neutral": 0}
     for row in rows:
         try:
-            scores.append(normalize_master_score_display(row.get("master_score_raw", row.get("master_score", row.get("score", 0.0))))[0])
+            display_score, warning, _ = resolve_master_score_display_value(row)
+            if display_score is not None and warning in (None, "master_score_normalized_from_raw_100"):
+                scores.append(display_score)
         except (TypeError, ValueError):
             pass
         status = str(row.get("master_status") or "").strip().lower()

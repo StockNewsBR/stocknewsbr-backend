@@ -6,10 +6,12 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 
 from fastapi import APIRouter, Depends
+import pandas as pd
 
 from app.ai.final_decision import ensure_final_decision_rows
 from app.ai.historical_confidence import ensure_historical_confidence_rows
@@ -21,7 +23,7 @@ from app.cache.market_data_cache import get_market_data
 from app.cache.snapshot_cache import get_snapshot_info, get_snapshot_signals
 from app.config import SYMBOLS
 from app.dependencies import require_active_plan
-from app.services.score_display import attach_master_score_display_contract
+from app.services.score_display import attach_master_score_display_contract, normalize_master_score_display
 from app.services.snapshot_contract import build_decision_envelope, coerce_data_quality, data_quality_label, data_quality_score, is_actionable_snapshot_row
 from app.services.symbol_registry import canonical_symbol
 from app.system.system_metrics import current_provider_call_source
@@ -73,6 +75,223 @@ def _safe_float(value, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _numeric_score_or_none(value) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        missing = pd.isna(value)
+        if bool(missing):
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def _is_missing_score_value(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _first_numeric_score(*values, default: float = 0.0) -> float:
+    for value in values:
+        numeric = _numeric_score_or_none(value)
+        if numeric is not None:
+            return numeric
+    return default
+
+
+def _ranking_sort_score(row: dict) -> float:
+    ranking_score = _numeric_score_or_none(row.get("ranking_opportunity_score"))
+    if ranking_score is not None:
+        return _canonical_score(ranking_score, _ranking_scale_hint(row))
+    score = row.get("score")
+    return _canonical_score(score, _score_scale_hint(row) or _scale_hint_for_value(score), default=0.0)
+
+
+def _ranking_symbol_key(row: dict) -> str:
+    return canonical_symbol(row.get("canonical_symbol") or row.get("ticker") or row.get("symbol")) or str(
+        row.get("ticker") or row.get("symbol") or ""
+    ).upper()
+
+
+def _ranking_order_key(row: dict) -> tuple[float, str]:
+    return (-_ranking_sort_score(row), _ranking_symbol_key(row))
+
+
+def _ranking_dedupe_key(row: dict) -> tuple[float, int, str]:
+    normalized_source = 1 if str(row.get("master_score_source_scale") or "") == "0_10" else 0
+    return (_ranking_sort_score(row), normalized_source, _ranking_symbol_key(row))
+
+
+def _scale_hint_for_value(value, explicit_scale: str | None = None) -> str:
+    if explicit_scale in {"0_10", "0_100"}:
+        return explicit_scale
+    numeric = _numeric_score_or_none(value)
+    if numeric is not None and numeric > 10.0:
+        return "0_100"
+    return "0_10"
+
+
+def _source_scale_hint(row: dict) -> str | None:
+    for key in ("master_score_source_scale", "master_score_scale", "source_scale"):
+        value = str(row.get(key) or "").strip()
+        if value in {"0_10", "0_100"}:
+            return value
+    return None
+
+
+def _score_scale_hint(row: dict) -> str | None:
+    for key in ("score_source_scale", "source_scale"):
+        value = str(row.get(key) or "").strip()
+        if value in {"0_10", "0_100"}:
+            return value
+    return None
+
+
+def _ranking_scale_hint(row: dict) -> str | None:
+    for key in ("ranking_opportunity_source_scale", "ranking_score_source_scale"):
+        value = str(row.get(key) or "").strip()
+        if value in {"0_10", "0_100"}:
+            return value
+    return None
+
+
+def _canonical_score(value, explicit_scale: str | None = None, default: float = 0.0) -> float:
+    numeric = _numeric_score_or_none(value)
+    if numeric is None:
+        return default
+    display, warning = normalize_master_score_display(numeric, source_scale=_scale_hint_for_value(numeric, explicit_scale))
+    return default if warning and warning != "master_score_normalized_from_raw_100" else display
+
+
+def _score_field_scale(row: dict, value) -> str:
+    scale_hint = _score_scale_hint(row)
+    return _scale_hint_for_value(value, scale_hint)
+
+
+def _valid_score_for_scale(numeric: float, scale: str) -> bool:
+    if scale == "0_100":
+        return 0.0 <= numeric <= 100.0
+    if scale == "0_10":
+        return 0.0 <= numeric <= 10.0
+    return False
+
+
+def _score_candidate(
+    row: dict,
+    *keys: str,
+    default: float | None = 0.0,
+    default_scale: str = "0_10",
+) -> tuple[float | None, str, bool]:
+    invalid_seen = False
+    for key in keys:
+        value = row.get(key)
+        numeric = _numeric_score_or_none(value)
+        if numeric is None:
+            if key in row and not _is_missing_score_value(value):
+                invalid_seen = True
+            continue
+        if key == "master_score_raw":
+            scale = "0_100"
+            if _valid_score_for_scale(numeric, scale):
+                return numeric, scale, invalid_seen
+            invalid_seen = True
+            continue
+        if key == "ranking_opportunity_score":
+            raw_numeric = _numeric_score_or_none(row.get("master_score_raw"))
+            scale = _ranking_scale_hint(row)
+            if scale is None and raw_numeric is not None and raw_numeric > 10.0 and numeric == raw_numeric:
+                scale = "0_100"
+            scale = scale or _scale_hint_for_value(value)
+            if _valid_score_for_scale(numeric, scale):
+                return numeric, scale, invalid_seen
+            invalid_seen = True
+            continue
+        scale_hint = _score_scale_hint(row) if key == "score" else _source_scale_hint(row)
+        scale = _score_field_scale(row, value) if key == "score" else _scale_hint_for_value(value, scale_hint)
+        if _valid_score_for_scale(numeric, scale):
+            return numeric, scale, invalid_seen
+        invalid_seen = True
+    return default, default_scale, invalid_seen
+
+
+def _master_score_source(row: dict) -> tuple[float | None, str]:
+    raw_score = row.get("master_score_raw")
+    raw_numeric = _numeric_score_or_none(raw_score)
+    explicit_scale = _source_scale_hint(row)
+    if raw_numeric is not None and _valid_score_for_scale(raw_numeric, "0_100"):
+        return raw_numeric, "0_100"
+
+    for key in ("master_score", "score"):
+        value = row.get(key)
+        numeric = _numeric_score_or_none(value)
+        if numeric is not None:
+            scale = _score_field_scale(row, value) if key == "score" else _scale_hint_for_value(value, explicit_scale)
+            if _valid_score_for_scale(numeric, scale):
+                return numeric, scale
+    return None, "0_10"
+
+
+def _normalize_calculated_ranking_item(item: dict) -> dict | None:
+    raw_score = item.get("score")
+    score_scale = _score_scale_hint(item)
+    if score_scale is None and item.get("master_score") == raw_score:
+        score_scale = _source_scale_hint(item)
+    score_scale = score_scale or _scale_hint_for_value(raw_score)
+    display_contract = attach_master_score_display_contract(
+        {
+            "score": raw_score,
+            "master_score": raw_score,
+            "master_score_raw": raw_score if score_scale == "0_100" else None,
+            "master_score_source_scale": score_scale,
+        }
+    )
+    if display_contract.get("master_score_display_warning") == "master_score_display_invalid":
+        return None
+    ranking_source = item.get("ranking_opportunity_score")
+    ranking_contract = display_contract
+    if _numeric_score_or_none(ranking_source) is not None:
+        ranking_scale = _ranking_scale_hint(item) or _scale_hint_for_value(ranking_source)
+        ranking_contract = attach_master_score_display_contract(
+            {
+                "score": ranking_source,
+                "master_score": ranking_source,
+                "master_score_raw": ranking_source if ranking_scale == "0_100" else None,
+                "master_score_source_scale": ranking_scale,
+            }
+        )
+        if ranking_contract.get("master_score_display_warning") == "master_score_display_invalid":
+            return None
+    return {
+        **item,
+        "score": display_contract.get("master_score", 0.0),
+        "score_source_scale": "0_10",
+        "score_display": display_contract.get("master_score_display"),
+        "master_score": display_contract.get("master_score"),
+        "master_score_display": display_contract.get("master_score_display"),
+        "master_score_display_warning": display_contract.get("master_score_display_warning"),
+        "master_score_raw": display_contract.get("master_score_raw"),
+        "master_score_source_scale": display_contract.get("master_score_source_scale"),
+        "ranking_opportunity_score": ranking_contract.get("master_score", 0.0),
+        "ranking_opportunity_source_scale": "0_10",
+        "ranking_score_source_scale": "0_10",
+    }
 
 
 def _has_positive_value(row: dict, *keys: str) -> bool:
@@ -258,36 +477,73 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
         if not symbol:
             continue
 
-        try:
-            ranking_score = float(row.get("ranking_opportunity_score", row.get("master_score", row.get("score", 0))) or 0)
-        except Exception:
-            ranking_score = 0.0
-        try:
-            display_score = float(row.get("master_score", row.get("score", 0)) or 0)
-        except Exception:
-            display_score = ranking_score
+        raw_ranking_score, ranking_source_scale, ranking_invalid = _score_candidate(
+            row,
+            "ranking_opportunity_score",
+            default=None,
+        )
+        if raw_ranking_score is None and not ranking_invalid:
+            raw_ranking_score, ranking_source_scale, ranking_invalid = _score_candidate(
+                row,
+                "master_score_raw",
+                "master_score",
+                "score",
+                default=None,
+            )
+        if ranking_invalid:
+            continue
+        if raw_ranking_score is None:
+            raw_ranking_score = 0.0
+        ranking_score = _canonical_score(raw_ranking_score, ranking_source_scale)
+        raw_display_score, display_source_scale, display_invalid = _score_candidate(
+            row,
+            "master_score_raw",
+            "master_score",
+            "score",
+            "ranking_opportunity_score",
+            default=raw_ranking_score,
+            default_scale=ranking_source_scale,
+        )
+        if raw_display_score is None:
+            raw_display_score = raw_ranking_score
+        if display_invalid:
+            continue
+        display_score = _canonical_score(raw_display_score, display_source_scale, default=ranking_score)
+        master_score_input, master_score_source_scale = _master_score_source(row)
+        has_master_score_source = master_score_input is not None
+        if not has_master_score_source:
+            master_score_input = display_score
+            master_score_source_scale = "0_10"
         display_contract = attach_master_score_display_contract(
             {
                 "score": display_score,
-                "master_score": row.get("master_score", display_score),
-                "master_score_raw": row.get("master_score_raw"),
+                "master_score": master_score_input,
+                "master_score_raw": master_score_input if master_score_source_scale == "0_100" else None,
+                "master_score_source_scale": master_score_source_scale,
             }
         )
+        if display_contract.get("master_score_display_warning") == "master_score_display_invalid":
+            continue
+        normalized_score = display_contract.get("master_score", display_score)
         decision_envelope = build_decision_envelope(row)
 
         results.append(
             {
                 "ticker": symbol,
                 "symbol": symbol,
-                "score": display_score,
+                "score": normalized_score,
                 "score_display": display_contract.get("master_score_display"),
                 "master_score_display": display_contract.get("master_score_display"),
                 "master_score_display_warning": display_contract.get("master_score_display_warning"),
                 "master_score_raw": display_contract.get("master_score_raw"),
+                "master_score_source_scale": display_contract.get("master_score_source_scale"),
                 "source_score": row.get("score"),
                 "decision_status": decision_envelope.get("decision_status"),
                 "decision_envelope": decision_envelope,
-                "ranking_opportunity_score": row.get("ranking_opportunity_score", ranking_score),
+                "ranking_opportunity_score": ranking_score,
+                "score_source_scale": "0_10",
+                "ranking_opportunity_source_scale": "0_10",
+                "ranking_score_source_scale": "0_10",
                 "ranking_classification": row.get("ranking_classification"),
                 "ranking_reason": row.get("ranking_reason"),
                 "ranking_summary": row.get("ranking_summary"),
@@ -383,11 +639,11 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
         item["symbol"] = symbol
         item["canonical_symbol"] = symbol
         current = deduped.get(symbol)
-        if current is None or (item.get("ranking_opportunity_score") or item["score"]) > (current.get("ranking_opportunity_score") or current["score"]):
+        if current is None or _ranking_dedupe_key(item) > _ranking_dedupe_key(current):
             deduped[symbol] = item
 
     output = list(deduped.values())
-    output.sort(key=lambda item: item.get("ranking_opportunity_score") or item["score"], reverse=True)
+    output.sort(key=_ranking_order_key)
     return output
 
 
@@ -474,11 +730,14 @@ def generate_ranking(force_refresh: bool = False, allow_external_fetch: bool = F
             score = calculate_score(symbol, frame)
 
             if score:
-                results.append(score)
-        except Exception:
+                normalized_score = _normalize_calculated_ranking_item(score)
+                if normalized_score:
+                    results.append(normalized_score)
+        except Exception as exc:
+            logger.warning("Ranking fallback error %s: %s", symbol, exc)
             continue
 
-    results.sort(key=lambda row: row["score"], reverse=True)
+    results.sort(key=_ranking_order_key)
 
     _RANK_CACHE["data"] = list(results)
     _RANK_CACHE["timestamp"] = now

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.score_display import normalize_master_score_display
+from app.services.score_display import attach_master_score_display_contract, normalize_master_score_display
 from app.services.symbol_registry import canonical_symbol
 
 
@@ -14,8 +14,8 @@ def _strip_visual(value: Any) -> str:
     return " ".join(text.split()).strip()
 
 
-def _score(value: Any) -> str:
-    number, _warning = normalize_master_score_display(value)
+def _score(value: Any, *, source_scale: str = "0_10") -> str:
+    number, _warning = normalize_master_score_display(value, source_scale=source_scale)
     if value in (None, "") or _warning == "master_score_display_invalid":
         return "N/A"
     if number.is_integer():
@@ -77,7 +77,17 @@ def format_signal_alert(signal, regime=None):
 
     ticker = canonical_symbol(signal.get("canonical_symbol") or signal.get("ticker") or signal.get("symbol")) or "N/A"
     final_decision = _strip_visual(signal.get("final_decision")) or "ALERTA INSTITUCIONAL"
-    master_score = _score(signal.get("master_score", signal.get("score")))
+    display_contract = attach_master_score_display_contract(signal)
+    score_value = display_contract.get("master_score_raw")
+    score_scale = display_contract.get("master_score_source_scale") or "0_10"
+    if score_value in (None, ""):
+        score_value = display_contract.get("master_score")
+        score_scale = "0_10"
+    master_score = (
+        "N/A"
+        if display_contract.get("master_score_display_warning") == "master_score_display_invalid"
+        else _score(score_value, source_scale=score_scale)
+    )
     audit_status = _audit_label(signal.get("audit_status") or signal.get("auditor_status") or "N/A")
     conviction = _strip_visual(signal.get("conviction_level") or "N/A")
     priority = _strip_visual(signal.get("priority_level") or "N/A")

@@ -4,6 +4,7 @@ from collections import defaultdict
 from typing import Any, Dict, Iterable, List
 
 from app.cache.signal_outcome_cache import get_signal_outcome_state
+from app.services.score_display import resolve_master_score_display_value
 from app.system.system_metrics import record_performance_intelligence_metrics
 
 MIN_SAMPLE_SIZE = 3
@@ -48,16 +49,12 @@ def decision_status_bucket(record: Dict[str, Any]) -> str:
 
 
 def _score_value(record: Dict[str, Any]) -> float | None:
-    raw = record.get("master_score_raw")
-    if raw is None:
-        raw = record.get("master_score")
-    if raw is None:
-        raw = record.get("score")
-    score = _safe_float(raw, -1.0)
-    if score < 0:
+    try:
+        score, warning, _ = resolve_master_score_display_value(record)
+    except (TypeError, ValueError):
         return None
-    if score > 10:
-        return min(10.0, score / 10.0)
+    if warning not in (None, "master_score_normalized_from_raw_100"):
+        return None
     return score
 
 

@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import threading
 import time
@@ -7,15 +8,40 @@ from pathlib import Path
 from app.database import SessionLocal
 from app.models import User
 from app.services.push_service import get_push_token_store, send_push_notification
-from app.services.score_display import normalize_master_score_display
+from app.services.score_display import attach_master_score_display_contract
 from app.services.snapshot_contract import build_decision_envelope, is_actionable_snapshot_row
 from app.services.symbol_registry import canonical_symbol
 
 
 PUSH_DISPATCH_STATE_PATH = Path("data/push_dispatch_state.json")
-PUSH_SCORE_THRESHOLD = float(os.getenv("PUSH_SIGNAL_SCORE_THRESHOLD", "85"))
-PUSH_MAX_SIGNALS_PER_CYCLE = max(1, int(os.getenv("PUSH_MAX_SIGNALS_PER_CYCLE", "2")))
-PUSH_SIGNAL_COOLDOWN_SECONDS = max(300, int(os.getenv("PUSH_SIGNAL_COOLDOWN_SECONDS", "1800")))
+
+
+def _score_threshold_from_env(value, default: float = 8.5) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = default
+    if not math.isfinite(parsed) or parsed <= 0:
+        parsed = default
+    if parsed > 10.0:
+        if 50.0 <= parsed <= 100.0:
+            return parsed / 10.0
+        return default
+    return parsed
+
+
+def _positive_int_from_env(name: str, default: int, minimum: int) -> int:
+    try:
+        parsed = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, parsed)
+
+
+_PUSH_SCORE_THRESHOLD_ENV = os.getenv("PUSH_SIGNAL_SCORE_THRESHOLD", "8.5")
+PUSH_SCORE_THRESHOLD = _score_threshold_from_env(_PUSH_SCORE_THRESHOLD_ENV)
+PUSH_MAX_SIGNALS_PER_CYCLE = _positive_int_from_env("PUSH_MAX_SIGNALS_PER_CYCLE", 2, 1)
+PUSH_SIGNAL_COOLDOWN_SECONDS = _positive_int_from_env("PUSH_SIGNAL_COOLDOWN_SECONDS", 1800, 300)
 _lock = threading.RLock()
 
 
@@ -28,6 +54,94 @@ def _load_state():
             return json.loads(PUSH_DISPATCH_STATE_PATH.read_text(encoding="utf-8"))
         except Exception:
             return {}
+
+
+def _scale_hint(source, *keys):
+    if not isinstance(source, dict):
+        return ""
+    for key in keys:
+        value = str(source.get(key) or "").strip()
+        if value in {"0_10", "0_100"}:
+            return value
+    return ""
+
+
+def _raw_master_score_payload(signal, display_contract=None):
+    def _finite_raw(value):
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(parsed) else None
+
+    def _valid_for_scale(value, scale):
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(parsed) or parsed < 0:
+            return False
+        if scale == "0_10":
+            return parsed <= 10.0
+        if scale == "0_100":
+            return parsed <= 100.0
+        return False
+
+    def _infer_raw_scale(value):
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return ""
+        if not math.isfinite(parsed) or parsed < 0:
+            return ""
+        if 10.0 < parsed <= 100.0:
+            return "0_100"
+        return ""
+
+    if isinstance(display_contract, dict):
+        contract_raw = display_contract.get("master_score_raw")
+        finite_contract_raw = _finite_raw(contract_raw)
+        if finite_contract_raw is not None:
+            if _valid_for_scale(finite_contract_raw, "0_100"):
+                return finite_contract_raw, "0_100"
+    raw_score = signal.get("master_score_raw") if isinstance(signal, dict) else None
+    finite_raw_score = _finite_raw(raw_score)
+    if finite_raw_score is not None:
+        if _valid_for_scale(finite_raw_score, "0_100"):
+            return finite_raw_score, "0_100"
+    if not isinstance(signal, dict):
+        return "", ""
+    for key in ("master_score", "score"):
+        legacy_score = signal.get(key)
+        if _finite_raw(legacy_score) is None:
+            continue
+        if key == "score":
+            explicit_scale = _scale_hint(signal, "score_source_scale", "source_scale")
+        else:
+            explicit_scale = _scale_hint(signal, "master_score_source_scale", "master_score_scale", "source_scale")
+        if explicit_scale:
+            if explicit_scale == "0_100" and _valid_for_scale(legacy_score, explicit_scale):
+                return legacy_score, explicit_scale
+            if explicit_scale == "0_10" and _valid_for_scale(legacy_score, explicit_scale):
+                return round(float(legacy_score) * 10.0, 1), "0_100"
+            continue
+        try:
+            parsed_legacy_score = float(legacy_score)
+            if math.isfinite(parsed_legacy_score) and 10.0 < parsed_legacy_score <= 100.0:
+                return legacy_score, "0_100"
+        except (TypeError, ValueError):
+            continue
+    return "", ""
+
+
+def _raw_master_score_source(signal, display_contract=None):
+    return _raw_master_score_payload(signal, display_contract)[1]
 
 
 def _save_state(state):
@@ -49,8 +163,9 @@ def _eligible_signals(signals):
         if not is_actionable_snapshot_row(item):
             continue
 
+        display_contract = attach_master_score_display_contract(item)
         try:
-            score = float(item.get("master_score_raw", item.get("master_score", item.get("score", 0))) or 0)
+            score = float(display_contract.get("master_score", 0.0) or 0.0)
         except Exception:
             score = 0.0
 
@@ -112,7 +227,9 @@ def dispatch_signal_pushes(signals):
                 continue
 
             title = f"Alerta SNBR: {ticker}"
-            display_score = normalize_master_score_display(signal.get("master_score", signal.get("score")))[0]
+            display_contract = attach_master_score_display_contract(signal)
+            display_score = display_contract.get("master_score", 0.0)
+            raw_master_score, raw_master_score_scale = _raw_master_score_payload(signal, display_contract)
             body = f"Score Mestre {display_score} | {signal.get('master_direction') or signal.get('trend') or 'n/a'}"
 
             signal_sent = 0
@@ -129,8 +246,11 @@ def dispatch_signal_pushes(signals):
                     data={
                         "ticker": ticker,
                         "canonical_symbol": ticker,
-                        "score": str(signal.get("score", "")),
-                        "master_score": str(signal.get("master_score", "")),
+                        "score": str(display_score),
+                        "master_score": str(display_contract.get("master_score", "")),
+                        "master_score_raw": str(raw_master_score if raw_master_score not in (None, "") else ""),
+                        "master_score_raw_source_scale": str(raw_master_score_scale if raw_master_score_scale else ""),
+                        "master_score_source_scale": str(display_contract.get("master_score_source_scale", "")),
                         "master_direction": str(signal.get("master_direction", "")),
                         "master_conviction": str(signal.get("master_conviction", "")),
                         "master_confidence": str(signal.get("master_confidence", "")),

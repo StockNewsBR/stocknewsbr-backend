@@ -37,6 +37,22 @@ def _listify(value: Any) -> List[str]:
     return [str(value).strip()]
 
 
+def _audit_score_value(row: Dict[str, Any]) -> float:
+    audit = row.get("audit") if isinstance(row.get("audit"), dict) else {}
+    for source in (row, audit):
+        for key in ("audit_score", "auditor_score"):
+            value = source.get(key)
+            if isinstance(value, bool) or value in (None, ""):
+                continue
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(parsed) and 0.0 <= parsed <= 100.0:
+                return parsed
+    return 50.0
+
+
 def _risk_index(ai_tools: Dict[str, Any] | None) -> Dict[str, Dict[str, Any]]:
     rows = ai_tools.get("risk") if isinstance(ai_tools, dict) else []
     if not isinstance(rows, list):
@@ -99,7 +115,7 @@ def _final_confidence(row: Dict[str, Any]) -> str:
     score = (
         _safe_float(row.get("conviction_score"), 0.0) * 0.35
         + _safe_float(row.get("historical_confidence_score"), 0.0) * 0.20
-        + _safe_float(row.get("audit_score"), 60.0) * 0.15
+        + _audit_score_value(row) * 0.15
         + _confidence_points(row.get("master_confidence")) * 0.15
         + _safe_float(row.get("priority_score"), 0.0) * 0.15
     )
@@ -136,7 +152,7 @@ def _score(row: Dict[str, Any], risk_level: str, market_pulse: Dict[str, Any] | 
         + _safe_float(row.get("radar_prioritization_score") or row.get("radar_priority_score"), 0.0) * 0.12
         + _safe_float(row.get("historical_confidence_score"), 0.0) * 0.10
         + _safe_float(row.get("operational_score"), 0.0) * 0.10
-        + _safe_float(row.get("audit_score"), 60.0) * 0.06
+        + _audit_score_value(row) * 0.06
     )
     if audit_status_value(row) == AUDIT_CAUTION:
         score -= 8.0

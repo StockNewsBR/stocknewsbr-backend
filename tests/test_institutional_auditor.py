@@ -12,6 +12,33 @@ from app.telegram import telegram_alert_engine
 from app.services import workspace_service
 
 
+def _normalize_score_contract(base, overrides):
+    base.setdefault("score_source_scale", "0_100")
+    base.setdefault("master_score", base.get("score"))
+    if base.get("master_score_source_scale") == "0_10":
+        display_value = float(base.get("master_score") or 0.0)
+        if "master_score_raw" not in base:
+            base["master_score_raw"] = display_value if display_value > 10.0 else display_value * 10.0
+        if display_value > 10.0:
+            base["master_score"] = round(display_value / 10.0, 1)
+        if "score_source_scale" not in overrides:
+            base["score_source_scale"] = "0_10"
+        if "ranking_opportunity_source_scale" not in overrides:
+            base["ranking_opportunity_source_scale"] = "0_10"
+    elif base.get("master_score") is not None:
+        base.setdefault("master_score_raw", base.get("master_score"))
+        base.setdefault("master_score_source_scale", "0_100")
+    base.setdefault("ranking_opportunity_score", base.get("score"))
+    base.setdefault("ranking_opportunity_source_scale", "0_100")
+    for score_key, scale_key in (("score", "score_source_scale"), ("ranking_opportunity_score", "ranking_opportunity_source_scale")):
+        if base.get(scale_key) == "0_10" and score_key in base:
+            score_value = float(base.get(score_key) or 0.0)
+            if score_value > 10.0:
+                base[score_key] = round(score_value / 10.0, 1)
+    base.setdefault("ranking_eligible", base.get("decision_ready") is True)
+    return base
+
+
 def _row(**overrides):
     base = {
         "ticker": "PETR4",
@@ -36,7 +63,7 @@ def _row(**overrides):
         "trend_strength": 66.0,
     }
     base.update(overrides)
-    return base
+    return _normalize_score_contract(base, overrides)
 
 
 def _ai_tools(**overrides):
