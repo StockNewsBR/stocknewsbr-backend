@@ -35,3 +35,6 @@ output/playwright/
 
 # Local Codex agent config - never commit
 .codex/
+
+# Claude Code local config
+.claude/

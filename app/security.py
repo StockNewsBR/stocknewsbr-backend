@@ -13,12 +13,12 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
+from app.core.settings import get_secret_key
 from app.database import get_db
 from app.models import User, UserSession
 
 logger = logging.getLogger("stocknewsbr.security")
 
-SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE_THIS_SECRET")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 1440))
 STRICT_SESSION_PLANS = {
@@ -51,12 +51,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
-def create_access_token(data: dict):
-    to_encode = data.copy()
-    if "sub" not in to_encode:
-        raise ValueError("Access token subject is required")
-
-    subject = to_encode["sub"]
+def _normalize_access_token_subject(subject):
     if subject is None or isinstance(subject, bool):
         raise ValueError("Access token subject must be integer-compatible")
 
@@ -64,16 +59,28 @@ def create_access_token(data: dict):
         normalized = int(subject)
         if str(normalized) != str(subject):
             raise ValueError("Access token subject must be integer-compatible")
-        to_encode["sub"] = str(normalized)
+        return normalized
     except (TypeError, ValueError) as exc:
         raise ValueError("Access token subject must be integer-compatible") from exc
+
+
+def get_jwt_secret() -> str:
+    return get_secret_key()
+
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    if "sub" not in to_encode:
+        raise ValueError("Access token subject is required")
+
+    to_encode["sub"] = str(_normalize_access_token_subject(to_encode["sub"]))
 
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire, "iat": datetime.utcnow()})
 
     return jwt.encode(
         to_encode,
-        SECRET_KEY,
+        get_jwt_secret(),
         algorithm=ALGORITHM,
     )
 
@@ -88,13 +95,13 @@ def decode_access_token_payload(token: str, credentials_exception: HTTPException
     )
 
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, get_jwt_secret(), algorithms=[ALGORITHM])
         user_id = payload.get("sub")
 
         if user_id is None:
             raise fallback_exception
 
-        payload["sub"] = int(user_id)
+        payload["sub"] = _normalize_access_token_subject(user_id)
         return payload
     except (JWTError, ValueError, TypeError):
         raise fallback_exception

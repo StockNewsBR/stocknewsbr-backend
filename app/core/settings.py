@@ -12,10 +12,83 @@ logger = logging.getLogger("stocknewsbr.settings")
 # LOAD ENV (SAFE)
 # =====================================================
 
-ENV = os.getenv("ENV", "development")
+_PROCESS_ENV = str(os.getenv("ENV") or "").strip().lower()
 
-if ENV != "production":
+if _PROCESS_ENV != "production":
     load_dotenv()
+
+
+ENV = str(os.getenv("ENV", "development")).strip() or "development"
+ENV_NORMALIZED = ENV.lower()
+MIN_SECRET_KEY_LENGTH = 32
+
+INSECURE_SECRET_KEY_VALUES = frozenset(
+    {
+        "change_this_secret",
+        "change_this_in_production",
+        "<defina-uma-chave-forte-fora-do-repositorio>",
+        "<defina_uma_chave_forte_fora_do_repositorio>",
+    }
+)
+TRIVIAL_SECRET_KEY_VALUES = frozenset(
+    {
+        "secret",
+        "password",
+        "changeme",
+        "change_me",
+        "default",
+        "default_secret",
+        "jwt_secret",
+        "test_secret",
+        "dev_secret",
+        "stocknewsbr",
+        "stocknewsbr_secret",
+    }
+)
+REPEATED_TRIVIAL_SECRET_TOKENS = ("secret", "password", "changeme", "default")
+
+
+def _normalize_secret_key_label(value: str) -> str:
+    return value.lower().replace("-", "_").replace(" ", "")
+
+
+def _is_repeated_trivial_secret(value: str) -> bool:
+    normalized = _normalize_secret_key_label(value)
+    if len(set(normalized)) <= 1:
+        return True
+
+    return any(
+        len(normalized) % len(token) == 0
+        and normalized == token * (len(normalized) // len(token))
+        for token in REPEATED_TRIVIAL_SECRET_TOKENS
+    )
+
+
+def _normalize_secret_key(value: str | None) -> str:
+    if value is None:
+        raise RuntimeError("SECRET_KEY is not configured or is insecure.")
+
+    normalized = str(value).strip()
+    normalized_label = _normalize_secret_key_label(normalized)
+
+    if (
+        not normalized
+        or len(normalized) < MIN_SECRET_KEY_LENGTH
+        or normalized_label in INSECURE_SECRET_KEY_VALUES
+        or normalized_label in TRIVIAL_SECRET_KEY_VALUES
+        or _is_repeated_trivial_secret(normalized)
+    ):
+        raise RuntimeError("SECRET_KEY is not configured or is insecure.")
+
+    return normalized
+
+
+def get_secret_key() -> str:
+    return _normalize_secret_key(os.getenv("SECRET_KEY"))
+
+
+def validate_runtime_security_settings() -> None:
+    get_secret_key()
 
 
 # =====================================================
@@ -68,7 +141,7 @@ class Settings:
 
     ENV: str = ENV
 
-    DEBUG: bool = ENV != "production"
+    DEBUG: bool = ENV_NORMALIZED != "production"
 
     # -------------------------------------------------
     # ENGINE
@@ -188,10 +261,9 @@ class Settings:
     # SECURITY
     # -------------------------------------------------
 
-    SECRET_KEY: str = os.getenv(
-        "SECRET_KEY",
-        "change_this_in_production"
-    )
+    @property
+    def SECRET_KEY(self) -> str:
+        return get_secret_key()
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = to_int(
         os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60),

@@ -21,6 +21,7 @@ from sqlalchemy import text
 
 from app.ai.ai_market_pulse import market_pulse
 from app.cache.snapshot_cache import get_snapshot, get_snapshot_info, get_snapshot_signals
+from app.core.settings import validate_runtime_security_settings
 from app.database import Base, SessionLocal, engine
 from app.database_schema import ensure_runtime_schema
 from app.dependencies import require_internal_token
@@ -212,6 +213,8 @@ async def lifespan(app: FastAPI):
             sys.version_info.major,
             sys.version_info.minor,
         )
+    validate_runtime_security_settings()
+    logger.info("Security settings validated")
     _create_tables_if_needed()
 
     with WORKERS_LOCK:
