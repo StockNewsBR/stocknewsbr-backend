@@ -53,6 +53,21 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(data: dict):
     to_encode = data.copy()
+    if "sub" not in to_encode:
+        raise ValueError("Access token subject is required")
+
+    subject = to_encode["sub"]
+    if subject is None or isinstance(subject, bool):
+        raise ValueError("Access token subject must be integer-compatible")
+
+    try:
+        normalized = int(subject)
+        if str(normalized) != str(subject):
+            raise ValueError("Access token subject must be integer-compatible")
+        to_encode["sub"] = str(normalized)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Access token subject must be integer-compatible") from exc
+
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire, "iat": datetime.utcnow()})
 
