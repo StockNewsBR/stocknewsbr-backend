@@ -245,6 +245,11 @@ SCHEMA_PATCHES = {
 }
 
 
+# ensure_runtime_schema applies INDEX_PATCHES inside engine.begin(); keep
+# PostgreSQL CONCURRENTLY and other non-transactional index DDL in migrations.
+INDEX_PATCHES = {}
+
+
 def ensure_runtime_schema(engine):
     inspector = inspect(engine)
     driver = engine.url.drivername
@@ -272,4 +277,25 @@ def ensure_runtime_schema(engine):
                     continue
 
                 ddl = ddl_map.get(dialect_key) or ddl_map["default"]
+                conn.execute(text(ddl))
+
+        for table_name, indexes in INDEX_PATCHES.items():
+            if not inspector.has_table(table_name):
+                continue
+
+            current_indexes = {
+                index["name"]
+                for index in inspect(engine).get_indexes(table_name)
+            }
+
+            for index_name, ddl_map in indexes.items():
+                if index_name in current_indexes:
+                    continue
+
+                ddl = ddl_map.get(dialect_key) or ddl_map["default"]
+                if "concurrently" in ddl.lower():
+                    raise RuntimeError(
+                        f"INDEX_PATCHES {table_name}.{index_name} uses CONCURRENTLY; "
+                        "apply it through a standalone migration instead of ensure_runtime_schema"
+                    )
                 conn.execute(text(ddl))

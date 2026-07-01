@@ -166,7 +166,7 @@ def _snapshot_master_context(symbol: str) -> dict:
         return {}
     row = attach_master_score_display_contract(dict(row))
     decision_envelope = build_decision_envelope(row)
-    return {
+    return _json_safe_payload({
         "master_score": row.get("master_score"),
         "master_score_raw": row.get("master_score_raw"),
         "master_score_source_scale": row.get("master_score_source_scale"),
@@ -226,7 +226,7 @@ def _snapshot_master_context(symbol: str) -> dict:
         "final_decision_reason": row.get("final_decision_reason"),
         "final_decision_blocks": row.get("final_decision_blocks") or [],
         "final_decision_confidence": row.get("final_decision_confidence"),
-    }
+    })
 
 
 def _is_blocked_public_symbol(symbol: str) -> bool:
@@ -253,6 +253,16 @@ def _safe_float(value, default: float = 0.0) -> float:
     if not math.isfinite(parsed):
         return default
     return parsed
+
+
+def _json_safe_payload(value):
+    if isinstance(value, dict):
+        return {key: _json_safe_payload(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_payload(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
 
 
 def _has_usable_quote_payload(payload, allow_stale: bool = False) -> bool:
@@ -635,7 +645,7 @@ def public_quotes(symbols: str = Query(default="")):
             "public_quotes",
         )
 
-    return {"items": items, "count": len(items)}
+    return _json_safe_payload({"items": items, "count": len(items)})
 
 
 @router.get("/market/insight/{symbol}")
@@ -689,7 +699,7 @@ def public_market_insight(symbol: str, interval: str = "1D"):
     if score is None:
         score = _fallback_score(closes, rsi)
 
-    return {
+    return _json_safe_payload({
         "symbol": response_symbol,
         "score": score,
         **master_context,
@@ -697,7 +707,7 @@ def public_market_insight(symbol: str, interval: str = "1D"):
         "trend_bias": trend_bias,
         "signal": insight.get("signal") or trend_bias,
         "summary": summary,
-    }
+    })
 
 
 @router.get("/market/chart/{symbol}")
@@ -726,7 +736,7 @@ def public_market_chart(
     summary = dict(overlays["summary"] or {})
     if is_quote_fallback:
         summary.update({"source": "quote_cache_fallback", "fallback": True, "confidence": "derived"})
-    return {
+    return _json_safe_payload({
         "ticker": response_symbol,
         "interval": chart_interval,
         "ohlc": ohlc,
@@ -734,7 +744,7 @@ def public_market_chart(
         "markers": overlays["markers"],
         "zones": overlays["zones"],
         "summary": summary,
-    }
+    })
 
 
 @router.get("/market/bundle/{symbol}")
@@ -752,7 +762,7 @@ def public_market_bundle(
     quote = _resolve_cached_quote(cached_payloads, ticker)
     record_cache_access("quote", _has_usable_quote_payload(quote), "public_bundle")
 
-    return {
+    return _json_safe_payload({
         "symbol": response_symbol,
         "quote": quote,
         "insight": public_market_insight(ticker, interval=chart_interval),
@@ -766,7 +776,7 @@ def public_market_bundle(
         ),
         "ai_tools": build_public_ai_tools_payload([ticker, response_symbol]),
         "source": "cache_snapshot_bundle",
-    }
+    })
 
 
 def _empty_chart_payload(symbol: str, interval: str, reason: str):

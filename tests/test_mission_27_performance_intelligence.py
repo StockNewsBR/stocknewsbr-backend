@@ -63,7 +63,7 @@ class Mission27PerformanceIntelligenceTests(unittest.TestCase):
         self.original_outcome_cache = outcome_cache_module.signal_outcome_cache
         self.original_internal_token = dependencies_module.INTERNAL_API_TOKEN
         outcome_cache_module.signal_outcome_cache = SignalOutcomeCache(self.outcome_state_path)
-        dependencies_module.INTERNAL_API_TOKEN = "mission27-secret"
+        dependencies_module.INTERNAL_API_TOKEN = "mission27-internal-token-valid-20260701"
 
     def tearDown(self):
         outcome_cache_module.signal_outcome_cache = self.original_outcome_cache
@@ -152,7 +152,7 @@ class Mission27PerformanceIntelligenceTests(unittest.TestCase):
 
         response = TestClient(app).get(
             "/internal/performance-intelligence",
-            headers={"X-Internal-Token": "mission27-secret"},
+            headers={"X-Internal-Token": "mission27-internal-token-valid-20260701"},
         )
 
         self.assertEqual(response.status_code, 200)

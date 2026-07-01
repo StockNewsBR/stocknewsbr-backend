@@ -74,7 +74,7 @@ def _signal(**overrides):
 class Mission28ExplainabilityTests(unittest.TestCase):
     def setUp(self):
         self.original_internal_token = dependencies_module.INTERNAL_API_TOKEN
-        dependencies_module.INTERNAL_API_TOKEN = "mission28-secret"
+        dependencies_module.INTERNAL_API_TOKEN = "mission28-internal-token-valid-20260701"
 
     def tearDown(self):
         dependencies_module.INTERNAL_API_TOKEN = self.original_internal_token
@@ -131,7 +131,7 @@ class Mission28ExplainabilityTests(unittest.TestCase):
         with patch("app.system.explainability.get_snapshot", return_value={"signals": [_signal()]}):
             response = TestClient(app).get(
                 "/internal/explainability",
-                headers={"X-Internal-Token": "mission28-secret"},
+                headers={"X-Internal-Token": "mission28-internal-token-valid-20260701"},
             )
 
         self.assertEqual(response.status_code, 200)

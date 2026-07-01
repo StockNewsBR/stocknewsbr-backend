@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List
 
 from app.cache.paper_trading_cache import get_paper_trading_state, update_paper_trading_state
@@ -47,7 +48,29 @@ def _volume(row: Dict[str, Any]) -> float:
 
 
 def _snapshot_timestamp(snapshot: Dict[str, Any], now: float) -> float:
-    return safe_float(snapshot.get("generated_at") or snapshot.get("updated_at") or snapshot.get("timestamp"), now)
+    for raw_value in (
+        snapshot.get("generated_at"),
+        snapshot.get("updated_at"),
+        snapshot.get("timestamp"),
+    ):
+        numeric_value = safe_float(raw_value, 0.0)
+        if numeric_value > 0:
+            return numeric_value
+
+        if isinstance(raw_value, str):
+            normalized = raw_value.strip()
+            if normalized:
+                try:
+                    parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    timestamp = parsed.astimezone(timezone.utc).timestamp()
+                    if timestamp > 0:
+                        return timestamp
+                except (ValueError, OSError, OverflowError):
+                    pass
+
+    return now
 
 
 def _snapshot_is_stale(snapshot: Dict[str, Any]) -> bool:

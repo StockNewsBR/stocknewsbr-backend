@@ -266,6 +266,7 @@ class SubscriptionAuditLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     provider = Column(String, index=True, nullable=False)
+    provider_event_id = Column(String, nullable=True, index=True)
     event_type = Column(String, index=True, nullable=False)
     product_id = Column(String, nullable=True)
     origin = Column(String, nullable=True)

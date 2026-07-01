@@ -9,7 +9,34 @@ from app.models import User
 from app.security import get_current_user
 from app.services.access_service import has_channel_access, refresh_user_access
 
-INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "").strip()
+INSECURE_INTERNAL_API_TOKENS = frozenset(
+    {
+        "change_this_internal_token",
+        "changeme",
+        "change_me",
+        "internal_token",
+        "default",
+    }
+)
+MIN_INTERNAL_API_TOKEN_LENGTH = 32
+
+
+def _normalize_internal_api_token(value: str | None) -> str:
+    token = str(value or "").strip()
+    if token.lower() in INSECURE_INTERNAL_API_TOKENS or (token.startswith("<") and token.endswith(">")):
+        return ""
+    try:
+        token.encode("ascii")
+    except UnicodeEncodeError:
+        return ""
+    if len(token) < MIN_INTERNAL_API_TOKEN_LENGTH:
+        return ""
+    if len(set(token.lower())) <= 3:
+        return ""
+    return token
+
+
+INTERNAL_API_TOKEN = _normalize_internal_api_token(os.getenv("INTERNAL_API_TOKEN"))
 
 
 def require_active_plan(
@@ -99,10 +126,20 @@ def require_any_channel_access(*channels: str):
 def require_internal_token(
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
 ):
-    if not INTERNAL_API_TOKEN:
+    configured_token = _normalize_internal_api_token(INTERNAL_API_TOKEN)
+    if not configured_token:
         raise HTTPException(status_code=503, detail="internal_token_not_configured")
 
-    if not x_internal_token or not secrets.compare_digest(x_internal_token, INTERNAL_API_TOKEN):
+    if not isinstance(x_internal_token, str) or not x_internal_token:
+        raise HTTPException(status_code=403, detail="internal_access_required")
+
+    try:
+        supplied_bytes = x_internal_token.encode("ascii")
+        configured_bytes = configured_token.encode("ascii")
+    except UnicodeEncodeError:
+        raise HTTPException(status_code=403, detail="internal_access_required")
+
+    if not secrets.compare_digest(supplied_bytes, configured_bytes):
         raise HTTPException(status_code=403, detail="internal_access_required")
 
     return True

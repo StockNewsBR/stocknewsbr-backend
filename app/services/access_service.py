@@ -304,10 +304,12 @@ def log_subscription_event(
     external_subscription_id: str | None = None,
     status: str | None = None,
     payload_excerpt: str | None = None,
+    provider_event_id: str | None = None,
 ):
     event = SubscriptionAuditLog(
         user_id=user.id if user else None,
         provider=provider,
+        provider_event_id=provider_event_id,
         event_type=event_type,
         product_id=product_id,
         origin=origin,

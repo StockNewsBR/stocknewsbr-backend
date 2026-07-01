@@ -2,8 +2,10 @@
 # STOCKNEWSBR AUTH ROUTES
 # ==========================================================
 
+import json
 import logging
 import secrets
+from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
@@ -48,7 +50,6 @@ from app.services.auth_session_service import (
 )
 from app.services.access_service import (
     accept_legal_documents,
-    activate_subscription,
     downgrade_to_free,
     ensure_referral_code,
     grant_trial_access,
@@ -59,11 +60,13 @@ from app.services.access_service import (
 )
 from app.services.email_service import send_login_code_email
 from app.services.legal_service import get_public_bootstrap
-from app.services.referrals import register_referral, validate_referrals
+from app.services.referrals import register_referral
 
 logger = logging.getLogger("stocknewsbr.auth")
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+
+PROVIDER_VERIFICATION_BLOCKED_DETAIL = "subscription_provider_verification_unavailable"
 
 
 def _build_session_token(
@@ -85,6 +88,27 @@ def _build_session_token(
 
 def _serialize_access(user: User) -> UserAccessResponse:
     return UserAccessResponse(**serialize_user_access(user))
+
+
+def _subscription_sync_audit_payload(payload: SubscriptionSyncRequest, status: str) -> str:
+    return json.dumps(
+        {
+            "provider": payload.provider,
+            "event_type": "subscription_sync",
+            "product_id": payload.product_id,
+            "origin": payload.origin,
+            "status": status,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _reject_unverified_subscription_activation() -> NoReturn:
+    raise HTTPException(
+        status_code=503,
+        detail=PROVIDER_VERIFICATION_BLOCKED_DETAIL,
+    )
 
 
 def _require_legal_acceptance(user_data: UserRegister):
@@ -356,19 +380,10 @@ def subscription_sync(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if not payload.activate:
-        downgrade_to_free(current_user, reason="premium_inactive")
-    else:
-        activate_subscription(
-            current_user,
-            provider=payload.provider,
-            product_id=payload.product_id,
-            origin=payload.origin,
-            external_subscription_id=payload.external_subscription_id,
-            purchase_token=payload.purchase_token,
-            renewal_at=payload.renewal_at,
-            started_at=payload.started_at,
-        )
+    if payload.activate:
+        _reject_unverified_subscription_activation()
+
+    downgrade_to_free(current_user, reason="premium_inactive")
 
     log_subscription_event(
         db,
@@ -379,10 +394,8 @@ def subscription_sync(
         origin=payload.origin,
         external_subscription_id=payload.external_subscription_id,
         status=current_user.plan_status,
-        payload_excerpt=str(payload.model_dump()),
+        payload_excerpt=_subscription_sync_audit_payload(payload, current_user.plan_status),
     )
-    if payload.activate:
-        validate_referrals(db)
 
     db.add(current_user)
     db.commit()

@@ -11,8 +11,10 @@ logger = logging.getLogger("stocknewsbr.referrals")
 
 VALID_REFERRAL_STATUS = "validated"
 PENDING_REFERRAL_STATUS = "pending"
+ACTIVE_REFERRAL_STATUS = "active"
 REFERRAL_REWARD_EVERY = 3
 REFERRAL_REWARD_DAYS = 31
+REFERRER_LOCK_BATCH_SIZE = 250
 VIP_BADGE_AT = 10
 LEADERBOARD_BADGE_AT = 100
 PAYMENT_EVENTS = {"invoice.payment_succeeded", "checkout.session.completed", "subscription_sync"}
@@ -182,18 +184,51 @@ def _sync_referrer_stats(db: Session, referrer_id: int, now: datetime):
     return stats
 
 
-def validate_referrals(db: Session, now: datetime | None = None):
-    now = _as_naive_utc(now) or _utcnow()
-    changed = 0
-
-    try:
-        referrals = (
-            db.query(Referral)
-            .filter(Referral.status.in_([PENDING_REFERRAL_STATUS, "active"]))
+def _lock_referrers_for_update(db: Session, referrer_ids: set[int]) -> None:
+    ordered_ids = sorted(referrer_id for referrer_id in referrer_ids if referrer_id)
+    for index in range(0, len(ordered_ids), REFERRER_LOCK_BATCH_SIZE):
+        batch = ordered_ids[index : index + REFERRER_LOCK_BATCH_SIZE]
+        (
+            db.query(User)
+            .filter(User.id.in_(batch))
+            .order_by(User.id.asc())
+            .populate_existing()
+            .with_for_update(of=User)
             .all()
         )
 
-        touched_referrers: set[int] = set()
+
+def apply_referral_validation(db: Session, now: datetime | None = None) -> dict:
+    """
+    Executa a validação e mutação de referrals na sessão fornecida.
+
+    NÃO executa commit nem rollback.
+    Propaga exceções não tratadas ao caller.
+    O caller é responsável pelo commit/rollback atômico.
+
+    Retorna: {"validated": int, "processed_referrers": int}
+    """
+    now = _as_naive_utc(now) or _utcnow()
+    changed = 0
+
+    touched_referrers: set[int] = set()
+    last_referral_id = 0
+    while True:
+        referrals = (
+            db.query(Referral)
+            .filter(
+                Referral.status.in_([PENDING_REFERRAL_STATUS, ACTIVE_REFERRAL_STATUS]),
+                Referral.id > last_referral_id,
+            )
+            .order_by(Referral.id.asc())
+            .limit(500)
+            .with_for_update(of=Referral, skip_locked=True)
+            .all()
+        )
+        if not referrals:
+            break
+
+        last_referral_id = referrals[-1].id or last_referral_id
         for referral in referrals:
             if not _qualifies_for_validation(db, referral, now):
                 continue
@@ -203,16 +238,31 @@ def validate_referrals(db: Session, now: datetime | None = None):
             touched_referrers.add(referral.referrer_id)
             changed += 1
 
-        for referrer_id in touched_referrers:
-            _sync_referrer_stats(db, referrer_id, now)
+    _lock_referrers_for_update(db, touched_referrers)
+    for referrer_id in sorted(touched_referrers):
+        _sync_referrer_stats(db, referrer_id, now)
 
+    return {"validated": changed, "processed_referrers": len(touched_referrers)}
+
+
+def validate_referrals(db: Session, now: datetime | None = None) -> dict:
+    """
+    Wrapper legado compatível: executa apply_referral_validation
+    e gerencia commit/rollback internamente.
+
+    Mantido para referral_worker e testes legados.
+    """
+    try:
+        result = apply_referral_validation(db, now)
         db.commit()
-        return {"validated": changed, "processed_referrers": len(touched_referrers)}
-
+        return result
     except SQLAlchemyError as exc:
         db.rollback()
-        logger.error("Referral validation error: %s", exc)
-        return {"validated": 0, "processed_referrers": 0, "error": str(exc)}
+        logger.error("Referral validation error: %s", exc.__class__.__name__)
+        return {"validated": 0, "processed_referrers": 0, "error": "database_error"}
+    except Exception:
+        db.rollback()
+        raise
 
 
 def referral_summary(db: Session, user_id: int):
