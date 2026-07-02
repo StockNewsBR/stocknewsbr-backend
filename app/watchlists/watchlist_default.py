@@ -70,14 +70,14 @@ WATCHLIST_BDR: Tuple[str, ...] = (
 
 # ₿ CRYPTO
 WATCHLIST_CRYPTO: Tuple[str, ...] = (
-    "BTC",
-    "ETH",
-    "SOL",
-    "BNB",
-    "XRP",
-    "ADA",
-    "AVAX",
-    "DOGE",
-    "LINK",
-    "MATIC",
+    "BTCUSD",
+    "ETHUSD",
+    "SOLUSD",
+    "BNBUSD",
+    "XRPUSD",
+    "ADAUSD",
+    "AVAXUSD",
+    "DOGEUSD",
+    "LINKUSD",
+    "MATICUSD",
 )

@@ -14,6 +14,7 @@ from app.services.symbol_sanitizer import sanitize_market_symbol
 from app.services.symbol_registry import (
     canonical_symbol,
     canonical_symbol_aliases,
+    is_ambiguous_crypto_symbol,
     provider_symbol,
     resolve_tradingview_symbol,
     resolve_tradingview_symbol_candidates,
@@ -67,7 +68,6 @@ class Mission30CanonicalSymbolRegistryTests(unittest.TestCase):
             "PETR4": "PETR4",
             "PETR4.SA": "PETR4",
             "PETR4 B3": "PETR4",
-            "BTC": "BTCUSD",
             "BTCUSD": "BTCUSD",
             "BTCUSDT": "BTCUSD",
             "BTC/USD": "BTCUSD",
@@ -79,6 +79,13 @@ class Mission30CanonicalSymbolRegistryTests(unittest.TestCase):
         }
         for raw, expected in cases.items():
             self.assertEqual(canonical_symbol(raw), expected)
+        self.assertEqual(canonical_symbol("BTC"), "")
+        self.assertTrue(is_ambiguous_crypto_symbol("BTC"))
+        results = search_ticker("BTC")
+        self.assertNotIn("BTC", results)
+        self.assertNotIn("BTCUSD", results)
+        qualified_results = search_ticker("BTC.US")
+        self.assertNotIn("BTCUSD", qualified_results)
 
     def test_tradingview_mapping_is_centralized_from_canonical_symbol(self):
         self.assertEqual(tradingview_symbol("PETR4.SA"), "BMFBOVESPA:PETR4")
@@ -216,6 +223,7 @@ class Mission30CanonicalSymbolRegistryTests(unittest.TestCase):
         self.assertIn("BTCUSDT", aliases)
         self.assertIn("BTC-USD", aliases)
         self.assertIn("BTC/USD", aliases)
+        self.assertNotIn("BTC", aliases)
 
     def test_mission30_complement_axia6_replaces_elet6_alias(self):
         self.assertEqual(canonical_symbol("ELET6"), "AXIA6")

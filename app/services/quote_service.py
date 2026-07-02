@@ -6,16 +6,32 @@ from typing import Any
 
 from app.cache.snapshot_cache import get_last_good_snapshot_ticker, get_snapshot_ticker
 from app.market.market_data_loader import get_cached_price_snapshots, get_display_symbol, get_price_snapshot
-from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases
+from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases, is_ambiguous_crypto_symbol
 from app.services.symbol_sanitizer import mark_symbol_cooldown, sanitize_market_symbol
 from app.system.system_metrics import record_cache_access
 
 
 def _normalize_symbol(symbol: str | None) -> str:
+    if is_ambiguous_crypto_symbol(symbol):
+        mark_symbol_cooldown(symbol, "ambiguous_symbol")
+        return ""
     sanitized = canonical_symbol(symbol) or sanitize_market_symbol(symbol, allow_provider_symbols=True)
     if not sanitized and symbol:
         mark_symbol_cooldown(symbol, "invalid_symbol")
     return sanitized or ""
+
+
+def _safe_display_symbol(symbol: str | None) -> str:
+    normalized = _normalize_symbol(symbol)
+    if normalized:
+        display = get_display_symbol(normalized)
+        if display:
+            return display
+    raw = str(symbol or "").upper().strip()
+    if not raw:
+        return "INVALID_SYMBOL"
+    safe = re.sub(r"[^A-Z0-9._=-]", "", raw)[:32]
+    return safe or "INVALID_SYMBOL"
 
 
 _CME_FUTURES_PROVIDER_SYMBOLS = {
@@ -118,15 +134,36 @@ def with_quote_diagnostics(payload: dict[str, Any] | None, symbol: str | None = 
         return None
     normalized_payload = dict(payload)
     if symbol:
-        normalized_payload["symbol"] = get_display_symbol(_normalize_symbol(symbol))
+        normalized_payload["symbol"] = _safe_display_symbol(symbol)
     diagnostics = quote_field_diagnostics(normalized_payload)
     normalized_payload.update(diagnostics)
     return normalized_payload
 
 
+QUOTE_STATUS_ALLOWLIST = {
+    "empty",
+    "ambiguous_symbol",
+    "blocked_symbol",
+    "invalid_symbol",
+    "no_data",
+    "provider_error",
+    "unknown_symbol",
+    "unsupported",
+}
+
+
+def _normalize_quote_status(status: str | None, default: str = "empty") -> str:
+    normalized = str(status or default).strip().lower()
+    return normalized if normalized in QUOTE_STATUS_ALLOWLIST else default
+
+
 def classify_quote_payload(payload: dict[str, Any] | None) -> str:
     if not isinstance(payload, dict) or not payload:
         return "empty"
+
+    explicit_status = _normalize_quote_status(payload.get("quote_status"), default="")
+    if explicit_status and explicit_status != "empty":
+        return explicit_status
 
     has_price = _safe_price(payload) is not None
     if has_price:
@@ -162,7 +199,7 @@ def _payload_from_row(display_symbol: str, row: dict[str, Any], source: str) -> 
         or row.get("last_seen_at")
         or row.get("created_at")
     )
-    return with_quote_diagnostics({
+    payload = {
         "symbol": display_symbol,
         "price": row.get("price"),
         "change": row.get("change"),
@@ -184,7 +221,26 @@ def _payload_from_row(display_symbol: str, row: dict[str, Any], source: str) -> 
         "market_data_updated_at": timestamp,
         "quote_time": timestamp,
         "provider_timestamp": timestamp,
-    })
+    }
+    for field in (
+        "requested_symbol",
+        "canonical_symbol",
+        "display_symbol",
+        "provider_symbol",
+        "asset_type",
+        "market",
+        "currency",
+        "timezone",
+        "identity_preserved",
+        "price_semantics",
+        "freshness_semantics",
+        "fallback",
+        "fallback_type",
+    ):
+        if row.get(field) is not None:
+            payload[field] = row.get(field)
+    payload.setdefault("display_symbol", display_symbol)
+    return with_quote_diagnostics(payload)
 
 
 def get_cached_quote_payload(symbol: str) -> dict[str, Any] | None:
@@ -247,8 +303,10 @@ def get_quote_payload(symbol: str, *, allow_fetch: bool = False) -> dict[str, An
     return get_cached_quote_payload(symbol)
 
 
-def empty_quote_payload(symbol: str) -> dict[str, Any]:
-    display_symbol = get_display_symbol(_normalize_symbol(symbol))
+def empty_quote_payload(symbol: str, *, quote_status: str = "empty", reason: str | None = None) -> dict[str, Any]:
+    status = _normalize_quote_status(quote_status)
+    display_symbol = _safe_display_symbol(symbol)
+    source = status if status != "empty" else "empty"
     return with_quote_diagnostics({
         "symbol": display_symbol,
         "price": None,
@@ -259,16 +317,20 @@ def empty_quote_payload(symbol: str) -> dict[str, Any]:
         "volume": None,
         "high": None,
         "low": None,
-        "source": "empty",
-        "quote_status": "empty",
+        "source": source,
+        "quote_status": status,
+        "provider_status": reason or status,
+        "error_reason": reason or status,
         "stale": False,
     }) or {
         "symbol": display_symbol,
         "price": None,
         "change": None,
         "change_pct": None,
-        "source": "empty",
-        "quote_status": "empty",
+        "source": source,
+        "quote_status": status,
+        "provider_status": reason or status,
+        "error_reason": reason or status,
         "stale": False,
         "core_data": False,
         "strategic_core_data": False,

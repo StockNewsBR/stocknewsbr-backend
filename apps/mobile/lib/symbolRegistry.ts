@@ -5,6 +5,25 @@ const CRYPTO_RE = /^([A-Z0-9]{2,8})(USD|USDT)$/;
 const US_RE = /^[A-Z][A-Z0-9]{0,9}$/;
 
 const CRYPTO_BASES = new Set(["BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "MATIC", "AVAX", "LINK"]);
+const US_MARKET_QUALIFIERS = new Set(["AMEX", "ARCA", "BATS", "CBOE", "NASDAQ", "NYSE", "NYSEARCA", "OTC"]);
+const KNOWN_BDR_SYMBOLS = new Set([
+  "A1MD34",
+  "AAPL34",
+  "AMZO34",
+  "BABA34",
+  "BERK34",
+  "GOGL34",
+  "ITLC34",
+  "M1TA34",
+  "MELI34",
+  "MSFT34",
+  "NFLX34",
+  "NVDC34",
+  "PFIZ34",
+  "PYPL34",
+  "QCOM34",
+  "TSLA34",
+]);
 
 const CURATED_ALIASES: Record<string, string[]> = {
   ASAI3: ["ASAI3.SA", "ASAI3 B3", "BVMF:ASAI3", "BMFBOVESPA:ASAI3"],
@@ -20,6 +39,10 @@ const CURATED_ALIASES: Record<string, string[]> = {
   MSFT: ["NASDAQ:MSFT", "MSFT.US"],
   NVDA: ["NASDAQ:NVDA", "NVDA.US"],
   TSLA: ["NASDAQ:TSLA", "TSLA.US"],
+  A1MD34: ["AMD34", "AMD34.SA", "A1MD34.SA"],
+  AMZO34: ["AMZN34", "AMZN34.SA", "AMZO34.SA"],
+  ITLC34: ["INTC34", "INTC34.SA", "I1NC34", "I1NC34.SA", "ITLC34.SA"],
+  M1TA34: ["META34", "META34.SA", "M1TA34.SA"],
 };
 
 function aliasKey(value: unknown) {
@@ -43,6 +66,13 @@ function aliasKey(value: unknown) {
   return compact;
 }
 
+function hasMarketQualifier(value: unknown) {
+  const raw = String(value || "").trim().toUpperCase();
+  if (raw.endsWith(".US")) return true;
+  if (!raw.includes(":")) return false;
+  return US_MARKET_QUALIFIERS.has(raw.split(":")[0]?.trim() || "");
+}
+
 const ALIASES = new Map<string, string>();
 for (const [canonical, aliases] of Object.entries(CURATED_ALIASES)) {
   for (const alias of [canonical, ...aliases]) {
@@ -52,7 +82,17 @@ for (const [canonical, aliases] of Object.entries(CURATED_ALIASES)) {
 }
 for (const base of CRYPTO_BASES) {
   const canonical = `${base}USD`;
-  for (const alias of [base, canonical, `${base}USDT`, `${base}/USD`, `${base}-USD`, `BINANCE:${base}USDT`]) {
+  const aliases = [
+    canonical,
+    `${base}USDT`,
+    `${base}/USD`,
+    `${base}/USDT`,
+    `${base}-USD`,
+    `${base}-USDT`,
+    `BINANCE:${base}USDT`,
+  ];
+  if (base === "BTC") aliases.push("XBTUSD", "XBTUSDT", "XBT/USD");
+  for (const alias of aliases) {
     const key = aliasKey(alias);
     if (key) ALIASES.set(key, canonical);
   }
@@ -61,11 +101,23 @@ for (const base of CRYPTO_BASES) {
 export function canonicalSymbol(value: unknown) {
   const key = aliasKey(value);
   if (!key) return "";
+  const marketQualified = hasMarketQualifier(value);
+  const cryptoMatch = key.match(CRYPTO_RE);
+  if (CRYPTO_BASES.has(key)) return "";
+  if (marketQualified && cryptoMatch && CRYPTO_BASES.has(cryptoMatch[1])) return "";
+  if (marketQualified && B3_RE.test(key)) return "";
   const mapped = ALIASES.get(key);
   if (mapped) return mapped;
-  const cryptoMatch = key.match(CRYPTO_RE);
+  if (key.endsWith("34") && !KNOWN_BDR_SYMBOLS.has(key)) return "";
   if (cryptoMatch && CRYPTO_BASES.has(cryptoMatch[1])) return `${cryptoMatch[1]}USD`;
-  if (CRYPTO_BASES.has(key)) return `${key}USD`;
   if (B3_RE.test(key) || US_RE.test(key)) return key;
   return "";
+}
+
+export function isAmbiguousCryptoSymbol(value: unknown) {
+  return CRYPTO_BASES.has(aliasKey(value)) && !hasMarketQualifier(value);
+}
+
+export function isBdrSymbol(value: unknown) {
+  return KNOWN_BDR_SYMBOLS.has(canonicalSymbol(value));
 }

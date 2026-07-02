@@ -5,7 +5,12 @@ import time
 from threading import RLock
 from typing import Any
 
+from app.services.symbol_registry import CRYPTO_BASES
+from app.services.symbol_registry import US_EXCHANGE_BY_SYMBOL
 from app.services.symbol_registry import canonical_symbol_or_none
+from app.services.symbol_registry import has_us_market_qualifier
+from app.services.symbol_registry import is_ambiguous_crypto_symbol
+from app.services.symbol_registry import is_known_bdr_symbol
 
 
 DEFAULT_SYMBOL_COOLDOWN_SECONDS = 300
@@ -132,6 +137,8 @@ def sanitize_market_symbol(value: Any, *, allow_provider_symbols: bool = False) 
     raw = _raw(value)
     if not raw:
         return None
+    if is_ambiguous_crypto_symbol(raw):
+        return None
 
     if allow_provider_symbols:
         if raw in _PROVIDER_SYMBOLS or _CME_PROVIDER_RE.match(raw):
@@ -145,6 +152,23 @@ def sanitize_market_symbol(value: Any, *, allow_provider_symbols: bool = False) 
     if canonical:
         return canonical
 
+    if has_us_market_qualifier(raw):
+        qualified_symbol = raw[:-3] if raw.endswith(".US") else raw
+        if ":" in qualified_symbol:
+            qualified_symbol = qualified_symbol.rsplit(":", 1)[-1].strip()
+        if qualified_symbol in CRYPTO_BASES and qualified_symbol not in US_EXCHANGE_BY_SYMBOL:
+            return None
+        if _crypto_base(qualified_symbol) in CRYPTO_BASES:
+            return None
+        if qualified_symbol.endswith("34"):
+            return None
+        if (
+            (_B3_RE.match(qualified_symbol) or _B3_FUTURE_RE.match(qualified_symbol))
+            and qualified_symbol not in US_EXCHANGE_BY_SYMBOL
+        ):
+            return None
+        raw = qualified_symbol
+
     if _looks_like_query(raw):
         return None
     if is_permanently_blocked_symbol(raw):
@@ -154,6 +178,10 @@ def sanitize_market_symbol(value: Any, *, allow_provider_symbols: bool = False) 
     compact = compact.replace("-USD", "USD")
     if compact.endswith("USDT"):
         compact = f"{compact[:-4]}USD"
+    if compact in CRYPTO_BASES:
+        return None
+    if compact.endswith("34") and not is_known_bdr_symbol(compact):
+        return None
 
     if compact.startswith("=") or not compact:
         return None

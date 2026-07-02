@@ -29,6 +29,12 @@ from app.services.symbol_sanitizer import (
     mark_symbol_cooldown,
     sanitize_market_symbol,
 )
+from app.services.symbol_registry import (
+    canonical_symbol,
+    is_ambiguous_crypto_symbol,
+    is_bdr_symbol as registry_is_bdr_symbol,
+    is_bdr_proxy_payload,
+)
 
 logger = logging.getLogger("stocknewsbr.market_data_loader")
 _YFINANCE = None
@@ -104,6 +110,124 @@ def _has_real_price_payload(payload: Optional[dict]) -> bool:
     return math.isfinite(price) and price > 0
 
 
+def _identity_contract_for_symbol(symbol: str, provider_symbol: str | None = None) -> dict:
+    original = (symbol or "").upper().strip()
+    normalized = _normalize_symbol(original)
+    display = _normalize_ticker_display(original, normalized)
+    crypto_identity = crypto_provider_symbol(original or normalized)
+    canonical_input = normalized if crypto_identity else (display or original)
+    canonical = (
+        canonical_symbol(canonical_input, fallback=False)
+        or canonical_symbol(display or original, fallback=False)
+        or canonical_input
+        or display
+    )
+    provider = provider_symbol or normalized
+
+    asset_type = "USA"
+    market = "USA"
+    currency = "USD"
+    timezone = "America/New_York"
+
+    if _is_bdr_symbol(display or original):
+        asset_type = "BDR"
+        market = "B3"
+        currency = "BRL"
+        timezone = "America/Sao_Paulo"
+    elif _b3_future_reference(original) or _B3_MINI_FUTURE_RE.match(original):
+        asset_type = "B3_FUTURE"
+        market = "B3"
+        currency = "BRL"
+        timezone = "America/Sao_Paulo"
+    elif crypto_provider_symbol(original or normalized):
+        asset_type = "CRYPTO"
+        market = "CRYPTO"
+        currency = "USD"
+        timezone = "UTC"
+    elif (normalized or original).endswith(".SA") or re.match(r"^[A-Z][A-Z0-9]{3,4}(3|4|5|6|11)$", display or ""):
+        asset_type = "B3"
+        market = "B3"
+        currency = "BRL"
+        timezone = "America/Sao_Paulo"
+
+    return {
+        "requested_symbol": original,
+        "canonical_symbol": canonical,
+        "display_symbol": display,
+        "provider": "yfinance",
+        "provider_symbol": provider,
+        "asset_type": asset_type,
+        "market": market,
+        "currency": currency,
+        "timezone": timezone,
+        "identity_preserved": True,
+        "freshness_semantics": "provider_observation_or_cache_ttl",
+    }
+
+
+def _identity_aliases_for_value(value: str) -> set[str]:
+    raw = str(value or "").upper().strip()
+    aliases = {raw}
+    normalized = _normalize_symbol(raw)
+    if normalized:
+        aliases.add(normalized.upper().strip())
+        aliases.add(_normalize_ticker_display(raw, normalized).upper().strip())
+    canonical = canonical_symbol(raw, fallback=False)
+    if canonical:
+        aliases.add(canonical.upper().strip())
+    cache_key = _cache_key(raw)
+    if cache_key:
+        aliases.add(cache_key.upper().strip())
+    aliases.discard("")
+    return aliases
+
+
+def _legacy_payload_matches_symbol(symbol: str, payload: Optional[dict]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    requested_aliases = _identity_aliases_for_value(symbol)
+    if not requested_aliases:
+        return False
+    checked_identity = False
+    for field in ("requested_symbol", "canonical_symbol", "display_symbol", "symbol", "provider_symbol"):
+        raw_value = payload.get(field)
+        if raw_value in (None, ""):
+            continue
+        checked_identity = True
+        if not (_identity_aliases_for_value(str(raw_value)) & requested_aliases):
+            return False
+    return checked_identity
+
+
+def _attach_identity_contract(symbol: str, payload: Optional[dict]) -> Optional[dict]:
+    if not isinstance(payload, dict):
+        return payload
+    source = str(payload.get("source") or "").lower().strip()
+    if source not in {"proxy_market", "reference_proxy"} and not _legacy_payload_matches_symbol(symbol, payload):
+        return None
+    provider_symbol = payload.get("provider_symbol") or _normalize_symbol(symbol)
+    contract = _identity_contract_for_symbol(symbol, str(provider_symbol or ""))
+    enriched = dict(payload)
+    for key, value in contract.items():
+        enriched[key] = value
+    enriched["symbol"] = str(contract.get("display_symbol") or symbol).upper().strip()
+    source = str(enriched.get("source") or "").lower()
+    if source == "reference_proxy":
+        enriched["fallback"] = True
+        enriched["fallback_type"] = "reference_proxy"
+        enriched["price_semantics"] = "reference_proxy_not_exact_contract"
+    elif source == "proxy_market":
+        enriched["fallback"] = True
+        enriched["fallback_type"] = "foreign_underlying_context_only"
+        enriched["price_semantics"] = "not_negotiable_for_requested_symbol"
+    else:
+        enriched["fallback"] = False
+        enriched["fallback_type"] = None
+        enriched["price_semantics"] = "direct_market_price"
+    enriched["freshness_semantics"] = "provider_observation_or_cache_ttl"
+    return enriched
+
+
 def _requires_provider_identity(symbol: str) -> bool:
     original = (symbol or "").upper().strip()
     normalized = _normalize_symbol(original)
@@ -117,10 +241,14 @@ def _requires_provider_identity(symbol: str) -> bool:
 def _payload_matches_requested_symbol(symbol: str, payload: Optional[dict]) -> bool:
     if not isinstance(payload, dict):
         return False
+    original = (symbol or "").upper().strip()
+    source = str(payload.get("source") or "").lower().strip()
+    semantics = str(payload.get("price_semantics") or "").lower().strip()
+    provider_symbol = str(payload.get("provider_symbol") or "").upper().strip()
     if _is_bdr_symbol(symbol):
-        source = str(payload.get("source") or "").lower().strip()
-        provider_symbol = str(payload.get("provider_symbol") or "").upper().strip()
-        if source == "proxy_market":
+        if is_bdr_proxy_payload(payload):
+            return False
+        if semantics != "direct_market_price":
             return False
         if not provider_symbol:
             return False
@@ -131,15 +259,128 @@ def _payload_matches_requested_symbol(symbol: str, payload: Optional[dict]) -> b
         return provider_symbol == normalized_symbol or (
             provider_symbol.endswith(".SA") and provider_display == requested_display
         )
+    if source == "proxy_market":
+        expected_proxy = str(_proxy_symbol_for(symbol) or "").upper().strip()
+        if not expected_proxy or provider_symbol != expected_proxy:
+            return False
+    elif source == "reference_proxy":
+        reference = _b3_future_reference(original)
+        expected_reference = str(reference[0] if reference else "").upper().strip()
+        payload_reference = str(payload.get("reference_symbol") or provider_symbol).upper().strip()
+        if (
+            reference is None
+            or provider_symbol != expected_reference
+            or payload_reference != expected_reference
+            or str(payload.get("reference_proxy_for") or "").upper().strip() != original
+        ):
+            return False
+    else:
+        if semantics != "direct_market_price":
+            return False
+        if provider_symbol != _normalize_symbol(symbol).upper().strip():
+            return False
     if not _requires_provider_identity(symbol):
         return True
-    original = (symbol or "").upper().strip()
     if _B3_MINI_FUTURE_RE.match(original):
         return (
             str(payload.get("reference_proxy_for") or "").upper().strip() == original
             and str(payload.get("source") or "").lower() == "reference_proxy"
         ) or str(payload.get("provider_symbol") or "").upper().strip() == _normalize_symbol(symbol)
     return str(payload.get("provider_symbol") or "").upper().strip() == _normalize_symbol(symbol)
+
+
+def _has_identity_contract(symbol: str, payload: Optional[dict]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    required_fields = (
+        "requested_symbol",
+        "canonical_symbol",
+        "display_symbol",
+        "provider_symbol",
+        "asset_type",
+        "market",
+        "currency",
+        "price_semantics",
+        "freshness_semantics",
+    )
+    if any(payload.get(field) in (None, "") for field in required_fields):
+        return False
+    if payload.get("identity_preserved") is not True:
+        return False
+    normalized_symbol = _normalize_symbol(symbol)
+    requested_aliases = {
+        str(symbol or "").upper().strip(),
+        normalized_symbol.upper().strip(),
+        _cache_key(symbol).upper().strip(),
+        _normalize_ticker_display(symbol, normalized_symbol).upper().strip(),
+        str(canonical_symbol(symbol, fallback=False) or "").upper().strip(),
+    }
+    payload_aliases = {
+        str(payload.get("requested_symbol") or "").upper().strip(),
+        str(payload.get("canonical_symbol") or "").upper().strip(),
+        str(payload.get("display_symbol") or "").upper().strip(),
+    }
+    requested_aliases.discard("")
+    payload_aliases.discard("")
+    if not requested_aliases.intersection(payload_aliases):
+        return False
+    expected = _identity_contract_for_symbol(
+        symbol,
+        str(payload.get("provider_symbol") or _normalize_symbol(symbol)),
+    )
+    for field in ("canonical_symbol", "display_symbol", "asset_type", "market", "currency", "timezone", "freshness_semantics"):
+        if str(payload.get(field) or "").upper().strip() != str(expected.get(field) or "").upper().strip():
+            return False
+    source = str(payload.get("source") or "").lower().strip()
+    semantics = str(payload.get("price_semantics") or "").lower().strip()
+    fallback_type = str(payload.get("fallback_type") or "").lower().strip()
+    if source == "reference_proxy":
+        if (
+            semantics != "reference_proxy_not_exact_contract"
+            or payload.get("fallback") is not True
+            or fallback_type != "reference_proxy"
+        ):
+            return False
+    elif source == "proxy_market":
+        if (
+            semantics != "not_negotiable_for_requested_symbol"
+            or payload.get("fallback") is not True
+            or fallback_type != "foreign_underlying_context_only"
+        ):
+            return False
+    else:
+        if semantics != "direct_market_price":
+            return False
+        if payload.get("fallback") is True or fallback_type:
+            return False
+    return _payload_matches_requested_symbol(symbol, payload)
+
+
+def _cached_payload_for_symbol(symbol: str, cached: Optional[dict], age: float) -> Optional[dict]:
+    if not isinstance(cached, dict):
+        return None
+    payload = dict(cached.get("payload") or {})
+    if not _has_real_price_payload(payload):
+        return None
+    if not _has_identity_contract(symbol, payload):
+        if payload.get("identity_preserved") is True:
+            return None
+        migrated_payload = _attach_identity_contract(symbol, payload)
+        if not _has_identity_contract(symbol, migrated_payload):
+            return None
+        payload = migrated_payload
+    if age > _PRICE_CACHE_TTL_SECONDS:
+        payload.setdefault("original_source", payload.get("source") or "market_cache")
+        if not payload.get("source"):
+            payload["source"] = "market_cache"
+        payload["cache_source"] = "stale_market_cache"
+        payload["stale"] = True
+    else:
+        payload["source"] = payload.get("source") or "market_cache"
+        payload.setdefault("cache_source", "market_cache")
+    payload["cache_age_seconds"] = round(age, 2)
+    return payload
+
 
 _CRYPTO_DISPLAY_TO_YF = {display: provider for display, provider in _CRYPTO_YF_SYMBOLS.items()}
 
@@ -272,8 +513,22 @@ _BDR_DISPLAY_SYMBOLS = {
     "NATU3": "NTCO3",
 }
 
+_TRUE_BDR_DISPLAY_SYMBOLS = {
+    key
+    for key, display in _BDR_DISPLAY_SYMBOLS.items()
+    if registry_is_bdr_symbol(key) or registry_is_bdr_symbol(display)
+}
+
 
 def _normalize_symbol(symbol: str) -> str:
+    if is_ambiguous_crypto_symbol(symbol):
+        return ""
+    original = str(symbol or "").upper().strip()
+    provider_symbol = _BDR_PROVIDER_SYMBOLS.get(original)
+    if provider_symbol:
+        if is_globally_blocked_symbol(provider_symbol):
+            return ""
+        return provider_symbol
     symbol = sanitize_market_symbol(symbol, allow_provider_symbols=True) or ""
 
     if not symbol:
@@ -286,7 +541,9 @@ def _normalize_symbol(symbol: str) -> str:
         return f"{symbol}.SA"
 
     provider_symbol = _BDR_PROVIDER_SYMBOLS.get(symbol)
-    if provider_symbol and not is_globally_blocked_symbol(provider_symbol):
+    if provider_symbol:
+        if is_globally_blocked_symbol(provider_symbol):
+            return ""
         return provider_symbol
 
     crypto_provider = crypto_provider_symbol(symbol)
@@ -343,7 +600,13 @@ def _is_bdr_symbol(symbol: str) -> bool:
     original = (symbol or "").upper().strip()
     normalized = _normalize_symbol(original)
     display = _normalize_ticker_display(original, normalized)
-    return any(_BDR_DISPLAY_RE.match(value or "") is not None for value in (original, normalized, display))
+    return any(
+        registry_is_bdr_symbol(value)
+        or value in _BDR_PROXY_SYMBOLS
+        or value in _TRUE_BDR_DISPLAY_SYMBOLS
+        for value in (original, normalized, display)
+        if value
+    )
 
 
 def _is_permanently_blocked_symbol(symbol: str) -> bool:
@@ -405,7 +668,7 @@ def _reference_payload_for_b3_future(symbol: str) -> Optional[dict]:
             "exact_contract": False,
         }
     )
-    return resolved
+    return _attach_identity_contract(original, resolved)
 
 
 def get_display_symbol(symbol: str) -> str:
@@ -513,10 +776,30 @@ def _load_price_cache_once(include_stale: bool = False, force: bool = False):
                 if not _has_real_price_payload(payload):
                     continue
                 if include_stale or now - timestamp <= _PRICE_CACHE_TTL_SECONDS:
-                    _PRICE_SNAPSHOT_CACHE[str(key)] = {
+                    payload = dict(payload)
+                    identity_symbol = str(
+                        payload.get("requested_symbol")
+                        or payload.get("display_symbol")
+                        or payload.get("symbol")
+                        or key
+                    )
+                    if not _has_identity_contract(identity_symbol, payload):
+                        if payload.get("identity_preserved") is True:
+                            continue
+                        migrated_payload = _attach_identity_contract(identity_symbol, payload)
+                        if not _has_identity_contract(identity_symbol, migrated_payload):
+                            continue
+                        payload = migrated_payload
+                    cache_key = _cache_key(identity_symbol) or _cache_key(str(key))
+                    if not cache_key:
+                        continue
+                    cache_entry = {
                         "timestamp": timestamp,
                         "payload": payload,
                     }
+                    _PRICE_SNAPSHOT_CACHE[cache_key] = cache_entry
+                    if cache_key != str(key):
+                        _PRICE_SNAPSHOT_CACHE.setdefault(str(key), cache_entry)
         except Exception as exc:
             logger.warning("Failed to load market quote cache: %s", exc)
 
@@ -687,10 +970,16 @@ def _cache_price_payload(symbol: str, payload: Optional[dict], persist: bool = T
     if not _has_real_price_payload(payload):
         return payload
 
-    payload = dict(payload or {})
+    payload = _attach_identity_contract(symbol, payload)
+    if not payload or not _payload_matches_requested_symbol(symbol, payload):
+        mark_symbol_cooldown(symbol, reason="identity_mismatch")
+        return None
     payload.setdefault("provider_symbol", _normalize_symbol(symbol))
     payload.setdefault("display_symbol", _normalize_ticker_display(symbol, _normalize_symbol(symbol)))
     key = _cache_key(symbol)
+    if not key:
+        mark_symbol_cooldown(symbol, reason="invalid_symbol")
+        return None
     with _PRICE_SNAPSHOT_CACHE_LOCK:
         _PRICE_SNAPSHOT_CACHE[key] = {
             "timestamp": time.time(),
@@ -716,18 +1005,7 @@ def _get_cached_price_payload(symbol: str, allow_stale: bool = False):
     if age > _PRICE_CACHE_TTL_SECONDS and not allow_stale:
         return None
 
-    payload = dict(cached.get("payload") or {})
-    if not _has_real_price_payload(payload):
-        return None
-    if not _payload_matches_requested_symbol(symbol, payload):
-        return None
-    if age > _PRICE_CACHE_TTL_SECONDS:
-        payload["source"] = payload.get("source") or "stale_market_cache"
-        payload["stale"] = True
-    else:
-        payload["source"] = payload.get("source") or "market_cache"
-    payload["cache_age_seconds"] = round(age, 2)
-    return payload
+    return _cached_payload_for_symbol(symbol, cached, age)
 
 
 def batch_download(
@@ -970,7 +1248,7 @@ def _price_payload_from_frame(symbol: str, frame: Optional[pd.DataFrame]):
             except Exception:
                 average_volume = None
 
-        return {
+        payload = {
             "symbol": _normalize_ticker_display(symbol, _normalize_symbol(symbol)),
             "provider_symbol": _normalize_symbol(symbol),
             "display_symbol": _normalize_ticker_display(symbol, _normalize_symbol(symbol)),
@@ -986,6 +1264,7 @@ def _price_payload_from_frame(symbol: str, frame: Optional[pd.DataFrame]):
             "high": float(last.get("High", 0) or 0),
             "low": float(last.get("Low", 0) or 0),
         }
+        return _attach_identity_contract(symbol, payload)
     except Exception as exc:
         logger.error("Price snapshot error for %s: %s", symbol, exc)
         return None
@@ -1137,6 +1416,18 @@ def _price_payload_from_fast_info(symbol: str):
             "low": float(low or last_price),
         }
         duration = time.perf_counter() - start
+        payload = _attach_identity_contract(symbol, payload)
+        if not payload:
+            _mark_symbol_failure(symbol, error="identity_mismatch")
+            record_external_provider_call(
+                "yfinance",
+                "fast_info",
+                duration_seconds=duration,
+                success=False,
+                symbol=normalized_symbol,
+                error="identity_mismatch",
+            )
+            return None
         record_external_provider_call("yfinance", "fast_info", duration_seconds=duration, success=True, symbol=normalized_symbol)
         return payload
     except Exception as exc:
@@ -1149,6 +1440,9 @@ def _price_payload_from_fast_info(symbol: str):
 
 
 def get_price_snapshot(symbol: str):
+    if is_ambiguous_crypto_symbol(symbol):
+        _mark_symbol_failure(symbol, error="ambiguous_symbol")
+        return None
     if not sanitize_market_symbol(symbol, allow_provider_symbols=True):
         _mark_symbol_failure(symbol, error="invalid_symbol")
         return None
@@ -1212,6 +1506,9 @@ def get_price_snapshots(symbols: List[str], *, force_refresh: bool = False):
     unique_symbols = []
     seen = set()
     for symbol in symbols:
+        if is_ambiguous_crypto_symbol(symbol):
+            _mark_symbol_failure(symbol, error="ambiguous_symbol")
+            continue
         sanitized = sanitize_market_symbol(symbol, allow_provider_symbols=True)
         if not sanitized:
             _mark_symbol_failure(symbol, error="invalid_symbol")
@@ -1254,10 +1551,12 @@ def get_price_snapshots(symbols: List[str], *, force_refresh: bool = False):
         if _prefer_b3_reference_proxy(symbol):
             reference_payload = _reference_payload_for_b3_future(symbol)
             if reference_payload:
-                payloads[symbol] = _cache_price_payload(symbol, reference_payload, persist=False)
-                _clear_symbol_failure(symbol)
-                cache_changed = True
-                continue
+                cached_reference_payload = _cache_price_payload(symbol, reference_payload, persist=False)
+                if cached_reference_payload:
+                    payloads[symbol] = cached_reference_payload
+                    _clear_symbol_failure(symbol)
+                    cache_changed = True
+                    continue
         proxy_symbol = None if _is_bdr_symbol(symbol) else _proxy_symbol_for(symbol)
         if proxy_symbol and proxy_symbol != normalized_symbol:
             proxy_symbol_by_display[symbol] = proxy_symbol
@@ -1286,18 +1585,22 @@ def get_price_snapshots(symbols: List[str], *, force_refresh: bool = False):
                 resolved = dict(payload)
                 resolved["symbol"] = _normalize_ticker_display(symbol, _normalize_symbol(symbol))
                 resolved["source"] = "proxy_market"
-                payloads[symbol] = _cache_price_payload(symbol, resolved, persist=False)
-                _clear_symbol_failure(symbol)
-                cache_changed = True
-                continue
+                cached_proxy_payload = _cache_price_payload(symbol, resolved, persist=False)
+                if cached_proxy_payload:
+                    payloads[symbol] = cached_proxy_payload
+                    _clear_symbol_failure(symbol)
+                    cache_changed = True
+                    continue
         elif not payload:
             payload = get_price_snapshot(symbol)
 
         if _has_real_price_payload(payload):
-            payloads[symbol] = _cache_price_payload(symbol, payload, persist=False)
-            _clear_symbol_failure(symbol)
-            cache_changed = True
-            continue
+            cached_payload = _cache_price_payload(symbol, payload, persist=False)
+            if cached_payload:
+                payloads[symbol] = cached_payload
+                _clear_symbol_failure(symbol)
+                cache_changed = True
+                continue
 
         cached = _get_cached_price_payload(symbol)
         if cached:
@@ -1319,6 +1622,9 @@ def get_cached_price_snapshots(symbols: List[str], allow_stale: bool = False):
     with _PRICE_SNAPSHOT_CACHE_LOCK:
         now = time.time()
         for symbol in symbols or []:
+            if is_ambiguous_crypto_symbol(symbol):
+                mark_symbol_cooldown(symbol, reason="ambiguous_symbol")
+                continue
             if not sanitize_market_symbol(symbol, allow_provider_symbols=True):
                 mark_symbol_cooldown(symbol, reason="invalid_symbol")
                 continue
@@ -1332,17 +1638,9 @@ def get_cached_price_snapshots(symbols: List[str], allow_stale: bool = False):
             age = now - float(cached.get("timestamp") or 0)
             if age > _PRICE_CACHE_TTL_SECONDS and not allow_stale:
                 continue
-            payload = dict(cached.get("payload") or {})
-            if not _has_real_price_payload(payload):
+            payload = _cached_payload_for_symbol(symbol, cached, age)
+            if not payload:
                 continue
-            if not _payload_matches_requested_symbol(symbol, payload):
-                continue
-            if age > _PRICE_CACHE_TTL_SECONDS:
-                payload["source"] = payload.get("source") or "stale_market_cache"
-                payload["stale"] = True
-            else:
-                payload["source"] = payload.get("source") or "market_cache"
-            payload["cache_age_seconds"] = round(age, 2)
             payloads[key] = payload
     missing_keys = [key for _, key in requested_keys if key not in payloads]
     if missing_keys:
@@ -1350,6 +1648,9 @@ def get_cached_price_snapshots(symbols: List[str], allow_stale: bool = False):
         with _PRICE_SNAPSHOT_CACHE_LOCK:
             now = time.time()
             for symbol, key in requested_keys:
+                if is_ambiguous_crypto_symbol(symbol):
+                    mark_symbol_cooldown(symbol, reason="ambiguous_symbol")
+                    continue
                 if key in payloads:
                     continue
                 cached = _PRICE_SNAPSHOT_CACHE.get(key)
@@ -1358,17 +1659,9 @@ def get_cached_price_snapshots(symbols: List[str], allow_stale: bool = False):
                 age = now - float(cached.get("timestamp") or 0)
                 if age > _PRICE_CACHE_TTL_SECONDS and not allow_stale:
                     continue
-                payload = dict(cached.get("payload") or {})
-                if not _has_real_price_payload(payload):
+                payload = _cached_payload_for_symbol(symbol, cached, age)
+                if not payload:
                     continue
-                if not _payload_matches_requested_symbol(symbol, payload):
-                    continue
-                if age > _PRICE_CACHE_TTL_SECONDS:
-                    payload["source"] = payload.get("source") or "stale_market_cache"
-                    payload["stale"] = True
-                else:
-                    payload["source"] = payload.get("source") or "market_cache"
-                payload["cache_age_seconds"] = round(age, 2)
                 payloads[key] = payload
     record_cache_lookup("quote", time.perf_counter() - start, len(_PRICE_SNAPSHOT_CACHE))
     return payloads

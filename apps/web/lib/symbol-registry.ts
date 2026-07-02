@@ -6,6 +6,25 @@ const CRYPTO_RE = /^([A-Z0-9]{2,8})(USD|USDT)$/;
 const US_RE = /^[A-Z][A-Z0-9]{0,9}$/;
 
 const CRYPTO_BASES = new Set(["BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "MATIC", "AVAX", "LINK"]);
+const US_MARKET_QUALIFIERS = new Set(["AMEX", "ARCA", "BATS", "CBOE", "NASDAQ", "NYSE", "NYSEARCA", "OTC"]);
+const KNOWN_BDR_SYMBOLS = new Set([
+  "A1MD34",
+  "AAPL34",
+  "AMZO34",
+  "BABA34",
+  "BERK34",
+  "GOGL34",
+  "ITLC34",
+  "M1TA34",
+  "MELI34",
+  "MSFT34",
+  "NFLX34",
+  "NVDC34",
+  "PFIZ34",
+  "PYPL34",
+  "QCOM34",
+  "TSLA34",
+]);
 
 const US_EXCHANGE_BY_SYMBOL: Record<string, string> = {
   AAL: "NASDAQ",
@@ -80,6 +99,10 @@ const CURATED_ALIASES: Record<string, string[]> = {
   VOO: ["NYSEARCA:VOO", "VOO.US"],
   SPY: ["NYSEARCA:SPY", "SPY.US"],
   QQQ: ["NASDAQ:QQQ", "QQQ.US"],
+  A1MD34: ["AMD34", "AMD34.SA", "A1MD34.SA"],
+  AMZO34: ["AMZN34", "AMZN34.SA", "AMZO34.SA"],
+  ITLC34: ["INTC34", "INTC34.SA", "I1NC34", "I1NC34.SA", "ITLC34.SA"],
+  M1TA34: ["META34", "META34.SA", "M1TA34.SA"],
 };
 
 const TRADING_VIEW_SYMBOL_FALLBACKS: Record<string, string[]> = {
@@ -114,6 +137,13 @@ function aliasKey(value: unknown) {
   return compact;
 }
 
+function hasMarketQualifier(value: unknown) {
+  const raw = String(value || "").trim().toUpperCase();
+  if (raw.endsWith(".US")) return true;
+  if (!raw.includes(":")) return false;
+  return US_MARKET_QUALIFIERS.has(raw.split(":")[0]?.trim() || "");
+}
+
 function buildAliasMap() {
   const map = new Map<string, string>();
 
@@ -127,7 +157,6 @@ function buildAliasMap() {
   for (const base of CRYPTO_BASES) {
     const canonical = `${base}USD`;
     const aliases = [
-      base,
       canonical,
       `${base}USDT`,
       `${base}/USD`,
@@ -158,16 +187,30 @@ const ALIAS_TO_CANONICAL = buildAliasMap();
 export function canonicalSymbol(value: unknown) {
   const key = aliasKey(value);
   if (!key) return "";
+  const marketQualified = hasMarketQualifier(value);
+  const cryptoMatch = key.match(CRYPTO_RE);
+  if (CRYPTO_BASES.has(key)) return marketQualified && US_EXCHANGE_BY_SYMBOL[key] ? key : "";
+  if (marketQualified && cryptoMatch && CRYPTO_BASES.has(cryptoMatch[1])) return "";
+  if (marketQualified && (B3_RE.test(key) || B3_FUTURE_RE.test(key))) {
+    return US_EXCHANGE_BY_SYMBOL[key] ? key : "";
+  }
 
   const mapped = ALIAS_TO_CANONICAL.get(key);
   if (mapped) return mapped;
+  if (key.endsWith("34") && !KNOWN_BDR_SYMBOLS.has(key)) return "";
   if (B3_RE.test(key) || B3_FUTURE_RE.test(key)) return key;
 
-  const cryptoMatch = key.match(CRYPTO_RE);
   if (cryptoMatch && CRYPTO_BASES.has(cryptoMatch[1])) return `${cryptoMatch[1]}USD`;
-  if (CRYPTO_BASES.has(key)) return `${key}USD`;
   if (US_RE.test(key)) return key;
   return "";
+}
+
+export function isAmbiguousCryptoSymbol(value: unknown) {
+  return CRYPTO_BASES.has(aliasKey(value)) && !hasMarketQualifier(value);
+}
+
+export function isBdrSymbol(value: unknown) {
+  return KNOWN_BDR_SYMBOLS.has(canonicalSymbol(value));
 }
 
 export function canonicalSymbolAliases(value: unknown) {
@@ -184,7 +227,6 @@ export function canonicalSymbolAliases(value: unknown) {
   }
   if (canonical.endsWith("USD")) {
     const base = canonical.slice(0, -3);
-    aliases.add(base);
     aliases.add(`${base}USDT`);
     aliases.add(`${base}-USD`);
     aliases.add(`${base}-USDT`);
@@ -244,7 +286,7 @@ export function symbolCategoryFor(value: unknown) {
   const canonical = canonicalSymbol(value);
   if (!canonical) return "";
   if (canonical.endsWith("USD") && CRYPTO_BASES.has(canonical.slice(0, -3))) return "Crypto";
-  if (canonical.endsWith("34") || canonical === "IVVB11") return "BDR";
+  if (KNOWN_BDR_SYMBOLS.has(canonical)) return "BDR";
   if (B3_RE.test(canonical) || B3_FUTURE_RE.test(canonical) || canonical === "WIN") return "B3";
   return "USA";
 }

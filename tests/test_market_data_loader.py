@@ -106,7 +106,7 @@ class MarketDataLoaderTests(unittest.TestCase):
         self.assertTrue(
             market_data_loader._payload_matches_requested_symbol(
                 "ES",
-                {"symbol": "ES", "provider_symbol": "ES=F", "price": 7538.0},
+                {"symbol": "ES", "provider_symbol": "ES=F", "price": 7538.0, "price_semantics": "direct_market_price"},
             )
         )
 
@@ -142,7 +142,7 @@ class MarketDataLoaderTests(unittest.TestCase):
             market_data_loader,
             "get_price_snapshot",
             return_value={
-                "symbol": "META34",
+                "symbol": "M1TA34",
                 "provider_symbol": "M1TA34.SA",
                 "price": 83.2,
                 "change": 0.4,
@@ -153,12 +153,15 @@ class MarketDataLoaderTests(unittest.TestCase):
             market_data_loader,
             "_persist_price_cache",
         ):
-            payloads = market_data_loader.get_price_snapshots(["META34.SA"])
+            payloads = market_data_loader.get_price_snapshots(["M1TA34.SA"])
 
         batch_download.assert_called_once()
         self.assertEqual(batch_download.call_args.args[0], ["META34"])
         get_price_snapshot.assert_called_once_with("META34")
         self.assertEqual(payloads["META34"]["symbol"], "META34")
+        self.assertEqual(payloads["META34"]["requested_symbol"], "META34")
+        self.assertEqual(payloads["META34"]["display_symbol"], "META34")
+        self.assertEqual(payloads["META34"]["canonical_symbol"], "M1TA34")
         self.assertEqual(payloads["META34"]["provider_symbol"], "M1TA34.SA")
         self.assertEqual(payloads["META34"]["source"], "market")
         self.assertEqual(payloads["META34"]["price"], 83.2)
@@ -207,6 +210,7 @@ class MarketDataLoaderTests(unittest.TestCase):
                     "provider_symbol": "A1MD34.SA",
                     "price": 89.72,
                     "source": "market",
+                    "price_semantics": "direct_market_price",
                 },
             )
         )

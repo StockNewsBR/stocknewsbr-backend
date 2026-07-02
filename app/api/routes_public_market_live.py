@@ -26,7 +26,13 @@ from app.services.quote_service import (
 )
 from app.services.score_display import attach_master_score_display_contract
 from app.services.snapshot_contract import build_decision_envelope
-from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases
+from app.services.symbol_registry import (
+    canonical_symbol,
+    canonical_symbol_aliases,
+    is_ambiguous_crypto_symbol,
+    is_bdr_proxy_payload,
+    is_bdr_symbol,
+)
 from app.services.symbol_sanitizer import mark_symbol_cooldown, sanitize_market_symbol
 from app.system.system_metrics import record_cache_access
 
@@ -60,11 +66,131 @@ def _is_b3_mini_future_symbol(symbol: str) -> bool:
     return _B3_MINI_FUTURE_RE.match(compact) is not None
 
 
-def _normalize_public_symbol(symbol: str) -> str:
+def _normalize_public_symbol(symbol: str, *, mark_cooldown: bool = True) -> str:
+    if is_ambiguous_crypto_symbol(symbol):
+        if mark_cooldown:
+            mark_symbol_cooldown(symbol, "ambiguous_symbol")
+        return ""
     sanitized = canonical_symbol(symbol) or sanitize_market_symbol(symbol, allow_provider_symbols=True)
-    if not sanitized and symbol:
+    if mark_cooldown and not sanitized and symbol:
         mark_symbol_cooldown(symbol, "invalid_symbol")
     return sanitized or ""
+
+
+def _safe_response_symbol(symbol: str) -> str:
+    normalized = _normalize_public_symbol(symbol, mark_cooldown=False)
+    if normalized:
+        return _response_symbol(normalized)
+    raw = str(symbol or "").upper().strip()
+    safe = re.sub(r"[^A-Z0-9._=-]", "", raw)[:32]
+    return safe or "INVALID_SYMBOL"
+
+
+def _invalid_quote_payload(symbol: str, status: str, reason: str | None = None) -> dict:
+    safe_symbol = _safe_response_symbol(symbol)
+    payload = empty_quote_payload(safe_symbol, quote_status=status, reason=reason or status)
+    payload["requested_symbol"] = safe_symbol
+    return payload
+
+
+def _empty_master_context() -> dict:
+    return {
+        "master_score": None,
+        "master_score_raw": None,
+        "master_score_source_scale": None,
+        "decision_status": None,
+        "decision_envelope": {},
+        "master_direction": None,
+        "master_conviction": None,
+        "master_confidence": None,
+        "master_summary": None,
+        "master_reasoning": {},
+        "master_risk": None,
+        "master_status": None,
+        "opinion_change_conditions": [],
+        "strategic_panel": {},
+        "strategic_panel_summary": "",
+        "recommended_action": None,
+        "radar_prioritization_score": None,
+        "radar_priority_score": None,
+        "radar_priority": None,
+        "radar_level": None,
+        "radar_reason": None,
+        "radar_summary": None,
+        "radar_no_trade_now": False,
+        "radar_blocked_reasons": [],
+        "ranking_opportunity_score": None,
+        "ranking_classification": None,
+        "ranking_reason": None,
+        "ranking_summary": None,
+        "ranking_eligible": None,
+        "ranking_excluded_reasons": [],
+        "historical_confidence_score": None,
+        "historical_confidence_label": None,
+        "historical_sample_size": None,
+        "historical_win_rate": None,
+        "historical_context_match": None,
+        "historical_reason": None,
+        "historical_warning": None,
+        "operational_status": None,
+        "operational_ready": None,
+        "operational_score": None,
+        "operational_blocks": [],
+        "operational_warnings": [],
+        "operational_summary": None,
+        "conviction_score": None,
+        "conviction_level": None,
+        "conviction_summary": None,
+        "conviction_factors": [],
+        "conviction_conflicts": [],
+        "priority_score": None,
+        "priority_level": None,
+        "priority_rank": None,
+        "priority_summary": None,
+        "priority_factors": [],
+        "final_decision": None,
+        "final_decision_score": None,
+        "final_decision_summary": None,
+        "final_decision_reason": None,
+        "final_decision_blocks": [],
+        "final_decision_confidence": None,
+    }
+
+
+def _invalid_insight_payload(symbol: str, status: str, provider_status: str) -> dict:
+    response_symbol = _safe_response_symbol(symbol)
+    return {
+        "symbol": response_symbol,
+        "score": None,
+        **_empty_master_context(),
+        "rsi": None,
+        "trend_bias": None,
+        "signal": None,
+        "summary": {
+            "source": status,
+            "fallback": True,
+            "status": status,
+            "provider_status": provider_status,
+        },
+        "fallback": True,
+        "status": status,
+        "provider_status": provider_status,
+    }
+
+
+def _invalid_bundle_payload(symbol: str, interval: str, limit: int, status: str, provider_status: str) -> dict:
+    del limit
+    response_symbol = _safe_response_symbol(symbol)
+    quote = _invalid_quote_payload(symbol, status, provider_status)
+    return _json_safe_payload({
+        "symbol": response_symbol,
+        "quote": quote,
+        "insight": _invalid_insight_payload(symbol, status, provider_status),
+        "chart": _empty_chart_payload(response_symbol, interval, provider_status, status=status),
+        "news": {"symbol": response_symbol, "items": [], "count": 0, "source": status, "status": status},
+        "ai_tools": {"tools": {}, "source": status, "using_fallback": False, "go_live_ready": False},
+        "source": "cache_snapshot_bundle",
+    })
 
 
 def _dedupe_public_symbols(symbols) -> list[str]:
@@ -146,18 +272,52 @@ def _identity_forms(value) -> set[str]:
 def _payload_matches_requested_symbol(payload, symbol: str, *, require_identity: bool = False) -> bool:
     if not isinstance(payload, dict):
         return False
+    if is_bdr_symbol(symbol):
+        if is_bdr_proxy_payload(payload):
+            return False
 
     allowed: set[str] = set()
     for alias in [*_symbol_aliases(symbol), _response_symbol(symbol)]:
         allowed.update(_identity_forms(alias))
 
     identities: set[str] = set()
-    for key in ("symbol", "display_symbol", "provider_symbol", "reference_symbol", "exact_contract", "ticker"):
+    for key in ("requested_symbol", "canonical_symbol", "symbol", "display_symbol", "provider_symbol", "reference_symbol", "exact_contract", "ticker"):
         identities.update(_identity_forms(payload.get(key)))
 
+    source = str(payload.get("source") or "").lower().strip()
+    snapshot_sources = {"snapshot", "last_good_snapshot", "stale_last_good_snapshot"}
+    if require_identity and payload.get("identity_preserved") is not True and source not in snapshot_sources:
+        return False
     if not identities:
         return not require_identity
     return bool(allowed.intersection(identities))
+
+
+def _quote_identity_rank(payload: dict) -> int:
+    if payload.get("identity_preserved") is True and all(
+        payload.get(field) not in (None, "")
+        for field in ("requested_symbol", "canonical_symbol", "display_symbol", "provider_symbol", "asset_type", "market", "currency")
+    ):
+        return 0
+    return 1
+
+
+def _matching_quote_candidates(cached_payloads, symbol: str) -> list[dict]:
+    candidates: list[dict] = []
+    seen: set[int] = set()
+    for alias in _symbol_aliases(symbol):
+        candidate = cached_payloads.get(alias)
+        if not isinstance(candidate, dict):
+            continue
+        if not _payload_matches_requested_symbol(candidate, symbol, require_identity=True):
+            continue
+        marker = id(candidate)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        candidates.append(candidate)
+    candidates.sort(key=_quote_identity_rank)
+    return candidates
 
 
 def _snapshot_master_context(symbol: str) -> dict:
@@ -386,12 +546,8 @@ def _fallback_score(closes, rsi):
 
 
 def _resolve_cached_quote(cached_payloads, symbol: str, chart_quote_cache: dict | None = None):
-    for alias in _symbol_aliases(symbol):
-        candidate = cached_payloads.get(alias)
-        if not isinstance(candidate, dict):
-            continue
-        if not _payload_matches_requested_symbol(candidate, symbol):
-            continue
+    candidates = _matching_quote_candidates(cached_payloads, symbol)
+    for candidate in candidates:
         if _has_usable_quote_payload(candidate, allow_stale=False) and not _quote_needs_background_refresh(candidate):
             payload = {**candidate, "symbol": _response_symbol(symbol)}
             if payload.get("source") is None:
@@ -399,12 +555,7 @@ def _resolve_cached_quote(cached_payloads, symbol: str, chart_quote_cache: dict 
             payload["quote_status"] = classify_quote_payload(payload)
             return with_quote_diagnostics(payload) or payload
 
-    for alias in _symbol_aliases(symbol):
-        candidate = cached_payloads.get(alias)
-        if not isinstance(candidate, dict):
-            continue
-        if not _payload_matches_requested_symbol(candidate, symbol):
-            continue
+    for candidate in candidates:
         if _has_usable_quote_payload(candidate, allow_stale=True):
             payload = {**candidate, "symbol": _response_symbol(symbol)}
             if payload.get("source") is None:
@@ -427,7 +578,11 @@ def _resolve_cached_quote(cached_payloads, symbol: str, chart_quote_cache: dict 
             return with_quote_diagnostics(payload) or payload
 
     snapshot_payload = get_cached_quote_payload(symbol)
-    if _payload_matches_requested_symbol(snapshot_payload, symbol) and _has_usable_quote_payload(snapshot_payload, allow_stale=True):
+    if _payload_matches_requested_symbol(
+        snapshot_payload,
+        symbol,
+        require_identity=True,
+    ) and _has_usable_quote_payload(snapshot_payload, allow_stale=True):
         payload = {**snapshot_payload, "symbol": _response_symbol(symbol)}
         payload["quote_status"] = classify_quote_payload(payload)
         return with_quote_diagnostics(payload) or payload
@@ -623,25 +778,43 @@ def _build_quote_fallback_chart(symbol: str, interval: str):
 
 @router.get("/market/quotes")
 def public_quotes(symbols: str = Query(default="")):
-    tickers = _dedupe_public_symbols(
-        _normalize_public_symbol(part)
-        for part in symbols.split(",")
-        if part.strip() and not _is_blocked_public_symbol(part)
-    )
-    limited_tickers = tickers[:80]
+    request_entries = []
+    for part in symbols.split(","):
+        if len(request_entries) >= 80:
+            break
+        raw = part.strip()
+        if not raw:
+            continue
+        if is_ambiguous_crypto_symbol(raw):
+            request_entries.append({"symbol": "", "payload": _invalid_quote_payload(raw, "ambiguous_symbol", "missing_quote_asset")})
+            continue
+        normalized = _normalize_public_symbol(raw)
+        if not normalized:
+            request_entries.append({"symbol": "", "payload": _invalid_quote_payload(raw, "invalid_symbol")})
+            continue
+        if _is_blocked_public_symbol(normalized):
+            request_entries.append({"symbol": "", "payload": _invalid_quote_payload(normalized, "blocked_symbol")})
+            continue
+        request_entries.append({"symbol": normalized, "payload": None})
+
+    limited_entries = request_entries
+    limited_tickers = [entry["symbol"] for entry in limited_entries if entry.get("symbol")]
     cache_keys = _dedupe_alias_symbols(
         alias for symbol in limited_tickers for alias in _symbol_aliases(symbol)
     )
     cached_payloads = cached_price_payloads(cache_keys, allow_stale=True)
     chart_quote_cache: dict = {}
-    items = [
-        _resolve_cached_quote(cached_payloads, symbol, chart_quote_cache=chart_quote_cache)
-        for symbol in limited_tickers
-    ]
-    for symbol, resolved in zip(limited_tickers, items):
+    items = []
+    for entry in limited_entries:
+        if entry.get("payload") is not None:
+            items.append(entry["payload"])
+            continue
+        items.append(_resolve_cached_quote(cached_payloads, entry["symbol"], chart_quote_cache=chart_quote_cache))
+    for entry, resolved in zip(limited_entries, items):
+        quote_status = classify_quote_payload(resolved) if isinstance(resolved, dict) else "empty"
         record_cache_access(
             "quote",
-            bool(isinstance(resolved, dict) and resolved.get("source") != "empty"),
+            quote_status in {"valid", "stale", "reference"},
             "public_quotes",
         )
 
@@ -650,7 +823,11 @@ def public_quotes(symbols: str = Query(default="")):
 
 @router.get("/market/insight/{symbol}")
 def public_market_insight(symbol: str, interval: str = "1D"):
+    if is_ambiguous_crypto_symbol(symbol):
+        return _invalid_insight_payload(symbol, "ambiguous_symbol", "missing_quote_asset")
     ticker = _normalize_public_symbol(symbol)
+    if not ticker:
+        return _invalid_insight_payload(symbol, "invalid_symbol", "invalid_symbol")
     response_symbol = _response_symbol(ticker)
     master_context = _snapshot_master_context(ticker)
     if _is_blocked_public_symbol(ticker):
@@ -717,6 +894,20 @@ def public_market_chart(
     range_value: str | None = Query(default=None, alias="range"),
 ):
     ticker = _normalize_public_symbol(symbol)
+    if is_ambiguous_crypto_symbol(symbol):
+        return _empty_chart_payload(
+            _safe_response_symbol(symbol),
+            _normalize_chart_interval(interval, range_value),
+            "ambiguous_symbol",
+            status="ambiguous_symbol",
+        )
+    if not ticker:
+        return _empty_chart_payload(
+            _safe_response_symbol(symbol),
+            _normalize_chart_interval(interval, range_value),
+            "invalid_symbol",
+            status="invalid_symbol",
+        )
     response_symbol = _response_symbol(ticker)
     chart_interval = _normalize_chart_interval(interval, range_value)
     if _is_blocked_public_symbol(ticker):
@@ -756,7 +947,11 @@ def public_market_bundle(
 ):
     chart_interval = _normalize_chart_interval(interval, range_value)
     safe_limit = max(1, min(int(limit or 6), 20))
+    if is_ambiguous_crypto_symbol(symbol):
+        return _invalid_bundle_payload(symbol, chart_interval, safe_limit, "ambiguous_symbol", "missing_quote_asset")
     ticker = _normalize_public_symbol(symbol)
+    if not ticker:
+        return _invalid_bundle_payload(symbol, chart_interval, safe_limit, "invalid_symbol", "invalid_symbol")
     response_symbol = _response_symbol(ticker)
     cached_payloads = cached_price_payloads(_symbol_aliases(ticker), allow_stale=True)
     quote = _resolve_cached_quote(cached_payloads, ticker)
@@ -779,7 +974,7 @@ def public_market_bundle(
     })
 
 
-def _empty_chart_payload(symbol: str, interval: str, reason: str):
+def _empty_chart_payload(symbol: str, interval: str, reason: str, *, status: str = "empty"):
     return {
         "ticker": symbol,
         "interval": interval,
@@ -791,11 +986,11 @@ def _empty_chart_payload(symbol: str, interval: str, reason: str):
             "ticker": symbol,
             "source": reason,
             "fallback": True,
-            "status": "empty",
+            "status": status,
             "provider_status": reason,
         },
         "fallback": True,
-        "status": "empty",
+        "status": status,
         "provider_status": reason,
     }
 

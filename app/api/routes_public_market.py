@@ -1,7 +1,12 @@
 import re
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.api.routes_public_market_live import (
+    _is_blocked_public_symbol,
+    _payload_matches_requested_symbol as _quote_identity_matches_symbol,
+)
+from app.dependencies import require_channel_access
 from app.services.public_ai_tools_service import build_public_ai_tools_payload
 from app.services.public_news_service import build_public_news_payload
 from app.services.quote_service import (
@@ -11,6 +16,8 @@ from app.services.quote_service import (
     is_usable_quote_payload,
     with_quote_diagnostics,
 )
+from app.services.symbol_registry import canonical_symbol_aliases, is_ambiguous_crypto_symbol, is_bdr_proxy_payload, is_bdr_symbol
+from app.services.symbol_sanitizer import sanitize_market_symbol
 
 
 router = APIRouter(prefix="/public", tags=["Public Market"])
@@ -67,17 +74,59 @@ def _response_symbol(symbol: str) -> str:
     return value
 
 
+def _safe_response_symbol(symbol: str) -> str:
+    sanitized = sanitize_market_symbol(symbol, allow_provider_symbols=True)
+    if sanitized:
+        return _response_symbol(sanitized)
+    raw = _normalize_symbol(symbol)
+    safe = re.sub(r"[^A-Z0-9._=-]", "", raw)[:32]
+    return safe or "INVALID_SYMBOL"
+
+
 def _has_quote_value(payload: dict | None) -> bool:
     return is_usable_quote_payload(payload, allow_stale=False)
 
 
-@router.get("/market/quote/{symbol}")
+def _resolve_query_symbol(symbol: str) -> str:
+    normalized_symbol = _normalize_symbol(symbol)
+    candidates = [normalized_symbol, *canonical_symbol_aliases(symbol), symbol]
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized_candidate = _normalize_symbol(candidate)
+        if not normalized_candidate or normalized_candidate in seen:
+            continue
+        seen.add(normalized_candidate)
+        sanitized = sanitize_market_symbol(normalized_candidate, allow_provider_symbols=True)
+        if sanitized:
+            return sanitized
+    return ""
+
+
+@router.get("/market/quote/{symbol}", dependencies=[Depends(require_channel_access("web"))])
 def public_quote(symbol: str, refresh: str | None = None):
-    query_symbol = _normalize_symbol(symbol)
-    response_symbol = _response_symbol(symbol)
-    for alias in _symbol_aliases(query_symbol):
+    if is_ambiguous_crypto_symbol(symbol):
+        return empty_quote_payload(_safe_response_symbol(symbol), quote_status="ambiguous_symbol", reason="missing_quote_asset")
+    sanitized_symbol = _resolve_query_symbol(symbol)
+    if not sanitized_symbol:
+        return empty_quote_payload(_safe_response_symbol(symbol), quote_status="invalid_symbol")
+    query_symbol = _normalize_symbol(sanitized_symbol)
+    response_symbol = _response_symbol(sanitized_symbol)
+    if _is_blocked_public_symbol(query_symbol):
+        return empty_quote_payload(response_symbol, quote_status="blocked_symbol", reason="blocked_symbol")
+    aliases = []
+    seen_aliases: set[str] = set()
+    for alias in [query_symbol, sanitized_symbol, *canonical_symbol_aliases(query_symbol), *_symbol_aliases(query_symbol)]:
+        normalized_alias = _normalize_symbol(alias)
+        if normalized_alias and normalized_alias not in seen_aliases:
+            seen_aliases.add(normalized_alias)
+            aliases.append(normalized_alias)
+    for alias in aliases:
         payload = get_cached_quote_payload(alias)
         if not payload:
+            continue
+        if is_bdr_symbol(query_symbol) and is_bdr_proxy_payload(payload):
+            continue
+        if not _quote_identity_matches_symbol(payload, query_symbol, require_identity=True):
             continue
         normalized_payload = {**payload, "symbol": response_symbol}
         if _has_quote_value(payload):

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 import logging
 
 from app.dependencies import require_channel_access
-from app.services.symbol_registry import canonical_symbol
+from app.services.symbol_registry import CRYPTO_BASES, canonical_symbol, has_us_market_qualifier
 from app.watchlists.watchlist_default import (
     WATCHLIST_B3,
     WATCHLIST_US_GLOBAL,
@@ -36,22 +36,13 @@ B3_PATTERN = re.compile(r"^[A-Z]{4}(?:3|4|5|6|11)$")
 BDR_PATTERN = re.compile(r"^[A-Z]{4,5}34$")
 USA_PATTERN = re.compile(r"^[A-Z]{1,5}$")
 CRYPTO_PATTERN = re.compile(r"^[A-Z]{2,10}USD$")
-CRYPTO_BASES = {
-    "BTC",
-    "ETH",
-    "BNB",
-    "SOL",
-    "XRP",
-    "ADA",
-    "DOGE",
-    "MATIC",
-    "AVAX",
-    "LINK",
-}
-
-
 def _normalize_query(value: str) -> str:
     return canonical_symbol(value) or str(value or "").upper().strip().replace(" ", "").replace(".SA", "").replace("-USD", "USD")
+
+
+def _is_unqualified_crypto_base_query(query: str) -> bool:
+    normalized = _normalize_query(query)
+    return normalized in CRYPTO_BASES and not has_us_market_qualifier(query)
 
 
 def _synthetic_candidates(query: str) -> list[str]:
@@ -60,12 +51,15 @@ def _synthetic_candidates(query: str) -> list[str]:
     if not normalized:
         return []
 
+    if _is_unqualified_crypto_base_query(query):
+        return []
+
     candidates: list[str] = []
 
     if B3_PATTERN.fullmatch(normalized):
         candidates.append(normalized)
 
-    if BDR_PATTERN.fullmatch(normalized):
+    if BDR_PATTERN.fullmatch(normalized) and canonical_symbol(normalized):
         candidates.append(normalized)
 
     if USA_PATTERN.fullmatch(normalized):
@@ -73,9 +67,6 @@ def _synthetic_candidates(query: str) -> list[str]:
 
     if CRYPTO_PATTERN.fullmatch(normalized):
         candidates.append(normalized)
-
-    if normalized in CRYPTO_BASES:
-        candidates.append(f"{normalized}USD")
 
     seen: set[str] = set()
     ordered: list[str] = []
@@ -94,8 +85,13 @@ def search_ticker(query: str):
 
     try:
         normalized = _normalize_query(query)
+        if not normalized:
+            return []
+        if _is_unqualified_crypto_base_query(query):
+            return []
+        qualified_crypto_base = normalized in CRYPTO_BASES
 
-        results = [
+        results = [] if qualified_crypto_base else [
             ticker
             for ticker in ALL_TICKERS
             if normalized in _normalize_query(ticker)
@@ -104,7 +100,7 @@ def search_ticker(query: str):
         combined: list[str] = []
         seen: set[str] = set()
 
-        for ticker in [*_synthetic_candidates(normalized), *results]:
+        for ticker in [*_synthetic_candidates(query), *results]:
             clean = canonical_symbol(ticker) or _normalize_query(ticker)
 
             if not clean or clean in seen:

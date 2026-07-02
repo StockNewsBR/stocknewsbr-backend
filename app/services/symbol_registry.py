@@ -24,6 +24,31 @@ CRYPTO_BASES = {
     "LINK",
 }
 
+_US_MARKET_QUALIFIERS = {"AMEX", "ARCA", "BATS", "CBOE", "NASDAQ", "NYSE", "NYSEARCA", "OTC"}
+
+KNOWN_BDR_SYMBOLS = {
+    "A1MD34",
+    "AAPL34",
+    "AMZO34",
+    "BABA34",
+    "BERK34",
+    "GOGL34",
+    "ITLC34",
+    "M1TA34",
+    "MELI34",
+    "MSFT34",
+    "NFLX34",
+    "NVDC34",
+    "PFIZ34",
+    "PYPL34",
+    "QCOM34",
+    "TSLA34",
+}
+
+KNOWN_NON_BDR_B3_SYMBOLS = {
+    "IVVB11",
+}
+
 US_EXCHANGE_BY_SYMBOL = {
     "AAL": "NASDAQ",
     "AAPL": "NASDAQ",
@@ -97,11 +122,26 @@ _CURATED_ALIASES: dict[str, tuple[str, ...]] = {
     "VOO": ("NYSEARCA:VOO", "VOO.US"),
     "SPY": ("NYSEARCA:SPY", "SPY.US"),
     "QQQ": ("NASDAQ:QQQ", "QQQ.US"),
+    "A1MD34": ("AMD34", "AMD34.SA", "A1MD34.SA"),
+    "AMZO34": ("AMZN34", "AMZN34.SA", "AMZO34.SA"),
+    "ITLC34": ("INTC34", "INTC34.SA", "I1NC34", "I1NC34.SA", "ITLC34.SA"),
+    "M1TA34": ("META34", "META34.SA", "M1TA34.SA"),
 }
 
 _TRADINGVIEW_SYMBOL_FALLBACKS: dict[str, tuple[str, ...]] = {
     "AXIA6": ("BMFBOVESPA:ELET6", "BMFBOVESPA:AXIA6", "BMFBOVESPA:ELET3"),
 }
+
+
+def _has_us_market_qualifier_raw(raw: str) -> bool:
+    if not raw:
+        return False
+    if raw.endswith(".US"):
+        return True
+    if ":" not in raw:
+        return False
+    prefix = raw.split(":", 1)[0].strip()
+    return prefix in _US_MARKET_QUALIFIERS
 
 
 def _alias_key(value: Any) -> str:
@@ -110,6 +150,7 @@ def _alias_key(value: Any) -> str:
         return ""
     if ".." in raw or "\\" in raw:
         return ""
+    has_us_market_qualifier = _has_us_market_qualifier_raw(raw)
 
     raw = re.sub(r"\s+", " ", raw)
     if ":" in raw:
@@ -138,11 +179,39 @@ def _alias_key(value: Any) -> str:
     if compact.startswith("XBT"):
         compact = f"BTC{compact[3:]}"
 
+    if has_us_market_qualifier and compact.endswith("34"):
+        return ""
+
     crypto_match = _CRYPTO_RE.match(compact)
     if crypto_match and crypto_match.group(1) in CRYPTO_BASES:
         compact = f"{crypto_match.group(1)}USD"
 
     return compact
+
+
+def _has_market_qualifier(value: Any) -> bool:
+    raw = str(value or "").strip().upper()
+    return _has_us_market_qualifier_raw(raw)
+
+
+def has_us_market_qualifier(value: Any) -> bool:
+    return _has_market_qualifier(value)
+
+
+_BDR_PROXY_SOURCES = {"proxy_market", "reference_proxy"}
+_BDR_PROXY_FALLBACK_TYPES = {
+    "foreign_underlying_context_only",
+    "foreign_underlying_proxy",
+    "reference_proxy",
+}
+
+
+def is_bdr_proxy_payload(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    source = str(payload.get("source") or "").lower().strip()
+    fallback_type = str(payload.get("fallback_type") or "").lower().strip()
+    return source in _BDR_PROXY_SOURCES or fallback_type in _BDR_PROXY_FALLBACK_TYPES
 
 
 def _build_alias_map() -> dict[str, str]:
@@ -157,7 +226,6 @@ def _build_alias_map() -> dict[str, str]:
     for base in CRYPTO_BASES:
         canonical = f"{base}USD"
         crypto_aliases = (
-            base,
             canonical,
             f"{base}USDT",
             f"{base}/USD",
@@ -185,9 +253,43 @@ def _build_alias_map() -> dict[str, str]:
 _ALIAS_TO_CANONICAL = _build_alias_map()
 
 
+def _is_ambiguous_crypto_key(key: str, value: Any) -> bool:
+    return key in CRYPTO_BASES and not _has_market_qualifier(value)
+
+
+def _is_disallowed_qualified_crypto_pair(key: str, value: Any) -> bool:
+    crypto_match = _CRYPTO_RE.match(key or "")
+    return bool(
+        _has_market_qualifier(value)
+        and crypto_match
+        and crypto_match.group(1) in CRYPTO_BASES
+    )
+
+
+def _is_disallowed_qualified_b3_key(key: str, value: Any) -> bool:
+    return bool(
+        _has_market_qualifier(value)
+        and (_B3_RE.match(key or "") or _B3_FUTURE_RE.match(key or ""))
+        and key not in US_EXCHANGE_BY_SYMBOL
+    )
+
+
+def _is_unlisted_bdr_key(key: str) -> bool:
+    return key.endswith("34") and key not in KNOWN_BDR_SYMBOLS
+
+
 def canonical_symbol_or_none(value: Any) -> str | None:
     key = _alias_key(value)
     if not key:
+        return None
+    crypto_match = _CRYPTO_RE.match(key)
+    if _is_disallowed_qualified_crypto_pair(key, value):
+        return None
+    if key in CRYPTO_BASES:
+        if _is_ambiguous_crypto_key(key, value):
+            return None
+        return key if key in US_EXCHANGE_BY_SYMBOL else None
+    if _is_disallowed_qualified_b3_key(key, value):
         return None
 
     mapped = _ALIAS_TO_CANONICAL.get(key)
@@ -195,17 +297,15 @@ def canonical_symbol_or_none(value: Any) -> str | None:
         return mapped
 
     if _B3_RE.match(key):
+        if _is_unlisted_bdr_key(key):
+            return None
         return key
 
     if _B3_FUTURE_RE.match(key):
         return key
 
-    crypto_match = _CRYPTO_RE.match(key)
     if crypto_match and crypto_match.group(1) in CRYPTO_BASES:
         return f"{crypto_match.group(1)}USD"
-
-    if key in CRYPTO_BASES:
-        return f"{key}USD"
 
     if _US_RE.match(key):
         return key
@@ -220,9 +320,33 @@ def canonical_symbol(value: Any, *, fallback: bool = True) -> str:
     if not fallback:
         return ""
     key = _alias_key(value)
+    if key in CRYPTO_BASES:
+        if _is_ambiguous_crypto_key(key, value) or key not in US_EXCHANGE_BY_SYMBOL:
+            return ""
+    crypto_match = _CRYPTO_RE.match(key or "")
+    if key and _is_disallowed_qualified_crypto_pair(key, value):
+        return ""
+    if key and _is_disallowed_qualified_b3_key(key, value):
+        return ""
+    if key and _is_unlisted_bdr_key(key):
+        return ""
     if key and re.fullmatch(r"[A-Z][A-Z0-9]{0,15}", key):
         return key
     return ""
+
+
+def is_ambiguous_crypto_symbol(value: Any) -> bool:
+    return _alias_key(value) in CRYPTO_BASES and not _has_market_qualifier(value)
+
+
+def is_known_bdr_symbol(value: Any) -> bool:
+    canonical = canonical_symbol(value, fallback=False)
+    key = _alias_key(value)
+    return bool((canonical and canonical in KNOWN_BDR_SYMBOLS) or (key and key in KNOWN_BDR_SYMBOLS))
+
+
+def is_bdr_symbol(value: Any) -> bool:
+    return is_known_bdr_symbol(value)
 
 
 def canonical_symbol_aliases(value: Any) -> list[str]:
@@ -241,7 +365,7 @@ def canonical_symbol_aliases(value: Any) -> list[str]:
 
     if canonical.endswith("USD"):
         base = canonical[:-3]
-        aliases.update({base, f"{base}USDT", f"{base}-USD", f"{base}-USDT", f"{base}/USD", f"{base}/USDT"})
+        aliases.update({f"{base}USDT", f"{base}-USD", f"{base}-USDT", f"{base}/USD", f"{base}/USDT"})
         if base == "BTC":
             aliases.update({"XBTUSD", "XBTUSDT"})
 
@@ -308,7 +432,7 @@ def symbol_category(value: Any) -> str:
         return ""
     if canonical.endswith("USD") and canonical[:-3] in CRYPTO_BASES:
         return "Crypto"
-    if canonical.endswith("34") or canonical == "IVVB11":
+    if is_bdr_symbol(canonical):
         return "BDR"
     if _B3_RE.match(canonical) or _B3_FUTURE_RE.match(canonical) or canonical == "WIN":
         return "B3"
