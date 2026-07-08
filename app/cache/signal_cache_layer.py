@@ -1,10 +1,12 @@
 import logging
-import json
 import os
 import threading
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List
+
+from app.core.atomic_io import read_json_file_consistent, write_json_file_atomic
 
 logger = logging.getLogger("stocknewsbr.cache.signal_layer")
 
@@ -26,22 +28,30 @@ class SignalCacheLayer:
         self._timestamp: float = 0.0
         self._disk_mtime: float = 0.0
         self._lock = threading.RLock()
+        self._disk_write_lock = threading.Lock()
+        self._write_epoch = 0
         self._storage_path = _project_runtime_path("SIGNAL_CACHE_FILE", "runtime/cache/signals.json")
 
     def _ensure_storage_dir(self):
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _write_to_disk(self):
+    def _write_to_disk(self, *, expected_timestamp: float | None = None, expected_epoch: int | None = None):
         try:
             self._ensure_storage_dir()
-            payload = {
-                "timestamp": self._timestamp,
-                "signals": list(self._signals[:MAX_SIGNALS]),
-            }
-            temp_path = self._storage_path.with_suffix(".tmp")
-            temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            temp_path.replace(self._storage_path)
-            self._disk_mtime = self._storage_path.stat().st_mtime
+            with self._disk_write_lock:
+                with self._lock:
+                    if expected_timestamp is not None and self._timestamp != expected_timestamp:
+                        return
+                    if expected_epoch is not None and self._write_epoch != expected_epoch:
+                        return
+                    payload = {
+                        "timestamp": self._timestamp,
+                        "signals": deepcopy(self._signals[:MAX_SIGNALS]),
+                    }
+                write_json_file_atomic(self._storage_path, payload, ensure_ascii=False)
+                with self._lock:
+                    if self._timestamp == float(payload.get("timestamp") or 0.0):
+                        self._disk_mtime = self._storage_path.stat().st_mtime
         except Exception as exc:
             logger.exception("Signal cache persist error: %s", exc)
 
@@ -51,10 +61,20 @@ class SignalCacheLayer:
                 return
 
             file_mtime = self._storage_path.stat().st_mtime
-            if file_mtime <= self._disk_mtime and self._signals:
+            if file_mtime <= self._disk_mtime:
                 return
 
-            payload = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            payload, stable_mtime, _stable_size = read_json_file_consistent(
+                self._storage_path,
+                lambda: {},
+            )
+            if not isinstance(payload, dict):
+                with self._lock:
+                    self._signals = []
+                    self._timestamp = 0.0
+                    self._disk_mtime = stable_mtime or file_mtime
+                return
+
             signals = payload.get("signals")
             timestamp = payload.get("timestamp")
 
@@ -64,9 +84,9 @@ class SignalCacheLayer:
                 signals = signals[:MAX_SIGNALS]
 
             with self._lock:
-                self._signals = [item for item in signals if isinstance(item, dict)]
+                self._signals = [deepcopy(item) for item in signals if isinstance(item, dict)]
                 self._timestamp = float(timestamp or 0.0)
-                self._disk_mtime = file_mtime
+                self._disk_mtime = stable_mtime or file_mtime
         except Exception as exc:
             logger.exception("Signal cache load error: %s", exc)
 
@@ -81,9 +101,11 @@ class SignalCacheLayer:
                 signals = signals[:MAX_SIGNALS]
 
             with self._lock:
-                self._signals = list(signals)
+                self._signals = [deepcopy(item) for item in signals if isinstance(item, dict)]
                 self._timestamp = now
-                self._write_to_disk()
+                write_epoch = self._write_epoch
+
+            self._write_to_disk(expected_timestamp=now, expected_epoch=write_epoch)
 
         except Exception as exc:
             logger.exception("Signal cache update error: %s", exc)
@@ -92,7 +114,7 @@ class SignalCacheLayer:
         try:
             self._load_from_disk_if_needed()
             with self._lock:
-                return list(self._signals)
+                return deepcopy(self._signals)
         except Exception:
             return []
 
@@ -100,13 +122,14 @@ class SignalCacheLayer:
         try:
             self._load_from_disk_if_needed()
             with self._lock:
-                return list(self._signals[:limit])
+                return deepcopy(self._signals[:limit])
         except Exception:
             return []
 
     def age(self):
         self._load_from_disk_if_needed()
-        ts = self._timestamp
+        with self._lock:
+            ts = self._timestamp
 
         if ts == 0:
             return None
@@ -122,15 +145,29 @@ class SignalCacheLayer:
             return 0
 
     def clear(self):
-        with self._lock:
-            self._signals = []
-            self._timestamp = 0
-            self._disk_mtime = 0.0
-        try:
-            if self._storage_path.exists():
-                self._storage_path.unlink()
-        except Exception as exc:
-            logger.exception("Signal cache clear error: %s", exc)
+        with self._disk_write_lock:
+            with self._lock:
+                self._write_epoch += 1
+                self._signals = []
+                self._timestamp = 0
+            try:
+                self._ensure_storage_dir()
+                write_json_file_atomic(
+                    self._storage_path,
+                    {"timestamp": 0.0, "signals": []},
+                    ensure_ascii=False,
+                )
+                with self._lock:
+                    self._disk_mtime = self._storage_path.stat().st_mtime
+            except Exception as exc:
+                logger.exception("Signal cache clear error: %s", exc)
+                # Mission 31F: falha ao persistir o clear não pode recarregar
+                # estado antigo do disco; marca o mtime atual como consumido.
+                with self._lock:
+                    try:
+                        self._disk_mtime = self._storage_path.stat().st_mtime
+                    except Exception:
+                        pass
 
 
 signal_cache_layer = SignalCacheLayer()

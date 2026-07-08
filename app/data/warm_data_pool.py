@@ -82,7 +82,12 @@ def update_pool(force_refresh: bool = False):
     with _lock:
         _pool = dict(new_pool)
         _last_update = now
-        market_store.update(_pool)
+        try:
+            market_store.update(_pool)
+        except Exception as exc:
+            # Mission 31F: persistence failure must not drop the freshly
+            # built in-memory snapshot. The error is logged, not masked.
+            logger.warning("Warm data pool persistence failed: %s", exc)
         return dict(_pool)
 
 

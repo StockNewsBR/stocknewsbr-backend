@@ -42,6 +42,8 @@ def _row(**overrides):
         "master_score": 88.0,
         "master_direction": "BULLISH",
         "historical_confidence_score": 72.0,
+        # Mission 31F: alertas Telegram exigem acesso validado explicitamente.
+        "telegram_access": {"linked": True, "allowed": True, "reason": None},
     }
     base.update(overrides)
     base.setdefault("score_source_scale", "0_100")
@@ -259,6 +261,41 @@ class TelegramInstitutionalTests(unittest.TestCase):
         self.assertIn("Confiança Histórica: 72.0%", message)
         self.assertLessEqual(len(telegram_summary(_row()).splitlines()), 3)
         self.assertTrue(get_telegram_alert_history(limit=1) == [])
+
+    def test_legacy_telegram_access_fields_are_handled_fail_closed(self):
+        # Mission 31F (CodeRabbit trivial): linhas antigas traziam os campos
+        # planos telegram_linked/telegram_allowed em vez do contrato
+        # telegram_access. A compatibilidade é fail-closed: sem o contrato
+        # validado, o alerta é bloqueado de forma determinística e nada é
+        # enviado — os campos legados sozinhos não concedem acesso.
+        legacy_rows = {
+            "legacy_allowed": ("LEGA3", {"telegram_linked": True, "telegram_allowed": True}),
+            "legacy_denied": ("LEGB3", {"telegram_linked": True, "telegram_allowed": False}),
+            "legacy_unlinked": ("LEGC3", {"telegram_linked": False, "telegram_allowed": False}),
+        }
+
+        for label, (ticker, legacy_fields) in legacy_rows.items():
+            with self.subTest(label):
+                row = _row(ticker=ticker, symbol=ticker, **legacy_fields)
+                row.pop("telegram_access", None)
+
+                with patch(
+                    "app.telegram.telegram_alert_engine.send_alert",
+                    side_effect=AssertionError("must_not_send"),
+                ) as sender:
+                    result = send_signal_alert(row, now=1000)
+
+                self.assertEqual(result["status"], "blocked")
+                self.assertEqual(result["reason"], "telegram_access_not_validated")
+                sender.assert_not_called()
+
+        with self.subTest("legacy_fields_do_not_break_modern_contract"):
+            row = _row(ticker="LEGD3", symbol="LEGD3", telegram_linked=True, telegram_allowed=True)
+
+            with patch("app.telegram.telegram_alert_engine.send_alert", return_value=True):
+                result = send_signal_alert(row, now=1000)
+
+            self.assertEqual(result["status"], "sent")
 
 
 if __name__ == "__main__":

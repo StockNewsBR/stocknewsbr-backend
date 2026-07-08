@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
+from app.core.atomic_io import read_json_file_consistent, write_json_file_atomic
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _TEST_RUNTIME_ROOT: Path | None = None
 _TEST_RUNTIME_CLEANUP_REGISTERED = False
@@ -145,10 +147,17 @@ class SignalOutcomeCache:
         try:
             if not self._storage_path.exists():
                 return
-            raw = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            raw, stable_mtime, _stable_size = read_json_file_consistent(
+                self._storage_path,
+                empty_signal_outcome_state,
+            )
             with self._lock:
+                if stable_mtime and stable_mtime <= self._disk_mtime:
+                    # Mission 31F: leitura stale do disco não pode sobrescrever
+                    # estado em memória mais novo.
+                    return
                 self._state = _normalize_state(raw)
-                self._disk_mtime = self._storage_path.stat().st_mtime
+                self._disk_mtime = stable_mtime or self._storage_path.stat().st_mtime
         except Exception:
             with self._lock:
                 self._state = empty_signal_outcome_state()
@@ -168,13 +177,14 @@ class SignalOutcomeCache:
 
     def update(self, state: Dict[str, Any]) -> Dict[str, Any]:
         normalized = _normalize_state(state)
+        # Mission 31F: a escrita em disco precisa ficar dentro do lock; fora
+        # dele, duas atualizações concorrentes podiam terminar com memória=A e
+        # disco=B (divergência entre estado em memória e persistido).
         with self._lock:
             self._state = normalized
             try:
                 self._ensure_storage_dir()
-                temp_path = self._storage_path.with_suffix(".tmp")
-                temp_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
-                temp_path.replace(self._storage_path)
+                write_json_file_atomic(self._storage_path, normalized, ensure_ascii=False)
                 self._disk_mtime = self._storage_path.stat().st_mtime
             except Exception:
                 self._state["signal_outcome_status"] = "DEGRADED"

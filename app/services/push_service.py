@@ -4,6 +4,7 @@ import threading
 import time
 from pathlib import Path
 
+from app.core.atomic_io import write_json_file_atomic
 from app.system.system_metrics import increment_push_sends
 
 
@@ -34,11 +35,9 @@ def _load_store():
 
 def _save_store(store):
     with _lock:
-        PUSH_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        PUSH_STORE_PATH.write_text(
-            json.dumps(store, ensure_ascii=True, indent=2),
-            encoding="utf-8",
-        )
+        # Mission 31F: escrita atômica; o write_text direto podia deixar JSON
+        # parcial em disco se o processo caísse no meio da gravação.
+        write_json_file_atomic(PUSH_STORE_PATH, store, ensure_ascii=True)
 
 
 def _firebase_ready():
@@ -81,30 +80,34 @@ def register_push_token(user_id: int, token: str, platform: str, app_version: st
     if not user_id or not token:
         return None
 
-    store = _load_store()
-    items = list(store.get(str(user_id), []))
-    token = token.strip()
-    platform = (platform or "android").strip().lower()
-    items = [item for item in items if item.get("token") != token]
-    items.append(
-        {
-            "token": token,
-            "platform": platform,
-            "app_version": app_version,
-            "registered_at": int(time.time()),
-        }
-    )
-    store[str(user_id)] = items[-10:]
-    _save_store(store)
-    return {"user_id": user_id, "tokens": store[str(user_id)]}
+    # Mission 31F: o ciclo load-modify-save precisa ser atômico; sem o lock
+    # cobrindo a operação inteira, registros concorrentes se sobrescrevem.
+    with _lock:
+        store = _load_store()
+        items = list(store.get(str(user_id), []))
+        token = token.strip()
+        platform = (platform or "android").strip().lower()
+        items = [item for item in items if item.get("token") != token]
+        items.append(
+            {
+                "token": token,
+                "platform": platform,
+                "app_version": app_version,
+                "registered_at": int(time.time()),
+            }
+        )
+        store[str(user_id)] = items[-10:]
+        _save_store(store)
+        return {"user_id": user_id, "tokens": store[str(user_id)]}
 
 
 def unregister_push_token(user_id: int, token: str):
-    store = _load_store()
-    items = [item for item in store.get(str(user_id), []) if item.get("token") != token]
-    store[str(user_id)] = items
-    _save_store(store)
-    return {"user_id": user_id, "tokens": items}
+    with _lock:
+        store = _load_store()
+        items = [item for item in store.get(str(user_id), []) if item.get("token") != token]
+        store[str(user_id)] = items
+        _save_store(store)
+        return {"user_id": user_id, "tokens": items}
 
 
 def list_push_tokens(user_id: int):

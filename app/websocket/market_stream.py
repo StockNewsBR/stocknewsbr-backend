@@ -42,7 +42,9 @@ async def broadcast(data):
 
     dead = []
 
-    for ws in connections:
+    # Mission 31F: itera um snapshot; mutar o set durante o await do send
+    # derruba a iteração (RuntimeError: set changed size during iteration).
+    for ws in list(connections):
 
         try:
 
@@ -65,6 +67,14 @@ async def heartbeat():
 
     while True:
 
-        await broadcast({"type": "heartbeat"})
+        try:
+
+            await broadcast({"type": "heartbeat"})
+
+        except Exception:
+
+            # Mission 31F: heartbeat não pode morrer silenciosamente na
+            # primeira exceção; loga e segue para o próximo ciclo.
+            logger.warning("Market stream heartbeat error", exc_info=True)
 
         await asyncio.sleep(10)

@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 import time
 from typing import Iterable, Optional, Tuple
@@ -19,12 +20,20 @@ _YFINANCE = None
 CACHE_TTL = 60
 PROVIDER_FAILURE_COOLDOWN_SECONDS = 180
 
+try:
+    MAX_CACHE_SYMBOLS = max(1, int(os.getenv("MARKET_DATA_MAX_CACHE_SYMBOLS", "250")))
+except (TypeError, ValueError):
+    MAX_CACHE_SYMBOLS = 250
+
 _cache_data = None
 _cache_key: Tuple[str, ...] = tuple()
 _last_update = 0.0
 _provider_cooldown_until = 0.0
 _last_provider_failure_log = 0.0
 _lock = threading.RLock()
+# Serializes provider refreshes so concurrent cache misses trigger a single
+# provider call (Mission 31F).
+_refresh_lock = threading.RLock()
 
 
 def _get_yfinance():
@@ -66,6 +75,24 @@ def _normalize_tickers(tickers: Optional[Iterable[str]]) -> Tuple[str, ...]:
     return tuple(normalized)
 
 
+def _available_symbols(data) -> Optional[Tuple[str, ...]]:
+    """Symbols actually present in a provider payload.
+
+    Returns a tuple for MultiIndex frames, or None when the payload has
+    single-level columns (symbol identity unknown from the frame itself).
+    """
+    columns = getattr(data, "columns", None)
+    if columns is None:
+        return tuple()
+    if hasattr(columns, "levels"):
+        seen = []
+        for symbol in columns.get_level_values(0):
+            if symbol not in seen:
+                seen.append(symbol)
+        return tuple(seen)
+    return None
+
+
 def _extract_subset(data, tickers: Tuple[str, ...]):
     if data is None:
         return None
@@ -82,9 +109,8 @@ def _extract_subset(data, tickers: Tuple[str, ...]):
         if not selected:
             return None
 
-        if len(selected) == 1:
-            return data[selected[0]]
-
+        # Preserve the MultiIndex shape even for a single selected symbol so
+        # downstream consumers can always rely on columns.get_level_values(0).
         return data.loc[:, data.columns.get_level_values(0).isin(selected)]
 
     if len(tickers) == 1:
@@ -101,6 +127,43 @@ def _cache_satisfies(requested_key: Tuple[str, ...], now: float) -> bool:
         return False
 
     return set(requested_key).issubset(set(_cache_key))
+
+
+def _store_cache_locked(data, requested_key: Tuple[str, ...], now: float) -> None:
+    """Stores a provider payload without poisoning coverage.
+
+    _cache_key must contain only the symbols actually present in the cached
+    payload: a partial provider response must never mark missing symbols as
+    covered (Mission 31F).
+    """
+    global _cache_data
+    global _cache_key
+    global _last_update
+
+    available = _available_symbols(data)
+
+    if available is None:
+        # Single-level columns: only trustworthy when a single symbol was requested.
+        present = requested_key if len(requested_key) == 1 else tuple()
+    else:
+        requested_set = set(requested_key)
+        present = tuple(symbol for symbol in available if symbol in requested_set)
+
+    if not present:
+        return
+
+    if len(present) > MAX_CACHE_SYMBOLS:
+        capped = present[:MAX_CACHE_SYMBOLS]
+        capped_data = _extract_subset(data, capped)
+        if capped_data is None:
+            return
+        _cache_data = capped_data
+        _cache_key = capped
+    else:
+        _cache_data = data
+        _cache_key = present
+
+    _last_update = now
 
 
 def _provider_in_cooldown(now: float) -> bool:
@@ -179,10 +242,6 @@ def fetch_market_data(tickers: Tuple[str, ...]):
 
 
 def get_market_data(tickers=None):
-    global _cache_data
-    global _cache_key
-    global _last_update
-
     requested_key = _normalize_tickers(tickers)
 
     if not requested_key:
@@ -194,20 +253,28 @@ def get_market_data(tickers=None):
         if _cache_satisfies(requested_key, now):
             return _extract_subset(_cache_data, requested_key)
 
-    data = fetch_market_data(requested_key)
-
-    if data is None:
+    with _refresh_lock:
+        # Another thread may have refreshed the cache while this one was
+        # waiting for the refresh lock.
+        now = time.time()
         with _lock:
             if _cache_satisfies(requested_key, now):
                 return _extract_subset(_cache_data, requested_key)
 
-        return None
+        data = fetch_market_data(requested_key)
 
-    with _lock:
-        _cache_data = data
-        _cache_key = requested_key
-        _last_update = now
-        return _extract_subset(_cache_data, requested_key)
+        if data is None:
+            with _lock:
+                if _cache_satisfies(requested_key, now):
+                    return _extract_subset(_cache_data, requested_key)
+
+            return None
+
+        with _lock:
+            _store_cache_locked(data, requested_key, now)
+            # Always answer from the full provider payload so a capped cache
+            # never truncates the caller's response.
+            return _extract_subset(data, requested_key)
 
 
 class MarketDataCacheCompatibility:

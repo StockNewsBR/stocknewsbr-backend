@@ -8,6 +8,7 @@ import threading
 import time
 from pathlib import Path
 
+from app.core.atomic_io import interprocess_file_lock, read_json_file, write_json_file_atomic
 from app.social.guardian import SocialGuardian
 from app.system.system_metrics import increment_reports
 
@@ -44,10 +45,7 @@ def _load_state():
         if not MODERATION_STORE_PATH.exists():
             return _default_state()
 
-        try:
-            data = json.loads(MODERATION_STORE_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return _default_state()
+        data = read_json_file(MODERATION_STORE_PATH, _default_state)
 
         base = _default_state()
         base.update(data if isinstance(data, dict) else {})
@@ -56,41 +54,49 @@ def _load_state():
 
 def _save_state(state):
     with _lock:
-        MODERATION_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        MODERATION_STORE_PATH.write_text(
-            json.dumps(state, ensure_ascii=True, indent=2),
-            encoding="utf-8",
-        )
+        write_json_file_atomic(MODERATION_STORE_PATH, state, ensure_ascii=True)
+
+
+def _mutate_state(mutator):
+    # Mission 31F: lock interprocesso ANTES do _lock (ordering fixo). Sem ele,
+    # read-modify-write concorrente entre processos perde atualizações; o
+    # ordering evita deadlock com quem só usa _lock (nunca o inverso).
+    with interprocess_file_lock(MODERATION_STORE_PATH.with_suffix(".json.lock")):
+        with _lock:
+            state = _load_state()
+            result = mutator(state)
+            _save_state(state)
+            return result
 
 
 def mute(user_id, target):
     if not user_id or not target:
         return False
 
-    state = _load_state()
-    muted = state.setdefault("muted", {})
-    muted.setdefault(str(user_id), [])
+    def mutator(state):
+        muted = state.setdefault("muted", {})
+        muted.setdefault(str(user_id), [])
 
-    if target not in muted[str(user_id)]:
-        muted[str(user_id)].append(target)
+        if target not in muted[str(user_id)]:
+            muted[str(user_id)].append(target)
+        return True
 
-    _save_state(state)
-    return True
+    return _mutate_state(mutator)
 
 
 def block(user_id, target):
     if not user_id or not target:
         return False
 
-    state = _load_state()
-    blocked = state.setdefault("blocked", {})
-    blocked.setdefault(str(user_id), [])
+    def mutator(state):
+        blocked = state.setdefault("blocked", {})
+        blocked.setdefault(str(user_id), [])
 
-    if target not in blocked[str(user_id)]:
-        blocked[str(user_id)].append(target)
+        if target not in blocked[str(user_id)]:
+            blocked[str(user_id)].append(target)
+        return True
 
-    _save_state(state)
-    return True
+    return _mutate_state(mutator)
 
 
 def get_blocked_users(user_id):
@@ -162,55 +168,56 @@ def can_publish(user_id: int, text: str):
     if not user_id:
         return False, "invalid_user"
 
-    state = _load_state()
-
-    if user_id in state.get("shadow_banned", []):
-        return False, "user_shadow_banned"
-
     guardian_decision = SocialGuardian.validate_content(text)
-    if not guardian_decision.allowed:
-        _append_audit(
-            state,
-            "content_blocked",
-            actor_user_id=user_id,
-            content_type="text",
-            reason=guardian_decision.reason,
-            details={
-                "category": guardian_decision.category,
-                "matched_terms": list(guardian_decision.matched_terms),
-            },
-        )
-        _save_state(state)
-        return False, guardian_decision.reason
 
     flagged_phrases = _flag_reasons(text)
-    if flagged_phrases:
-        _append_audit(
-            state,
-            "content_blocked",
-            actor_user_id=user_id,
-            content_type="text",
-            reason="blocked_phrase_detected",
-            details={"matched_terms": flagged_phrases},
-        )
-        _save_state(state)
-        return False, "blocked_phrase_detected"
 
     now = int(time.time())
-    post_rate = state.setdefault("post_rate", {})
-    timestamps = [
-        ts
-        for ts in post_rate.get(str(user_id), [])
-        if now - int(ts) <= POST_WINDOW_SECONDS
-    ]
 
-    if len(timestamps) >= POST_WINDOW_LIMIT:
-        return False, "rate_limited"
+    def mutator(state):
+        if user_id in state.get("shadow_banned", []):
+            return False, "user_shadow_banned"
 
-    timestamps.append(now)
-    post_rate[str(user_id)] = timestamps
-    _save_state(state)
-    return True, "allowed"
+        if not guardian_decision.allowed:
+            _append_audit(
+                state,
+                "content_blocked",
+                actor_user_id=user_id,
+                content_type="text",
+                reason=guardian_decision.reason,
+                details={
+                    "category": guardian_decision.category,
+                    "matched_terms": list(guardian_decision.matched_terms),
+                },
+            )
+            return False, guardian_decision.reason
+
+        if flagged_phrases:
+            _append_audit(
+                state,
+                "content_blocked",
+                actor_user_id=user_id,
+                content_type="text",
+                reason="blocked_phrase_detected",
+                details={"matched_terms": flagged_phrases},
+            )
+            return False, "blocked_phrase_detected"
+
+        post_rate = state.setdefault("post_rate", {})
+        timestamps = [
+            ts
+            for ts in post_rate.get(str(user_id), [])
+            if now - int(ts) <= POST_WINDOW_SECONDS
+        ]
+
+        if len(timestamps) >= POST_WINDOW_LIMIT:
+            return False, "rate_limited"
+
+        timestamps.append(now)
+        post_rate[str(user_id)] = timestamps
+        return True, "allowed"
+
+    return _mutate_state(mutator)
 
 
 def validate_attachment_url(user_id: int, image_url: str | None):
@@ -218,138 +225,146 @@ def validate_attachment_url(user_id: int, image_url: str | None):
     if decision.allowed:
         return True, "allowed"
 
-    state = _load_state()
-    _append_audit(
-        state,
-        "content_blocked",
-        actor_user_id=user_id,
-        content_type="attachment",
-        reason=decision.reason,
-        details={
-            "category": decision.category,
-            "matched_terms": list(decision.matched_terms),
-        },
-    )
-    _save_state(state)
-    return False, decision.reason
+    def mutator(state):
+        _append_audit(
+            state,
+            "content_blocked",
+            actor_user_id=user_id,
+            content_type="attachment",
+            reason=decision.reason,
+            details={
+                "category": decision.category,
+                "matched_terms": list(decision.matched_terms),
+            },
+        )
+        return False, decision.reason
+
+    return _mutate_state(mutator)
 
 
 def record_content_approved(user_id, *, content_type: str, content_id=None, post_id=None, ticker=None):
     if not user_id:
         return None
 
-    state = _load_state()
-    record = _adjust_score(
-        state,
-        int(user_id),
-        SocialGuardian.approved_delta(content_type),
-        approved_content_type=content_type,
-    )
-    audit_action = "post_created" if content_type == "post" else f"{content_type}_created"
-    _append_audit(
-        state,
-        audit_action,
-        actor_user_id=int(user_id),
-        target_user_id=int(user_id),
-        post_id=post_id or content_id,
-        content_type=content_type,
-        reason="approved",
-        details={"ticker": ticker, "content_id": content_id},
-    )
-    _save_state(state)
-    return record
+    def mutator(state):
+        record = _adjust_score(
+            state,
+            int(user_id),
+            SocialGuardian.approved_delta(content_type),
+            approved_content_type=content_type,
+        )
+        audit_action = "post_created" if content_type == "post" else f"{content_type}_created"
+        _append_audit(
+            state,
+            audit_action,
+            actor_user_id=int(user_id),
+            target_user_id=int(user_id),
+            post_id=post_id or content_id,
+            content_type=content_type,
+            reason="approved",
+            details={"ticker": ticker, "content_id": content_id},
+        )
+        return record
+
+    return _mutate_state(mutator)
 
 
 def record_post_removed(post_id, *, actor_user_id=None, target_user_id=None, reason: str | None = None):
-    state = _load_state()
-    if target_user_id:
-        _adjust_score(
+    def mutator(state):
+        if target_user_id:
+            _adjust_score(
+                state,
+                int(target_user_id),
+                SocialGuardian.REMOVED_POST_DELTA,
+                removed=True,
+            )
+        _append_audit(
             state,
-            int(target_user_id),
-            SocialGuardian.REMOVED_POST_DELTA,
-            removed=True,
+            "post_removed",
+            actor_user_id=actor_user_id,
+            target_user_id=target_user_id,
+            post_id=post_id,
+            content_type="post",
+            reason=reason or "removed",
         )
-    _append_audit(
-        state,
-        "post_removed",
-        actor_user_id=actor_user_id,
-        target_user_id=target_user_id,
-        post_id=post_id,
-        content_type="post",
-        reason=reason or "removed",
-    )
-    _save_state(state)
+
+    return _mutate_state(mutator)
 
 
 def report(user_id, post_id, reason: str | None = None, reporter_note: str | None = None, target_user_id: int | None = None):
     if not user_id or post_id is None:
         return False
 
-    state = _load_state()
-    reports = state.setdefault("reports", [])
-    queue = state.setdefault("review_queue", [])
     normalized_reason = SocialGuardian.normalize_report_reason(reason)
 
-    report_item = {
-        "id": f"report-{int(time.time() * 1000)}-{user_id}",
-        "user": user_id,
-        "post": post_id,
-        "reason": normalized_reason,
-        "reason_label": SocialGuardian.REPORT_REASONS.get(normalized_reason, "Outro"),
-        "note": reporter_note,
-        "target_user_id": target_user_id,
-        "created_at": int(time.time()),
-    }
+    # Mission 31F: todo o read-modify-write roda dentro de _mutate_state; o
+    # padrão anterior (_load_state ... _save_state) perdia reports concorrentes
+    # registrados entre a leitura e a gravação.
+    def mutator(state):
+        reports = state.setdefault("reports", [])
+        queue = state.setdefault("review_queue", [])
 
-    reports.append(report_item)
-    increment_reports()
+        report_item = {
+            "id": f"report-{int(time.time() * 1000)}-{user_id}",
+            "user": user_id,
+            "post": post_id,
+            "reason": normalized_reason,
+            "reason_label": SocialGuardian.REPORT_REASONS.get(normalized_reason, "Outro"),
+            "note": reporter_note,
+            "target_user_id": target_user_id,
+            "created_at": int(time.time()),
+        }
 
-    report_count = len([item for item in reports if item.get("post") == post_id])
+        reports.append(report_item)
+        increment_reports()
 
-    queue_item = {
-        "post_id": post_id,
-        "reports": report_count,
-        "auto_hidden": report_count >= REPORT_THRESHOLD_AUTO_HIDE,
-        "last_reason": report_item["reason"],
-        "last_reason_label": report_item["reason_label"],
-        "target_user_id": target_user_id,
-        "updated_at": int(time.time()),
-    }
+        report_count = len([item for item in reports if item.get("post") == post_id])
 
-    queue = [item for item in queue if item.get("post_id") != post_id]
-    queue.append(queue_item)
+        queue_item = {
+            "post_id": post_id,
+            "reports": report_count,
+            "auto_hidden": report_count >= REPORT_THRESHOLD_AUTO_HIDE,
+            "last_reason": report_item["reason"],
+            "last_reason_label": report_item["reason_label"],
+            "target_user_id": target_user_id,
+            "updated_at": int(time.time()),
+        }
 
-    state["reports"] = reports[-20000:]
-    state["review_queue"] = queue[-5000:]
-    if target_user_id:
-        _adjust_score(
-            state,
-            int(target_user_id),
-            SocialGuardian.REPORT_DELTA,
-            report=True,
-        )
-    _append_audit(
-        state,
-        "post_reported",
-        actor_user_id=user_id,
-        target_user_id=target_user_id,
-        post_id=post_id,
-        content_type="post",
-        reason=normalized_reason,
-        details={"reason_label": report_item["reason_label"], "note": reporter_note},
-    )
-    if target_user_id:
+        queue = [item for item in queue if item.get("post_id") != post_id]
+        queue.append(queue_item)
+
+        state["reports"] = reports[-20000:]
+        state["review_queue"] = queue[-5000:]
+        if target_user_id:
+            _adjust_score(
+                state,
+                int(target_user_id),
+                SocialGuardian.REPORT_DELTA,
+                report=True,
+            )
         _append_audit(
             state,
-            "user_reported",
+            "post_reported",
             actor_user_id=user_id,
             target_user_id=target_user_id,
             post_id=post_id,
-            content_type="user",
+            content_type="post",
             reason=normalized_reason,
+            details={"reason_label": report_item["reason_label"], "note": reporter_note},
         )
-    _save_state(state)
-    return True
+        if target_user_id:
+            _append_audit(
+                state,
+                "user_reported",
+                actor_user_id=user_id,
+                target_user_id=target_user_id,
+                post_id=post_id,
+                content_type="user",
+                reason=normalized_reason,
+            )
+        return True
+
+    return _mutate_state(mutator)
 
 
 def get_review_queue(limit: int = 100):
@@ -373,35 +388,39 @@ def is_post_hidden(post_id: int):
 
 
 def review_report(post_id: int, action: str, moderator_id: int | None = None):
-    state = _load_state()
-    existing_item = next((item for item in state.get("review_queue", []) if item.get("post_id") == post_id), {})
-    queue = [item for item in state.get("review_queue", []) if item.get("post_id") != post_id]
-    reviewed = list(state.get("reviewed_reports", []))
-    reviewed.append(
-        {
-            "post_id": post_id,
-            "action": action,
-            "moderator_id": moderator_id,
-            "reviewed_at": int(time.time()),
-        }
-    )
-    state["review_queue"] = queue
-    state["reviewed_reports"] = reviewed[-5000:]
-    if str(action).lower() in {"hide", "remove"}:
-        target_user_id = existing_item.get("target_user_id")
-        if target_user_id:
-            _adjust_score(state, int(target_user_id), SocialGuardian.REMOVED_POST_DELTA, removed=True)
-        _append_audit(
-            state,
-            "post_removed",
-            actor_user_id=moderator_id,
-            target_user_id=target_user_id,
-            post_id=post_id,
-            content_type="post",
-            reason=str(action).lower(),
+    # Mission 31F: read-modify-write atômico via _mutate_state; o padrão
+    # anterior podia perder atualização concorrente (novo report ou outra
+    # revisão) entre a leitura e a gravação.
+    def mutator(state):
+        existing_item = next((item for item in state.get("review_queue", []) if item.get("post_id") == post_id), {})
+        queue = [item for item in state.get("review_queue", []) if item.get("post_id") != post_id]
+        reviewed = list(state.get("reviewed_reports", []))
+        reviewed.append(
+            {
+                "post_id": post_id,
+                "action": action,
+                "moderator_id": moderator_id,
+                "reviewed_at": int(time.time()),
+            }
         )
-    _save_state(state)
-    return {"post_id": post_id, "action": action}
+        state["review_queue"] = queue
+        state["reviewed_reports"] = reviewed[-5000:]
+        if str(action).lower() in {"hide", "remove"}:
+            target_user_id = existing_item.get("target_user_id")
+            if target_user_id:
+                _adjust_score(state, int(target_user_id), SocialGuardian.REMOVED_POST_DELTA, removed=True)
+            _append_audit(
+                state,
+                "post_removed",
+                actor_user_id=moderator_id,
+                target_user_id=target_user_id,
+                post_id=post_id,
+                content_type="post",
+                reason=str(action).lower(),
+            )
+        return {"post_id": post_id, "action": action}
+
+    return _mutate_state(mutator)
 
 
 def get_user_guardian_score(user_id):

@@ -1,4 +1,3 @@
-import json
 import logging
 import threading
 import time
@@ -10,6 +9,7 @@ from typing import Any, Dict, List
 
 from app.cache.snapshot_cache import get_snapshot_by_ticker
 from app.config import CRYPTO_SYMBOLS
+from app.core.atomic_io import interprocess_file_lock, read_json_file, write_json_file_atomic
 
 logger = logging.getLogger("stocknewsbr.polls")
 
@@ -123,7 +123,7 @@ def _migrate_legacy_store(store: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
     return store, migrated
 
 
-def _load_store() -> Dict[str, Any]:
+def _load_store(use_cache: bool = True) -> Dict[str, Any]:
     _ensure_store_path()
 
     if not POLL_STORE_PATH.exists():
@@ -134,19 +134,20 @@ def _load_store() -> Dict[str, Any]:
     except OSError:
         return {"polls": {}}
 
-    with _lock:
-        cache_path = str(POLL_STORE_PATH)
-        cached_path = str(_store_cache.get("path") or "")
-        cached_mtime = float(_store_cache.get("mtime") or 0.0)
-        cached_data = _store_cache.get("data")
-        if cached_path == cache_path and cached_mtime == mtime and isinstance(cached_data, dict):
-            store, migrated = _migrate_legacy_store(deepcopy(cached_data))
-            if migrated:
-                _save_store(store)
-            return deepcopy(store)
+    if use_cache:
+        with _lock:
+            cache_path = str(POLL_STORE_PATH)
+            cached_path = str(_store_cache.get("path") or "")
+            cached_mtime = float(_store_cache.get("mtime") or 0.0)
+            cached_data = _store_cache.get("data")
+            if cached_path == cache_path and cached_mtime == mtime and isinstance(cached_data, dict):
+                store, migrated = _migrate_legacy_store(deepcopy(cached_data))
+                if migrated:
+                    _save_store(store)
+                return deepcopy(store)
 
     try:
-        store = _normalize_store(json.loads(POLL_STORE_PATH.read_text(encoding="utf-8")))
+        store = _normalize_store(read_json_file(POLL_STORE_PATH, lambda: {"polls": {}}))
     except Exception as exc:
         logger.warning("Poll store load error: %s", exc)
         store = {"polls": {}}
@@ -173,8 +174,7 @@ def _load_store() -> Dict[str, Any]:
 def _save_store(store: Dict[str, Any]):
     _ensure_store_path()
     normalized = _normalize_store(store)
-    payload = json.dumps(normalized, ensure_ascii=False, indent=2)
-    POLL_STORE_PATH.write_text(payload, encoding="utf-8")
+    write_json_file_atomic(POLL_STORE_PATH, normalized, ensure_ascii=False)
 
     try:
         mtime = POLL_STORE_PATH.stat().st_mtime
@@ -185,6 +185,14 @@ def _save_store(store: Dict[str, Any]):
         _store_cache["path"] = str(POLL_STORE_PATH)
         _store_cache["mtime"] = mtime
         _store_cache["data"] = deepcopy(normalized)
+
+
+def _mutate_store(mutator):
+    with _lock, interprocess_file_lock(POLL_STORE_PATH.with_suffix(".json.lock")):
+        store = _load_store()
+        result = mutator(store)
+        _save_store(store)
+        return result
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -966,23 +974,26 @@ def _upgrade_poll_record_with_touch(
 
 
 def _store_poll(poll: Dict[str, Any]) -> Dict[str, Any]:
-    store = _load_store()
-    polls = store.setdefault("polls", {})
-    polls[poll["id"]] = poll
+    def mutator(store):
+        polls = store.setdefault("polls", {})
+        polls[poll["id"]] = poll
 
-    if len(polls) > MAX_POLLS:
-        ordered = sorted(
-            polls.items(),
-            key=lambda item: (
-                str(item[1].get("created_at", "")),
-                str(item[0]),
-            ),
-        )
-        for key, _value in ordered[: len(polls) - MAX_POLLS]:
-            polls.pop(key, None)
+        if len(polls) > MAX_POLLS:
+            ordered = sorted(
+                polls.items(),
+                key=lambda item: (
+                    str(item[1].get("created_at", "")),
+                    str(item[0]),
+                ),
+            )
+            # Mission 31F: o poll recém-armazenado nunca pode ser podado,
+            # mesmo que seja o mais antigo por created_at.
+            removable = [key for key, _value in ordered if key != poll["id"]]
+            for key in removable[: len(polls) - MAX_POLLS]:
+                polls.pop(key, None)
+        return poll
 
-    _save_store(store)
-    return poll
+    return _mutate_store(mutator)
 
 
 def _lookup_signal_for_symbol(symbol: str, snapshot: Dict[str, Dict[str, Any]] | None = None) -> Dict[str, Any] | None:
@@ -1030,16 +1041,13 @@ def ensure_weekly_poll(
     week_key = _week_key()
     poll_key = _poll_id(symbol, week_key)
 
-    with _lock:
-        store = _load_store()
+    def mutator(store):
         polls = store.setdefault("polls", {})
         poll = polls.get(poll_key)
 
         if isinstance(poll, dict):
             upgraded = _upgrade_poll_record_with_touch(poll, symbol, signal=signal, touch_updated_at=False)
             polls[poll_key] = upgraded
-            if upgraded != poll:
-                _save_store(store)
             return upgraded
 
         report_context = _build_poll_context(symbol, market_type, earnings_week, timing_bucket, signal, earnings_meta=earnings_meta)
@@ -1078,7 +1086,24 @@ def ensure_weekly_poll(
             "reason": report_context["insight"],
         }
         poll["report"] = _build_poll_report(poll)
-        return _store_poll(poll)
+        polls[poll_key] = poll
+
+        if len(polls) > MAX_POLLS:
+            ordered = sorted(
+                polls.items(),
+                key=lambda item: (
+                    str(item[1].get("created_at", "")),
+                    str(item[0]),
+                ),
+            )
+            # Mission 31F: o poll recém-armazenado nunca pode ser podado,
+            # mesmo que seja o mais antigo por created_at.
+            removable = [key for key, _value in ordered if key != poll["id"]]
+            for key in removable[: len(polls) - MAX_POLLS]:
+                polls.pop(key, None)
+        return poll
+
+    return _mutate_store(mutator)
 
 
 def get_weekly_poll(symbol: str) -> Dict[str, Any]:
@@ -1098,10 +1123,11 @@ def get_weekly_poll(symbol: str) -> Dict[str, Any]:
             touch_updated_at=False,
         )
         if upgraded != poll:
-            with _lock:
-                store = _load_store()
+            def mutator(store):
                 store.setdefault("polls", {})[poll_key] = upgraded
-                _save_store(store)
+                return upgraded
+
+            _mutate_store(mutator)
         return upgraded
 
     signal = _lookup_signal_for_symbol(symbol)
@@ -1167,9 +1193,9 @@ def vote_poll(symbol: str, option_key: str, user_id: int) -> Dict[str, Any]:
     if option_key not in {"A", "B"}:
         raise ValueError("invalid_option")
 
-    with _lock:
-        poll = get_weekly_poll(symbol)
-        store = _load_store()
+    poll = get_weekly_poll(symbol)
+
+    def mutator(store):
         stored_poll = store.setdefault("polls", {}).get(poll["id"], poll)
         voters = stored_poll.setdefault("voters", {})
         previous_vote = voters.get(str(user_id))
@@ -1197,8 +1223,9 @@ def vote_poll(symbol: str, option_key: str, user_id: int) -> Dict[str, Any]:
         stored_poll["total_votes"] = sum(int(option.get("votes", 0) or 0) for option in stored_poll.get("options", []))
         stored_poll["report"] = _build_poll_report(stored_poll)
         store["polls"][stored_poll["id"]] = stored_poll
-        _save_store(store)
         return stored_poll
+
+    return _mutate_store(mutator)
 
 
 def get_poll_history(symbol: str, limit: int = 8) -> List[Dict[str, Any]]:

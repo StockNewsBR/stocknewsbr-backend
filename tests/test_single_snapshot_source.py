@@ -314,14 +314,18 @@ class SingleSnapshotSourceTests(unittest.TestCase):
         self.assertGreater(data_quality_score("score_only"), data_quality_score("stale"))
 
     def test_snapshot_cache_preserves_good_payload_when_empty_update_arrives(self):
+        # Mission 31F: update vazio zera o payload vivo e o payload bom
+        # anterior fica preservado em last_good (não é mais espelhado no get()).
         cache = SnapshotCache()
         cache.update({"signals": [_actionable_row("PETR4")]})
         first = cache.get()
         cache.update({"signals": [], "source": "empty", "stale": True})
         second = cache.get()
+        last_good = cache.get_last_good()
 
         self.assertTrue(first["signals"])
-        self.assertEqual(second["signals"][0]["ticker"], "PETR4")
+        self.assertEqual(second["signals"], [])
+        self.assertEqual(last_good["signals"][0]["ticker"], "PETR4")
 
     def test_snapshot_cache_stats_count_only_actionable_bullish_bearish(self):
         cache = SnapshotCache()

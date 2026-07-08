@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
+from app.core.atomic_io import read_json_file_consistent, write_json_file_atomic
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _TEST_RUNTIME_ROOT: Path | None = None
 _TEST_RUNTIME_CLEANUP_REGISTERED = False
@@ -117,6 +119,7 @@ class PaperTradingCache:
     def __init__(self, storage_path: Path | None = None):
         self._storage_path = storage_path or _paper_runtime_path()
         self._lock = threading.RLock()
+        self._disk_write_lock = threading.Lock()
         self._state = empty_paper_trading_state()
         self._disk_mtime = 0.0
         self._load_from_disk()
@@ -132,10 +135,17 @@ class PaperTradingCache:
         try:
             if not self._storage_path.exists():
                 return
-            raw = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            raw, stable_mtime, _stable_size = read_json_file_consistent(
+                self._storage_path,
+                empty_paper_trading_state,
+            )
             with self._lock:
+                if stable_mtime and stable_mtime <= self._disk_mtime:
+                    # Mission 31F: leitura stale do disco não pode sobrescrever
+                    # estado em memória mais novo.
+                    return
                 self._state = _normalize_state(raw)
-                self._disk_mtime = self._storage_path.stat().st_mtime
+                self._disk_mtime = stable_mtime or self._storage_path.stat().st_mtime
         except Exception:
             with self._lock:
                 self._state = empty_paper_trading_state()
@@ -157,16 +167,32 @@ class PaperTradingCache:
         normalized = _normalize_state(state)
         with self._lock:
             self._state = normalized
+            # Mission 31F (CodeRabbit trivial): o payload é clonado dentro do
+            # lock e a escrita atômica acontece fora dele, para não bloquear
+            # leitores durante o I/O de disco.
+            payload = _clone(normalized)
+
+        # _disk_write_lock serializa escritores e o guard de identidade impede
+        # que um update superado deixe no disco estado mais antigo que a memória.
+        with self._disk_write_lock:
+            with self._lock:
+                if self._state is not normalized:
+                    # Um update mais novo assumiu; ele grava o próprio estado.
+                    return _clone(normalized)
             try:
                 self._ensure_storage_dir()
-                temp_path = self._storage_path.with_suffix(".tmp")
-                temp_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
-                temp_path.replace(self._storage_path)
-                self._disk_mtime = self._storage_path.stat().st_mtime
+                write_json_file_atomic(self._storage_path, payload, ensure_ascii=False)
+                disk_mtime = self._storage_path.stat().st_mtime
             except Exception:
-                self._state["paper_trading_status"] = "DEGRADED"
-                self._state["state_error"] = "state_write_failed"
-            return _clone(self._state)
+                with self._lock:
+                    if self._state is normalized:
+                        self._state["paper_trading_status"] = "DEGRADED"
+                        self._state["state_error"] = "state_write_failed"
+                    return _clone(self._state)
+            with self._lock:
+                if self._state is normalized:
+                    self._disk_mtime = disk_mtime
+                return _clone(self._state)
 
     def reset(self) -> Dict[str, Any]:
         state = empty_paper_trading_state()

@@ -7,9 +7,11 @@ import atexit
 import shutil
 import sys
 import tempfile
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
+from app.core.atomic_io import read_json_file_consistent, write_json_file_atomic
 from app.services.snapshot_contract import attach_decision_envelope, summarize_snapshot_rows
 from app.services.go_live_status_service import attach_go_live_status, build_go_live_status
 from app.services.snapshot_runtime_status import evaluate_snapshot_runtime_status
@@ -119,6 +121,8 @@ class SnapshotCache:
         self._last_good_signature: str = ""
         self._disk_write_min_interval_seconds = SNAPSHOT_DISK_WRITE_MIN_INTERVAL_SECONDS
         self._lock = threading.RLock()
+        self._disk_write_lock = threading.Lock()
+        self._write_epoch = 0
         self._storage_path = _snapshot_runtime_path("SNAPSHOT_CACHE_FILE", "runtime/cache/snapshot.json")
 
     def _empty_payload(self) -> Dict[str, Any]:
@@ -273,62 +277,27 @@ class SnapshotCache:
         return True
 
     def _clone_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        cloned = dict(payload)
-        cloned["signals"] = list(payload.get("signals", []))
-        cloned["leaders"] = list(payload.get("leaders", []))
-        cloned["stats"] = dict(payload.get("stats", {}))
-        cloned["by_ticker"] = {
-            key: dict(value)
-            for key, value in payload.get("by_ticker", {}).items()
-        }
-        ai_tools = payload.get("ai_tools")
-        if isinstance(ai_tools, dict):
-            cloned["ai_tools"] = {
-                key: [dict(row) for row in value if isinstance(row, dict)]
-                for key, value in ai_tools.items()
-                if isinstance(value, list)
-            }
-        for key in (
-            "auditor",
-            "institutional_auditor",
-            "master_score",
-            "strategic_panel",
-            "historical_confidence",
-            "institutional_conviction",
-            "institutional_priority",
-            "final_decision",
-            "institutional_consistency",
-            "decision_envelope",
-        ):
-            if isinstance(payload.get(key), dict):
-                cloned[key] = canonicalize_master_score_row(dict(payload.get(key, {})))
-        for key in ("master_scores", "strategic_panels", "institutional_radar", "institutional_ranking", "historical_confidences", "operational_rules", "institutional_convictions", "institutional_priorities", "final_decisions", "decision_envelopes"):
-            if isinstance(payload.get(key), list):
-                cloned[key] = [canonicalize_master_score_row(dict(row)) for row in payload.get(key, []) if isinstance(row, dict)]
-        for key in ("radar_metrics", "ranking_metrics", "historical_confidence_metrics", "operational_rules_metrics", "conviction_metrics", "priority_metrics", "final_decision_metrics", "institutional_consistency_metrics"):
-            if isinstance(payload.get(key), dict):
-                cloned[key] = dict(payload.get(key, {}))
-        return cloned
+        try:
+            return deepcopy(payload)
+        except Exception:
+            try:
+                return json.loads(json.dumps(payload, ensure_ascii=False, default=str))
+            except Exception:
+                return self._empty_payload()
 
     def _ensure_storage_dir(self):
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _write_to_disk(self):
+    def _write_to_disk_payload(self, payload: Dict[str, Any]) -> tuple[bool, float]:
         try:
             self._ensure_storage_dir()
-            payload = {
-                "timestamp": self._timestamp,
-                "payload": self._clone_payload(self._payload),
-                "last_good_timestamp": self._last_good_timestamp,
-                "last_good_payload": self._clone_payload(self._last_good_payload),
-            }
-            temp_path = self._storage_path.with_suffix(".tmp")
-            temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            temp_path.replace(self._storage_path)
-            self._disk_mtime = self._storage_path.stat().st_mtime
-            return True
+            write_json_file_atomic(self._storage_path, payload, ensure_ascii=False)
+            return True, self._storage_path.stat().st_mtime
         except Exception:
-            return False
+            return False, 0.0
+
+    def _write_to_disk(self, payload: Dict[str, Any]) -> tuple[bool, float]:
+        return self._write_to_disk_payload(payload)
 
     def _payload_signature(self, payload: Dict[str, Any]) -> str:
         stable_payload = {
@@ -354,11 +323,20 @@ class SnapshotCache:
                 return
 
             file_mtime = self._storage_path.stat().st_mtime
-            should_reload = file_mtime > self._disk_mtime or (self._timestamp == 0.0 and file_mtime > 0)
+            should_reload = file_mtime > self._disk_mtime or (
+                self._disk_mtime <= 0.0 and self._timestamp == 0.0 and file_mtime > 0
+            )
             if not should_reload:
                 return
 
-            raw = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            raw, stable_mtime, _stable_size = read_json_file_consistent(
+                self._storage_path,
+                lambda: {},
+            )
+            if not isinstance(raw, dict) or "payload" not in raw:
+                with self._lock:
+                    self._disk_mtime = stable_mtime or file_mtime
+                return
             payload = self._normalize_payload(raw.get("payload"))
             last_good_payload = self._normalize_payload(raw.get("last_good_payload"))
             timestamp = float(raw.get("timestamp") or 0.0)
@@ -369,49 +347,76 @@ class SnapshotCache:
                 self._timestamp = timestamp
                 self._last_good_payload = last_good_payload
                 self._last_good_timestamp = last_good_timestamp
-                self._disk_mtime = file_mtime
-                self._last_disk_write_at = file_mtime
+                self._disk_mtime = stable_mtime or file_mtime
+                self._last_disk_write_at = stable_mtime or file_mtime
                 self._last_disk_signature = self._payload_signature(payload)
                 self._last_good_signature = self._payload_signature(last_good_payload)
         except Exception:
             pass
 
     def update(self, data: Any):
-        normalized = self._normalize_payload(data)
-        if not normalized.get("signals") and self._payload.get("signals"):
-            # Preserve the last good live payload when an empty update arrives.
-            # This keeps transient provider gaps from blanking the shared cache.
-            return
+        normalized = self._clone_payload(self._normalize_payload(data))
         now = time.time()
         normalized["updated_at"] = now
         normalized.setdefault("generated_at", now)
         normalized = attach_go_live_status(normalized, now=now)
         signature = self._payload_signature(normalized)
 
-        with self._lock:
-            self._payload = normalized
-            self._timestamp = now
-            if self._is_promotable_last_good(self._payload):
-                if signature != self._last_good_signature:
-                    self._last_good_payload = self._clone_payload(self._payload)
-                    self._last_good_signature = signature
-                else:
-                    self._last_good_payload["updated_at"] = self._payload.get("updated_at")
-                    self._last_good_payload["generated_at"] = self._payload.get("generated_at")
-                self._last_good_timestamp = self._timestamp
-            should_write = (
-                not self._last_disk_write_at
-                or signature != self._last_disk_signature
-                or now - self._last_disk_write_at >= self._disk_write_min_interval_seconds
-            )
-            if should_write:
-                write_ok = self._write_to_disk()
+        disk_payload = None
+        write_epoch = 0
+        cache_timestamp = 0.0
+
+        with self._disk_write_lock:
+            with self._lock:
+                previous_payload = self._clone_payload(self._payload)
+                previous_timestamp = self._timestamp
+                self._payload = normalized
+                self._timestamp = now
+                cache_timestamp = self._timestamp
+                if self._is_promotable_last_good(self._payload):
+                    if signature != self._last_good_signature:
+                        self._last_good_payload = self._clone_payload(self._payload)
+                        self._last_good_signature = signature
+                    else:
+                        self._last_good_payload["updated_at"] = self._payload.get("updated_at")
+                        self._last_good_payload["generated_at"] = self._payload.get("generated_at")
+                    self._last_good_timestamp = self._timestamp
+                elif not self._payload.get("signals") and self._is_promotable_last_good(previous_payload):
+                    previous_signature = self._payload_signature(previous_payload)
+                    if previous_signature != self._last_good_signature:
+                        self._last_good_payload = previous_payload
+                        self._last_good_signature = previous_signature
+                    self._last_good_timestamp = previous_timestamp or self._last_good_timestamp
+                should_write = (
+                    not self._last_disk_write_at
+                    or signature != self._last_disk_signature
+                    or now - self._last_disk_write_at >= self._disk_write_min_interval_seconds
+                )
+                if should_write:
+                    disk_payload = {
+                        "timestamp": self._timestamp,
+                        "payload": self._clone_payload(self._payload),
+                        "last_good_timestamp": self._last_good_timestamp,
+                        "last_good_payload": self._clone_payload(self._last_good_payload),
+                    }
+                    write_epoch = self._write_epoch
+
+            if disk_payload is not None:
+                expected_timestamp = float(disk_payload.get("timestamp") or 0.0)
+                write_ok, disk_mtime = self._write_to_disk(disk_payload)
                 record_snapshot_write_metric(write_ok)
                 if write_ok:
-                    self._last_disk_write_at = now
-                    self._last_disk_signature = signature
+                    with self._lock:
+                        if (
+                            self._payload_signature(self._payload) == signature
+                            and self._write_epoch == write_epoch
+                            and self._timestamp == expected_timestamp
+                        ):
+                            self._disk_mtime = disk_mtime
+                            self._last_disk_write_at = now
+                            self._last_disk_signature = signature
 
-        update_cache_timestamp(self._timestamp)
+        update_cache_timestamp(cache_timestamp)
 
     def get(self) -> Dict[str, Any]:
         start = time.perf_counter()
@@ -425,7 +430,7 @@ class SnapshotCache:
         start = time.perf_counter()
         self._load_from_disk_if_needed()
         with self._lock:
-            signals = list(self._payload.get("signals", []))
+            signals = self._clone_payload({"signals": self._payload.get("signals", [])}).get("signals", [])
         record_cache_lookup("snapshot_signals", time.perf_counter() - start, len(signals))
 
         if limit is None:
@@ -437,10 +442,7 @@ class SnapshotCache:
         start = time.perf_counter()
         self._load_from_disk_if_needed()
         with self._lock:
-            payload = {
-                key: dict(value)
-                for key, value in self._payload.get("by_ticker", {}).items()
-            }
+            payload = self._clone_payload(self._payload.get("by_ticker", {}))
         record_cache_lookup("snapshot_by_ticker", time.perf_counter() - start, len(payload))
         return payload
 
@@ -460,7 +462,7 @@ class SnapshotCache:
                 canonical_ticker = canonical_symbol(ticker)
                 row = by_ticker.get(canonical_ticker) or by_ticker.get(ticker)
                 if isinstance(row, dict):
-                    result = dict(row)
+                    result = self._clone_payload(row)
                     break
 
         record_cache_lookup("snapshot_by_ticker", time.perf_counter() - start, size)
@@ -532,20 +534,38 @@ class SnapshotCache:
         return info
 
     def clear(self):
-        with self._lock:
-            self._payload = self._empty_payload()
-            self._timestamp = 0.0
-            self._last_good_payload = self._empty_payload()
-            self._last_good_timestamp = 0.0
-            self._disk_mtime = 0.0
-            self._last_disk_write_at = 0.0
-            self._last_disk_signature = ""
-            self._last_good_signature = ""
-        try:
-            if self._storage_path.exists():
-                self._storage_path.unlink()
-        except Exception:
-            pass
+        with self._disk_write_lock:
+            with self._lock:
+                self._write_epoch += 1
+                self._payload = self._empty_payload()
+                self._timestamp = 0.0
+                self._last_good_payload = self._empty_payload()
+                self._last_good_timestamp = 0.0
+                previous_disk_mtime = self._disk_mtime
+                self._last_disk_write_at = 0.0
+                self._last_disk_signature = ""
+                self._last_good_signature = ""
+            try:
+                self._ensure_storage_dir()
+                write_json_file_atomic(
+                    self._storage_path,
+                    {
+                        "timestamp": 0.0,
+                        "payload": self._empty_payload(),
+                        "last_good_timestamp": 0.0,
+                        "last_good_payload": self._empty_payload(),
+                    },
+                    ensure_ascii=False,
+                )
+                with self._lock:
+                    self._disk_mtime = self._storage_path.stat().st_mtime
+            except Exception:
+                with self._lock:
+                    try:
+                        self._disk_mtime = self._storage_path.stat().st_mtime
+                    except Exception:
+                        self._disk_mtime = previous_disk_mtime
+                pass
 
     def get_last_good(self) -> Dict[str, Any]:
         start = time.perf_counter()
@@ -572,7 +592,7 @@ class SnapshotCache:
                 canonical_ticker = canonical_symbol(ticker)
                 row = by_ticker.get(canonical_ticker) or by_ticker.get(ticker)
                 if isinstance(row, dict):
-                    result = dict(row)
+                    result = self._clone_payload(row)
                     break
 
         record_cache_lookup("snapshot_last_good_by_ticker", time.perf_counter() - start, size)

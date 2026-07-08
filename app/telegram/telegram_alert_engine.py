@@ -331,6 +331,19 @@ def build_telegram_alert(signal: dict[str, Any]) -> dict[str, Any]:
     if blocked_reason:
         return _event_payload(signal=signal, status="blocked", reason=blocked_reason)
 
+    # Mission 31F: acesso Telegram precisa ter sido validado explicitamente.
+    # Dados ausentes não são considerados válidos. Avaliado após os bloqueios
+    # de decisão para preservar a precedência de motivo (Mission 29).
+    access = signal.get("telegram_access")
+    if not isinstance(access, dict) or "allowed" not in access:
+        return _event_payload(signal=signal, status="blocked", reason="telegram_access_not_validated")
+    if access.get("allowed") is not True:
+        return _event_payload(
+            signal=signal,
+            status="blocked",
+            reason=str(access.get("reason") or "telegram_access_required"),
+        )
+
     alert_level = classify_telegram_alert(signal)
     if not alert_level:
         return _event_payload(signal=signal, status="discarded", reason="alert_level_not_institutional")
@@ -439,6 +452,11 @@ def _dispatch_prepared_alert(
             _record_event(event, "cooldown", alert_level=alert_level)
             return event
 
+        # Mission 31F: reserva o fingerprint antes de liberar o lock para que
+        # envios concorrentes do mesmo alerta sejam deduplicados de forma
+        # determinística (apenas um envia).
+        _sent_fingerprints[fingerprint] = current_time
+
     message = f"{ALERT_LABELS.get(alert_level, 'ALERTA')}\n\n{format_signal_alert(signal, regime)}"
     sent = send_alert(message)
 
@@ -456,6 +474,11 @@ def _dispatch_prepared_alert(
         )
         _record_event(event, "sent", alert_level=alert_level)
         return event
+
+    with _lock:
+        # Falha no envio: libera a reserva para não mascarar futuros alertas.
+        if _sent_fingerprints.get(fingerprint) == current_time:
+            _sent_fingerprints.pop(fingerprint, None)
 
     event = _event_payload(
         signal=signal,

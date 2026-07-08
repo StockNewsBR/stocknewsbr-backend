@@ -10,9 +10,13 @@ from app.cache.signal_cache import get_all_signals, get_signal_info, signal_cach
 from app.cache.signal_cache_layer import (
     get_signal_cache,
     get_top_signals,
-    signal_cache_layer,
     update_signal_cache,
 )
+
+# Mission 31F: re-exportar a instância com o mesmo nome do submódulo
+# sombreava app.cache.signal_cache_layer no pacote e quebrava alvos de
+# unittest.mock.patch. O nome do pacote agora aponta para o submódulo.
+import app.cache.signal_cache_layer as signal_cache_layer  # noqa: E402,F401
 from app.cache.snapshot_cache import (
     get_snapshot_by_ticker,
     get_snapshot_signals,
