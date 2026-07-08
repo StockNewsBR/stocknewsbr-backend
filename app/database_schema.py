@@ -148,6 +148,41 @@ TABLE_PATCHES = {
             )
         """,
     },
+    "auth_audit_events": {
+        "sqlite": """
+            CREATE TABLE auth_audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event VARCHAR NOT NULL,
+                user_id INTEGER,
+                email_masked VARCHAR,
+                email_hash VARCHAR,
+                ip_hash VARCHAR,
+                user_agent VARCHAR,
+                sid_ref VARCHAR,
+                reason VARCHAR,
+                status VARCHAR,
+                correlation_id VARCHAR,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+        """,
+        "default": """
+            CREATE TABLE auth_audit_events (
+                id SERIAL PRIMARY KEY,
+                event VARCHAR NOT NULL,
+                user_id INTEGER REFERENCES users(id),
+                email_masked VARCHAR,
+                email_hash VARCHAR,
+                ip_hash VARCHAR,
+                user_agent VARCHAR,
+                sid_ref VARCHAR,
+                reason VARCHAR,
+                status VARCHAR,
+                correlation_id VARCHAR,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """,
+    },
 }
 
 
@@ -236,6 +271,58 @@ SCHEMA_PATCHES = {
             "default": "ALTER TABLE referrals ADD COLUMN reward_processed BOOLEAN DEFAULT FALSE",
         },
     },
+    "login_challenges": {
+        "purpose": {
+            "sqlite": "ALTER TABLE login_challenges ADD COLUMN purpose VARCHAR NOT NULL DEFAULT 'LOGIN'",
+            "default": "ALTER TABLE login_challenges ADD COLUMN purpose VARCHAR NOT NULL DEFAULT 'LOGIN'",
+        },
+        "target_email": {
+            "sqlite": "ALTER TABLE login_challenges ADD COLUMN target_email VARCHAR",
+            "default": "ALTER TABLE login_challenges ADD COLUMN target_email VARCHAR",
+        },
+        "max_attempts": {
+            "sqlite": "ALTER TABLE login_challenges ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 5",
+            "default": "ALTER TABLE login_challenges ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 5",
+        },
+        "delivery_status": {
+            "sqlite": "ALTER TABLE login_challenges ADD COLUMN delivery_status VARCHAR NOT NULL DEFAULT 'INVALIDATED'",
+            "default": "ALTER TABLE login_challenges ADD COLUMN delivery_status VARCHAR NOT NULL DEFAULT 'INVALIDATED'",
+        },
+        "delivery_attempted_at": {
+            "sqlite": "ALTER TABLE login_challenges ADD COLUMN delivery_attempted_at DATETIME",
+            "default": "ALTER TABLE login_challenges ADD COLUMN delivery_attempted_at TIMESTAMP",
+        },
+        "invalidated_at": {
+            "sqlite": "ALTER TABLE login_challenges ADD COLUMN invalidated_at DATETIME",
+            "default": "ALTER TABLE login_challenges ADD COLUMN invalidated_at TIMESTAMP",
+        },
+        "request_ip_hash": {
+            "sqlite": "ALTER TABLE login_challenges ADD COLUMN request_ip_hash VARCHAR",
+            "default": "ALTER TABLE login_challenges ADD COLUMN request_ip_hash VARCHAR",
+        },
+        "correlation_id": {
+            "sqlite": "ALTER TABLE login_challenges ADD COLUMN correlation_id VARCHAR",
+            "default": "ALTER TABLE login_challenges ADD COLUMN correlation_id VARCHAR",
+        },
+    },
+    "user_sessions": {
+        "expires_at": {
+            "sqlite": "ALTER TABLE user_sessions ADD COLUMN expires_at DATETIME",
+            "default": "ALTER TABLE user_sessions ADD COLUMN expires_at TIMESTAMP",
+        },
+        "created_ip_hash": {
+            "sqlite": "ALTER TABLE user_sessions ADD COLUMN created_ip_hash VARCHAR",
+            "default": "ALTER TABLE user_sessions ADD COLUMN created_ip_hash VARCHAR",
+        },
+        "user_agent": {
+            "sqlite": "ALTER TABLE user_sessions ADD COLUMN user_agent VARCHAR",
+            "default": "ALTER TABLE user_sessions ADD COLUMN user_agent VARCHAR",
+        },
+        "correlation_id": {
+            "sqlite": "ALTER TABLE user_sessions ADD COLUMN correlation_id VARCHAR",
+            "default": "ALTER TABLE user_sessions ADD COLUMN correlation_id VARCHAR",
+        },
+    },
     "promo_codes": {
         "free_months": {
             "sqlite": "ALTER TABLE promo_codes ADD COLUMN free_months INTEGER",
@@ -247,7 +334,18 @@ SCHEMA_PATCHES = {
 
 # ensure_runtime_schema applies INDEX_PATCHES inside engine.begin(); keep
 # PostgreSQL CONCURRENTLY and other non-transactional index DDL in migrations.
-INDEX_PATCHES = {}
+INDEX_PATCHES = {
+    "auth_audit_events": {
+        "ix_auth_audit_event_email_created": {
+            "sqlite": "CREATE INDEX ix_auth_audit_event_email_created ON auth_audit_events (event, email_hash, created_at)",
+            "default": "CREATE INDEX ix_auth_audit_event_email_created ON auth_audit_events (event, email_hash, created_at)",
+        },
+        "ix_auth_audit_event_ip_created": {
+            "sqlite": "CREATE INDEX ix_auth_audit_event_ip_created ON auth_audit_events (event, ip_hash, created_at)",
+            "default": "CREATE INDEX ix_auth_audit_event_ip_created ON auth_audit_events (event, ip_hash, created_at)",
+        },
+    },
+}
 
 
 def ensure_runtime_schema(engine):

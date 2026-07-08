@@ -2,6 +2,8 @@
 # STOCKNEWSBR GLOBAL SETTINGS
 # =====================================================
 
+import hashlib
+import hmac
 import os
 import logging
 from dotenv import load_dotenv
@@ -87,8 +89,135 @@ def get_secret_key() -> str:
     return _normalize_secret_key(os.getenv("SECRET_KEY"))
 
 
+# =====================================================
+# MISSION 31B - AUTH / OTP / SESSION SETTINGS
+# =====================================================
+
+MIN_OTP_PEPPER_LENGTH = 16
+
+OTP_PEPPER_PLACEHOLDER_VALUES = frozenset(
+    {
+        "change_this_pepper",
+        "changeme",
+        "change_me",
+        "default",
+        "pepper",
+        "otp_pepper",
+        "secret",
+        "test_pepper",
+        "dev_pepper",
+    }
+)
+
+
+def _normalize_otp_pepper(value: str | None) -> str:
+    normalized = str(value or "").strip()
+    normalized_label = _normalize_secret_key_label(normalized)
+
+    if (
+        not normalized
+        or len(normalized) < MIN_OTP_PEPPER_LENGTH
+        or normalized_label in OTP_PEPPER_PLACEHOLDER_VALUES
+        or (normalized.startswith("<") and normalized.endswith(">"))
+        or len(set(normalized_label)) <= 3
+    ):
+        return ""
+
+    return normalized
+
+
+def get_otp_pepper() -> str:
+    configured = _normalize_otp_pepper(os.getenv("OTP_PEPPER"))
+
+    if configured:
+        return configured
+
+    if _current_env_normalized() == "production":
+        raise RuntimeError("OTP_PEPPER_NOT_CONFIGURED")
+
+    # Non-production only: deterministic pepper derived from the mandatory
+    # SECRET_KEY so local/dev/test never operate with an empty pepper.
+    return hmac.new(
+        get_secret_key().encode("utf-8"),
+        b"stocknewsbr-otp-pepper-v1",
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _current_env_normalized() -> str:
+    return str(os.getenv("ENV", ENV)).strip().lower() or "development"
+
+
+def _to_positive_int(name: str, default: int, minimum: int = 1) -> int:
+    try:
+        value = int(str(os.getenv(name, default)).strip())
+    except Exception:
+        return default
+    return value if value >= minimum else default
+
+
+def login_code_expiry_seconds() -> int:
+    return _to_positive_int("LOGIN_CODE_EXPIRY_SECONDS", 600, minimum=60)
+
+
+def login_code_max_attempts() -> int:
+    return _to_positive_int("LOGIN_CODE_MAX_ATTEMPTS", 5)
+
+
+def login_code_max_sends_per_email() -> int:
+    return _to_positive_int("LOGIN_CODE_MAX_SENDS_PER_EMAIL", 3)
+
+
+def login_code_send_window_seconds() -> int:
+    return _to_positive_int("LOGIN_CODE_SEND_WINDOW_SECONDS", 900, minimum=60)
+
+
+def login_code_resend_cooldown_seconds() -> int:
+    return _to_positive_int("LOGIN_CODE_RESEND_COOLDOWN_SECONDS", 60, minimum=1)
+
+
+def login_code_max_sends_per_ip() -> int:
+    return _to_positive_int("LOGIN_CODE_MAX_SENDS_PER_IP", 10)
+
+
+def session_cookie_name() -> str:
+    configured = str(os.getenv("SESSION_COOKIE_NAME", "")).strip()
+
+    if configured:
+        return configured
+
+    return "__Host-snb_session" if _current_env_normalized() == "production" else "snb_session"
+
+
+def session_cookie_secure() -> bool:
+    raw = os.getenv("SESSION_COOKIE_SECURE")
+
+    if raw is None:
+        return _current_env_normalized() == "production"
+
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def session_cookie_samesite() -> str:
+    value = str(os.getenv("SESSION_COOKIE_SAMESITE", "lax")).strip().lower()
+    return value if value in {"lax", "strict"} else "lax"
+
+
+def auth_email_test_mailbox_path() -> str:
+    """Test-only OTP capture mailbox. Must never be active in production."""
+    return str(os.getenv("AUTH_EMAIL_TEST_MAILBOX", "")).strip()
+
+
 def validate_runtime_security_settings() -> None:
     get_secret_key()
+
+    if _current_env_normalized() == "production":
+        configured_pepper = _normalize_otp_pepper(os.getenv("OTP_PEPPER"))
+        if not configured_pepper:
+            raise RuntimeError("OTP_PEPPER_NOT_CONFIGURED")
+
+        if auth_email_test_mailbox_path():
+            raise RuntimeError("AUTH_EMAIL_TEST_MAILBOX_FORBIDDEN_IN_PRODUCTION")
 
 
 # =====================================================

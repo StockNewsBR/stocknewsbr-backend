@@ -211,9 +211,13 @@ class UserSession(Base):
     device_id = Column(String, nullable=True, index=True)
     device_label = Column(String, nullable=True)
     issued_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=True, index=True)
     last_seen_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     revoked_at = Column(DateTime, nullable=True, index=True)
     revoked_reason = Column(String, nullable=True)
+    created_ip_hash = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+    correlation_id = Column(String, nullable=True)
 
     user = relationship(
         "User",
@@ -228,19 +232,46 @@ class LoginChallenge(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     email = Column(String, nullable=False, index=True)
     login_token = Column(String, unique=True, index=True, nullable=False)
+    # Mission 31B: stores the HMAC-SHA256 digest of the code (conceptual
+    # "code_digest"); never a reversible or plaintext value.
     code_hash = Column(String, nullable=False)
+    purpose = Column(String, nullable=False, default="LOGIN", index=True)
+    target_email = Column(String, nullable=True)
     channel = Column(String, nullable=False, default="web", index=True)
     device_id = Column(String, nullable=True, index=True)
     device_label = Column(String, nullable=True)
     attempt_count = Column(Integer, default=0, nullable=False)
+    max_attempts = Column(Integer, default=5, nullable=False)
+    delivery_status = Column(String, nullable=False, default="PENDING", index=True)
+    delivery_attempted_at = Column(DateTime, nullable=True)
     expires_at = Column(DateTime, nullable=False, index=True)
     consumed_at = Column(DateTime, nullable=True, index=True)
+    invalidated_at = Column(DateTime, nullable=True, index=True)
+    request_ip_hash = Column(String, nullable=True)
+    correlation_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     user = relationship(
         "User",
         back_populates="login_challenges",
     )
+
+
+class AuthAuditEvent(Base):
+    __tablename__ = "auth_audit_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event = Column(String, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    email_masked = Column(String, nullable=True)
+    email_hash = Column(String, nullable=True, index=True)
+    ip_hash = Column(String, nullable=True, index=True)
+    user_agent = Column(String, nullable=True)
+    sid_ref = Column(String, nullable=True)
+    reason = Column(String, nullable=True)
+    status = Column(String, nullable=True)
+    correlation_id = Column(String, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
 class TelegramLinkToken(Base):
