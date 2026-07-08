@@ -72,10 +72,145 @@ class SocialGuardian:
         "brazino",
         "esportes da sorte",
         "pixbet",
+        "kto",
+        "5kto",
+        "betboom",
+        "7kbet",
+        "bet7k",
+        "vbet",
+        "playuzu",
+        "br4bet",
+        "rivalo",
+        "novibet",
+        "sportingbet",
+        "betfair",
+        "betmgm",
+        "1xbet",
+        "betnacional",
+        "estrela bet",
+        "estrelabet",
+        "hiperbet",
+        "vaidebet",
+        "fortune tiger",
+        "aviator",
+        "foguetinho",
+        "mines",
+        "crash",
+        "double",
+        "caça niquel",
+        "caça-niquel",
+        "cacaniquel",
+        "roleta",
+        "blackjack",
+        "bingo",
+        "jackpot",
+        "pay",
+        "slot",
+        "slots",
+        "betar",
+        "fezinha",
+        "roleteiro",
+        "tipster",
+        "palpite",
+        "odd",
+        "cotacao",
+        "alavancagem",
+        "banca",
+        "green",
+        "red",
+        "fé",
+        "fe",
+        "casa de aposta",
+        "renda garantida",
+        "lucro garantido",
+        "ganho garantido",
+        "dobro seu dinheiro",
+        "multiplique seu dinheiro",
+        "robô milagroso",
+        "robo milagroso",
+        "sinal garantido",
+        "sem risco",
+        "100% certo",
+        "certeza absoluta",
+        "ganhe dinheiro facil",
+        "ganhe dinheiro fácil",
+        "jogo de azar",
     )
     _BETTING_PATTERN = re.compile(
         r"\b(?:"
         + "|".join(re.escape(term).replace(r"\ ", r"\s+") for term in _BETTING_TERMS)
+        + r")\b",
+        re.IGNORECASE,
+    )
+
+    _BETTING_PATTERN_SEPARATED = None
+
+    _ADULT_TERMS = (
+        "onlyfans",
+        "sexo",
+        "anal",
+        "puta",
+        "cu",
+        "cuzao",
+        "cuzão",
+        "buceta",
+        "pau",
+        "penis",
+        "pênis",
+        "caralho",
+        "pornô",
+        "porno",
+        "xxx",
+        "adult",
+    )
+    _ADULT_PATTERN = re.compile(
+        r"\b(?:"
+        + "|".join(re.escape(term) for term in _ADULT_TERMS)
+        + r")\b",
+        re.IGNORECASE,
+    )
+
+    _SWEAR_TERMS = (
+        "caralho",
+        "merda",
+        "porra",
+        "bosta",
+        "desgraça",
+        "desgraca",
+        "arrombado",
+        "babaca",
+        "burro",
+        "idiota",
+        "imbecil",
+        "miseravel",
+        "miserável",
+        "canalha",
+        "vagabundo",
+        "maldito",
+        "droga",
+        "puta",
+        "putaria",
+        "cuzao",
+        "cuzão",
+    )
+    _SWEAR_PATTERN = re.compile(
+        r"\b(?:"
+        + "|".join(re.escape(term) for term in _SWEAR_TERMS)
+        + r")\b",
+        re.IGNORECASE,
+    )
+
+    _HATE_TERMS = (
+        "racismo",
+        "racista",
+        "transfobico",
+        "transfóbico",
+        "homofobico",
+        "homofóbico",
+    )
+    _HATE_PATTERN = re.compile(
+        r"\b(?:"
+        + "|".join(re.escape(term) for term in _HATE_TERMS)
         + r")\b",
         re.IGNORECASE,
     )
@@ -85,6 +220,12 @@ class SocialGuardian:
         text = unicodedata.normalize("NFKD", str(value or ""))
         text = "".join(char for char in text if not unicodedata.combining(char))
         return re.sub(r"\s+", " ", text).strip().lower()
+
+    @classmethod
+    def denormalize_separators(cls, value: str | None) -> str:
+        text = cls.normalize_text(value)
+        text = re.sub(r"[\s\-_.•·]", "", text)
+        return text
 
     @classmethod
     def validate_content(cls, text: str | None, *, content_type: str = "post") -> SocialGuardianDecision:
@@ -112,6 +253,24 @@ class SocialGuardian:
         match = cls._BETTING_PATTERN.search(normalized)
         if match:
             return SocialGuardianDecision(False, "betting_detected", "betting", (match.group(0).strip(),))
+
+        denormalized = cls.denormalize_separators(text)
+        for term in cls._BETTING_TERMS:
+            term_clean = re.sub(r"[\s\-_.•·]", "", term)
+            if term_clean and term_clean in denormalized:
+                return SocialGuardianDecision(False, "betting_detected", "betting", (term.strip(),))
+
+        match = cls._ADULT_PATTERN.search(normalized)
+        if match:
+            return SocialGuardianDecision(False, "adult_content_detected", "adult", (match.group(0).strip(),))
+
+        match = cls._SWEAR_PATTERN.search(normalized)
+        if match:
+            return SocialGuardianDecision(False, "swear_detected", "swear", (match.group(0).strip(),))
+
+        match = cls._HATE_PATTERN.search(normalized)
+        if match:
+            return SocialGuardianDecision(False, "hate_speech_detected", "hate", (match.group(0).strip(),))
 
         return SocialGuardianDecision(True, "allowed")
 
@@ -189,4 +348,7 @@ class SocialGuardian:
             "emails": ("@", "gmail", "hotmail", "outlook", "yahoo", "icloud", "proton"),
             "phones": ("+55", "(16)", "WhatsApp", "Telegram"),
             "bets": cls._BETTING_TERMS,
+            "adult": cls._ADULT_TERMS,
+            "swear": cls._SWEAR_TERMS,
+            "hate": cls._HATE_TERMS,
         }
