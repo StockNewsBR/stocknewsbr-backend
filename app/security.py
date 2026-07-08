@@ -7,25 +7,24 @@ import os
 from datetime import datetime, timedelta
 
 import bcrypt as raw_bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-from app.core.settings import get_secret_key
+from app.core.settings import get_secret_key, session_cookie_name
 from app.database import get_db
 from app.models import User, UserSession
 
 logger = logging.getLogger("stocknewsbr.security")
 
 ALGORITHM = "HS256"
+ALLOWED_JWT_ALGORITHMS = [ALGORITHM]
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 1440))
-STRICT_SESSION_PLANS = {
-    item.strip().lower()
-    for item in os.getenv("STRICT_SESSION_PLANS", "premium,enterprise").split(",")
-    if item.strip()
-}
+
+SESSION_REPLACED_REASONS = {"session_replaced_by_new_login", "replaced_by_new_login"}
+SESSION_REPLACED_DETAIL = "session_replaced"
 
 pwd_context = CryptContext(
     schemes=["pbkdf2_sha256"],
@@ -85,7 +84,23 @@ def create_access_token(data: dict):
     )
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
+
+
+def get_request_token(
+    request: Request,
+    bearer_token: str | None = Depends(oauth2_scheme),
+) -> str | None:
+    """Mission 31B token extraction: Authorization Bearer or session cookie."""
+    if bearer_token:
+        return bearer_token
+
+    cookie_token = request.cookies.get(session_cookie_name())
+
+    if cookie_token:
+        return cookie_token
+
+    return None
 
 
 def decode_access_token_payload(token: str, credentials_exception: HTTPException | None = None):
@@ -95,7 +110,9 @@ def decode_access_token_payload(token: str, credentials_exception: HTTPException
     )
 
     try:
-        payload = jwt.decode(token, get_jwt_secret(), algorithms=[ALGORITHM])
+        # Server-side algorithm allowlist: alg=none and any non-HS256
+        # algorithm are rejected by python-jose when the list is explicit.
+        payload = jwt.decode(token, get_jwt_secret(), algorithms=ALLOWED_JWT_ALGORITHMS)
         user_id = payload.get("sub")
 
         if user_id is None:
@@ -118,40 +135,62 @@ def resolve_token_user(
     )
 
     payload = decode_access_token_payload(token, fallback_exception)
+
+    session_id = payload.get("sid")
+
+    # Mission 31B legacy-token policy: immediate revocation. A valid signature
+    # is not enough — every accepted token must carry a sid whose session is
+    # alive server-side, for every plan.
+    if not session_id:
+        raise fallback_exception
+
     user = db.query(User).filter(User.id == payload["sub"]).first()
 
     if user is None:
         raise fallback_exception
 
-    session_id = payload.get("sid")
+    session = (
+        db.query(UserSession)
+        .filter(UserSession.user_id == user.id)
+        .filter(UserSession.session_id == str(session_id))
+        .first()
+    )
 
-    if session_id:
-        session = (
-            db.query(UserSession)
-            .filter(UserSession.user_id == user.id)
-            .filter(UserSession.session_id == str(session_id))
-            .filter(UserSession.revoked_at.is_(None))
-            .first()
-        )
-
-        if session is None:
-            raise fallback_exception
-
-        session.last_seen_at = datetime.utcnow()
-        db.add(session)
-    elif str(user.plan).lower() in STRICT_SESSION_PLANS:
+    if session is None:
         raise fallback_exception
+
+    if session.revoked_at is not None:
+        if str(session.revoked_reason or "") in SESSION_REPLACED_REASONS:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=SESSION_REPLACED_DETAIL,
+            )
+        raise fallback_exception
+
+    now = datetime.utcnow()
+
+    if session.expires_at is not None and session.expires_at < now:
+        session.revoked_at = now
+        session.revoked_reason = "session_expired"
+        db.add(session)
+        raise fallback_exception
+
+    session.last_seen_at = now
+    db.add(session)
 
     return user
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    token: str | None = Depends(get_request_token),
     db: Session = Depends(get_db),
 ):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid authentication credentials",
     )
+
+    if not token:
+        raise credentials_exception
 
     return resolve_token_user(token, db, credentials_exception)
