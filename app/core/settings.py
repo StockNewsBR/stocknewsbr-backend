@@ -173,7 +173,8 @@ def login_code_send_window_seconds() -> int:
 
 
 def login_code_resend_cooldown_seconds() -> int:
-    return _to_positive_int("LOGIN_CODE_RESEND_COOLDOWN_SECONDS", 60, minimum=1)
+    # 0 disables the cooldown (used by controlled test environments).
+    return _to_positive_int("LOGIN_CODE_RESEND_COOLDOWN_SECONDS", 60, minimum=0)
 
 
 def login_code_max_sends_per_ip() -> int:
@@ -218,6 +219,11 @@ def validate_runtime_security_settings() -> None:
 
         if auth_email_test_mailbox_path():
             raise RuntimeError("AUTH_EMAIL_TEST_MAILBOX_FORBIDDEN_IN_PRODUCTION")
+
+        # Mission 31B: the session cookie must never ship without Secure in
+        # production, even through explicit misconfiguration.
+        if not session_cookie_secure():
+            raise RuntimeError("SESSION_COOKIE_SECURE_REQUIRED_IN_PRODUCTION")
 
 
 # =====================================================

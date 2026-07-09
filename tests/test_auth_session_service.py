@@ -1,5 +1,9 @@
+import os
 import unittest
 from datetime import datetime, timedelta, timezone
+
+os.environ.setdefault("SECRET_KEY", "unit-test-secret-key-31b-0123456789abcdef")
+os.environ.setdefault("OTP_PEPPER", "unit-test-otp-pepper-31b-0123456789")
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -8,11 +12,13 @@ from app.database import Base
 from app.models import User, UserSession
 from app.security import hash_password
 from app.services.auth_session_service import (
+    DELIVERY_SENT,
     consume_login_challenge,
     consume_telegram_link_token,
     create_telegram_link_token,
     create_user_session,
     login_requires_email_otp,
+    mark_challenge_delivery,
     start_login_challenge,
 )
 
@@ -81,6 +87,9 @@ class AuthSessionServiceTests(unittest.TestCase):
         user = self._user("otp@example.com", plan="premium")
         challenge, code = start_login_challenge(self.db, user, channel="app", device_id="device-1", device_label="android")
         self.db.commit()
+
+        # Mission 31B: verification only accepts challenges marked as SENT.
+        mark_challenge_delivery(self.db, challenge.id, DELIVERY_SENT)
 
         resolved_user, channel, device_id, device_label, _expires_at = consume_login_challenge(
             self.db,

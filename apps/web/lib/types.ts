@@ -843,10 +843,15 @@ export type AuthFlowResponse = {
   otp_required?: boolean;
   login_token?: string | null;
   otp_expires_at?: string | null;
-  debug_otp_code?: string | null;
   session_policy?: string | null;
   channel?: string | null;
   detail?: string | null;
+};
+
+export type LoginCodeRequestResponse = {
+  detail: string;
+  login_token?: string | null;
+  otp_expires_at?: string | null;
 };
 
 export type TelegramLinkSessionResponse = {

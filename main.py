@@ -21,6 +21,7 @@ from sqlalchemy import text
 
 from app.ai.ai_market_pulse import market_pulse
 from app.cache.snapshot_cache import get_snapshot, get_snapshot_info, get_snapshot_signals
+from app.core.csrf import allowed_web_origins, csrf_rejection
 from app.core.settings import validate_runtime_security_settings
 from app.database import Base, SessionLocal, engine
 from app.database_schema import ensure_runtime_schema
@@ -112,12 +113,9 @@ def _default_start_background_workers() -> bool:
 
 
 def _cors_origins():
-    raw_value = os.getenv(
-        "CORS_ALLOWED_ORIGINS",
-        "https://www.stocknewsbr.com,https://stocknewsbr.com,http://localhost:3000,http://127.0.0.1:3000",
-    )
-    origins = [item.strip() for item in raw_value.split(",") if item.strip()]
-    return origins or ["*"]
+    # Mission 31B: cookies ride on credentialed CORS, so a wildcard origin is
+    # forbidden — the shared helper enforces exact origins.
+    return allowed_web_origins()
 
 
 def _create_tables_if_needed():
@@ -284,14 +282,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins(),
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 app.add_middleware(GZipMiddleware, minimum_size=512)
+
+@app.middleware("http")
+async def csrf_origin_guard(request: Request, call_next):
+    """Mission 31B CSRF protection (SameSite cookie + Origin/Referer check)."""
+    rejection = csrf_rejection(request, _cors_origins())
+
+    if rejection is not None:
+        return rejection
+
+    return await call_next(request)
+
 app.mount(
     "/media",
     StaticFiles(directory=str(ensure_media_root())),
@@ -338,6 +340,17 @@ async def add_process_time_header(request: Request, call_next):
 
     return response
 
+
+# Mission 31B: CORS is registered LAST so it wraps the whole middleware
+# stack (outermost) and error responses from csrf_origin_guard / exception
+# paths still carry Access-Control-Allow-Origin + credentials headers.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _include_routers(app)
 

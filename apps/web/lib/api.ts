@@ -3,6 +3,7 @@ import type {
   ChartPayload,
   ChatHistoryPayload,
   FeedPayload,
+  LoginCodeRequestResponse,
   NewsPayload,
   PollPayload,
   PublicAiToolsPayload,
@@ -27,13 +28,20 @@ function buildUrl(path: string) {
 
 type ApiRequestOptions = RequestInit & { token?: string; cacheTtlMs?: number };
 
+// Mission 31B: web sessions live in an httpOnly cookie. This sentinel marks
+// "authenticated via cookie" UI state without holding any real token in JS.
+export const COOKIE_SESSION_TOKEN = "cookie-session";
+export const SESSION_REPLACED_EVENT = "snb:session-replaced";
+export const SESSION_REPLACED_DETAIL = "session_replaced";
+
 const GET_REQUEST_CACHE_LIMIT = 160;
 const getRequestCache = new Map<string, { expiresAt: number; promise: Promise<unknown>; lastValue?: unknown }>();
 
 function buildHeaders(token?: string, base?: HeadersInit) {
+  const useBearer = Boolean(token) && token !== COOKIE_SESSION_TOKEN;
   return {
     ...(base || {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(useBearer ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
 
@@ -46,6 +54,14 @@ async function parseJson<T>(response: Response): Promise<T> {
       detail = payload.detail || JSON.stringify(payload);
     } catch {
       detail = response.statusText;
+    }
+
+    if (
+      response.status === 401 &&
+      detail === SESSION_REPLACED_DETAIL &&
+      typeof window !== "undefined"
+    ) {
+      window.dispatchEvent(new CustomEvent(SESSION_REPLACED_EVENT));
     }
 
     throw new Error(detail || "request_failed");
@@ -88,6 +104,8 @@ async function request<T>(path: string, options?: ApiRequestOptions) {
   const promise = (async () => {
     const response = await fetch(buildUrl(path), {
       cache: "no-store",
+      // Mission 31B: always send the httpOnly session cookie.
+      credentials: "include",
       ...fetchOptions,
       headers,
       signal: fetchOptions.signal || controller?.signal,
@@ -150,11 +168,22 @@ export function loginJson(
   });
 }
 
+export function requestLoginCode(
+  email: string,
+  options?: { channel?: string; device_id?: string; device_label?: string },
+) {
+  return request<LoginCodeRequestResponse>("/auth/request-code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, channel: "web", ...(options || {}) }),
+  });
+}
+
 export function verifyLoginOtp(login_token: string, code: string) {
   return request<AuthFlowResponse>("/auth/login/verify-otp", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ login_token, code }),
+    body: JSON.stringify({ login_token, code, channel: "web" }),
   });
 }
 
@@ -165,13 +194,38 @@ export function logoutAuth(token: string) {
   });
 }
 
+export function logoutAllAuth(token: string) {
+  return request<{ ok: boolean; revoked_sessions?: number | null }>("/auth/logout-all", {
+    method: "POST",
+    token,
+  });
+}
+
+export function requestEmailChange(token: string, new_email: string) {
+  return request<LoginCodeRequestResponse>("/auth/email-change/request", {
+    method: "POST",
+    token,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ new_email }),
+  });
+}
+
+export function verifyEmailChange(token: string, login_token: string, code: string) {
+  return request<UserAccess>("/auth/email-change/verify", {
+    method: "POST",
+    token,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ login_token, code }),
+  });
+}
+
 export function getAccess(token: string) {
   return request<UserAccess>("/auth/access", { token });
 }
 
 export function updateProfile(
   token: string,
-  payload: { display_name?: string | null; email?: string | null; avatar_url?: string | null },
+  payload: { display_name?: string | null; avatar_url?: string | null; phone?: string | null },
 ) {
   return request<UserAccess>("/auth/profile", {
     method: "PATCH",
@@ -557,6 +611,8 @@ export async function uploadMedia(token: string, file: File) {
 
   const response = await fetch(buildUrl("/api/media/upload"), {
     method: "POST",
+    // Mission 31B: cookie-session uploads must carry the httpOnly cookie.
+    credentials: "include",
     headers: buildHeaders(token),
     body,
   });

@@ -344,7 +344,7 @@ def serialize_user_access(user: User):
         "accepted_terms_at": user.accepted_terms_at,
         "accepted_privacy_at": user.accepted_privacy_at,
         "accepted_risk_notice_at": user.accepted_risk_notice_at,
-        "session_policy": "single_per_channel" if str(user.plan).lower() in PAID_PLANS else "shared",
+        "session_policy": "single",
         "otp_required_on_login": str(user.plan).lower() in PAID_PLANS,
         "access": {
             "app": bool(user.access_app),

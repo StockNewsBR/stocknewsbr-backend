@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
 
+from app.core.csrf import allowed_web_origins, origin_from_header
+from app.core.settings import session_cookie_name
 from app.database import SessionLocal
 from app.dependencies import require_active_plan
 from app.models import User
@@ -87,10 +89,28 @@ async def chat_message(
     return item
 
 
+def _cookie_websocket_origin_allowed(websocket: WebSocket) -> bool:
+    """CSWSH guard: cookie-authenticated handshakes need an allowed Origin."""
+    origin = origin_from_header(websocket.headers.get("origin"))
+    return origin in set(allowed_web_origins())
+
+
 @router.websocket("/ws/chat/{symbol}")
 async def websocket_chat(websocket: WebSocket, symbol: str):
     symbol = canonical_symbol(symbol)
+    # Mission 31B: browser clients authenticate via the httpOnly session
+    # cookie; the query-param token remains for bearer clients (mobile app).
     token = websocket.query_params.get("token")
+
+    if not token:
+        cookie_token = websocket.cookies.get(session_cookie_name())
+
+        if cookie_token and not _cookie_websocket_origin_allowed(websocket):
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
+        token = cookie_token
+
     user = _resolve_user_from_token(token)
 
     if user is None:

@@ -427,19 +427,27 @@ class JwtCompatibilityTests(unittest.TestCase):
 
                 self.assertEqual(getattr(context.exception, "status_code", None), 401)
 
-    def test_current_sid_policy_is_preserved_when_secret_is_configured(self):
+    def test_mission_31b_sid_policy_rejects_legacy_tokens_for_all_plans(self):
+        # Mission 31B legacy-token policy: immediate revocation. A token
+        # without sid is rejected for EVERY plan (previously only strict ones).
         token_without_sid = security.create_access_token({"sub": 123})
         free_user = SimpleNamespace(id=123, plan="free")
         premium_user = SimpleNamespace(id=123, plan="premium")
 
-        self.assertIs(security.resolve_token_user(token_without_sid, _FakeDb(free_user)), free_user)
+        for user in (free_user, premium_user):
+            with self.subTest(plan=user.plan):
+                with self.assertRaises(Exception) as context:
+                    security.resolve_token_user(token_without_sid, _FakeDb(user))
 
-        with self.assertRaises(Exception) as context:
-            security.resolve_token_user(token_without_sid, _FakeDb(premium_user))
+                self.assertEqual(getattr(context.exception, "status_code", None), 401)
 
-        self.assertEqual(getattr(context.exception, "status_code", None), 401)
-
-        session = SimpleNamespace(session_id="session-web-1", last_seen_at=None)
+        session = SimpleNamespace(
+            session_id="session-web-1",
+            last_seen_at=None,
+            revoked_at=None,
+            revoked_reason=None,
+            expires_at=None,
+        )
         token_with_sid = security.create_access_token(
             {"sub": 123, "sid": "session-web-1"}
         )

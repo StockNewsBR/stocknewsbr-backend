@@ -15,6 +15,8 @@ import {
   WorkspaceRightRail,
 } from "@/components/workspace-rails";
 import {
+  COOKIE_SESSION_TOKEN,
+  SESSION_REPLACED_EVENT,
   blockUser,
   buildWebSocketUrl,
   commentOnPost,
@@ -33,12 +35,14 @@ import {
   getWorkspaceTickerBundle,
   followUser,
   likePost,
-  loginJson,
+  logoutAllAuth,
   logoutAuth,
   muteUser,
   postChatMessage,
   repostPost,
   reportPost,
+  requestEmailChange,
+  requestLoginCode,
   requestTelegramLink,
   resolveApiBase,
   saveWorkspaceLayout,
@@ -47,6 +51,7 @@ import {
   unlikePost,
   updateProfile,
   uploadMedia,
+  verifyEmailChange,
   verifyLoginOtp,
   votePoll,
 } from "@/lib/api";
@@ -57,7 +62,6 @@ import {
 import type {
   AiToolRow,
   AiToolMetrics,
-  AuthFlowResponse,
   ChartPayload,
   ChatHistoryPayload,
   FeedPayload,
@@ -145,7 +149,7 @@ function renderCommercialPricingNote(locale: AppLocale) {
         <span>While the Apple Store integration is not available, users can access the app directly through play.google.com.</span>
         <br />
         <br />
-        <span>The login and password used on the site are the same as the app, ensuring full access to the web version.</span>
+        <span>The site login uses the same account e-mail as the app: request a secure access code by e-mail to unlock the full web version.</span>
       </>
     );
   }
@@ -167,7 +171,7 @@ function renderCommercialPricingNote(locale: AppLocale) {
       <span>Enquanto a integração com a Apple Store não está disponível, os usuários podem acessar o aplicativo diretamente pelo site play.google.com.</span>
       <br />
       <br />
-      <span>O login e a senha utilizados no site são os mesmos do aplicativo, garantindo acesso completo às funcionalidades na versão web.</span>
+      <span>O login do site usa o mesmo e-mail da conta do aplicativo: solicite um código de acesso seguro por e-mail para liberar a versão web completa.</span>
     </>
   );
 }
@@ -358,6 +362,8 @@ const SIMPLE_TOP_TAB_IDS = new Set([
 ]);
 const INTERNAL_AI_TAB_IDS = new Set(["risk", "news-ia", "macro", "regime"]);
 const WORKSPACE_MODE_STORAGE_KEY = "stocknewsbr.workspace_mode";
+// Non-sensitive resend-cooldown deadline (epoch ms) — survives reloads.
+const CODE_COOLDOWN_STORAGE_KEY = "stocknewsbr.code_cooldown_until";
 const DETACHABLE_IA_TABS = new Set([
   "grafico",
   "flow",
@@ -2170,6 +2176,44 @@ function formatAssetMoney(value: unknown, symbol: string, locale: AppLocale) {
   if (parsePriceNumber(value) == null) return locale === "en-US" ? "No confirmed quote" : "Sem cotação confirmada";
   const prefix = isBrazilianMarketSymbol(symbol) ? "R$" : locale === "en-US" ? "$" : "US$";
   return `${prefix} ${formatLocalePrice(value, locale)}`;
+}
+
+function friendlyAuthErrorMessage(error: unknown, locale: AppLocale = "pt-BR") {
+  const raw = error instanceof Error ? error.message : String(error || "");
+
+  if (/otp_invalid|otp_already_used|otp_expired|invalid_credentials/i.test(raw)) {
+    return locale === "en-US" ? "Invalid or expired code." : "Código inválido ou expirado.";
+  }
+  if (/otp_too_many_attempts|muitas tentativas|429/i.test(raw)) {
+    return locale === "en-US"
+      ? "Too many attempts. Please wait before trying again."
+      : "Muitas tentativas. Aguarde antes de tentar novamente.";
+  }
+  if (/session_replaced/i.test(raw)) {
+    return locale === "en-US"
+      ? "Your session ended because a new login happened on another device."
+      : "Sua sessão foi encerrada porque houve login em outro dispositivo.";
+  }
+  if (/email_change_same_email/i.test(raw)) {
+    return locale === "en-US"
+      ? "The new e-mail must be different from the current one."
+      : "O novo e-mail precisa ser diferente do atual.";
+  }
+  if (/email_change_failed/i.test(raw)) {
+    return locale === "en-US"
+      ? "It was not possible to change the e-mail."
+      : "Não foi possível alterar o e-mail.";
+  }
+  if (/user_inactive/i.test(raw)) {
+    return locale === "en-US" ? "Account unavailable." : "Conta indisponível.";
+  }
+  if (/failed to fetch|networkerror|load failed|aborterror|fetch failed/i.test(raw) || !raw.trim()) {
+    return locale === "en-US"
+      ? "Temporary connection issue. Please try again."
+      : "Falha temporária de conexão. Tente novamente.";
+  }
+  // Never surface raw technical/English errors in the auth UI.
+  return locale === "en-US" ? "Could not complete the request." : "Não foi possível concluir a solicitação.";
 }
 
 function friendlyNetworkErrorMessage(error: unknown, locale: AppLocale = "pt-BR") {
@@ -6597,11 +6641,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [token, setToken] = useState("");
   const [viewedAtIso] = useState(() => new Date().toISOString());
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [otpCode, setOtpCode] = useState("");
   const [pendingLoginToken, setPendingLoginToken] = useState("");
-  const [debugOtpCode, setDebugOtpCode] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [loginNotice, setLoginNotice] = useState("");
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [resendCooldownUntil, setResendCooldownUntil] = useState(0);
+  const [emailChangeInput, setEmailChangeInput] = useState("");
+  const [emailChangeToken, setEmailChangeToken] = useState("");
+  const [emailChangeCode, setEmailChangeCode] = useState("");
+  const [emailChangeNotice, setEmailChangeNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -6626,7 +6675,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [mediaStatus, setMediaStatus] = useState<Record<string, unknown> | null>(null);
   const [telegramLink, setTelegramLink] = useState<TelegramLinkSessionResponse | null>(null);
   const [profileNameInput, setProfileNameInput] = useState("");
-  const [profileEmailInput, setProfileEmailInput] = useState("");
   const [profileAvatarUrl, setProfileAvatarUrl] = useState("");
   const [profileFile, setProfileFile] = useState<File | null>(null);
   const [profileSaving, setProfileSaving] = useState(false);
@@ -6812,14 +6860,75 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, [tickerTapeQuotes]);
 
   useEffect(() => {
-    const stored =
-      queryToken ||
-      readStorageValue("stocknewsbr.token") ||
-      process.env.NEXT_PUBLIC_DEFAULT_TOKEN ||
-      "";
+    // Mission 31B: web sessions live in an httpOnly cookie. Purge any legacy
+    // token persisted by older builds — tokens never touch storage again.
+    removeStorageValue("stocknewsbr.token");
 
-    if (stored) setToken(stored);
+    const storedCooldown = Number(readStorageValue(CODE_COOLDOWN_STORAGE_KEY) || 0);
+    if (storedCooldown > Date.now()) setResendCooldownUntil(storedCooldown);
+
+    if (queryToken) {
+      // Transient app->web handoff token: kept in memory only, and scrubbed
+      // from the address bar/history so it never lingers in the URL.
+      try {
+        const nextUrl = new URL(window.location.href);
+        nextUrl.searchParams.delete("token");
+        window.history.replaceState(window.history.state, "", `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+      } catch {
+        // history scrub is best-effort
+      }
+      setToken(queryToken);
+      return;
+    }
+
+    let cancelled = false;
+
+    getAccess(COOKIE_SESSION_TOKEN)
+      .then((payload) => {
+        if (cancelled) return;
+        startTransition(() => {
+          setToken(COOKIE_SESSION_TOKEN);
+          setAccess(payload);
+        });
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
   }, [queryToken]);
+
+  useEffect(() => {
+    // Re-enable the "Enviar/Reenviar código" button when the cooldown ends.
+    if (!resendCooldownUntil) return;
+
+    const remainingMs = resendCooldownUntil - Date.now();
+
+    if (remainingMs <= 0) {
+      setResendCooldownUntil(0);
+      return;
+    }
+
+    const timer = window.setTimeout(() => setResendCooldownUntil(0), remainingMs + 250);
+    return () => window.clearTimeout(timer);
+  }, [resendCooldownUntil]);
+
+  useEffect(() => {
+    function onSessionReplaced() {
+      startTransition(() => {
+        setToken("");
+        setAccess(null);
+        setWorkspace(null);
+        setPendingLoginToken("");
+        setOtpCode("");
+        setLoginNotice("");
+        setLoginError("Sua sessão foi encerrada porque houve login em outro dispositivo.");
+      });
+    }
+
+    window.addEventListener(SESSION_REPLACED_EVENT, onSessionReplaced);
+    return () => window.removeEventListener(SESSION_REPLACED_EVENT, onSessionReplaced);
+  }, []);
 
   useEffect(() => {
     getBootstrap().then(setBootstrap).catch(() => undefined);
@@ -7003,9 +7112,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
   useEffect(() => {
     setProfileNameInput(access?.display_name || "");
-    setProfileEmailInput(access?.email || "");
     setProfileAvatarUrl(access?.avatar_url || "");
-  }, [access?.display_name, access?.email, access?.avatar_url]);
+  }, [access?.display_name, access?.avatar_url]);
 
   useEffect(() => {
     let cancelled = false;
@@ -7426,8 +7534,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   useEffect(() => {
     if (!token) return;
 
+    // Cookie sessions authenticate the handshake via the httpOnly cookie;
+    // only real bearer tokens (app handoff) travel in the URL.
+    const wsQuery = token === COOKIE_SESSION_TOKEN ? "" : `?token=${encodeURIComponent(token)}`;
     const socket = new WebSocket(
-      buildWebSocketUrl(`/ws/chat/${encodeURIComponent(deferredTicker)}?token=${encodeURIComponent(token)}`),
+      buildWebSocketUrl(`/ws/chat/${encodeURIComponent(deferredTicker)}${wsQuery}`),
     );
 
     socketRef.current = socket;
@@ -7467,52 +7578,87 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     };
   }, [token, deferredTicker]);
 
-  async function handleLogin() {
+  function _startResendCooldown(seconds = 60) {
+    const deadline = Date.now() + seconds * 1000;
+    setResendCooldownUntil(deadline);
+    writeStorageValue(CODE_COOLDOWN_STORAGE_KEY, String(deadline));
+  }
+
+  async function handleRequestCode() {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || !normalizedEmail.includes("@")) {
+      setLoginError("Informe um e-mail válido.");
+      return;
+    }
+
+    if (resendCooldownUntil > Date.now()) {
+      setLoginError("Muitas tentativas. Aguarde antes de tentar novamente.");
+      return;
+    }
+
     try {
+      setLoginBusy(true);
       setLoginError("");
-      const payload: AuthFlowResponse = await loginJson(email, password, {
-        channel: "web",
+      setLoginNotice("Enviando código...");
+      const payload = await requestLoginCode(normalizedEmail, {
         device_id: getBrowserDeviceId(),
         device_label: getBrowserDeviceLabel(),
       });
 
-      if (payload.otp_required && payload.login_token) {
-        setPendingLoginToken(payload.login_token);
-        setOtpCode("");
-        setDebugOtpCode(payload.debug_otp_code || "");
-        return;
-      }
-
-      if (!payload.access_token) {
-        throw new Error(payload.detail || "Falha ao entrar");
-      }
-
-      writeStorageValue("stocknewsbr.token", payload.access_token);
-      setToken(payload.access_token);
-      setPendingLoginToken("");
-      setDebugOtpCode("");
+      setPendingLoginToken(payload.login_token || "");
+      setOtpCode("");
+      setLoginNotice("Se o e-mail estiver apto, enviaremos um código de acesso.");
+      _startResendCooldown(60);
     } catch (requestError) {
-      setLoginError(friendlyNetworkErrorMessage(requestError, appLocale));
+      setLoginNotice("");
+      const raw = requestError instanceof Error ? requestError.message : "";
+      if (raw.includes("Muitas tentativas")) {
+        setLoginError("Muitas tentativas. Aguarde antes de tentar novamente.");
+        _startResendCooldown(60);
+      } else {
+        setLoginError(friendlyAuthErrorMessage(requestError, appLocale));
+      }
+    } finally {
+      setLoginBusy(false);
     }
   }
 
   async function handleVerifyOtp() {
     try {
+      setLoginBusy(true);
       setLoginError("");
-      const payload = await verifyLoginOtp(pendingLoginToken, otpCode);
+      setLoginNotice("Verificando...");
+      const payload = await verifyLoginOtp(pendingLoginToken, otpCode.trim());
 
-      if (!payload.access_token) {
-        throw new Error(payload.detail || "Codigo invalido");
-      }
-
-      writeStorageValue("stocknewsbr.token", payload.access_token);
-      setToken(payload.access_token);
+      // Web login: the session token lives in an httpOnly cookie; the JSON
+      // payload intentionally carries no token.
+      const nextToken = payload.access_token || COOKIE_SESSION_TOKEN;
+      setToken(nextToken);
       setPendingLoginToken("");
       setOtpCode("");
-      setDebugOtpCode("");
+      setLoginNotice("");
     } catch (requestError) {
-      setLoginError(friendlyNetworkErrorMessage(requestError, appLocale));
+      setLoginNotice("");
+      setLoginError(friendlyAuthErrorMessage(requestError, appLocale));
+    } finally {
+      setLoginBusy(false);
     }
+  }
+
+  function _clearAuthState() {
+    removeStorageValue("stocknewsbr.token");
+    setToken("");
+    setAccess(null);
+    setWorkspace(null);
+    setPendingLoginToken("");
+    setOtpCode("");
+    setLoginNotice("");
+    setEmailChangeInput("");
+    setEmailChangeToken("");
+    setEmailChangeCode("");
+    setEmailChangeNotice("");
+    setTelegramLink(null);
   }
 
   async function handleLogout() {
@@ -7524,14 +7670,62 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       }
     }
 
-    removeStorageValue("stocknewsbr.token");
-    setToken("");
-    setAccess(null);
-    setWorkspace(null);
-    setPendingLoginToken("");
-    setOtpCode("");
-    setDebugOtpCode("");
-    setTelegramLink(null);
+    _clearAuthState();
+    setLoginError("");
+    setLoginNotice("Sessão encerrada.");
+  }
+
+  async function handleLogoutAll() {
+    if (!token) return;
+
+    try {
+      await logoutAllAuth(token);
+    } catch {
+      // Best effort local cleanup.
+    }
+
+    _clearAuthState();
+    setLoginError("");
+    setLoginNotice("Sessão encerrada em todos os dispositivos.");
+  }
+
+  async function handleRequestEmailChange() {
+    if (!token) return;
+    const normalized = emailChangeInput.trim().toLowerCase();
+
+    if (!normalized || !normalized.includes("@")) {
+      setEmailChangeNotice("Informe um e-mail válido.");
+      return;
+    }
+
+    try {
+      setEmailChangeNotice("Enviando código...");
+      const payload = await requestEmailChange(token, normalized);
+      setEmailChangeToken(payload.login_token || "");
+      setEmailChangeCode("");
+      setEmailChangeNotice("Se o e-mail informado estiver apto, enviaremos um código de confirmação.");
+    } catch (requestError) {
+      setEmailChangeToken("");
+      setEmailChangeNotice(friendlyAuthErrorMessage(requestError, appLocale));
+    }
+  }
+
+  async function handleVerifyEmailChange() {
+    if (!token || !emailChangeToken) return;
+
+    try {
+      setEmailChangeNotice("Verificando...");
+      const nextAccess = await verifyEmailChange(token, emailChangeToken, emailChangeCode.trim());
+      startTransition(() => {
+        setAccess(nextAccess);
+        setEmailChangeInput("");
+        setEmailChangeToken("");
+        setEmailChangeCode("");
+        setEmailChangeNotice("E-mail alterado com sucesso.");
+      });
+    } catch (requestError) {
+      setEmailChangeNotice(friendlyAuthErrorMessage(requestError, appLocale));
+    }
   }
 
   async function handleTelegramLinkRequest() {
@@ -7559,13 +7753,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         nextAvatarUrl = upload.url;
       }
 
+      // Mission 31B: e-mail changes go through the verified
+      // /auth/email-change flow — never through profile updates.
       const nextAccess = await updateProfile(token, {
         display_name: profileNameInput || null,
-        email: profileEmailInput || null,
         avatar_url: nextAvatarUrl,
       });
 
-      writeStorageValue("stocknewsbr.token", token);
       startTransition(() => {
         setAccess(nextAccess);
         setProfileAvatarUrl(nextAccess.avatar_url || "");
@@ -11386,16 +11580,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 placeholder={isUsLocale ? "Your feed name" : "Seu nome no feed"}
               />
             </label>
-            <label className="snbr-profile-field">
-              <span>Email</span>
-              <input
-                className="snbr-input"
-                value={profileEmailInput}
-                onChange={(event) => setProfileEmailInput(event.target.value)}
-                placeholder="Email"
-                type="email"
-              />
-            </label>
             <div className="snbr-profile-upload-row">
               <button className="snbr-button secondary" onClick={() => profileFileInputRef.current?.click()} type="button">
                 {isUsLocale ? "Upload photo" : "Upload da foto"}
@@ -11418,6 +11602,45 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               {profileSaving ? (isUsLocale ? "Saving..." : "Salvando...") : (isUsLocale ? "Save profile" : "Salvar perfil")}
             </button>
           </div>
+          <div className="snbr-profile-editor">
+            <label className="snbr-profile-field">
+              <span>{isUsLocale ? "Change e-mail" : "Alterar e-mail"}</span>
+              <input
+                className="snbr-input"
+                value={emailChangeInput}
+                onChange={(event) => setEmailChangeInput(event.target.value)}
+                placeholder={isUsLocale ? "New e-mail" : "Novo e-mail"}
+                type="email"
+                autoComplete="email"
+              />
+            </label>
+            {emailChangeToken ? (
+              <>
+                <label className="snbr-profile-field">
+                  <span>{isUsLocale ? "Access code" : "Código de acesso"}</span>
+                  <input
+                    className="snbr-input"
+                    value={emailChangeCode}
+                    onChange={(event) => setEmailChangeCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="000000"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    autoComplete="one-time-code"
+                    aria-label={isUsLocale ? "E-mail change code" : "Código de confirmação do novo e-mail"}
+                  />
+                </label>
+                <button className="snbr-button primary" onClick={() => void handleVerifyEmailChange()} type="button">
+                  {isUsLocale ? "Confirm new e-mail" : "Confirmar novo e-mail"}
+                </button>
+              </>
+            ) : (
+              <button className="snbr-button secondary" onClick={() => void handleRequestEmailChange()} type="button">
+                {isUsLocale ? "Send code" : "Enviar código"}
+              </button>
+            )}
+            {emailChangeNotice ? <div className="snbr-empty">{emailChangeNotice}</div> : null}
+          </div>
           {access?.access?.telegram ? (
             <button className="snbr-button secondary" onClick={handleTelegramLinkRequest} type="button">
               {isUsLocale ? "Generate secure Telegram link" : "Gerar link seguro do Telegram"}
@@ -11435,6 +11658,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             </div>
           ) : null}
           <button className="snbr-button secondary" onClick={() => void handleLogout()} type="button">{isUsLocale ? "Sign out" : "Sair"}</button>
+          <button className="snbr-button secondary" onClick={() => void handleLogoutAll()} type="button">
+            {isUsLocale ? "Sign out of all devices" : "Sair de todos os dispositivos"}
+          </button>
         </div>
       );
     }
@@ -11444,30 +11670,48 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         <div className="snbr-side-card">
           <div className="snbr-section-head compact">
             <div>
-              <h3>{isUsLocale ? "Email code" : "Codigo por email"}</h3>
-              <p>{isUsLocale ? "Premium account requires verification on each new login." : "Conta Premium pede verificação a cada novo login."}</p>
+              <h3>{isUsLocale ? "Access code" : "Código de acesso"}</h3>
+              <p>{isUsLocale ? "Enter the 6-digit code we sent to your e-mail." : "Digite o código de 6 dígitos enviado para o seu e-mail."}</p>
             </div>
           </div>
           <div className="snbr-auth">
-            <input
-              className="snbr-input"
-              value={otpCode}
-              onChange={(event) => setOtpCode(event.target.value)}
-              placeholder={isUsLocale ? "6-digit code" : "Codigo de 6 digitos"}
-            />
-            <button className="snbr-button primary" onClick={handleVerifyOtp} type="button">{isUsLocale ? "Validate code" : "Validar codigo"}</button>
+            <label className="snbr-profile-field">
+              <span>{isUsLocale ? "Access code" : "Código de acesso"}</span>
+              <input
+                className="snbr-input"
+                value={otpCode}
+                onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="000000"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                autoComplete="one-time-code"
+                aria-label={isUsLocale ? "6-digit access code" : "Código de acesso de 6 dígitos"}
+              />
+            </label>
+            <button className="snbr-button primary" disabled={loginBusy || otpCode.length !== 6} onClick={handleVerifyOtp} type="button">
+              {loginBusy ? (isUsLocale ? "Verifying..." : "Verificando...") : (isUsLocale ? "Log in" : "Entrar")}
+            </button>
+            <button
+              className="snbr-button secondary"
+              disabled={loginBusy || resendCooldownUntil > Date.now()}
+              onClick={() => void handleRequestCode()}
+              type="button"
+            >
+              {isUsLocale ? "Resend code" : "Reenviar código"}
+            </button>
             <button
               className="snbr-button secondary"
               onClick={() => {
                 setPendingLoginToken("");
                 setOtpCode("");
-                setDebugOtpCode("");
+                setLoginNotice("");
               }}
               type="button"
             >
               {isUsLocale ? "Back" : "Voltar"}
             </button>
-            {debugOtpCode ? <div className="snbr-empty">{isUsLocale ? "Local code" : "Codigo local"}: {debugOtpCode}</div> : null}
+            {loginNotice ? <div className="snbr-empty">{loginNotice}</div> : null}
             {loginError ? <div className="snbr-empty">{loginError}</div> : null}
           </div>
         </div>
@@ -11479,13 +11723,26 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         <div className="snbr-section-head compact">
           <div>
             <h3>{isUsLocale ? "Authentication" : "Autenticação"}</h3>
-            <p>{isUsLocale ? "Trial and Free enter directly. Premium confirms login through the email code." : "Trial e Free entram direto. Premium confirma o login pelo codigo no email."}</p>
+            <p>{isUsLocale ? "Enter your e-mail to receive a secure access code." : "Informe seu e-mail para receber um código de acesso seguro."}</p>
           </div>
         </div>
         <div className="snbr-auth">
-          <input className="snbr-input" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" />
-          <input className="snbr-input" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={isUsLocale ? "Password" : "Senha"} type="password" />
-          <button className="snbr-button primary" onClick={handleLogin} type="button">{isUsLocale ? "Log in" : "Entrar"}</button>
+          <label className="snbr-profile-field">
+            <span>E-mail</span>
+            <input
+              className="snbr-input"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="E-mail"
+              type="email"
+              autoComplete="email"
+              ref={loginEmailInputRef}
+            />
+          </label>
+          <button className="snbr-button primary" disabled={loginBusy || resendCooldownUntil > Date.now()} onClick={() => void handleRequestCode()} type="button">
+            {loginBusy ? (isUsLocale ? "Sending..." : "Enviando...") : (isUsLocale ? "Send code" : "Enviar código")}
+          </button>
+          {loginNotice ? <div className="snbr-empty">{loginNotice}</div> : null}
           {loginError ? <div className="snbr-empty">{loginError}</div> : null}
         </div>
       </div>
@@ -11631,10 +11888,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 <span>{isUsLocale ? "Name" : "Nome"}</span>
                 <input className="snbr-input" value={profileNameInput} onChange={(event) => setProfileNameInput(event.target.value)} placeholder={isUsLocale ? "Your feed name" : "Seu nome no feed"} />
               </label>
-              <label className="snbr-profile-field">
-                <span>Email</span>
-                <input className="snbr-input" value={profileEmailInput} onChange={(event) => setProfileEmailInput(event.target.value)} placeholder="Email" type="email" />
-              </label>
               <div className="snbr-profile-upload-row">
                 <button className="snbr-button secondary" onClick={() => profileFileInputRef.current?.click()} type="button">
                   {isUsLocale ? "Upload photo" : "Upload da foto"}
@@ -11651,6 +11904,43 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               <button className="snbr-button primary" disabled={profileSaving} onClick={() => void handleSaveProfile()} type="button">
                 {profileSaving ? (isUsLocale ? "Saving..." : "Salvando...") : (isUsLocale ? "Save profile" : "Salvar perfil")}
               </button>
+              <label className="snbr-profile-field">
+                <span>{isUsLocale ? "Change e-mail" : "Alterar e-mail"}</span>
+                <input
+                  className="snbr-input"
+                  value={emailChangeInput}
+                  onChange={(event) => setEmailChangeInput(event.target.value)}
+                  placeholder={isUsLocale ? "New e-mail" : "Novo e-mail"}
+                  type="email"
+                  autoComplete="email"
+                />
+              </label>
+              {emailChangeToken ? (
+                <>
+                  <label className="snbr-profile-field">
+                    <span>{isUsLocale ? "Access code" : "Código de acesso"}</span>
+                    <input
+                      className="snbr-input"
+                      value={emailChangeCode}
+                      onChange={(event) => setEmailChangeCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="000000"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      autoComplete="one-time-code"
+                      aria-label={isUsLocale ? "E-mail change code" : "Código de confirmação do novo e-mail"}
+                    />
+                  </label>
+                  <button className="snbr-button primary" onClick={() => void handleVerifyEmailChange()} type="button">
+                    {isUsLocale ? "Confirm new e-mail" : "Confirmar novo e-mail"}
+                  </button>
+                </>
+              ) : (
+                <button className="snbr-button secondary" onClick={() => void handleRequestEmailChange()} type="button">
+                  {isUsLocale ? "Send code" : "Enviar código"}
+                </button>
+              )}
+              {emailChangeNotice ? <div className="snbr-empty">{emailChangeNotice}</div> : null}
             </div>
           ) : null}
           {accountPanel === "upgrade" ? renderUpgradeOptions() : null}
@@ -11658,6 +11948,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             {isUsLocale ? "Google Play app and legal terms are the official entry. Premium unlocks app, website and Telegram." : "App Google Play e o termo legal sao a entrada oficial. Premium libera app, website e Telegram."}
           </div>
           <button className="snbr-button secondary" onClick={() => void handleLogout()} type="button">{isUsLocale ? "Sign out" : "Sair"}</button>
+          <button className="snbr-button secondary" onClick={() => void handleLogoutAll()} type="button">
+            {isUsLocale ? "Sign out of all devices" : "Sair de todos os dispositivos"}
+          </button>
         </div>
       );
     }
@@ -11667,31 +11960,48 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         <div className="snbr-side-card snbr-side-card-highlight">
           <div className="snbr-section-head compact">
             <div>
-              <h3>{isUsLocale ? "Platform access" : "Acesso a plataforma"}</h3>
-              <p>{isUsLocale ? "Enter the email code to complete login." : "Digite o código enviado por email para concluir o login."}</p>
+              <h3>{isUsLocale ? "Platform access" : "Acesso à plataforma"}</h3>
+              <p>{isUsLocale ? "Enter the 6-digit code we sent to your e-mail." : "Digite o código de 6 dígitos enviado para o seu e-mail."}</p>
             </div>
           </div>
           <div className="snbr-auth">
-            <input
-              ref={loginEmailInputRef}
-              className="snbr-input"
-              value={otpCode}
-              onChange={(event) => setOtpCode(event.target.value)}
-              placeholder={isUsLocale ? "6-digit code" : "Código de 6 dígitos"}
-            />
-            <button className="snbr-button primary" onClick={handleVerifyOtp} type="button">{isUsLocale ? "Validate code" : "Validar código"}</button>
+            <label className="snbr-profile-field">
+              <span>{isUsLocale ? "Access code" : "Código de acesso"}</span>
+              <input
+                className="snbr-input"
+                value={otpCode}
+                onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="000000"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                autoComplete="one-time-code"
+                aria-label={isUsLocale ? "6-digit access code" : "Código de acesso de 6 dígitos"}
+              />
+            </label>
+            <button className="snbr-button primary" disabled={loginBusy || otpCode.length !== 6} onClick={handleVerifyOtp} type="button">
+              {loginBusy ? (isUsLocale ? "Verifying..." : "Verificando...") : (isUsLocale ? "Log in" : "Entrar")}
+            </button>
+            <button
+              className="snbr-button secondary"
+              disabled={loginBusy || resendCooldownUntil > Date.now()}
+              onClick={() => void handleRequestCode()}
+              type="button"
+            >
+              {isUsLocale ? "Resend code" : "Reenviar código"}
+            </button>
             <button
               className="snbr-button secondary"
               onClick={() => {
                 setPendingLoginToken("");
                 setOtpCode("");
-                setDebugOtpCode("");
+                setLoginNotice("");
               }}
               type="button"
             >
               {isUsLocale ? "Back" : "Voltar"}
             </button>
-            {debugOtpCode ? <div className="snbr-empty">{isUsLocale ? "Local code" : "Código local"}: {debugOtpCode}</div> : null}
+            {loginNotice ? <div className="snbr-empty">{loginNotice}</div> : null}
             {loginError ? <div className="snbr-empty">{loginError}</div> : null}
           </div>
         </div>
@@ -11702,14 +12012,27 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       <div className="snbr-side-card snbr-side-card-highlight">
         <div className="snbr-section-head compact">
           <div>
-            <h3>{isUsLocale ? "Platform access" : "Acesso a plataforma"}</h3>
-            <p>{isUsLocale ? "Log in to post, comment and use the full account." : "Faça login para publicar, comentar e usar a conta completa."}</p>
+            <h3>{isUsLocale ? "Platform access" : "Acesso à plataforma"}</h3>
+            <p>{isUsLocale ? "Enter your e-mail to receive a secure access code." : "Informe seu e-mail para receber um código de acesso seguro."}</p>
           </div>
         </div>
         <div className="snbr-auth">
-          <input ref={loginEmailInputRef} className="snbr-input" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" />
-          <input className="snbr-input" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={isUsLocale ? "Password" : "Senha"} type="password" />
-          <button className="snbr-button primary" onClick={handleLogin} type="button">{isUsLocale ? "Log in" : "Entrar"}</button>
+          <label className="snbr-profile-field">
+            <span>E-mail</span>
+            <input
+              ref={loginEmailInputRef}
+              className="snbr-input"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="E-mail"
+              type="email"
+              autoComplete="email"
+            />
+          </label>
+          <button className="snbr-button primary" disabled={loginBusy || resendCooldownUntil > Date.now()} onClick={() => void handleRequestCode()} type="button">
+            {loginBusy ? (isUsLocale ? "Sending..." : "Enviando...") : (isUsLocale ? "Send code" : "Enviar código")}
+          </button>
+          {loginNotice ? <div className="snbr-empty">{loginNotice}</div> : null}
           {loginError ? <div className="snbr-empty">{loginError}</div> : null}
         </div>
       </div>

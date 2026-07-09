@@ -190,11 +190,13 @@ def login_code_rate_limit_state(
     ) >= login_code_max_sends_per_email():
         return "email_window"
 
-    if auth_audit.last_event_at(
+    cooldown_seconds = login_code_resend_cooldown_seconds()
+
+    if cooldown_seconds > 0 and auth_audit.last_event_at(
         db,
         "login_code_requested",
         email_hash_value=email_hash_value,
-        window_seconds=login_code_resend_cooldown_seconds(),
+        window_seconds=cooldown_seconds,
     ) is not None:
         return "resend_cooldown"
 
@@ -350,6 +352,7 @@ def _consume_challenge_core(
     now = utcnow()
     challenge = (
         db.query(LoginChallenge)
+        .populate_existing()
         .filter(LoginChallenge.login_token == str(login_token or ""))
         .first()
     )
@@ -491,8 +494,15 @@ def create_user_session(
     normalized_channel = normalize_channel(channel)
     now = utcnow()
 
-    # Mission 31B invariant: one active session per user. A new login revokes
-    # every previous active session atomically in the same transaction.
+    # Mission 31B invariant: one active session per user. Serialize the
+    # replace-and-create block per user with a transactional row lock so two
+    # concurrent logins cannot interleave revoke+insert on PostgreSQL and
+    # leave two active sessions. SQLite ignores FOR UPDATE (its single-writer
+    # model already serializes the transactions).
+    db.query(User.id).filter(User.id == user.id).with_for_update().first()
+
+    # A new login revokes every previous active session in the same
+    # transaction that creates the replacement session.
     db.execute(
         update(UserSession)
         .where(

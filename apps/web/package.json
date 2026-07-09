@@ -15,6 +15,7 @@
     "test:mission30f2": "node scripts/mission-30f2-final-visual-audit.mjs",
     "test:mission31a": "node scripts/mission-31a-social-guardian-audit.mjs",
     "test:mission31a2": "node scripts/mission-31a2-web-p0-hotfix-audit.mjs",
+    "test:mission31b": "node scripts/mission-31b-auth-session-audit.mjs",
     "tsc": "tsc --noEmit --incremental false",
     "smoke:etapa7": "node scripts/smoke-etapa7.mjs",
     "lint": "next lint"
