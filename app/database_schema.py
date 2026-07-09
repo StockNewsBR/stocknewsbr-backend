@@ -212,6 +212,23 @@ TABLE_PATCHES = {
 
 SCHEMA_PATCHES = {
     "users": {
+        # Mission 31B.1: forge-proof official identity taxonomy.
+        "official": {
+            "sqlite": "ALTER TABLE users ADD COLUMN official BOOLEAN DEFAULT 0 NOT NULL",
+            "default": "ALTER TABLE users ADD COLUMN official BOOLEAN DEFAULT FALSE NOT NULL",
+        },
+        "role": {
+            "sqlite": "ALTER TABLE users ADD COLUMN role VARCHAR DEFAULT 'user' NOT NULL",
+            "default": "ALTER TABLE users ADD COLUMN role VARCHAR DEFAULT 'user' NOT NULL",
+        },
+        "is_bot": {
+            "sqlite": "ALTER TABLE users ADD COLUMN is_bot BOOLEAN DEFAULT 0 NOT NULL",
+            "default": "ALTER TABLE users ADD COLUMN is_bot BOOLEAN DEFAULT FALSE NOT NULL",
+        },
+        "official_identity_locked": {
+            "sqlite": "ALTER TABLE users ADD COLUMN official_identity_locked BOOLEAN DEFAULT 0 NOT NULL",
+            "default": "ALTER TABLE users ADD COLUMN official_identity_locked BOOLEAN DEFAULT FALSE NOT NULL",
+        },
         "display_name": {
             "sqlite": "ALTER TABLE users ADD COLUMN display_name VARCHAR",
             "default": "ALTER TABLE users ADD COLUMN display_name VARCHAR",

@@ -46,6 +46,11 @@ AUTH_EVENTS = frozenset(
         "email_change_verified",
         "email_changed",
         "email_change_failed",
+        # Mission 31B.1: official identity / anti-impersonation trail.
+        "impersonation_blocked",
+        "official_identity_provisioned",
+        "official_content_published",
+        "bot_content_blocked",
     }
 )
 

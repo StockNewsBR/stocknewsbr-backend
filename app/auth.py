@@ -50,7 +50,9 @@ from app.security import (
     hash_password,
     verify_password,
 )
+from app.social.identity_guard import check_impersonation
 from app.services import auth_audit_service as auth_audit
+from app.services import official_identity_service
 from app.services.auth_session_service import (
     CHALLENGE_PURPOSE_EMAIL_CHANGE,
     DELIVERY_FAILED,
@@ -403,6 +405,25 @@ def auth_bootstrap():
 def register(user_data: UserRegister, db: Session = Depends(get_db)):
     _require_legal_acceptance(user_data)
 
+    if official_identity_service.is_official_service_email(user_data.email):
+        auth_audit.record_auth_event(
+            db,
+            "impersonation_blocked",
+            email=user_data.email,
+            reason="official_email_reserved",
+        )
+        db.commit()
+        raise HTTPException(status_code=400, detail="official_email_reserved")
+
+    # Mission 31B.1: regular users cannot register an impersonating identity.
+    impersonation = check_impersonation(display_name=user_data.display_name)
+    if impersonation:
+        auth_audit.record_auth_event(
+            db, "impersonation_blocked", email=user_data.email, reason=impersonation
+        )
+        db.commit()
+        raise HTTPException(status_code=400, detail=impersonation)
+
     existing_user = db.query(User).filter(User.email == normalize_email(user_data.email)).first()
 
     if existing_user:
@@ -680,7 +701,29 @@ def update_profile(
 ):
     # Mission 31B: e-mail is NOT editable here — use the verified
     # /auth/email-change flow. Unknown fields are rejected by the schema.
+
+    # Mission 31B.1: a locked official identity is never editable by this route;
+    # regular users cannot rename themselves into a reserved/official identity.
+    if getattr(current_user, "official_identity_locked", False):
+        raise HTTPException(status_code=403, detail="official_identity_locked")
+
     if payload.display_name is not None:
+        is_privileged = official_identity_service.is_privileged_role(
+            getattr(current_user, "role", "user")
+        )
+        impersonation = check_impersonation(
+            display_name=payload.display_name, is_privileged=is_privileged
+        )
+        if impersonation:
+            auth_audit.record_auth_event(
+                db,
+                "impersonation_blocked",
+                user_id=current_user.id,
+                email=current_user.email,
+                reason=impersonation,
+            )
+            db.commit()
+            raise HTTPException(status_code=400, detail=impersonation)
         current_user.display_name = payload.display_name.strip() or None
 
     if payload.avatar_url is not None:
@@ -709,6 +752,20 @@ def request_email_change(
 
     if not new_email or new_email == normalize_email(current_user.email):
         raise HTTPException(status_code=400, detail="email_change_same_email")
+
+    # Mission 31B.1: an official/bot service email is reserved — a regular user
+    # cannot migrate INTO it via the sibling email-change flow (register already
+    # blocks it at sign-up). Same guard, same audit trail, same error contract.
+    if official_identity_service.is_official_service_email(new_email):
+        auth_audit.record_auth_event(
+            db,
+            "impersonation_blocked",
+            user_id=current_user.id,
+            email=new_email,
+            reason="official_email_reserved",
+        )
+        db.commit()
+        raise HTTPException(status_code=400, detail="official_email_reserved")
 
     violated = login_code_rate_limit_state(
         db,

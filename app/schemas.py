@@ -53,6 +53,11 @@ class UserAccessResponse(BaseModel):
     display_name: str | None = None
     phone: str | None = None
     avatar_url: str | None = None
+    # Mission 31B.1: forge-proof identity flags — the ONLY badge source.
+    official: bool = False
+    verified: bool = False
+    role: str = "user"
+    is_bot: bool = False
     plan: str
     plan_status: str
     subscription_provider: str | None = None

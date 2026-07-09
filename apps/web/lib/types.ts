@@ -815,6 +815,11 @@ export type UserAccess = {
   display_name?: string | null;
   phone?: string | null;
   avatar_url?: string | null;
+  // Mission 31B.1: forge-proof identity flags from backend (the ONLY badge source).
+  official?: boolean;
+  verified?: boolean;
+  role?: string;
+  is_bot?: boolean;
   plan: string;
   plan_status: string;
   telegram_linked?: boolean;

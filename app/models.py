@@ -25,6 +25,13 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
 
+    # Mission 31B.1: forge-proof official identity taxonomy. These are set
+    # ONLY by the backend (seeds / privileged flows), never by user payload.
+    official = Column(Boolean, default=False, nullable=False, index=True)
+    role = Column(String, default="user", nullable=False, index=True)
+    is_bot = Column(Boolean, default=False, nullable=False)
+    official_identity_locked = Column(Boolean, default=False, nullable=False)
+
     plan = Column(String, default="trial", index=True)
     plan_status = Column(String, default="trialing", index=True)
 

@@ -330,6 +330,11 @@ def serialize_user_access(user: User):
         "display_name": user.display_name,
         "phone": user.phone,
         "avatar_url": user.avatar_url,
+        # Mission 31B.1: badge flags come from trusted backend columns only.
+        "official": bool(getattr(user, "official", False)),
+        "verified": bool(getattr(user, "is_verified", False)),
+        "role": (getattr(user, "role", None) or "user"),
+        "is_bot": bool(getattr(user, "is_bot", False)),
         "plan": user.plan,
         "plan_status": user.plan_status,
         "subscription_provider": user.subscription_provider,

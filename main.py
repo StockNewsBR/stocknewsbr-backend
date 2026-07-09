@@ -133,6 +133,44 @@ def _create_tables_if_needed():
         raise
 
 
+def _seed_official_identities_if_needed():
+    """Mission 31B.1: provision the canonical official account + bot at boot.
+
+    Controlled startup path only — no public route, no Telegram/Push, the bot
+    publishes nothing here. Fail-closed: if a non-canonical user already holds
+    an official service email the seed raises a conflict, which we log and skip
+    (a public account is NEVER promoted). Idempotent; safe on every boot.
+    """
+    if not _env_flag("SEED_OFFICIAL_IDENTITIES", True):
+        return
+
+    from app.services.official_identity_service import (
+        OfficialIdentityConflictError,
+        ensure_official_identities,
+    )
+
+    db = None
+    try:
+        db = SessionLocal()
+        ensure_official_identities(db)
+        logger.info("Official identities ensured")
+    except OfficialIdentityConflictError:
+        logger.error(
+            "Official identity seed conflict — promotion skipped (fail-closed)"
+        )
+        if db is not None:
+            db.rollback()
+    except Exception:
+        logger.exception(
+            "Official identity seed failed — continuing without seeded identities"
+        )
+        if db is not None:
+            db.rollback()
+    finally:
+        if db is not None:
+            db.close()
+
+
 def _safe_import_router(module_path: str, attribute: str):
     try:
         module = importlib.import_module(module_path)
@@ -214,6 +252,7 @@ async def lifespan(app: FastAPI):
     validate_runtime_security_settings()
     logger.info("Security settings validated")
     _create_tables_if_needed()
+    _seed_official_identities_if_needed()
 
     with WORKERS_LOCK:
         if not WORKERS_STARTED:
