@@ -290,16 +290,20 @@ def _process_row(state: Dict[str, Any], row: Dict[str, Any], snapshot: Dict[str,
 
     if decision in CLOSE_LONG_DECISIONS:
         position = _find_open_position(state, symbol, "LONG")
-        if not position:
+        if position:
+            _close_position(state, position, row, now, snapshot_timestamp)
+            return
+        if decision not in CLOSE_SHORT_DECISIONS:
             _append_skip(state, row, decision, "no_open_long_position", now, snapshot_timestamp)
             return
-        _close_position(state, position, row, now, snapshot_timestamp)
-        return
+        # Mission 31G: EXIT/CLOSE are side-agnostic - fall through to the SHORT leg
+        # so an open short is never left dangling as "no_open_long_position".
 
     if decision in CLOSE_SHORT_DECISIONS:
         position = _find_open_position(state, symbol, "SHORT")
         if not position:
-            _append_skip(state, row, decision, "no_open_short_position", now, snapshot_timestamp)
+            reason = "no_open_position" if decision in CLOSE_LONG_DECISIONS else "no_open_short_position"
+            _append_skip(state, row, decision, reason, now, snapshot_timestamp)
             return
         _close_position(state, position, row, now, snapshot_timestamp)
         return
