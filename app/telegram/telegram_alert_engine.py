@@ -21,6 +21,7 @@ from app.core.settings import settings
 from app.services.score_display import attach_master_score_display_contract
 from app.services.snapshot_contract import DECISION_READY, audit_status_value, build_decision_envelope
 from app.services.symbol_registry import canonical_symbol
+from app.system.kill_switches import alert_channel_block_reason, symbol_block_reason
 from app.system.observability_engine import record_observability_event
 from app.system.system_metrics import get_telegram_alert_metrics_snapshot, record_telegram_alert_metric
 from app.telegram.telegram_alert_formatter import format_signal_alert
@@ -78,12 +79,20 @@ _alert_history: deque[dict[str, Any]] = deque(maxlen=MAX_ALERT_HISTORY)
 
 _session = requests.Session()
 
-retry = Retry(
+# Mission 32: retries limitados com backoff exponencial; jitter quando o
+# urllib3 instalado suportar (>=2.0). HTTP 400 fica fora do forcelist de
+# propósito: payload inválido é erro permanente e não deve ser re-tentado.
+_RETRY_KWARGS = dict(
     total=3,
     backoff_factor=0.5,
     status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=["POST"]
+    allowed_methods=["POST"],
 )
+
+try:
+    retry = Retry(backoff_jitter=0.3, **_RETRY_KWARGS)
+except TypeError:  # pragma: no cover - urllib3 < 2.0 sem jitter
+    retry = Retry(**_RETRY_KWARGS)
 
 adapter = HTTPAdapter(
     pool_connections=10,
@@ -327,6 +336,12 @@ def build_telegram_alert(signal: dict[str, Any]) -> dict[str, Any]:
     if not ticker:
         return _event_payload(signal=signal, status="discarded", reason="missing_ticker")
 
+    # Mission 32: kill switches operacionais têm precedência máxima — o
+    # bloqueio é explícito, auditável e reversível (rollback = limpar a env).
+    kill_reason = alert_channel_block_reason("telegram") or symbol_block_reason(ticker)
+    if kill_reason:
+        return _event_payload(signal=signal, status="blocked", reason=kill_reason)
+
     blocked_reason = _blocking_reason(signal)
     if blocked_reason:
         return _event_payload(signal=signal, status="blocked", reason=blocked_reason)
@@ -358,54 +373,81 @@ def build_telegram_alert(signal: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def send_alert(message: str) -> bool:
+TRANSPORT_SENT = "sent"
+TRANSPORT_FAILED = "failed"
+TRANSPORT_UNKNOWN = "unknown"
 
+
+def _scrub_secret(text: Any) -> str:
+    # Mission 32: exceções de rede (requests) incluem a URL completa, que
+    # contém o bot token. Nunca registrar o token em log.
+    value = str(text or "")
+    if TELEGRAM_TOKEN:
+        value = value.replace(TELEGRAM_TOKEN, "***TELEGRAM_TOKEN***")
+    if CHAT_ID:
+        value = value.replace(str(CHAT_ID), "***CHAT_ID***")
+    return value
+
+
+def _send_alert_transport(message: str) -> str:
+    """Envia a mensagem e devolve TRANSPORT_SENT/FAILED/UNKNOWN.
+
+    UNKNOWN = a requisição pode ter chegado ao provider (ex.: read timeout);
+    o chamador NÃO deve re-enviar automaticamente para evitar duplicação.
+    """
     global _last_alert_time
 
     if not TELEGRAM_TOKEN or not CHAT_ID:
-
         logger.warning("Telegram token or chat_id not configured")
+        return TRANSPORT_FAILED
 
-        return False
+    with _lock:
+        elapsed = time.time() - _last_alert_time
+        if elapsed < MIN_ALERT_INTERVAL:
+            time.sleep(MIN_ALERT_INTERVAL - elapsed)
+        _last_alert_time = time.time()
+
+    url = f"{BASE_URL}{TELEGRAM_TOKEN}/sendMessage"
+
+    # Mission 32: texto plano (sem parse_mode). O template não usa marcação e
+    # conteúdo dinâmico sem escape podia derrubar o envio com HTTP 400
+    # (entity parse error) — perda silenciosa de alerta + injeção de Markdown.
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": message[:4000],
+    }
 
     try:
-
-        with _lock:
-
-            elapsed = time.time() - _last_alert_time
-            if elapsed < MIN_ALERT_INTERVAL:
-                time.sleep(MIN_ALERT_INTERVAL - elapsed)
-            _last_alert_time = time.time()
-
-        url = f"{BASE_URL}{TELEGRAM_TOKEN}/sendMessage"
-
-        payload = {
-
-            "chat_id": CHAT_ID,
-            "text": message[:4000],
-            "parse_mode": "Markdown"
-
-        }
-
-        r = _session.post(
-            url,
-            json=payload,
-            timeout=TIMEOUT
-        )
-
-        if r.status_code != 200:
-
-            logger.warning(f"Telegram status {r.status_code}")
-
-            return False
-
-        return True
-
+        r = _session.post(url, json=payload, timeout=TIMEOUT)
+    except requests.exceptions.ReadTimeout as e:
+        # A mensagem pode ter sido aceita pelo provider: resultado ambíguo.
+        logger.error("Telegram send timeout (ambiguous): %s", _scrub_secret(e))
+        return TRANSPORT_UNKNOWN
     except Exception as e:
+        logger.error("Telegram send error: %s", _scrub_secret(e))
+        return TRANSPORT_FAILED
 
-        logger.error(f"Telegram send error: {e}")
+    if r.status_code != 200:
+        logger.warning("Telegram status %s", r.status_code)
+        return TRANSPORT_FAILED
 
-        return False
+    return TRANSPORT_SENT
+
+
+def send_alert(message: str):
+    """Seam público/histórico de envio usado pelo dispatch e por testes.
+
+    Retorna o status tri-state do transporte. Valores booleanos (mocks
+    legados) são aceitos pelo dispatch via _coerce_transport_status.
+    """
+    return _send_alert_transport(message)
+
+
+def _coerce_transport_status(value) -> str:
+    if value in (TRANSPORT_SENT, TRANSPORT_FAILED, TRANSPORT_UNKNOWN):
+        return value
+    # Compatibilidade com a interface booleana histórica (True/False).
+    return TRANSPORT_SENT if value else TRANSPORT_FAILED
 
 # =====================================================
 # SIGNAL ALERT
@@ -458,9 +500,9 @@ def _dispatch_prepared_alert(
         _sent_fingerprints[fingerprint] = current_time
 
     message = f"{ALERT_LABELS.get(alert_level, 'ALERTA')}\n\n{format_signal_alert(signal, regime)}"
-    sent = send_alert(message)
+    transport_status = _coerce_transport_status(send_alert(message))
 
-    if sent:
+    if transport_status == TRANSPORT_SENT:
         with _lock:
             _sent_fingerprints[fingerprint] = current_time
             _cooldown_until[equivalent_key] = current_time + cooldown
@@ -475,8 +517,24 @@ def _dispatch_prepared_alert(
         _record_event(event, "sent", alert_level=alert_level)
         return event
 
+    if transport_status == TRANSPORT_UNKNOWN:
+        # Mission 32: timeout ambíguo — a mensagem pode ter sido entregue.
+        # Mantém a reserva do fingerprint (sem re-envio automático que
+        # duplicaria o alerta) e registra o resultado como UNKNOWN, nunca
+        # como DELIVERED. O evento auditável impede perda silenciosa.
+        event = _event_payload(
+            signal=signal,
+            status="unknown",
+            reason="telegram_send_timeout_ambiguous",
+            alert_level=alert_level,
+            fingerprint=fingerprint,
+        )
+        _record_event(event, "errors", alert_level=alert_level)
+        return event
+
     with _lock:
-        # Falha no envio: libera a reserva para não mascarar futuros alertas.
+        # Falha definitiva no envio: libera a reserva para não mascarar
+        # futuros alertas (retry legítimo em ciclo seguinte).
         if _sent_fingerprints.get(fingerprint) == current_time:
             _sent_fingerprints.pop(fingerprint, None)
 
@@ -585,7 +643,7 @@ def send_bulk_alert(signals, regime=None, *, now: float | None = None, cooldown_
             status = str(item.get("status") or "")
             if status in summary:
                 summary[status] += 1
-            elif status == "error":
+            elif status in {"error", "unknown"}:
                 summary["errors"] += 1
         summary["items"] = results
         return summary
@@ -624,6 +682,10 @@ def get_telegram_health() -> dict[str, Any]:
         "high": int(metrics.get("high", 0) or 0),
         "medium": int(metrics.get("medium", 0) or 0),
         "cooldown_seconds": TELEGRAM_ALERT_COOLDOWN_SECONDS,
+        "kill_switches": {
+            "telegram_alerts_disabled": alert_channel_block_reason("telegram") is not None,
+            "block_reason": alert_channel_block_reason("telegram"),
+        },
         "last_alerts": get_telegram_alert_history(limit=10),
         "updated_at": metrics.get("updated_at", 0.0),
     }

@@ -11,6 +11,8 @@ from app.services.push_service import get_push_token_store, send_push_notificati
 from app.services.score_display import attach_master_score_display_contract
 from app.services.snapshot_contract import build_decision_envelope, is_actionable_snapshot_row
 from app.services.symbol_registry import canonical_symbol
+from app.system.kill_switches import alert_channel_block_reason, symbol_block_reason
+from app.system.observability_engine import record_observability_event
 
 
 PUSH_DISPATCH_STATE_PATH = Path("data/push_dispatch_state.json")
@@ -184,6 +186,19 @@ def _eligible_signals(signals):
 
 
 def dispatch_signal_pushes(signals):
+    # Mission 32: kill switch operacional bloqueia o canal inteiro de forma
+    # auditável antes de qualquer acesso a tokens ou estado.
+    kill_reason = alert_channel_block_reason("push")
+    if kill_reason:
+        record_observability_event(
+            "push",
+            "push_dispatch_blocked_by_kill_switch",
+            severity="warning",
+            source="push_dispatcher",
+            details={"reason": kill_reason, "signals": len(signals or [])},
+        )
+        return {"sent": 0, "signals": 0, "blocked_by": kill_reason}
+
     candidates = _eligible_signals(signals)
 
     if not candidates:
@@ -220,10 +235,32 @@ def dispatch_signal_pushes(signals):
 
         for signal in candidates:
             ticker = canonical_symbol(signal.get("canonical_symbol") or signal.get("ticker") or signal.get("symbol"))
+
+            # Mission 32: símbolo desativado por kill switch — pulo auditável.
+            symbol_reason = symbol_block_reason(ticker)
+            if symbol_reason:
+                record_observability_event(
+                    "push",
+                    "push_signal_blocked_by_symbol_kill_switch",
+                    severity="warning",
+                    source="push_dispatcher",
+                    details={"ticker": ticker, "reason": symbol_reason},
+                )
+                continue
+
             decision_envelope = build_decision_envelope(signal)
             last_sent = int(state.get(ticker, 0) or 0)
 
             if now - last_sent < PUSH_SIGNAL_COOLDOWN_SECONDS:
+                # Mission 32: cooldown é rate limit intencional, mas o pulo
+                # precisa ser auditável (nenhum alerta perdido em silêncio).
+                record_observability_event(
+                    "push",
+                    "push_signal_skipped_cooldown",
+                    severity="info",
+                    source="push_dispatcher",
+                    details={"ticker": ticker, "cooldown_remaining_seconds": int(PUSH_SIGNAL_COOLDOWN_SECONDS - (now - last_sent))},
+                )
                 continue
 
             title = f"Alerta SNBR: {ticker}"
@@ -278,6 +315,13 @@ def dispatch_signal_pushes(signals):
             if signal_sent > 0:
                 state[ticker] = now
                 dispatched += signal_sent
+                record_observability_event(
+                    "push",
+                    "push_signal_dispatched",
+                    severity="info",
+                    source="push_dispatcher",
+                    details={"ticker": ticker, "sent": signal_sent},
+                )
 
         _save_state(state)
         return {"sent": dispatched, "signals": len(candidates)}

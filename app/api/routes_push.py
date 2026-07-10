@@ -5,7 +5,7 @@ from app.dependencies import require_active_plan, require_internal_token
 from app.models import User
 from app.services.push_service import (
     get_push_status,
-    list_push_tokens,
+    list_push_tokens_public,
     register_push_token,
     send_push_notification,
     unregister_push_token,
@@ -40,7 +40,8 @@ def push_status(current_user: User = Depends(require_active_plan)):
 
 @router.get("/push/tokens")
 def push_tokens(current_user: User = Depends(require_active_plan)):
-    return {"items": list_push_tokens(current_user.id)}
+    # Mission 32: resposta pública nunca devolve o token bruto.
+    return {"items": list_push_tokens_public(current_user.id)}
 
 
 @router.post("/push/register")

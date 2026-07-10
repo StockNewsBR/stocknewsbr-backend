@@ -17,6 +17,7 @@ from app.services.storage_service import get_storage_status
 from app.social.moderation import get_moderation_summary
 from app.system.ai_tab_audit import get_ai_tab_audit_history, get_ai_tab_audit_report, run_ai_tab_audit
 from app.system.observability_engine import build_observability_dashboard, get_metrics, record_observability_event
+from app.system.kill_switches import get_kill_switch_status
 from app.system.paper_trading import get_paper_trading_status, summarize_paper_trading_status
 from app.system.system_metrics import format_prometheus_metrics, get_metrics_snapshot, get_performance_metrics_snapshot
 from app.telegram.telegram_alert_engine import get_telegram_health
@@ -144,6 +145,7 @@ def system_status():
         "storage": get_storage_status(),
         "media": get_media_status(),
         "push": get_push_status(),
+        "kill_switches": get_kill_switch_status(),
         "moderation": get_moderation_summary(),
     }
 
