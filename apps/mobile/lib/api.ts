@@ -40,6 +40,14 @@ async function readErrorDetail(response: Response) {
       if (typeof payload.detail === "string") {
         return payload.detail;
       }
+      if (Array.isArray(payload.detail)) {
+        const messages = payload.detail
+          .map((item: any) => (item && typeof item === "object" ? item.msg || item.message || "" : String(item || "")))
+          .filter(Boolean);
+        if (messages.length) {
+          return messages.join(" | ");
+        }
+      }
       return JSON.stringify(payload);
     }
   } catch {}
@@ -83,7 +91,8 @@ async function requestJson<T>(
 
     return (await response.json()) as T;
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
+    // Hermes does not expose a global DOMException, so detect aborts by name.
+    if ((error as { name?: string } | null)?.name === "AbortError") {
       throw new Error("request_timeout");
     }
     throw error;
@@ -111,6 +120,20 @@ export async function loginJson(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, ...(options || {}) }),
+    },
+  );
+}
+
+export async function requestLoginCode(
+  email: string,
+  options?: { channel?: string; device_id?: string; device_label?: string },
+) {
+  return requestJson<Record<string, any>>(
+    "/auth/request-code",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, ...(options || {}) }),
     },
   );
 }
@@ -196,7 +219,7 @@ export async function getWorkspace(token: string) {
 export async function getChart(token: string, ticker: string, interval = "1D") {
   const symbol = tickerPathValue(ticker);
   return requestJson<Record<string, any>>(
-    `/chart/${encodeURIComponent(symbol)}`,
+    `/web/chart/${encodeURIComponent(symbol)}`,
     {
       headers: { Authorization: `Bearer ${token}` },
     },

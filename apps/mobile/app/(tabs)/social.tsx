@@ -6,12 +6,14 @@ import { createTickerPost, getTickerFeed } from "@/lib/api";
 import { formatRelativeSeconds } from "@/lib/format";
 import { canonicalSymbol } from "@/lib/symbolRegistry";
 import { Button, Card, EmptyState, Field, Pill, SectionHeader, theme } from "@/components/ui";
+import { useI18n } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 
 const SENTIMENTS = ["bullish", "bearish", "neutral"];
 
 export default function SocialTab() {
   const { token, access } = useSession();
+  const { t } = useI18n();
   const [ticker, setTicker] = useState("PETR4");
   const [feed, setFeed] = useState<Record<string, any> | null>(null);
   const [draft, setDraft] = useState("");
@@ -52,7 +54,7 @@ export default function SocialTab() {
         sentiment,
       });
       setDraft("");
-      setStatus(published?.error ? published.reason || published.error : "Post publicado com sucesso.");
+      setStatus(published?.error ? published.reason || published.error : t("postSuccess"));
       await loadFeed();
     } catch (requestError) {
       setStatus(requestError instanceof Error ? requestError.message : "post_failed");
@@ -70,31 +72,31 @@ export default function SocialTab() {
       refreshControl={<RefreshControl refreshing={loading} onRefresh={loadFeed} tintColor={theme.colors.accent} />}
     >
       <View style={{ gap: 8, paddingTop: 10 }}>
-        <Pill label="Social por ticker" tone="accent" />
+        <Pill label={t("socialPill")} tone="accent" />
         <Text style={{ color: theme.colors.text, fontSize: 30, fontWeight: "800", lineHeight: 34 }}>
-          Feed, post e contexto em uma tela so.
+          {t("socialTitle")}
         </Text>
         <Text style={{ color: theme.colors.muted, fontSize: 14, lineHeight: 21 }}>
-          Publique, leia comentarios e navegue direto para o detalhe do ativo.
+          {t("socialSubtitle")}
         </Text>
       </View>
 
       <Card>
-        <SectionHeader title="Ticker" subtitle="Troque o ativo e a tela recarrega o feed associado." />
+        <SectionHeader title={t("tickerCardTitle")} subtitle={t("socialTickerSubtitle")} />
         <Field value={ticker} onChangeText={(value) => setTicker(value.toUpperCase())} placeholder="PETR4" />
         <View style={{ flexDirection: "row", gap: 10 }}>
-          <Button label="Abrir ticker" onPress={() => router.push(`/ticker/${canonicalSymbol(ticker) || "PETR4"}`)} variant="secondary" />
-          <Button label="Atualizar" onPress={loadFeed} loading={loading} />
+          <Button label={t("openTicker")} onPress={() => router.push(`/ticker/${canonicalSymbol(ticker) || "PETR4"}`)} variant="secondary" />
+          <Button label={t("refreshBtn")} onPress={loadFeed} loading={loading} />
         </View>
       </Card>
 
       <Card>
-        <SectionHeader title="Novo post" subtitle="Conte algo do ativo ou do fluxo que voce esta vendo agora." />
+        <SectionHeader title={t("newPostTitle")} subtitle={t("newPostSubtitle")} />
         <TextInput
           multiline
           value={draft}
           onChangeText={setDraft}
-          placeholder="Escreva sua leitura..."
+          placeholder={t("draftPh")}
           placeholderTextColor={theme.colors.muted}
           style={{
             minHeight: 120,
@@ -126,14 +128,14 @@ export default function SocialTab() {
             </Pressable>
           ))}
         </View>
-        <Button label="Publicar no feed" onPress={handlePublish} loading={busy} />
+        <Button label={t("publishFeedBtn")} onPress={handlePublish} loading={busy} />
         {status ? <Text style={{ color: theme.colors.muted, fontSize: 13 }}>{status}</Text> : null}
       </Card>
 
       <Card>
         <SectionHeader
-          title="Feed"
-          subtitle={feed?.count ? `${feed.count} posts carregados` : "Sem posts carregados ainda"}
+          title={t("feedCardTitle")}
+          subtitle={feed?.count ? `${feed.count} ${t("postsLoadedSuffix")}` : t("feedNoneYet")}
         />
         {posts.length ? (
           posts.map((post: any) => (
@@ -148,7 +150,7 @@ export default function SocialTab() {
             >
               <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontWeight: "700" }}>{post.user || post.display_name || "Usuario"}</Text>
+                  <Text style={{ color: theme.colors.text, fontWeight: "700" }}>{post.user || post.display_name || t("userFallback")}</Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{formatRelativeSeconds(Date.now() / 1000 - Number(post.timestamp || 0))} ago</Text>
                 </View>
                 {post.ticker ? <Pill label={post.ticker} tone="info" /> : null}
@@ -160,13 +162,13 @@ export default function SocialTab() {
             </View>
           ))
         ) : (
-          <EmptyState title="Sem feed" description="Ainda nao ha posts para este ticker." />
+          <EmptyState title={t("socialFeedEmptyTitle")} description={t("socialFeedEmptyDesc")} />
         )}
       </Card>
 
       {access?.telegram_linked ? (
         <Card>
-          <SectionHeader title="Telegram" subtitle="O acesso do Telegram ja esta conectado na conta." />
+          <SectionHeader title="Telegram" subtitle={t("telegramLinkedSubtitle")} />
         </Card>
       ) : null}
     </ScrollView>

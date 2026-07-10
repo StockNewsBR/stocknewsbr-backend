@@ -7,6 +7,7 @@ import {
   getPublicBootstrap,
   loginJson,
   logoutAuth,
+  requestLoginCode,
   requestTelegramLink as requestTelegramLinkApi,
   verifyLoginOtp,
   updateProfile,
@@ -33,6 +34,7 @@ type SessionContextValue = {
   error: string | null;
   deviceId: string;
   signIn: (email: string, password: string) => Promise<{ otpRequired: boolean; debugOtpCode?: string | null }>;
+  requestAccessCode: (email: string) => Promise<string | null>;
   verifyOtp: (code: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshAccess: () => Promise<Record<string, any> | null>;
@@ -181,6 +183,36 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function requestAccessCode(email: string) {
+    setBusy(true);
+    setError(null);
+
+    try {
+      const payload = await requestLoginCode(email, {
+        channel: "app",
+        device_id: deviceId || (await ensureDeviceId()),
+        device_label: "mobile_app",
+      });
+
+      if (payload?.login_token) {
+        setChallenge({
+          login_token: payload.login_token,
+          debug_otp_code: payload.debug_otp_code || null,
+          otp_expires_at: payload.otp_expires_at || null,
+          session_policy: payload.session_policy || null,
+          detail: payload.detail || null,
+        });
+      }
+
+      return typeof payload?.detail === "string" ? payload.detail : null;
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "request_code_failed");
+      throw requestError;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function verifyOtp(code: string) {
     if (!challenge?.login_token) {
       throw new Error("missing_login_challenge");
@@ -277,6 +309,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     error,
     deviceId,
     signIn,
+    requestAccessCode,
     verifyOtp,
     signOut,
     refreshAccess,

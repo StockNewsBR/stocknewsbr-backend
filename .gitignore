@@ -26,6 +26,7 @@ playwright-report/
 test-results/
 
 apps/mobile/node_modules/
+apps/mobile/.expo/
 apps/web/.next_cache_reset*/
 apps/web/.next_stale*/
 apps/web/.next-stale-*/

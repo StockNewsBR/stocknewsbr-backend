@@ -1,13 +1,25 @@
-import { Redirect, Tabs } from "expo-router";
+import { Tabs, router } from "expo-router";
+import { useEffect } from "react";
 
 import { theme } from "@/components/ui";
+import { useI18n } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 
 export default function TabsLayout() {
   const { ready, token } = useSession();
+  const { t } = useI18n();
+  const loggedOut = ready && !token;
 
-  if (ready && !token) {
-    return <Redirect href="/" />;
+  // Navigate imperatively once instead of rendering <Redirect> every render:
+  // paired declarative redirects ("/" <-> "/(tabs)") ping-pong into a render loop.
+  useEffect(() => {
+    if (loggedOut) {
+      router.replace("/");
+    }
+  }, [loggedOut]);
+
+  if (loggedOut) {
+    return null;
   }
 
   return (
@@ -29,11 +41,11 @@ export default function TabsLayout() {
         },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: "Home" }} />
-      <Tabs.Screen name="market" options={{ title: "Mercado" }} />
-      <Tabs.Screen name="social" options={{ title: "Social" }} />
-      <Tabs.Screen name="polls" options={{ title: "Polls" }} />
-      <Tabs.Screen name="profile" options={{ title: "Perfil" }} />
+      <Tabs.Screen name="index" options={{ title: t("tabHome") }} />
+      <Tabs.Screen name="market" options={{ title: t("tabMarket") }} />
+      <Tabs.Screen name="social" options={{ title: t("tabSocial") }} />
+      <Tabs.Screen name="polls" options={{ title: t("tabPolls") }} />
+      <Tabs.Screen name="profile" options={{ title: t("tabProfile") }} />
     </Tabs>
   );
 }

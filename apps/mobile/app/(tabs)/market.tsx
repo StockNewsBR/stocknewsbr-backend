@@ -10,10 +10,12 @@ import {
 } from "@/lib/api";
 import { formatPercent, formatRelativeSeconds } from "@/lib/format";
 import { Card, EmptyState, Pill, SectionHeader, StatTile, theme } from "@/components/ui";
+import { useI18n } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 
 export default function MarketTab() {
   const { token } = useSession();
+  const { t } = useI18n();
   const [heatmap, setHeatmap] = useState<Record<string, any> | null>(null);
   const [radar, setRadar] = useState<Record<string, any>[]>([]);
   const [narrative, setNarrative] = useState<string>("");
@@ -63,17 +65,17 @@ export default function MarketTab() {
       refreshControl={<RefreshControl refreshing={loading} onRefresh={loadMarket} tintColor={theme.colors.accent} />}
     >
       <View style={{ gap: 8, paddingTop: 10 }}>
-        <Pill label="Mercado" tone="info" />
+        <Pill label={t("marketPill")} tone="info" />
         <Text style={{ color: theme.colors.text, fontSize: 30, fontWeight: "800", lineHeight: 34 }}>
-          Leitura de fluxo, calor, radar e narrativa institucional.
+          {t("marketTitle")}
         </Text>
         <Text style={{ color: theme.colors.muted, fontSize: 14, lineHeight: 21 }}>
-          A tela concentra o que o app sabe do mercado em um toque rapido.
+          {t("marketSubtitle")}
         </Text>
       </View>
 
       <Card>
-        <SectionHeader title="Snapshot" subtitle="Sinaliza a saude da memoria de mercado." />
+        <SectionHeader title={t("snapshotTitle")} subtitle={t("snapshotSubtitle")} />
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
           <StatTile label="Signals" value={String(snapshotInfo?.signals ?? snapshotInfo?.snapshot_signals ?? "n/a")} tone="accent" />
           <StatTile label="Cache" value={formatRelativeSeconds(snapshotInfo?.age_seconds ?? snapshotInfo?.cache_age)} tone="warning" />
@@ -83,28 +85,28 @@ export default function MarketTab() {
       </Card>
 
       <Card>
-        <SectionHeader title="Narrativa" subtitle="O texto de contexto que ajuda a ler o dia sem caçar sinal solto." />
+        <SectionHeader title={t("narrativeTitle")} subtitle={t("narrativeSubtitle")} />
         {narrative ? (
           <View style={{ gap: 8 }}>
             <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "700" }}>
-              Narrativa de mercado
+              {t("narrativeHeader")}
             </Text>
             <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
               {narrative}
             </Text>
           </View>
         ) : (
-          <EmptyState title="Sem narrativa" description="O backend nao retornou narrativa agora." />
+          <EmptyState title={t("narrativeEmptyTitle")} description={t("narrativeEmptyDesc")} />
         )}
       </Card>
 
       <Card>
-        <SectionHeader title="Heatmap" subtitle="O que esta quente, o que esta fraco e os nomes com pressao real." />
+        <SectionHeader title={t("heatmapTitle")} subtitle={t("heatmapSubtitle")} />
         {heatmap?.global || heatmap?.sectors ? (
           <View style={{ gap: 12 }}>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
               <StatTile
-                label="Forca"
+                label={t("strengthLabel")}
                 value={formatPercent(heatmap?.global?.market_strength)}
                 tone="accent"
               />
@@ -124,7 +126,7 @@ export default function MarketTab() {
               />
             </View>
             <View style={{ gap: 8 }}>
-              <Text style={{ color: theme.colors.text, fontWeight: "700" }}>Setores</Text>
+              <Text style={{ color: theme.colors.text, fontWeight: "700" }}>{t("sectorsLabel")}</Text>
               {(Object.entries(heatmap?.sectors || {}) as Array<[string, Record<string, any>]>)
                 .sort((left, right) => Number(right[1]?.strength || 0) - Number(left[1]?.strength || 0))
                 .slice(0, 6)
@@ -139,12 +141,12 @@ export default function MarketTab() {
             </View>
           </View>
         ) : (
-          <EmptyState title="Heatmap vazio" description="A leitura quente/fria ainda nao veio do servidor." />
+          <EmptyState title={t("heatmapEmptyTitle")} description={t("heatmapEmptyDesc")} />
         )}
       </Card>
 
       <Card>
-        <SectionHeader title="Radar" subtitle="Movimentos com evento, gatilho ou aceleracao relevante." />
+        <SectionHeader title={t("radarTitle")} subtitle={t("radarSubtitle")} />
         {radar.length ? (
           radar.slice(0, 8).map((row: any) => (
             <View key={`${row.symbol || row.ticker || row.id}`} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: theme.colors.line, gap: 5 }}>
@@ -154,29 +156,29 @@ export default function MarketTab() {
               </View>
               <Text style={{ color: theme.colors.muted, lineHeight: 18 }}>{row.signal || row.state || "n/a"}</Text>
               <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                {Array.isArray(row.events) ? `${row.events.length} eventos` : "sem eventos"}
+                {Array.isArray(row.events) ? `${row.events.length} ${t("eventsSuffix")}` : t("noEvents")}
               </Text>
             </View>
           ))
         ) : (
-          <EmptyState title="Radar vazio" description="Sem alvos de radar no momento." />
+          <EmptyState title={t("radarEmptyTitle")} description={t("radarEmptyDesc")} />
         )}
       </Card>
 
       <Card>
-        <SectionHeader title="Top movers" subtitle="Ativos com maior tracao no recorte atual." />
+        <SectionHeader title={t("moversTitle")} subtitle={t("moversSubtitle")} />
         {movers.length ? (
           movers.slice(0, 8).map((symbol) => (
             <View key={symbol} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: theme.colors.line }}>
               <View>
                 <Text style={{ color: theme.colors.text, fontWeight: "700" }}>{symbol}</Text>
-                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>Top mover atual no ranking</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{t("moversNote")}</Text>
               </View>
               <Pill label="ranking" tone="warning" />
             </View>
           ))
         ) : (
-          <EmptyState title="Sem movers" description="A fila de top movers ainda nao voltou do backend." />
+          <EmptyState title={t("moversEmptyTitle")} description={t("moversEmptyDesc")} />
         )}
       </Card>
     </ScrollView>

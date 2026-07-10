@@ -107,15 +107,15 @@ export function WorkspaceLeftRail({
     <aside className="snbr-left-rail" ref={railRef}>
       <div className="snbr-left-header">
         <div className="snbr-header-brand">
-          <div className="snbr-header-brand-copy">
-            <h1>StockNewsBR</h1>
-            <p>{isEnglish ? "AI Market Intelligence" : "Inteligência de Mercado com IA"}</p>
-          </div>
           <img
             className="snbr-brand-image"
             src="/brand/stocknewsbr-brand.png"
             alt={isEnglish ? "StockNewsBR brand art" : "Arte da marca StockNewsBR"}
           />
+          <div className="snbr-header-brand-copy">
+            <h1>StockNewsBR</h1>
+            <p>{isEnglish ? "AI Market Intelligence" : "Inteligência de Mercado com IA"}</p>
+          </div>
         </div>
         <button
           aria-expanded={mobileWatchlistOpen}
