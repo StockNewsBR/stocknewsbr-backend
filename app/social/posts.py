@@ -8,7 +8,9 @@ from app.services.symbol_registry import canonical_symbol
 from app.social.db import ensure_social_tables
 from app.social.moderation import (
     can_publish,
+    get_hidden_post_ids,
     get_user_guardian_score,
+    get_user_guardian_scores,
     is_post_hidden,
     record_content_approved,
     record_post_removed,
@@ -16,8 +18,9 @@ from app.social.moderation import (
 )
 
 
-def _serialize_post(post: SocialPost) -> dict:
-    guardian_score = get_user_guardian_score(post.user_id)
+def _serialize_post(post: SocialPost, guardian_score: dict | None = None) -> dict:
+    if guardian_score is None:
+        guardian_score = get_user_guardian_score(post.user_id)
     return {
         "id": post.id,
         "user_id": post.user_id,
@@ -115,8 +118,15 @@ def get_posts(ticker=None, limit=50, blocked_users=None):
             .all()
         )
 
-        serialized = [_serialize_post(row) for row in reversed(rows)]
-        return [row for row in serialized if not is_post_hidden(row.get("id"))]
+        # Missão 34: lote — 2 leituras do estado de moderação por request em
+        # vez de 2 por post (N+1 de I/O + parse JSON com N até 500).
+        guardian_scores = get_user_guardian_scores(row.user_id for row in rows)
+        serialized = [
+            _serialize_post(row, guardian_score=dict(guardian_scores[row.user_id]))
+            for row in reversed(rows)
+        ]
+        hidden_post_ids = get_hidden_post_ids(row.get("id") for row in serialized)
+        return [row for row in serialized if row.get("id") not in hidden_post_ids]
     finally:
         db.close()
 

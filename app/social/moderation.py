@@ -387,6 +387,39 @@ def is_post_hidden(post_id: int):
     return False
 
 
+def get_hidden_post_ids(post_ids):
+    # Missão 34: versão em lote de is_post_hidden. Carrega o estado UMA vez em
+    # vez de reler/parsear o arquivo por post (N+1 de I/O em get_posts).
+    # Mesma semântica: primeiro match em reviewed_reports (reverso) decide;
+    # senão primeiro match em review_queue (reverso); senão não-oculto.
+    pending = set(post_ids)
+    if not pending:
+        return set()
+
+    state = _load_state()
+    hidden = set()
+
+    for item in reversed(state.get("reviewed_reports", [])):
+        item_post_id = item.get("post_id")
+        if item_post_id in pending:
+            pending.discard(item_post_id)
+            if item.get("action") in {"hide", "remove"}:
+                hidden.add(item_post_id)
+            if not pending:
+                return hidden
+
+    for item in reversed(state.get("review_queue", [])):
+        item_post_id = item.get("post_id")
+        if item_post_id in pending:
+            pending.discard(item_post_id)
+            if bool(item.get("auto_hidden")):
+                hidden.add(item_post_id)
+            if not pending:
+                break
+
+    return hidden
+
+
 def review_report(post_id: int, action: str, moderator_id: int | None = None):
     # Mission 31F: read-modify-write atômico via _mutate_state; o padrão
     # anterior podia perder atualização concorrente (novo report ou outra
@@ -436,6 +469,34 @@ def get_user_guardian_score(user_id):
         "score": SocialGuardian.clamp_score(record.get("score")),
         "label": SocialGuardian.trust_label(record.get("score")),
     }
+
+
+def get_user_guardian_scores(user_ids):
+    # Missão 34: versão em lote de get_user_guardian_score. Carrega o estado
+    # UMA vez em vez de reler/parsear o arquivo por post (N+1 em get_posts).
+    default_score = {
+        "score": SocialGuardian.TRUST_START,
+        "label": SocialGuardian.trust_label(SocialGuardian.TRUST_START),
+    }
+    scores = {}
+    remaining = set()
+    for user_id in user_ids:
+        if not user_id:
+            scores[user_id] = dict(default_score)
+        else:
+            remaining.add(user_id)
+
+    if remaining:
+        state = _load_state()
+        for user_id in remaining:
+            record = _score_record(state, int(user_id))
+            scores[user_id] = {
+                **record,
+                "score": SocialGuardian.clamp_score(record.get("score")),
+                "label": SocialGuardian.trust_label(record.get("score")),
+            }
+
+    return scores
 
 
 def get_guardian_audit(limit: int = 100):
