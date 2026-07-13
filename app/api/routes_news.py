@@ -16,4 +16,12 @@ def symbol_news(
     current_user: User = Depends(require_any_channel_access("app", "web")),
 ):
     del current_user
-    return build_public_news_payload(symbol, limit=limit, allow_fetch=refresh is not None, schedule_warmup=True)
+    # Cache-first: the HTTP path never calls the provider synchronously. A
+    # refresh request schedules a bounded, deduplicated background warmup
+    # (see news_warmup) instead of blocking the request on a provider fetch.
+    return build_public_news_payload(
+        symbol,
+        limit=limit,
+        allow_fetch=False,
+        schedule_warmup=True,
+    )

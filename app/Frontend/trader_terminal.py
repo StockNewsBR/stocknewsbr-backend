@@ -3,11 +3,25 @@ import json
 from app.Frontend.layout import get_layout
 
 
-def get_terminal(focused_tab: str | None = None, token: str | None = None):
+def _json_for_inline_script(value) -> str:
+    return (
+        json.dumps(value)
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
+def get_terminal(focused_tab: str | None = None):
     tabs = get_layout()["tabs"]
-    initial_tab = focused_tab or "home"
-    embedded_tabs = json.dumps(tabs)
-    embedded_token = json.dumps(token or "")
+    embedded_tabs = _json_for_inline_script(tabs)
+    # Serialize the real focused_tab (None -> JSON null) so the main terminal
+    # (no focused_tab) stays IS_POPOUT=false. The JS keeps its own "home"
+    # visual fallback (FOCUSED_TAB || "home") without turning the page into a
+    # popout. Only an explicitly-provided focused_tab yields IS_POPOUT=true.
+    embedded_focused_tab = _json_for_inline_script(focused_tab)
 
     return f"""
 <!DOCTYPE html>
@@ -314,8 +328,7 @@ button.secondary {{
 </div>
 <script>
 const FALLBACK_TABS = {embedded_tabs};
-const FOCUSED_TAB = {json.dumps(initial_tab)};
-const AUTH_TOKEN = {embedded_token};
+const FOCUSED_TAB = {embedded_focused_tab};
 const IS_POPOUT = Boolean(FOCUSED_TAB);
 let WORKSPACE = null;
 let CHART = null;
@@ -341,18 +354,13 @@ function scoreClass(score) {{
   return "down";
 }}
 
-function authHeaders(base = {{}}) {{
-  if (!AUTH_TOKEN) return base;
-  return {{ ...base, Authorization: `Bearer ${{AUTH_TOKEN}}` }};
-}}
-
 async function apiFetch(url, options = {{}}) {{
-  const headers = authHeaders(options.headers || {{}});
+  const headers = {{ ...(options.headers || {{}}) }};
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   if (options.body && !isFormData && !headers["Content-Type"]) {{
     headers["Content-Type"] = "application/json";
   }}
-  const response = await fetch(url, {{ ...options, headers }});
+  const response = await fetch(url, {{ ...options, credentials: "same-origin", headers }});
   if (!response.ok) {{
     let detail = response.statusText;
     try {{
@@ -371,8 +379,7 @@ function openDetached(tabId) {{
     OPENED_POPOUTS.push(tabId);
     persistLayout();
   }}
-  const tokenQuery = AUTH_TOKEN ? `?token=${{encodeURIComponent(AUTH_TOKEN)}}` : "";
-  const url = `/web/terminal/popout/${{tabId}}${{tokenQuery}}`;
+  const url = `/web/terminal/popout/${{tabId}}`;
   window.open(url, `stocknewsbr_${{tabId}}`, "width=1480,height=920,resizable=yes,scrollbars=yes");
 }}
 
@@ -427,7 +434,7 @@ function renderTabs() {{
 
 function renderStatus() {{
   const status = WORKSPACE?.status || {{}};
-  const authHint = AUTH_TOKEN ? "token conectado" : "adicione ?token=SEU_TOKEN";
+  const authHint = "sessao web protegida por cookie";
   document.getElementById("statusbar").innerHTML = `
     <div class="pill">Ciclos: ${{status.engine_cycles ?? 0}}</div>
     <div class="pill">Sinais: ${{status.signals_generated ?? 0}}</div>
@@ -773,11 +780,9 @@ function connectChatSocket() {{
     }}
   }}
 
-  if (!AUTH_TOKEN) return;
-
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   ROOM_SOCKET = new WebSocket(
-    `${{protocol}}://${{window.location.host}}/ws/chat/${{encodeURIComponent(ACTIVE_TICKER)}}?token=${{encodeURIComponent(AUTH_TOKEN)}}`
+    `${{protocol}}://${{window.location.host}}/ws/chat/${{encodeURIComponent(ACTIVE_TICKER)}}`
   );
 
   ROOM_SOCKET.onmessage = event => {{
@@ -878,7 +883,7 @@ async function loadWorkspace() {{
 }}
 
 loadWorkspace().catch(error => {{
-  document.getElementById("main-column").innerHTML = `<div class="panel"><h2>Workspace indisponivel</h2><p class="muted">${{escapeHtml(error.message || "Erro ao carregar os dados.")}}</p><p class="hint">Se voce estiver testando no navegador, abra esta pagina com ?token=SEU_ACCESS_TOKEN para liberar as chamadas autenticadas do workspace.</p></div>`;
+  document.getElementById("main-column").innerHTML = `<div class="panel"><h2>Workspace indisponivel</h2><p class="muted">${{escapeHtml(error.message || "Erro ao carregar os dados.")}}</p><p class="hint">Entre novamente pela tela de login para restaurar a sessao web.</p></div>`;
 }});
 </script>
 </body>

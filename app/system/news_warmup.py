@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import RLock, Thread
+from threading import BoundedSemaphore, RLock
 from typing import Iterable
 
 from app.services.news_service import get_cached_symbol_news, get_symbol_news
@@ -34,11 +35,23 @@ def _project_runtime_path(env_name: str, default_relative: str) -> Path:
 
 REQUEST_PATH = _project_runtime_path("NEWS_WARMUP_REQUEST_FILE", "runtime/cache/news_warmup_requests.json")
 
+# Async warmup runs on a single shared, bounded executor instead of an
+# unbounded Thread-per-request. NEWS_WARMUP_MAX_WORKERS caps concurrent
+# provider work; the BoundedSemaphore caps workers + queued jobs so a burst of
+# distinct cold symbols cannot spawn unlimited threads/queue growth.
+NEWS_WARMUP_MAX_WORKERS = max(1, int(os.getenv("NEWS_WARMUP_MAX_WORKERS", "2")))
+NEWS_WARMUP_QUEUE_CAPACITY = max(0, int(os.getenv("NEWS_WARMUP_QUEUE_CAPACITY", "8")))
+_ASYNC_CAPACITY = NEWS_WARMUP_MAX_WORKERS + NEWS_WARMUP_QUEUE_CAPACITY
+
 _lock = RLock()
 _last_warmup_at = 0.0
 _async_last_request_at: dict[str, float] = {}
 _async_running: set[str] = set()
 _symbol_cooldowns: dict[str, float] = {}
+_async_executor = ThreadPoolExecutor(
+    max_workers=NEWS_WARMUP_MAX_WORKERS, thread_name_prefix="news-warmup"
+)
+_async_slots = BoundedSemaphore(_ASYNC_CAPACITY)
 
 _NEWS_PRIORITY = [
     "F",
@@ -159,12 +172,19 @@ def request_news_warmup(symbol: str, limit: int = 6) -> None:
             should_start_async = True
 
     if should_start_async:
-        Thread(
-            target=_warm_single_request,
-            args=(ticker, item_limit, key),
-            name=f"news-warmup-{ticker}",
-            daemon=True,
-        ).start()
+        # Acquire a slot without blocking the caller. On overflow (no free
+        # worker/queue slot) we drop the async attempt instead of creating
+        # unbounded work; the request stays persisted for the periodic sweep.
+        if _async_slots.acquire(blocking=False):
+            try:
+                _async_executor.submit(_warm_single_request, ticker, item_limit, key)
+            except RuntimeError:
+                _async_slots.release()
+                with _lock:
+                    _async_running.discard(key)
+        else:
+            with _lock:
+                _async_running.discard(key)
 
 
 def _warm_single_request(symbol: str, limit: int, key: str) -> None:
@@ -187,6 +207,7 @@ def _warm_single_request(symbol: str, limit: int, key: str) -> None:
         _mark_cooldown(symbol)
         logger.exception("Async news warmup failed for %s", symbol)
     finally:
+        _async_slots.release()
         with _lock:
             _async_running.discard(key)
         record_worker_stage_duration("news_request_warmup", time.perf_counter() - start, success=success)

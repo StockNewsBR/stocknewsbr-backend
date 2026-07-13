@@ -16,6 +16,7 @@ const moderationStorePath = process.env.MISSION31A_MODERATION_STORE_PATH
 const API_BASE = (process.env.MISSION31A_API_BASE || "http://127.0.0.1:8000").replace(/\/$/, "");
 const WEB_BASE = (process.env.MISSION31A_WEB_BASE || "http://127.0.0.1:3000").replace(/\/$/, "");
 const HEADLESS = process.env.MISSION31A_HEADLESS !== "false";
+const SESSION_COOKIE_NAME = process.env.MISSION31A_SESSION_COOKIE_NAME || process.env.SESSION_COOKIE_NAME || "snb_session";
 
 function ensureDirs() {
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
@@ -184,9 +185,16 @@ async function runApiAudit(authorToken, reporterToken) {
 async function runBrowserAudit(reporter) {
   const browser = await chromium.launch({ headless: HEADLESS });
   const context = await browser.newContext({ viewport: { width: 1440, height: 920 } });
-  await context.addInitScript((token) => {
-    window.localStorage.setItem("stocknewsbr.token", token);
-  }, reporter.token);
+  await context.addCookies([
+    {
+      name: SESSION_COOKIE_NAME,
+      value: reporter.token,
+      url: new URL(API_BASE).origin,
+      httpOnly: true,
+      secure: API_BASE.startsWith("https://"),
+      sameSite: "Lax",
+    },
+  ]);
   const page = await context.newPage();
   const browserPostText = `Post normal Mission 31A navegador ${Date.now()} PETR4 suporte, volume, fluxo e risco controlado.`;
   const result = {
@@ -199,7 +207,7 @@ async function runBrowserAudit(reporter) {
   };
 
   try {
-    await page.goto(`${WEB_BASE}/panel/PETR4?token=${encodeURIComponent(reporter.token)}&ticker=PETR4`, {
+    await page.goto(`${WEB_BASE}/panel/PETR4?ticker=PETR4`, {
       waitUntil: "domcontentloaded",
     });
     await page.locator("main").waitFor({ state: "visible", timeout: 20000 });

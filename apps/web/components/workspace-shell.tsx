@@ -6635,7 +6635,6 @@ function normalizePollPayload(poll: PollPayload | null | undefined, symbol: stri
 
 export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const searchParams = useSearchParams();
-  const queryToken = searchParams.get("token") || "";
   const queryTicker = normalizeSymbol(searchParams.get("ticker") || initialTicker || "PETR4");
 
   const [token, setToken] = useState("");
@@ -6867,18 +6866,22 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const storedCooldown = Number(readStorageValue(CODE_COOLDOWN_STORAGE_KEY) || 0);
     if (storedCooldown > Date.now()) setResendCooldownUntil(storedCooldown);
 
-    if (queryToken) {
-      // Transient app->web handoff token: kept in memory only, and scrubbed
-      // from the address bar/history so it never lingers in the URL.
-      try {
-        const nextUrl = new URL(window.location.href);
-        nextUrl.searchParams.delete("token");
-        window.history.replaceState(window.history.state, "", `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
-      } catch {
-        // history scrub is best-effort
+    // Remove legacy credential-shaped parameters without reading or accepting
+    // their values. Authentication for the browser remains cookie-only.
+    try {
+      const nextUrl = new URL(window.location.href);
+      let changed = false;
+      for (const parameter of ["token", "access_token", "bearer"]) {
+        if (nextUrl.searchParams.has(parameter)) {
+          nextUrl.searchParams.delete(parameter);
+          changed = true;
+        }
       }
-      setToken(queryToken);
-      return;
+      if (changed) {
+        window.history.replaceState(window.history.state, "", `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+      }
+    } catch {
+      // History cleanup is best-effort; credential parameters are never used.
     }
 
     let cancelled = false;
@@ -6896,7 +6899,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [queryToken]);
+  }, []);
 
   useEffect(() => {
     // Re-enable the "Enviar/Reenviar código" button when the cooldown ends.
@@ -7534,11 +7537,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   useEffect(() => {
     if (!token) return;
 
-    // Cookie sessions authenticate the handshake via the httpOnly cookie;
-    // only real bearer tokens (app handoff) travel in the URL.
-    const wsQuery = token === COOKIE_SESSION_TOKEN ? "" : `?token=${encodeURIComponent(token)}`;
     const socket = new WebSocket(
-      buildWebSocketUrl(`/ws/chat/${encodeURIComponent(deferredTicker)}${wsQuery}`),
+      buildWebSocketUrl(`/ws/chat/${encodeURIComponent(deferredTicker)}`),
     );
 
     socketRef.current = socket;
@@ -7633,8 +7633,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
       // Web login: the session token lives in an httpOnly cookie; the JSON
       // payload intentionally carries no token.
-      const nextToken = payload.access_token || COOKIE_SESSION_TOKEN;
-      setToken(nextToken);
+      setToken(COOKIE_SESSION_TOKEN);
       setPendingLoginToken("");
       setOtpCode("");
       setLoginNotice("");
@@ -8122,10 +8121,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   function openPopout(tabId: string) {
     const nextPopouts = [...new Set([...(workspace?.layout?.opened_popouts || []), tabId])];
     void persistLayout(tabs, nextPopouts);
-    const tokenQuery = token ? `?token=${encodeURIComponent(token)}&ticker=${encodeURIComponent(selectedTicker)}` : "";
+    const tickerQuery = `?ticker=${encodeURIComponent(selectedTicker)}`;
     const features = DETACHABLE_IA_TABS.has(tabId) ? "width=1280,height=900,resizable=yes" : "width=1440,height=960,resizable=yes";
     const targetName = tabId === "grafico" ? `stocknewsbr_panel_${tabId}_${Date.now()}` : `stocknewsbr_panel_${tabId}`;
-    window.open(`/panel/${tabId}${tokenQuery}`, targetName, features);
+    window.open(`/panel/${tabId}${tickerQuery}`, targetName, features);
   }
 
   async function handleMuteTrader(post: FeedPost) {

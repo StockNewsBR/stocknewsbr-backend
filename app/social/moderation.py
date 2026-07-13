@@ -291,6 +291,18 @@ def record_post_removed(post_id, *, actor_user_id=None, target_user_id=None, rea
     return _mutate_state(mutator)
 
 
+def _distinct_reporter_count(reports, post_id) -> int:
+    # Count DISTINCT reporters for a post. Malformed/legacy rows without a
+    # valid reporter (missing or None ``user``) never contribute to the count.
+    return len(
+        {
+            item.get("user")
+            for item in reports
+            if item.get("post") == post_id and item.get("user") is not None
+        }
+    )
+
+
 def report(user_id, post_id, reason: str | None = None, reporter_note: str | None = None, target_user_id: int | None = None):
     if not user_id or post_id is None:
         return False
@@ -303,6 +315,35 @@ def report(user_id, post_id, reason: str | None = None, reporter_note: str | Non
     def mutator(state):
         reports = state.setdefault("reports", [])
         queue = state.setdefault("review_queue", [])
+
+        # One active report per reporter + post. A repeated report by the same
+        # user is idempotent: no new row, no additional author penalty, no new
+        # queue/audit entry, and it cannot push a post to auto-hide on its own.
+        # Auto-hide counts DISTINCT reporters (also normalizes legacy state
+        # that may already contain duplicate rows).
+        already_reported = any(
+            item.get("post") == post_id and item.get("user") == user_id
+            for item in reports
+        )
+        if already_reported:
+            # Idempotent (no new row/penalty/audit/queue entry), but still
+            # normalize a legacy queue entry whose reports/auto_hidden may have
+            # been inflated by pre-dedup duplicate rows: recompute from DISTINCT
+            # valid reporters so an inflated auto_hidden is corrected downward
+            # and a genuine threshold stays hidden. _mutate_state persists.
+            distinct = _distinct_reporter_count(reports, post_id)
+            new_auto_hidden = distinct >= REPORT_THRESHOLD_AUTO_HIDE
+            for queue_item in queue:
+                if queue_item.get("post_id") != post_id:
+                    continue
+                if (
+                    queue_item.get("reports") != distinct
+                    or bool(queue_item.get("auto_hidden")) != new_auto_hidden
+                ):
+                    queue_item["reports"] = distinct
+                    queue_item["auto_hidden"] = new_auto_hidden
+                    queue_item["updated_at"] = int(time.time())
+            return True
 
         report_item = {
             "id": f"report-{int(time.time() * 1000)}-{user_id}",
@@ -318,7 +359,7 @@ def report(user_id, post_id, reason: str | None = None, reporter_note: str | Non
         reports.append(report_item)
         increment_reports()
 
-        report_count = len([item for item in reports if item.get("post") == post_id])
+        report_count = _distinct_reporter_count(reports, post_id)
 
         queue_item = {
             "post_id": post_id,

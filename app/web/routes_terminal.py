@@ -2,7 +2,7 @@
 # STOCKNEWSBR WEB TERMINAL ROUTES
 # =====================================================
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 import logging
 
@@ -53,13 +53,12 @@ def get_terminal():
 
 
 @router.get("/terminal/ui", response_class=HTMLResponse)
-def terminal_ui(token: str | None = Query(default=None)):
-    return render_terminal_html(token=token)
+def terminal_ui():
+    return render_terminal_html()
 
 
 @router.get("/terminal/popout/{tab_id}", response_class=HTMLResponse)
 def terminal_popout(
     tab_id: str,
-    token: str | None = Query(default=None),
 ):
-    return render_terminal_html(focused_tab=tab_id, token=token)
+    return render_terminal_html(focused_tab=tab_id)
