@@ -208,6 +208,20 @@ class MediaAsset(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class MediaUploadReservation(Base):
+    # In-flight upload admission control: one active row per streaming upload,
+    # created before bytes are written and released on completion/failure. Bounds
+    # concurrent temporary-storage usage per owner (and globally) across workers.
+    __tablename__ = "media_upload_reservations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    reserved_bytes = Column(Integer, nullable=False, default=0)
+    state = Column(String, nullable=False, default="reserved", index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+
+
 class UserSession(Base):
     __tablename__ = "user_sessions"
 
