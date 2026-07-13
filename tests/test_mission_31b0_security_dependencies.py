@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.testclient import TestClient
 
-TEST_SECRET_KEY = "mission31b0-jwt-key-valid-20260630-x9"
+TEST_SECRET_KEY = "mission31b0-jwt-key-valid-20260630-x9-padded-to-satisfy-rfc7518-min"
 os.environ["SECRET_KEY"] = TEST_SECRET_KEY
 
 from app import security
@@ -301,7 +301,7 @@ class JwtCompatibilityTests(unittest.TestCase):
     def test_invalid_signature_is_rejected(self):
         token = security.jwt.encode(
             {"sub": "123", "exp": datetime.utcnow() + timedelta(minutes=5)},
-            "wrong-secret",
+            "wrong-secret-key-distinct-from-configured-value-rfc7518-padding-000",
             algorithm=security.ALGORITHM,
         )
 
@@ -313,7 +313,7 @@ class JwtCompatibilityTests(unittest.TestCase):
     def test_old_public_secret_key_is_rejected_when_explicit_secret_is_configured(self):
         token = security.jwt.encode(
             {"sub": "123", "exp": datetime.utcnow() + timedelta(minutes=5)},
-            "CHANGE_THIS_SECRET",
+            "CHANGE_THIS_SECRET-legacy-default-leaked-placeholder-rfc7518-pad-00",
             algorithm=security.ALGORITHM,
         )
 
@@ -352,7 +352,13 @@ class JwtCompatibilityTests(unittest.TestCase):
             algorithm=security.ALGORITHM,
         )
 
-        raw_payload = security.jwt.get_unverified_claims(token)
+        raw_payload = security.jwt.decode(
+            token,
+            options={
+                "verify_signature": False,
+                "verify_exp": False,
+            },
+        )
 
         self.assertIn("sub", raw_payload)
         self.assertIsNone(raw_payload.get("sub"))

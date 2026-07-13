@@ -13,13 +13,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-os.environ.setdefault("SECRET_KEY", "unit-test-secret-key-31b-0123456789abcdef")
+os.environ.setdefault("SECRET_KEY", "unit-test-secret-key-31b-0123456789abcdef-padded-rfc7518-hmac-minlen")
 os.environ.setdefault("OTP_PEPPER", "unit-test-otp-pepper-31b-0123456789")
 os.environ.setdefault("LOGIN_CODE_RESEND_COOLDOWN_SECONDS", "0")
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from jose import jwt
+import jwt
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -878,7 +878,7 @@ class TokenHardeningTests(_EndpointTestCase):
         payload = {"sub": str(user.id), "sid": session.session_id}
         none_token = jwt.encode(payload, "", algorithm=None) if False else None
 
-        # python-jose refuses to build alg=none tokens; craft one manually.
+        # alg=none tokens are crafted manually to exercise the server-side allowlist.
         import base64
         import json as jsonlib
 

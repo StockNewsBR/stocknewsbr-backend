@@ -7,9 +7,9 @@ import os
 from datetime import datetime, timedelta
 
 import bcrypt as raw_bcrypt
+import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
@@ -111,7 +111,7 @@ def decode_access_token_payload(token: str, credentials_exception: HTTPException
 
     try:
         # Server-side algorithm allowlist: alg=none and any non-HS256
-        # algorithm are rejected by python-jose when the list is explicit.
+        # algorithm are rejected by PyJWT when the list is explicit.
         payload = jwt.decode(token, get_jwt_secret(), algorithms=ALLOWED_JWT_ALGORITHMS)
         user_id = payload.get("sub")
 
@@ -120,7 +120,7 @@ def decode_access_token_payload(token: str, credentials_exception: HTTPException
 
         payload["sub"] = _normalize_access_token_subject(user_id)
         return payload
-    except (JWTError, ValueError, TypeError):
+    except (jwt.PyJWTError, ValueError, TypeError):
         raise fallback_exception
 
 
