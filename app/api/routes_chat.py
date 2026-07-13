@@ -1,3 +1,6 @@
+import asyncio
+import os
+
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
 
@@ -19,6 +22,17 @@ class ChatMessageRequest(BaseModel):
 
 
 router = APIRouter(tags=["Ticker Rooms"])
+
+# Chat WebSocket authorization is revalidated against the authoritative session
+# store instead of being frozen at the handshake. The interval bounds how long a
+# revoked/expired/logged-out session can linger on an otherwise idle socket; it
+# is always >= 1s so production never gets a zero/negative (busy-loop) interval.
+try:
+    # Non-numeric/invalid config must never crash import; fall back to the safe
+    # default. Valid values keep the >= 1s minimum (never zero/negative).
+    CHAT_WS_REVALIDATE_SECONDS = max(1, int(os.getenv("CHAT_WS_REVALIDATE_SECONDS", "30")))
+except (TypeError, ValueError):
+    CHAT_WS_REVALIDATE_SECONDS = 30
 
 
 def _resolve_user_from_token(token: str | None):
@@ -95,21 +109,29 @@ def _cookie_websocket_origin_allowed(websocket: WebSocket) -> bool:
     return origin in set(allowed_web_origins())
 
 
+def _authorization_websocket_bearer(websocket: WebSocket) -> str | None:
+    authorization = str(websocket.headers.get("authorization") or "").strip()
+    scheme, separator, token = authorization.partition(" ")
+
+    if separator and scheme.lower() == "bearer" and token.strip():
+        return token.strip()
+
+    return None
+
+
 @router.websocket("/ws/chat/{symbol}")
 async def websocket_chat(websocket: WebSocket, symbol: str):
     symbol = canonical_symbol(symbol)
-    # Mission 31B: browser clients authenticate via the httpOnly session
-    # cookie; the query-param token remains for bearer clients (mobile app).
-    token = websocket.query_params.get("token")
+    cookie_token = websocket.cookies.get(session_cookie_name())
 
-    if not token:
-        cookie_token = websocket.cookies.get(session_cookie_name())
+    if cookie_token and not _cookie_websocket_origin_allowed(websocket):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
 
-        if cookie_token and not _cookie_websocket_origin_allowed(websocket):
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-
-        token = cookie_token
+    # Browser clients use the httpOnly cookie. Non-browser clients may use an
+    # Authorization header, but reusable bearer credentials are never accepted
+    # from a query string.
+    token = cookie_token or _authorization_websocket_bearer(websocket)
 
     user = _resolve_user_from_token(token)
 
@@ -128,7 +150,28 @@ async def websocket_chat(websocket: WebSocket, symbol: str):
 
     try:
         while True:
-            payload = await websocket.receive_json()
+            try:
+                payload = await asyncio.wait_for(
+                    websocket.receive_json(), timeout=CHAT_WS_REVALIDATE_SECONDS
+                )
+            except asyncio.TimeoutError:
+                # Idle socket: revalidate so a revoked/expired session on a
+                # silent connection is still torn down within the interval.
+                if _resolve_user_from_token(token) is None:
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                    return
+                continue
+
+            # Revalidate against the authoritative session store before ANY
+            # action (including ping): logout, revocation, expiry or a
+            # deactivated user must stop the socket, not stay frozen from the
+            # handshake. Ping cannot bypass this.
+            refreshed = _resolve_user_from_token(token)
+            if refreshed is None:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
+            user = refreshed
+
             message_type = str(payload.get("type") or "message").lower()
 
             if message_type == "ping":

@@ -14,6 +14,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.csrf import enforce_session_establishment_origin
 from app.core.settings import (
     login_code_expiry_seconds,
     session_cookie_name,
@@ -238,6 +239,14 @@ def _issue_session(
     correlation_id: str | None = None,
 ) -> AuthFlowResponse:
     normalized_channel = normalize_channel(channel)
+
+    # Login CSRF / session fixation guard: a browser session cookie is only
+    # ever minted for the web channel, so foreign-origin session establishment
+    # is rejected before any token/session/audit side effect. Bearer clients
+    # (mobile/API) send no Origin and are unaffected.
+    if normalized_channel == "web":
+        enforce_session_establishment_origin(request)
+
     resolved_correlation = correlation_id or _correlation_id(request)
 
     access_token, session = issue_access_token_for_user(
@@ -1029,21 +1038,15 @@ def telegram_link(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    try:
-        link_telegram_account(
-            db,
-            current_user,
-            telegram_id=payload.telegram_id,
-            telegram_username=payload.telegram_username,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    db.add(current_user)
-    db.commit()
-    db.refresh(current_user)
-
-    return _serialize_access(current_user)
+    # Direct binding of a client-supplied telegram_id is NOT proof of possession
+    # and is disabled: a user could otherwise claim a Telegram identity they do
+    # not control. Linking requires the possession-proof flow — request a link
+    # token via /telegram/link/request, then confirm it FROM the target Telegram
+    # chat so the bot consumes it (consume_telegram_link_token) with the real
+    # telegram_id from the authenticated Telegram update. No state is mutated
+    # here.
+    del payload, db
+    raise HTTPException(status_code=409, detail="telegram_direct_link_disabled")
 
 
 @router.post("/telegram/link/request", response_model=TelegramLinkSessionResponse)
