@@ -1,5 +1,7 @@
 from sqlalchemy import inspect, text
 
+from app.core.settings import is_production_environment
+
 
 TABLE_PATCHES = {
     "promo_redemptions": {
@@ -389,7 +391,387 @@ INDEX_PATCHES = {
 }
 
 
+REQUIRED_PRODUCTION_COLUMNS = {
+    "users": {
+        "id", "email", "password_hash", "display_name", "phone", "avatar_url",
+        "is_active", "is_verified", "official", "role", "is_bot",
+        "official_identity_locked", "plan", "plan_status", "trial_expires_at",
+        "plan_expires_at", "access_app", "access_web", "access_telegram",
+        "telegram_id", "telegram_username", "subscription_provider",
+        "subscription_origin", "subscription_product_id",
+        "external_subscription_id", "google_play_purchase_token",
+        "stripe_customer_id", "stripe_subscription_id", "legal_notice_version",
+        "accepted_terms_at", "accepted_privacy_at", "accepted_risk_notice_at",
+        "referral_code", "created_at", "updated_at", "last_access_at",
+    },
+    "referrals": {
+        "id", "referrer_id", "referred_user_id", "status", "created_at",
+        "validated_at", "reward_processed",
+    },
+    "referral_stats": {
+        "user_id", "total_validated", "total_active", "benefit_level",
+        "reward_balance_months",
+    },
+    "promo_codes": {
+        "id", "code", "free_year", "free_months", "max_uses", "current_uses",
+        "starts_at", "expires_at", "created_at",
+    },
+    "promo_redemptions": {"id", "promo_code_id", "user_id", "redeemed_at"},
+    "media_assets": {
+        "id", "owner_user_id", "provider", "folder", "filename", "storage_key",
+        "content_type", "size_bytes", "public_url", "status", "created_at",
+    },
+    "user_sessions": {
+        "id", "user_id", "session_id", "channel", "device_id", "device_label",
+        "issued_at", "expires_at", "last_seen_at", "revoked_at",
+        "revoked_reason", "created_ip_hash", "user_agent", "correlation_id",
+    },
+    "login_challenges": {
+        "id", "user_id", "email", "login_token", "code_hash", "purpose",
+        "target_email", "channel", "device_id", "device_label", "attempt_count",
+        "max_attempts", "delivery_status", "delivery_attempted_at", "expires_at",
+        "consumed_at", "invalidated_at", "request_ip_hash", "correlation_id",
+        "created_at",
+    },
+    "auth_audit_events": {
+        "id", "event", "user_id", "email_masked", "email_hash", "ip_hash",
+        "user_agent", "sid_ref", "reason", "status", "correlation_id", "created_at",
+    },
+    "telegram_link_tokens": {
+        "id", "user_id", "link_code", "origin_channel", "expires_at",
+        "consumed_at", "created_at",
+    },
+    "subscription_audit_logs": {
+        "id", "user_id", "provider", "provider_event_id", "event_type",
+        "product_id", "origin", "external_subscription_id", "status",
+        "payload_excerpt", "created_at",
+    },
+    "social_posts": {
+        "id", "user_id", "ticker", "text", "image_url", "sentiment",
+        "display_name", "email", "avatar_url", "created_at",
+    },
+    "social_comments": {
+        "id", "post_id", "user_id", "text", "image_url", "display_name",
+        "email", "avatar_url", "created_at",
+    },
+    "social_likes": {"id", "post_id", "user_id", "created_at"},
+    "social_reposts": {"id", "post_id", "user_id", "quote_text", "created_at"},
+    "social_follows": {"id", "user_id", "target_user_id", "created_at"},
+    "social_sentiment_votes": {"id", "ticker", "user_id", "sentiment", "created_at"},
+}
+
+REQUIRED_PRODUCTION_PRIMARY_KEYS = {
+    table_name: ("user_id",) if table_name == "referral_stats" else ("id",)
+    for table_name in REQUIRED_PRODUCTION_COLUMNS
+}
+
+REQUIRED_PRODUCTION_UNIQUE_CONSTRAINTS = {
+    "promo_redemptions": {
+        "uq_promo_redemption_user_code": ("promo_code_id", "user_id"),
+    },
+    "social_likes": {"uq_social_like_post_user": ("post_id", "user_id")},
+    "social_reposts": {"uq_social_repost_post_user": ("post_id", "user_id")},
+    "social_follows": {
+        "uq_social_follow_user_target": ("user_id", "target_user_id"),
+    },
+    "social_sentiment_votes": {
+        "uq_social_sentiment_vote_ticker_user": ("ticker", "user_id"),
+    },
+}
+
+REQUIRED_PRODUCTION_FOREIGN_KEYS = {
+    "referrals": {
+        (("referrer_id",), "users", ("id",)),
+        (("referred_user_id",), "users", ("id",)),
+    },
+    "referral_stats": {(("user_id",), "users", ("id",))},
+    "promo_redemptions": {
+        (("promo_code_id",), "promo_codes", ("id",)),
+        (("user_id",), "users", ("id",)),
+    },
+    "media_assets": {(("owner_user_id",), "users", ("id",))},
+    "user_sessions": {(("user_id",), "users", ("id",))},
+    "login_challenges": {(("user_id",), "users", ("id",))},
+    "auth_audit_events": {(("user_id",), "users", ("id",))},
+    "telegram_link_tokens": {(("user_id",), "users", ("id",))},
+    "subscription_audit_logs": {(("user_id",), "users", ("id",))},
+    "social_posts": {(("user_id",), "users", ("id",))},
+    "social_comments": {
+        (("post_id",), "social_posts", ("id",)),
+        (("user_id",), "users", ("id",)),
+    },
+    "social_likes": {
+        (("post_id",), "social_posts", ("id",)),
+        (("user_id",), "users", ("id",)),
+    },
+    "social_reposts": {
+        (("post_id",), "social_posts", ("id",)),
+        (("user_id",), "users", ("id",)),
+    },
+    "social_follows": {
+        (("user_id",), "users", ("id",)),
+        (("target_user_id",), "users", ("id",)),
+    },
+    "social_sentiment_votes": {(("user_id",), "users", ("id",))},
+}
+
+REQUIRED_PRODUCTION_INDEXES = {
+    "users": {
+        "ix_users_email": ("email",),
+        "ix_users_referral_code": ("referral_code",),
+        "ix_users_telegram_id": ("telegram_id",),
+    },
+    "referrals": {
+        "ix_referrals_referrer_id": ("referrer_id",),
+        "ix_referrals_referred_user_id": ("referred_user_id",),
+    },
+    "promo_codes": {"ix_promo_codes_code": ("code",)},
+    "promo_redemptions": {
+        "ix_promo_redemptions_promo_code_id": ("promo_code_id",),
+        "ix_promo_redemptions_user_id": ("user_id",),
+    },
+    "media_assets": {
+        "ix_media_assets_owner_user_id": ("owner_user_id",),
+    },
+    "user_sessions": {
+        "ix_user_sessions_session_id": ("session_id",),
+        "ix_user_sessions_user_id": ("user_id",),
+    },
+    "login_challenges": {
+        "ix_login_challenges_login_token": ("login_token",),
+        "ix_login_challenges_user_id": ("user_id",),
+        "ix_login_challenges_expires_at": ("expires_at",),
+    },
+    "auth_audit_events": {
+        "ix_auth_audit_event_email_created": ("event", "email_hash", "created_at"),
+        "ix_auth_audit_event_ip_created": ("event", "ip_hash", "created_at"),
+        "ix_auth_audit_events_user_id": ("user_id",),
+    },
+    "telegram_link_tokens": {
+        "ix_telegram_link_tokens_link_code": ("link_code",),
+        "ix_telegram_link_tokens_user_id": ("user_id",),
+    },
+    "subscription_audit_logs": {
+        "ix_subscription_audit_logs_user_id": ("user_id",),
+    },
+}
+
+REQUIRED_PRODUCTION_UNIQUE_INDEXES = {
+    "users": {"ix_users_email", "ix_users_referral_code", "ix_users_telegram_id"},
+    "referrals": {"ix_referrals_referred_user_id"},
+    "promo_codes": {"ix_promo_codes_code"},
+    "user_sessions": {"ix_user_sessions_session_id"},
+    "login_challenges": {"ix_login_challenges_login_token"},
+    "telegram_link_tokens": {"ix_telegram_link_tokens_link_code"},
+}
+
+REQUIRED_PRODUCTION_RLS_POLICIES = {
+    "media_assets": {
+        "media_assets_app_select": ("stocknewsbr_app", "SELECT", True, False, "owner_user_id"),
+        "media_assets_app_insert": ("stocknewsbr_app", "INSERT", False, True, "owner_user_id"),
+        "media_assets_app_update": ("stocknewsbr_app", "UPDATE", True, True, "owner_user_id"),
+        "media_assets_app_delete": ("stocknewsbr_app", "DELETE", True, False, "owner_user_id"),
+        "media_assets_owner_admin": ("stocknewsbr_owner", "ALL", True, True, "true"),
+        "media_assets_backup_read": ("stocknewsbr_backup", "SELECT", True, False, "true"),
+    },
+    "promo_redemptions": {
+        "promo_redemptions_app_select": ("stocknewsbr_app", "SELECT", True, False, "user_id"),
+        "promo_redemptions_app_insert": ("stocknewsbr_app", "INSERT", False, True, "user_id"),
+        "promo_redemptions_owner_admin": ("stocknewsbr_owner", "ALL", True, True, "true"),
+        "promo_redemptions_backup_read": ("stocknewsbr_backup", "SELECT", True, False, "true"),
+    },
+}
+
+
+def validate_required_tables(engine, required_tables) -> dict[str, int]:
+    inspector = inspect(engine)
+    names = tuple(dict.fromkeys(str(name) for name in required_tables))
+    if any(not inspector.has_table(table_name) for table_name in names):
+        raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+    return {"tables": len(names)}
+
+
+def _foreign_key_signature(foreign_key) -> tuple[tuple[str, ...], str, tuple[str, ...]]:
+    return (
+        tuple(foreign_key.get("constrained_columns") or ()),
+        str(foreign_key.get("referred_table") or ""),
+        tuple(foreign_key.get("referred_columns") or ()),
+    )
+
+
+def _normalized_policy_expression(value) -> str:
+    rendered = str(value or "").lower().replace("::text", "")
+    return "".join(
+        char
+        for char in rendered
+        if char not in "() \t\r\n"
+    )
+
+
+def _validate_production_rls(engine) -> int:
+    relation_sql = text(
+        """
+        SELECT c.relname AS table_name,
+               c.relrowsecurity AS rls_enabled,
+               c.relforcerowsecurity AS rls_forced
+        FROM pg_class AS c
+        WHERE c.relnamespace = 'public'::regnamespace
+          AND c.relkind IN ('r', 'p')
+          AND c.relname IN ('media_assets', 'promo_redemptions')
+        """
+    )
+    policy_sql = text(
+        """
+        SELECT tablename AS table_name, policyname, cmd, roles, qual, with_check
+        FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename IN ('media_assets', 'promo_redemptions')
+        """
+    )
+
+    try:
+        with engine.connect() as connection:
+            relations = {
+                row["table_name"]: dict(row)
+                for row in connection.execute(relation_sql).mappings()
+            }
+            policies = [
+                dict(row)
+                for row in connection.execute(policy_sql).mappings()
+            ]
+    except Exception:
+        raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY") from None
+
+    if set(relations) != set(REQUIRED_PRODUCTION_RLS_POLICIES):
+        raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+    if any(
+        not relation["rls_enabled"] or not relation["rls_forced"]
+        for relation in relations.values()
+    ):
+        raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+
+    policies_by_table = {}
+    for policy in policies:
+        policies_by_table.setdefault(policy["table_name"], {})[policy["policyname"]] = policy
+
+    for table_name, expected_policies in REQUIRED_PRODUCTION_RLS_POLICIES.items():
+        actual_policies = policies_by_table.get(table_name, {})
+        if set(actual_policies) != set(expected_policies):
+            raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+
+        for policy_name, expected in expected_policies.items():
+            expected_role, expected_cmd, require_using, require_check, expression_kind = expected
+            actual = actual_policies[policy_name]
+            if tuple(actual.get("roles") or ()) != (expected_role,):
+                raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+            if actual.get("cmd") != expected_cmd:
+                raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+
+            qual = actual.get("qual")
+            with_check = actual.get("with_check")
+            if (qual is not None) != require_using:
+                raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+            if (with_check is not None) != require_check:
+                raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+
+            expressions = [value for value in (qual, with_check) if value is not None]
+            expected_expression = _normalized_policy_expression(
+                "true"
+                if expression_kind == "true"
+                else (
+                    f"{expression_kind}=nullif("
+                    "current_setting('app.current_user_id',true),'')::integer"
+                )
+            )
+            if any(
+                _normalized_policy_expression(value) != expected_expression
+                for value in expressions
+            ):
+                raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+
+    return sum(len(policies) for policies in REQUIRED_PRODUCTION_RLS_POLICIES.values())
+
+
+def validate_production_schema(engine) -> dict[str, int]:
+    inspector = inspect(engine)
+
+    for table_name, required_columns in REQUIRED_PRODUCTION_COLUMNS.items():
+        if not inspector.has_table(table_name):
+            raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+        available_columns = {
+            column["name"]
+            for column in inspector.get_columns(table_name)
+        }
+        if not required_columns.issubset(available_columns):
+            raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+
+    for table_name, required_indexes in REQUIRED_PRODUCTION_INDEXES.items():
+        available_indexes = {
+            index["name"]: index
+            for index in inspector.get_indexes(table_name)
+        }
+        if not set(required_indexes).issubset(available_indexes):
+            raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+        if any(
+            tuple(available_indexes[index_name].get("column_names") or ())
+            != tuple(expected_columns)
+            for index_name, expected_columns in required_indexes.items()
+        ):
+            raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+        if any(
+            not available_indexes[index_name].get("unique", False)
+            for index_name in REQUIRED_PRODUCTION_UNIQUE_INDEXES.get(table_name, set())
+        ):
+            raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+
+    for table_name, required_primary_key in REQUIRED_PRODUCTION_PRIMARY_KEYS.items():
+        primary_key = tuple(
+            inspector.get_pk_constraint(table_name).get("constrained_columns") or ()
+        )
+        if primary_key != required_primary_key:
+            raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+
+    for table_name, required_constraints in REQUIRED_PRODUCTION_UNIQUE_CONSTRAINTS.items():
+        available_constraints = {
+            constraint.get("name"): tuple(constraint.get("column_names") or ())
+            for constraint in inspector.get_unique_constraints(table_name)
+        }
+        if any(
+            available_constraints.get(constraint_name) != columns
+            for constraint_name, columns in required_constraints.items()
+        ):
+            raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+
+    for table_name, required_foreign_keys in REQUIRED_PRODUCTION_FOREIGN_KEYS.items():
+        available_foreign_keys = {
+            _foreign_key_signature(foreign_key)
+            for foreign_key in inspector.get_foreign_keys(table_name)
+        }
+        if not required_foreign_keys.issubset(available_foreign_keys):
+            raise RuntimeError("PRODUCTION_SCHEMA_NOT_READY")
+
+    policy_count = _validate_production_rls(engine)
+
+    return {
+        "tables": len(REQUIRED_PRODUCTION_COLUMNS),
+        "indexes": sum(len(indexes) for indexes in REQUIRED_PRODUCTION_INDEXES.values()),
+        "primary_keys": len(REQUIRED_PRODUCTION_PRIMARY_KEYS),
+        "unique_constraints": sum(
+            len(constraints)
+            for constraints in REQUIRED_PRODUCTION_UNIQUE_CONSTRAINTS.values()
+        ),
+        "foreign_keys": sum(
+            len(foreign_keys)
+            for foreign_keys in REQUIRED_PRODUCTION_FOREIGN_KEYS.values()
+        ),
+        "rls_policies": policy_count,
+    }
+
+
 def ensure_runtime_schema(engine):
+    if is_production_environment():
+        raise RuntimeError("RUNTIME_DDL_FORBIDDEN_IN_PRODUCTION")
+
     inspector = inspect(engine)
     driver = engine.url.drivername
     dialect_key = "sqlite" if driver.startswith("sqlite") else "default"

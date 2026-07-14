@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
 
-from app.core.settings import auth_email_test_mailbox_path
+from app.core.settings import auth_email_test_mailbox_path, is_production_environment
 
 
 logger = logging.getLogger("stocknewsbr.email")
@@ -52,7 +52,7 @@ def email_delivery_mode() -> str:
     if SMTP_HOST:
         return "smtp"
 
-    if auth_email_test_mailbox_path() and _environment() != "production":
+    if auth_email_test_mailbox_path() and not is_production_environment(_environment()):
         return "test_mailbox"
 
     return "log"
@@ -75,7 +75,7 @@ def _send_via_smtp(message: EmailMessage):
 
 
 def _append_to_test_mailbox(payload: dict) -> None:
-    if _environment() == "production":
+    if is_production_environment(_environment()):
         raise RuntimeError("AUTH_EMAIL_TEST_MAILBOX_FORBIDDEN_IN_PRODUCTION")
 
     mailbox = Path(auth_email_test_mailbox_path())

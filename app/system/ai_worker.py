@@ -11,8 +11,9 @@ from typing import Any, Dict, List
 from app.ai.feature_hub import build_ai_tool_payload
 from app.cache.signal_cache import get_all_signals, get_signal_info
 from app.cache.snapshot_cache import get_last_good_snapshot, get_snapshot, get_snapshot_info, update_snapshot
+from app.core.settings import is_production_environment
 from app.database import engine
-from app.database_schema import ensure_runtime_schema
+from app.database_schema import ensure_runtime_schema, validate_production_schema
 from app.engine.market_snapshot_engine import generate_market_snapshot
 from app.services.ai_alert_history_service import AI_TOOL_KEYS, persist_ai_alert_history
 from app.services.legal_service import get_public_bootstrap
@@ -379,6 +380,13 @@ def _prewarm_public_news() -> None:
         logger.warning("AI worker news prewarm failed: %s", exc)
 
 
+def _ensure_worker_schema() -> None:
+    if is_production_environment():
+        validate_production_schema(engine)
+    else:
+        ensure_runtime_schema(engine)
+
+
 def run_ai_worker_cycle() -> Dict[str, Any]:
     report: Dict[str, Any] = {
         "worker": "ai_worker",
@@ -388,7 +396,7 @@ def run_ai_worker_cycle() -> Dict[str, Any]:
     }
 
     try:
-        ensure_runtime_schema(engine)
+        _ensure_worker_schema()
         report["schema"] = {"status": "ok"}
     except Exception as exc:
         report["status"] = "degraded"

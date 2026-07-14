@@ -2,9 +2,10 @@
 # STOCKNEWSBR CONFIG
 # =====================================================
 
-import os
 import logging
+import os
 
+from app.core.settings import DATABASE_URL
 from app.services.symbol_sanitizer import sanitize_market_symbol
 
 logger = logging.getLogger("stocknewsbr.config")
@@ -12,11 +13,6 @@ logger = logging.getLogger("stocknewsbr.config")
 # =====================================================
 # DATABASE
 # =====================================================
-
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "sqlite:///./stocknews.db"
-)
 
 # =====================================================
 # ENGINE

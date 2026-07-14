@@ -22,9 +22,13 @@ from sqlalchemy import text
 from app.ai.ai_market_pulse import market_pulse
 from app.cache.snapshot_cache import get_snapshot, get_snapshot_info, get_snapshot_signals
 from app.core.csrf import allowed_web_origins, csrf_rejection
-from app.core.settings import validate_runtime_security_settings
-from app.database import Base, SessionLocal, engine
-from app.database_schema import ensure_runtime_schema
+from app.core.settings import (
+    is_production_environment,
+    validate_database_configuration,
+    validate_runtime_security_settings,
+)
+from app.database import DATABASE_URL, Base, SessionLocal, engine
+from app.database_schema import ensure_runtime_schema, validate_production_schema
 from app.dependencies import require_internal_token
 from app.services.media_service import ensure_media_root
 from app.services.referrals import validate_referrals
@@ -109,7 +113,7 @@ def _env_flag(name: str, default: bool) -> bool:
 
 def _default_start_background_workers() -> bool:
     """Keep local API/web snappy; production can opt in explicitly."""
-    return os.getenv("ENV", "development").strip().lower() == "production"
+    return is_production_environment()
 
 
 def _cors_origins():
@@ -119,15 +123,14 @@ def _cors_origins():
 
 
 def _create_tables_if_needed():
-    environment = os.getenv("ENV", "development").lower()
-
     try:
         import app.models  # noqa: F401
 
-        if environment != "production" or engine.url.drivername.startswith("sqlite"):
+        if is_production_environment():
+            validate_production_schema(engine)
+        else:
             Base.metadata.create_all(bind=engine)
-
-        ensure_runtime_schema(engine)
+            ensure_runtime_schema(engine)
     except Exception:
         logger.exception("Database bootstrap failed")
         raise
@@ -251,6 +254,8 @@ async def lifespan(app: FastAPI):
         )
     validate_runtime_security_settings()
     logger.info("Security settings validated")
+    validate_database_configuration(database_url=DATABASE_URL)
+    logger.info("Database configuration validated")
     _create_tables_if_needed()
     _seed_official_identities_if_needed()
 

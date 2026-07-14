@@ -45,10 +45,16 @@ def _run_python_with_secret(
 ):
     env = os.environ.copy()
     pythonpath = os.pathsep.join([*(str(path) for path in pythonpath_entries), str(REPO_ROOT)])
+    normalized_env = str(env_value).strip().lower() if isinstance(env_value, str) else ""
+    database_url = (
+        "sqlite:///:memory:"
+        if normalized_env in {"development", "local", "test", "testing"}
+        else "postgresql://unit_test:unit_test@db.invalid/stocknewsbr_test"
+    )
     env.update(
         {
             "PYTHONPATH": pythonpath,
-            "DATABASE_URL": "sqlite:///:memory:",
+            "DATABASE_URL": database_url,
             "START_ENGINE_WORKER": "false",
             "START_REFERRAL_WORKER": "false",
             "START_SNAPSHOT_WORKER": "false",
@@ -176,6 +182,21 @@ class JwtCompatibilityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip().splitlines(), ["production", "False", TEST_SECRET_KEY])
 
+    def test_prod_alias_disables_debug(self):
+        result = _run_python_with_secret(
+            """
+            from app.core.settings import settings
+
+            print(settings.ENV)
+            print(settings.DEBUG)
+            """,
+            secret=TEST_SECRET_KEY,
+            env_value="prod",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip().splitlines(), ["prod", "False"])
+
     def test_production_process_env_skips_dotenv_loading(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             Path(tmp_dir, "dotenv.py").write_text(
@@ -263,6 +284,7 @@ class JwtCompatibilityTests(unittest.TestCase):
                 print(client.get("/ping").status_code)
             """,
             secret=TEST_SECRET_KEY,
+            env_value="test",
         )
 
         self.assertEqual(explicit_secret.returncode, 0, explicit_secret.stderr)

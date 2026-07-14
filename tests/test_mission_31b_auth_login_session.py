@@ -147,41 +147,65 @@ class OtpPrimitivesTests(unittest.TestCase):
             build_login_code_digest(challenge_id="c1", purpose="LOGIN", code="123456", pepper="")
 
     def test_pepper_fails_closed_in_production(self):
-        with mock.patch.dict(os.environ, {"ENV": "production", "OTP_PEPPER": ""}):
-            with self.assertRaises(RuntimeError):
-                core_settings.get_otp_pepper()
-
-        with mock.patch.dict(os.environ, {"ENV": "production", "OTP_PEPPER": "change_this_pepper"}):
-            with self.assertRaises(RuntimeError):
-                core_settings.get_otp_pepper()
+        for environment in ("prod", "production"):
+            for pepper in ("", "change_this_pepper"):
+                with self.subTest(environment=environment, pepper=pepper):
+                    with mock.patch.dict(
+                        os.environ,
+                        {"ENV": environment, "OTP_PEPPER": pepper},
+                    ):
+                        with self.assertRaises(RuntimeError):
+                            core_settings.get_otp_pepper()
 
     def test_runtime_validation_blocks_test_mailbox_in_production(self):
-        env = {
-            "ENV": "production",
-            "OTP_PEPPER": "prod-pepper-0123456789abcdef",
-            "AUTH_EMAIL_TEST_MAILBOX": "C:/tmp/mailbox.jsonl",
-        }
-        with mock.patch.dict(os.environ, env):
-            with self.assertRaises(RuntimeError):
-                core_settings.validate_runtime_security_settings()
+        for environment in ("prod", "production"):
+            env = {
+                "ENV": environment,
+                "OTP_PEPPER": "prod-pepper-0123456789abcdef",
+                "AUTH_EMAIL_TEST_MAILBOX": "/tmp/m36-mailbox.jsonl",
+            }
+            with self.subTest(environment=environment):
+                with mock.patch.dict(os.environ, env):
+                    with self.assertRaises(RuntimeError):
+                        core_settings.validate_runtime_security_settings()
 
     def test_runtime_validation_blocks_insecure_cookie_in_production(self):
-        env = {
-            "ENV": "production",
-            "OTP_PEPPER": "prod-pepper-0123456789abcdef",
-            "AUTH_EMAIL_TEST_MAILBOX": "",
-            "SESSION_COOKIE_SECURE": "false",
-        }
-        with mock.patch.dict(os.environ, env):
-            with self.assertRaises(RuntimeError) as ctx:
-                core_settings.validate_runtime_security_settings()
+        for environment in ("prod", "production"):
+            env = {
+                "ENV": environment,
+                "OTP_PEPPER": "prod-pepper-0123456789abcdef",
+                "AUTH_EMAIL_TEST_MAILBOX": "",
+                "SESSION_COOKIE_SECURE": "false",
+            }
+            with self.subTest(environment=environment):
+                with mock.patch.dict(os.environ, env):
+                    with self.assertRaises(RuntimeError) as ctx:
+                        core_settings.validate_runtime_security_settings()
 
-        self.assertIn("SESSION_COOKIE_SECURE", str(ctx.exception))
+                self.assertIn("SESSION_COOKIE_SECURE", str(ctx.exception))
 
-        # Explicit true (or unset) keeps production startup healthy.
-        env["SESSION_COOKIE_SECURE"] = "true"
-        with mock.patch.dict(os.environ, env):
-            core_settings.validate_runtime_security_settings()
+                # Explicit true (or unset) keeps production startup healthy.
+                env["SESSION_COOKIE_SECURE"] = "true"
+                with mock.patch.dict(os.environ, env):
+                    core_settings.validate_runtime_security_settings()
+
+    def test_production_aliases_use_host_only_secure_cookie_defaults(self):
+        for environment in ("prod", "production"):
+            with self.subTest(environment=environment):
+                with mock.patch.dict(
+                    os.environ,
+                    {
+                        "ENV": environment,
+                        "SESSION_COOKIE_NAME": "",
+                    },
+                ):
+                    with mock.patch.dict(os.environ, {}, clear=False):
+                        os.environ.pop("SESSION_COOKIE_SECURE", None)
+                        self.assertEqual(
+                            core_settings.session_cookie_name(),
+                            "__Host-snb_session",
+                        )
+                        self.assertTrue(core_settings.session_cookie_secure())
 
     def test_websocket_cookie_origin_guard(self):
         from types import SimpleNamespace
@@ -200,9 +224,19 @@ class OtpPrimitivesTests(unittest.TestCase):
                 self.assertFalse(_cookie_websocket_origin_allowed(fake_ws("https://evil.example.com")))
 
     def test_email_delivery_mode_never_uses_test_mailbox_in_production(self):
-        with mock.patch.dict(os.environ, {"ENV": "production", "AUTH_EMAIL_TEST_MAILBOX": "C:/tmp/mb.jsonl"}):
-            with mock.patch.object(email_service, "SMTP_HOST", ""):
-                self.assertEqual(email_service.email_delivery_mode(), "log")
+        for environment in ("prod", "production"):
+            with self.subTest(environment=environment):
+                with mock.patch.dict(
+                    os.environ,
+                    {"ENV": environment, "AUTH_EMAIL_TEST_MAILBOX": "/tmp/m36-mailbox.jsonl"},
+                ):
+                    with mock.patch.object(email_service, "SMTP_HOST", ""):
+                        self.assertEqual(email_service.email_delivery_mode(), "log")
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "^AUTH_EMAIL_TEST_MAILBOX_FORBIDDEN_IN_PRODUCTION$",
+                    ):
+                        email_service._append_to_test_mailbox({"body": "must-not-write"})
 
 
 # ==========================================================

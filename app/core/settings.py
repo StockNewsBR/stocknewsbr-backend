@@ -7,6 +7,8 @@ import hmac
 import os
 import logging
 from dotenv import load_dotenv
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 logger = logging.getLogger("stocknewsbr.settings")
 
@@ -14,15 +16,104 @@ logger = logging.getLogger("stocknewsbr.settings")
 # LOAD ENV (SAFE)
 # =====================================================
 
+PRODUCTION_ENVIRONMENTS = frozenset({"prod", "production"})
 _PROCESS_ENV = str(os.getenv("ENV") or "").strip().lower()
 
-if _PROCESS_ENV != "production":
+if _PROCESS_ENV not in PRODUCTION_ENVIRONMENTS:
     load_dotenv()
 
 
 ENV = str(os.getenv("ENV", "development")).strip() or "development"
 ENV_NORMALIZED = ENV.lower()
 MIN_SECRET_KEY_LENGTH = 32
+DEFAULT_DATABASE_URL = "sqlite:///./stocknews.db"
+
+DATABASE_PLACEHOLDER_COMPONENTS = frozenset(
+    {
+        "change_me",
+        "change_this",
+        "changeme",
+        "database",
+        "dbname",
+        "example",
+        "example.com",
+        "host",
+        "hostname",
+        "password",
+        "secret",
+        "user",
+        "username",
+        "your_database",
+        "your_host",
+        "your_password",
+        "your_user",
+    }
+)
+
+
+def get_runtime_environment(value: str | None = None) -> str:
+    configured = value if value is not None else os.getenv("ENV", ENV)
+    return str(configured or "development").strip().lower() or "development"
+
+
+def is_production_environment(value: str | None = None) -> bool:
+    return get_runtime_environment(value) in PRODUCTION_ENVIRONMENTS
+
+
+def get_database_url(value: str | None = None) -> str:
+    configured = value if value is not None else os.getenv("DATABASE_URL")
+    normalized = str(configured or "").strip()
+    return normalized or DEFAULT_DATABASE_URL
+
+
+def _database_component_is_placeholder(value: str | None) -> bool:
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    if not normalized:
+        return False
+    if normalized in DATABASE_PLACEHOLDER_COMPONENTS:
+        return True
+    if "${" in normalized and "}" in normalized:
+        return True
+    if "{{" in normalized and "}}" in normalized:
+        return True
+    return "<" in normalized and ">" in normalized
+
+
+def validate_database_configuration(
+    *,
+    environment: str | None = None,
+    database_url: str | None = None,
+) -> str:
+    configured = database_url if database_url is not None else os.getenv("DATABASE_URL")
+    normalized = str(configured or "").strip()
+
+    if not is_production_environment(environment):
+        return normalized or DEFAULT_DATABASE_URL
+
+    if not normalized:
+        raise RuntimeError("DATABASE_URL_REQUIRED_FOR_PRODUCTION")
+
+    try:
+        parsed = make_url(normalized)
+    except (ArgumentError, TypeError, ValueError) as exc:
+        raise RuntimeError("DATABASE_URL_INVALID_FOR_PRODUCTION") from exc
+
+    if parsed.get_backend_name() != "postgresql":
+        raise RuntimeError("POSTGRESQL_REQUIRED_FOR_PRODUCTION")
+
+    if parsed.drivername not in {"postgresql", "postgresql+psycopg2"}:
+        raise RuntimeError("SYNC_POSTGRESQL_DRIVER_REQUIRED_FOR_PRODUCTION")
+
+    components = (parsed.username, parsed.password, parsed.host, parsed.database)
+    if any(not str(component or "").strip() for component in components):
+        raise RuntimeError("DATABASE_URL_INCOMPLETE_FOR_PRODUCTION")
+    if any(_database_component_is_placeholder(component) for component in components):
+        raise RuntimeError("DATABASE_URL_PLACEHOLDER_FORBIDDEN_IN_PRODUCTION")
+
+    return normalized
+
+
+DATABASE_URL = get_database_url()
 
 INSECURE_SECRET_KEY_VALUES = frozenset(
     {
@@ -132,7 +223,7 @@ def get_otp_pepper() -> str:
     if configured:
         return configured
 
-    if _current_env_normalized() == "production":
+    if is_production_environment():
         raise RuntimeError("OTP_PEPPER_NOT_CONFIGURED")
 
     # Non-production only: deterministic pepper derived from the mandatory
@@ -187,14 +278,14 @@ def session_cookie_name() -> str:
     if configured:
         return configured
 
-    return "__Host-snb_session" if _current_env_normalized() == "production" else "snb_session"
+    return "__Host-snb_session" if is_production_environment() else "snb_session"
 
 
 def session_cookie_secure() -> bool:
     raw = os.getenv("SESSION_COOKIE_SECURE")
 
     if raw is None:
-        return _current_env_normalized() == "production"
+        return is_production_environment()
 
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -212,7 +303,7 @@ def auth_email_test_mailbox_path() -> str:
 def validate_runtime_security_settings() -> None:
     get_secret_key()
 
-    if _current_env_normalized() == "production":
+    if is_production_environment():
         configured_pepper = _normalize_otp_pepper(os.getenv("OTP_PEPPER"))
         if not configured_pepper:
             raise RuntimeError("OTP_PEPPER_NOT_CONFIGURED")
@@ -276,7 +367,7 @@ class Settings:
 
     ENV: str = ENV
 
-    DEBUG: bool = ENV_NORMALIZED != "production"
+    DEBUG: bool = not is_production_environment(ENV_NORMALIZED)
 
     # -------------------------------------------------
     # ENGINE
@@ -387,10 +478,7 @@ class Settings:
     # DATABASE
     # -------------------------------------------------
 
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "sqlite:///./stocknews.db"
-    )
+    DATABASE_URL: str = DATABASE_URL
 
     # -------------------------------------------------
     # SECURITY
