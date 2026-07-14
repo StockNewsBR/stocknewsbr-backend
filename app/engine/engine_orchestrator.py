@@ -65,6 +65,18 @@ def _run_legacy(pool):
     return _safe_run(build_ranking, signals) or []
 
 
+def _normalize_ticker(value):
+    ticker = str(value or "").upper().strip()
+
+    if ticker.endswith(".SA"):
+        ticker = ticker[:-3]
+
+    if ticker.endswith("-USD"):
+        ticker = ticker[:-4] + "USD"
+
+    return ticker
+
+
 def _attach_events(ranked, events):
     if not ranked:
         return []
@@ -74,22 +86,11 @@ def _attach_events(ranked, events):
 
     events_by_ticker = {}
 
-    def normalize_ticker(value):
-        ticker = str(value or "").upper().strip()
-
-        if ticker.endswith(".SA"):
-            ticker = ticker[:-3]
-
-        if ticker.endswith("-USD"):
-            ticker = ticker[:-4] + "USD"
-
-        return ticker
-
     for event in events:
         if not isinstance(event, dict):
             continue
 
-        ticker = normalize_ticker(event.get("ticker") or event.get("symbol"))
+        ticker = _normalize_ticker(event.get("ticker") or event.get("symbol"))
 
         if not ticker:
             continue
@@ -105,7 +106,7 @@ def _attach_events(ranked, events):
         item = dict(row)
         ticker = item.get("ticker") or item.get("symbol")
         row_events = list(item.get("events", []))
-        normalized_ticker = normalize_ticker(ticker)
+        normalized_ticker = _normalize_ticker(ticker)
 
         if ticker:
             item["ticker"] = ticker
@@ -120,18 +121,6 @@ def _attach_events(ranked, events):
         annotated.append(item)
 
     return annotated
-
-
-def _normalize_ticker(value):
-    ticker = str(value or "").upper().strip()
-
-    if ticker.endswith(".SA"):
-        ticker = ticker[:-3]
-
-    if ticker.endswith("-USD"):
-        ticker = ticker[:-4] + "USD"
-
-    return ticker
 
 
 def _pool_lookup(pool):
@@ -343,10 +332,15 @@ def run_engine():
             return []
 
         event_start = time.perf_counter()
-        events = _safe_run(detect_price_events, pool, ranked, EVENT_SCAN_SYMBOLS) or []
-        record_worker_stage_duration("event_detection", time.perf_counter() - event_start, success=True)
-        ranked = _attach_events(ranked, events)
-        ranked = _enrich_ranked_with_market_data(ranked, pool)
+        events_result = _safe_run(detect_price_events, pool, ranked, EVENT_SCAN_SYMBOLS)
+        events = events_result if events_result is not None else []
+        record_worker_stage_duration("event_detection", time.perf_counter() - event_start, success=events_result is not None)
+        attached = _safe_run(_attach_events, ranked, events)
+        if attached is not None:
+            ranked = attached
+        enriched = _safe_run(_enrich_ranked_with_market_data, ranked, pool)
+        if enriched is not None:
+            ranked = enriched
         _safe_run(record_signal_quality_coverage, ranked, source="signal_cache")
         _safe_run(update_signals, ranked)
 

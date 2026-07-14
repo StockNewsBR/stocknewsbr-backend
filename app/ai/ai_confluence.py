@@ -3,15 +3,20 @@
 # Fast + Safe
 # =====================================================
 
+import math
+
+
 def calculate_confluence(active_models, total_models=12):
 
     try:
 
-        if not isinstance(active_models, (int, float)):
+        if not isinstance(active_models, (int, float)) or not math.isfinite(active_models):
             active_models = 0
 
         if not isinstance(total_models, (int, float)) or total_models <= 0:
             total_models = 1
+
+        active_models = min(max(active_models, 0), total_models)
 
         ratio = active_models / total_models
         percentage = ratio * 100

@@ -91,6 +91,12 @@ def workspace_help_center(current_user: User = Depends(require_channel_access("w
     return get_help_center_blueprint()
 
 
+@router.get("/help-center/videos")
+def workspace_help_videos(current_user: User = Depends(require_channel_access("web"))):
+    del current_user
+    return get_help_video_library()
+
+
 @router.get("/help-center/{slug}")
 def workspace_help_guide(
     slug: str,
@@ -133,9 +139,3 @@ def workspace_help_demo(
             "example": guide.get("example"),
         },
     }
-
-
-@router.get("/help-center/videos")
-def workspace_help_videos(current_user: User = Depends(require_channel_access("web"))):
-    del current_user
-    return get_help_video_library()

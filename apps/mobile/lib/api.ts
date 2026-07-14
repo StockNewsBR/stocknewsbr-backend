@@ -25,14 +25,18 @@ function buildUrl(path: string, query?: Record<string, QueryValue>) {
 }
 
 function tickerPathValue(ticker: string) {
-  return canonicalSymbol(ticker) || "PETR4";
+  const symbol = canonicalSymbol(ticker);
+  if (!symbol) throw new Error("invalid_ticker");
+  return symbol;
 }
 
 async function readErrorDetail(response: Response) {
   const fallback = response.statusText || "request_failed";
+  let text = "";
 
   try {
-    const payload = await response.json();
+    text = await response.text();
+    const payload = JSON.parse(text);
     if (typeof payload === "string") {
       return payload;
     }
@@ -52,12 +56,7 @@ async function readErrorDetail(response: Response) {
     }
   } catch {}
 
-  try {
-    const text = await response.text();
-    if (text) {
-      return text;
-    }
-  } catch {}
+  if (text) return text;
 
   return fallback;
 }

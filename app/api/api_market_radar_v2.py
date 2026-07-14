@@ -131,7 +131,7 @@ def detect_volume_expansion(df):
 
     try:
 
-        avg_vol = df["Volume"].rolling(20).mean().iloc[-1]
+        avg_vol = df["Volume"].iloc[-21:-1].mean()
         last_vol = df["Volume"].iloc[-1]
 
         if avg_vol == 0:

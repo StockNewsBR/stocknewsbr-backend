@@ -30,7 +30,7 @@ retry_strategy = Retry(
         504
     ],
 
-    allowed_methods=["POST"]
+    allowed_methods=frozenset({"DELETE", "GET", "HEAD", "OPTIONS", "PUT"})
 
 )
 

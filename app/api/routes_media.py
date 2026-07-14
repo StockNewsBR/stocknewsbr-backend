@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.dependencies import require_active_plan
@@ -106,6 +106,6 @@ def media_asset_detail(
     asset = get_media_asset(db, asset_id)
 
     if not asset or asset.owner_user_id != current_user.id:
-        return {"detail": "media_not_found"}
+        raise HTTPException(status_code=404, detail="media_not_found")
 
     return serialize_media_asset(asset)

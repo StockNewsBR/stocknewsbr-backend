@@ -2,9 +2,9 @@
 
 Arquivos revisados:
 
-- `C:\Users\dcima\Downloads\44444.odt`
-- `C:\Users\dcima\Downloads\stocknewsbr_product_starter.zip`
-- `C:\Users\dcima\Downloads\stocknewsbr_product_starter (1).zip`
+- `44444.odt`
+- `stocknewsbr_product_starter.zip`
+- `stocknewsbr_product_starter (1).zip`
 
 ## O que o starter traz
 

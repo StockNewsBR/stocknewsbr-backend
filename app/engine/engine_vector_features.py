@@ -15,6 +15,9 @@ def compute_vector_features(pool):
             if close.size < 30:
                 continue
 
+            if not np.isfinite(close).all() or np.any(close[:-1] == 0):
+                continue
+
             returns = np.diff(close) / close[:-1]
 
             momentum = float(returns[-5:].mean())

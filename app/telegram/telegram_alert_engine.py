@@ -85,7 +85,7 @@ _session = requests.Session()
 _RETRY_KWARGS = dict(
     total=3,
     backoff_factor=0.5,
-    status_forcelist=[429, 500, 502, 503, 504],
+    status_forcelist=[429],
     allowed_methods=["POST"],
 )
 

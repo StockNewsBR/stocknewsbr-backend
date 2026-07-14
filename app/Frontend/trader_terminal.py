@@ -314,7 +314,7 @@ button.secondary {{
 </div>
 <script>
 const FALLBACK_TABS = {embedded_tabs};
-const FOCUSED_TAB = {json.dumps(initial_tab)};
+const FOCUSED_TAB = {json.dumps(focused_tab)};
 const AUTH_TOKEN = {embedded_token};
 const IS_POPOUT = Boolean(FOCUSED_TAB);
 let WORKSPACE = null;
@@ -323,6 +323,7 @@ let ACTIVE_TAB = FOCUSED_TAB || "home";
 let ACTIVE_TICKER = "PETR4";
 let ROOM_MESSAGES = [];
 let ROOM_SOCKET = null;
+let ROOM_SOCKET_TICKER = null;
 let OPENED_POPOUTS = [];
 let DRAG_INDEX = null;
 
@@ -366,14 +367,30 @@ async function apiFetch(url, options = {{}}) {{
   return response;
 }}
 
-function openDetached(tabId) {{
+async function openDetached(tabId) {{
   if (!OPENED_POPOUTS.includes(tabId)) {{
     OPENED_POPOUTS.push(tabId);
     persistLayout();
   }}
-  const tokenQuery = AUTH_TOKEN ? `?token=${{encodeURIComponent(AUTH_TOKEN)}}` : "";
-  const url = `/web/terminal/popout/${{tabId}}${{tokenQuery}}`;
-  window.open(url, `stocknewsbr_${{tabId}}`, "width=1480,height=920,resizable=yes,scrollbars=yes");
+  const response = await apiFetch("/web/terminal/ticket", {{
+    method: "POST",
+    body: JSON.stringify({{ scope: "popout", target: tabId }}),
+  }});
+  const {{ ticket }} = await response.json();
+  const windowName = `stocknewsbr_${{tabId}}`;
+  window.open("", windowName, "width=1480,height=920,resizable=yes,scrollbars=yes");
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = `/web/terminal/popout/${{encodeURIComponent(tabId)}}`;
+  form.target = windowName;
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.name = "ticket";
+  input.value = ticket;
+  form.appendChild(input);
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
 }}
 
 function setActiveTab(tabId) {{
@@ -764,7 +781,13 @@ async function updateTicker(focusRoom = false) {{
   renderWorkspace();
 }}
 
-function connectChatSocket() {{
+async function connectChatSocket() {{
+  if (
+    ROOM_SOCKET &&
+    ROOM_SOCKET_TICKER === ACTIVE_TICKER &&
+    (ROOM_SOCKET.readyState === WebSocket.OPEN || ROOM_SOCKET.readyState === WebSocket.CONNECTING)
+  ) return;
+
   if (ROOM_SOCKET) {{
     try {{
       ROOM_SOCKET.close();
@@ -773,11 +796,16 @@ function connectChatSocket() {{
     }}
   }}
 
-  if (!AUTH_TOKEN) return;
-
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const response = await apiFetch("/web/terminal/ticket", {{
+    method: "POST",
+    body: JSON.stringify({{ scope: "chat", target: ACTIVE_TICKER }}),
+  }});
+  const {{ ticket }} = await response.json();
+  ROOM_SOCKET_TICKER = ACTIVE_TICKER;
   ROOM_SOCKET = new WebSocket(
-    `${{protocol}}://${{window.location.host}}/ws/chat/${{encodeURIComponent(ACTIVE_TICKER)}}?token=${{encodeURIComponent(AUTH_TOKEN)}}`
+    `${{protocol}}://${{window.location.host}}/ws/chat/${{encodeURIComponent(ACTIVE_TICKER)}}`,
+    ["stocknewsbr-ticket", ticket]
   );
 
   ROOM_SOCKET.onmessage = event => {{

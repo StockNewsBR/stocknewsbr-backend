@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 # =====================================================
 # MARKET STATE ENGINE
 # =====================================================
@@ -17,6 +19,7 @@ class MarketStateEngine:
         if not signals:
             return
 
+        updated = False
         for s in signals:
 
             ticker = s.get("ticker")
@@ -33,6 +36,10 @@ class MarketStateEngine:
                 "liquidity": s.get("liquidity_sweep")
 
             }
+            updated = True
+
+        if updated:
+            self.state["last_update"] = datetime.now(timezone.utc).isoformat()
 
 
     def get_state(self):

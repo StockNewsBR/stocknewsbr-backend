@@ -4,6 +4,7 @@
 # =====================================================
 
 import logging
+import math
 
 import pandas as pd
 
@@ -53,7 +54,7 @@ def detect_compression(df):
         atr = tr.rolling(14).mean()
         atr_base = atr.rolling(50).mean().iloc[-1]
 
-        if not atr_base:
+        if not math.isfinite(atr_base) or atr_base == 0:
             return 0
 
         atr_ratio = atr.iloc[-1] / atr_base
@@ -71,7 +72,7 @@ def detect_compression(df):
 
         vol_avg = volume.rolling(20).mean().iloc[-1]
 
-        if not vol_avg:
+        if not math.isfinite(vol_avg) or vol_avg == 0:
             return 0
 
         vol_ratio = volume.iloc[-1] / vol_avg
@@ -202,17 +203,11 @@ def build_radar():
             for row in institutional_radar_items(enriched_rows, limit=50)
             if is_actionable_snapshot_row(row)
         ]
-        source_by_ticker = {
-            _normalize_symbol(row.get("ticker") or row.get("symbol")): row
-            for row in actionable_rows
-            if isinstance(row, dict)
-        }
-
         for row in actionable_rows:
             symbol = row.get("ticker") or row.get("symbol")
             if not symbol:
                 continue
-            source = source_by_ticker.get(_normalize_symbol(symbol), {})
+            source = row
             results.append(
                 {
                     "symbol": _normalize_symbol(symbol),

@@ -35,6 +35,7 @@ def build_market_matrices(pool: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
         tickers = list(pool.keys())
 
+        valid_tickers = []
         closes = []
         volumes = []
 
@@ -66,6 +67,7 @@ def build_market_matrices(pool: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             if min_size is None or size < min_size:
                 min_size = size
 
+            valid_tickers.append(ticker)
             closes.append(close)
             volumes.append(volume)
 
@@ -101,7 +103,7 @@ def build_market_matrices(pool: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             return None
 
         return {
-            "tickers": tickers,
+            "tickers": valid_tickers,
             "price_matrix": price_matrix,
             "volume_matrix": volume_matrix,
         }

@@ -135,4 +135,4 @@ Fluxo verificado em duas etapas: `request` (autenticado, rate limited, challenge
 - **Fronteira de commits desalinhada por processo externo** (ver aviso no topo) — precisa de reconciliação humana antes de push.
 
 ## 34. Status final
-`TOOL_BLOCKED` — implementação, 727 testes backend, TSC, build, regressões e Playwright (failureCount=0) locais **PASS**; PASS formal bloqueado até CodeRabbit + Codex Security oficiais rodarem com zero P0/P1.
+`TOOL_BLOCKED` — implementação, 729 testes backend, TSC, build, regressões e Playwright (failureCount=0) locais **PASS**; PASS formal bloqueado até CodeRabbit + Codex Security oficiais rodarem com zero P0/P1.

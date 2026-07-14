@@ -42,14 +42,14 @@ def get_signals():
 
         }
 
-    except Exception as e:
+    except Exception:
 
-        logger.error(f"Signals route error: {e}")
+        logger.exception("Signals route failed")
 
         return JSONResponse(
             status_code=500,
             content={
                 "status": "error",
-                "message": str(e)
+                "message": "signals_unavailable"
             }
         )

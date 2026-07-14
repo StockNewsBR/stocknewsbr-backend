@@ -40,11 +40,11 @@ def get_top_movers():
                 if not ticker:
                     continue
 
-                raw_change = (
-                    data.get("change")
-                    or data.get("change_pct")
-                    or (float(data.get("momentum", 0) or 0) * 100)
-                )
+                raw_change = data.get("change")
+                if raw_change is None:
+                    raw_change = data.get("change_pct")
+                if raw_change is None:
+                    raw_change = float(data.get("momentum", 0) or 0) * 100
                 change = float(raw_change)
                 volume = float(data.get("volume", 0))
                 avg_volume = float(data.get("avg_volume", 0))

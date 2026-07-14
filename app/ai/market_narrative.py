@@ -9,7 +9,9 @@ def generate_market_narrative(symbol="Market", score=None, confluence=None):
         heatmap = generate_market_heatmap(signals)
         global_heat = heatmap.get("global", {})
 
-        score = global_heat.get("market_strength", 0)
-        confluence = min(10, len([row for row in signals if (row.get("score") or 0) >= 70]))
+        if score is None:
+            score = global_heat.get("market_strength", 0)
+        if confluence is None:
+            confluence = min(10, len([row for row in signals if (row.get("score") or 0) >= 70]))
 
     return _generate_market_narrative(symbol, score, confluence)

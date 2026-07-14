@@ -880,7 +880,7 @@ def evaluate_trade_coherence(
     }
 
 
-def _weighted_component_score(row: Dict[str, Any]) -> float:
+def _weighted_component_score(row: Dict[str, Any]) -> tuple[float, float]:
     bullish = 0.0
     bearish = 0.0
 

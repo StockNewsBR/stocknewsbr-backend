@@ -7274,7 +7274,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [token, deferredTicker, chartInterval, focusedTab, priorityPublicWatchKey, publicTickerTapeKey, publicWatchKey, strategicAnalysisMinute]);
+  }, [token, deferredTicker, chartInterval, focusedTab, priorityPublicWatchKey, publicTickerTapeKey, publicWatchKey]);
 
   useEffect(() => {
     if (token) return;

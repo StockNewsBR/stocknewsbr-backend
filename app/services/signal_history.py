@@ -56,7 +56,7 @@ def get_top_today():
             if now - s["timestamp"] < day
         ]
 
-    today.sort(key=lambda x: x["score"], reverse=True)
+    today.sort(key=lambda x: x.get("score") or 0, reverse=True)
 
     return today[:20]
 
@@ -73,6 +73,6 @@ def get_top_week():
             if now - s["timestamp"] < week
         ]
 
-    data.sort(key=lambda x: x["score"], reverse=True)
+    data.sort(key=lambda x: x.get("score") or 0, reverse=True)
 
     return data[:20]

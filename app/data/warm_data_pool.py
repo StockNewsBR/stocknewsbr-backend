@@ -16,6 +16,7 @@ _pool: Dict[str, object] = {}
 _last_update = 0.0
 _last_empty_log = 0.0
 _lock = threading.RLock()
+_refresh_lock = threading.Lock()
 
 
 def _build_pool(data, tickers):
@@ -57,10 +58,14 @@ def update_pool(force_refresh: bool = False):
     global _last_update
     global _last_empty_log
 
-    tickers = get_all_tickers()
+    with _refresh_lock:
+        return _update_pool_locked(force_refresh)
 
-    if not tickers:
-        return {}
+
+def _update_pool_locked(force_refresh: bool = False):
+    global _pool
+    global _last_update
+    global _last_empty_log
 
     now = time.time()
 
@@ -68,7 +73,13 @@ def update_pool(force_refresh: bool = False):
         if _pool and not force_refresh and now - _last_update < WARM_POOL_TTL:
             return dict(_pool)
 
+    tickers = get_all_tickers()
+
+    if not tickers:
+        return {}
+
     data = get_market_data(tickers)
+    now = time.time()
     new_pool = _build_pool(data, tickers)
 
     if not new_pool:
@@ -92,17 +103,26 @@ def update_pool(force_refresh: bool = False):
 
 
 def get_market_pool(force_refresh: bool = False):
+    global _last_update
+
     now = time.time()
 
     with _lock:
         if _pool and not force_refresh and now - _last_update < WARM_POOL_TTL:
             return dict(_pool)
 
-    cached_store = market_store.get()
+    if not force_refresh:
+        with _refresh_lock:
+            now = time.time()
+            with _lock:
+                if _pool and now - _last_update < WARM_POOL_TTL:
+                    return dict(_pool)
 
-    if cached_store and not force_refresh:
-        with _lock:
-            _pool.update(cached_store)
-            return dict(_pool)
+            cached_store = market_store.get()
+            if cached_store:
+                with _lock:
+                    _pool.update(cached_store)
+                    _last_update = now
+                    return dict(_pool)
 
     return update_pool(force_refresh=force_refresh)

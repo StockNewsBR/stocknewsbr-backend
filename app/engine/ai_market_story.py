@@ -21,8 +21,8 @@ class MarketStoryEngine:
             )
 
         momentum = [
-            s["ticker"] for s in signals
-            if s.get("momentum", 0) > 6
+            s.get("ticker") for s in signals
+            if s.get("ticker") and s.get("momentum", 0) > 6
         ]
 
         if momentum:
@@ -31,8 +31,8 @@ class MarketStoryEngine:
             )
 
         liquidity = [
-            s["ticker"] for s in signals
-            if s.get("liquidity_sweep", 0) > 1
+            s.get("ticker") for s in signals
+            if s.get("ticker") and s.get("liquidity_sweep", 0) > 1
         ]
 
         if liquidity:
@@ -41,8 +41,8 @@ class MarketStoryEngine:
             )
 
         volume = [
-            s["ticker"] for s in signals
-            if s.get("volume_spike", 0) > 2
+            s.get("ticker") for s in signals
+            if s.get("ticker") and s.get("volume_spike", 0) > 2
         ]
 
         if volume:
@@ -56,9 +56,10 @@ class MarketStoryEngine:
             )
 
         if sectors:
-            strongest = sectors[0]["sector"]
-            story.append(
-                f"Sector rotation currently favoring {strongest}."
-            )
+            strongest = sectors[0].get("sector") if isinstance(sectors[0], dict) else None
+            if strongest:
+                story.append(
+                    f"Sector rotation currently favoring {strongest}."
+                )
 
         return "\n".join(story)

@@ -16,7 +16,7 @@ TABS: List[Dict[str, str]] = [
     {"id": "news-ia", "title": "Notícias IA", "icon": "news"},
     {"id": "macro", "title": "Macro IA", "icon": "macro"},
     {"id": "regime", "title": "Regime IA", "icon": "regime"},
-    {"id": "grafico", "title": "IA Grafico", "icon": "chart"},
+    {"id": "grafico", "title": "IA Gráfico", "icon": "chart"},
     {"id": "observability", "title": "Observabilidade", "icon": "status"},
     {"id": "ticker-rooms", "title": "Ticker Rooms", "icon": "chat"},
     {"id": "education", "title": "Ajuda Educacional", "icon": "help"},

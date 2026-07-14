@@ -167,7 +167,7 @@ def _is_chart_on_cooldown(symbol: str, interval: str, now: float | None = None) 
     key = _chart_cooldown_key(symbol, interval)
     if not key:
         return False
-    if is_symbol_on_cooldown(symbol, now=now):
+    if is_symbol_on_cooldown(key, now=now):
         return True
     current_time = now or time.time()
     with _lock:
@@ -274,8 +274,9 @@ def warm_quotes_once(
             if all(_is_quote_on_cooldown(symbol) for symbol in chunk):
                 continue
             try:
-                resolved.update(get_price_snapshots(chunk, force_refresh=True) or {})
-                if not resolved:
+                chunk_resolved = get_price_snapshots(chunk, force_refresh=True) or {}
+                resolved.update(chunk_resolved)
+                if not chunk_resolved:
                     for symbol in chunk:
                         _mark_quote_cooldown(symbol)
             except Exception as exc:

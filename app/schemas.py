@@ -12,7 +12,7 @@ class UserBase(BaseModel):
 
 
 class UserRegister(UserBase):
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
     display_name: str | None = Field(default=None, max_length=120)
     phone: str | None = Field(default=None, max_length=32)
     referral_code: str | None = Field(default=None, max_length=32)

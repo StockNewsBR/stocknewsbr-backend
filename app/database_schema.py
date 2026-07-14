@@ -784,6 +784,8 @@ def ensure_runtime_schema(engine):
             ddl = ddl_map.get(dialect_key) or ddl_map["default"]
             conn.execute(text(ddl))
 
+        inspector = inspect(conn)
+
         for table_name, columns in SCHEMA_PATCHES.items():
             if not inspector.has_table(table_name):
                 continue

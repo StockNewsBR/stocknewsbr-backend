@@ -464,6 +464,9 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
     except HTTPException:
         db.rollback()
         raise
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="email_already_registered")
     except Exception as exc:
         db.rollback()
         logger.exception("Register error: %s", exc)

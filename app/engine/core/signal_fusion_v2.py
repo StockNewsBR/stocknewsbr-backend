@@ -80,14 +80,13 @@ def run_signal_fusion(signals):
 
             fused.append(item)
 
-        # limit list size for safety
-        if len(fused) > MAX_SIGNALS:
-            fused = fused[:MAX_SIGNALS]
-
         fused.sort(
             key=lambda x: x.get("fusion_score", 0),
             reverse=True
         )
+
+        if len(fused) > MAX_SIGNALS:
+            fused = fused[:MAX_SIGNALS]
 
         return fused
 

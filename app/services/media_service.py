@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -24,6 +25,14 @@ ALLOWED_CONTENT_TYPES = {
     "image/webp": ".webp",
     "image/gif": ".gif",
 }
+MEDIA_FOLDER_RE = re.compile(r"^[a-z0-9_-]+$")
+
+
+def _media_folder(folder: str) -> str:
+    value = str(folder or "").strip().lower()
+    if not MEDIA_FOLDER_RE.fullmatch(value):
+        raise HTTPException(status_code=400, detail="invalid_media_folder")
+    return value
 
 
 def ensure_media_root():
@@ -54,6 +63,7 @@ def get_media_status():
 
 async def save_upload(file: UploadFile, folder: str = "posts"):
     ensure_media_root()
+    folder = _media_folder(folder)
 
     content_type = (file.content_type or "").lower().strip()
 
@@ -63,17 +73,27 @@ async def save_upload(file: UploadFile, folder: str = "posts"):
     extension = ALLOWED_CONTENT_TYPES[content_type]
     directory = MEDIA_ROOT / folder
     directory.mkdir(parents=True, exist_ok=True)
+    if not directory.resolve().is_relative_to(MEDIA_ROOT):
+        raise HTTPException(status_code=400, detail="invalid_media_folder")
 
     filename = f"{uuid4().hex}{extension}"
     destination = directory / filename
-    content = await file.read()
+    temporary = destination.with_suffix(f"{extension}.tmp")
 
     max_size_bytes = MEDIA_MAX_MB * 1024 * 1024
 
-    if len(content) > max_size_bytes:
-        raise HTTPException(status_code=413, detail="media_too_large")
-
-    destination.write_bytes(content)
+    size = 0
+    try:
+        with temporary.open("xb") as output:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > max_size_bytes:
+                    raise HTTPException(status_code=413, detail="media_too_large")
+                output.write(chunk)
+        temporary.replace(destination)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
     increment_uploads()
 
     relative_url = f"{MEDIA_PUBLIC_PREFIX.rstrip('/')}/{folder}/{filename}"
@@ -84,13 +104,14 @@ async def save_upload(file: UploadFile, folder: str = "posts"):
         "folder": folder,
         "filename": filename,
         "content_type": content_type,
-        "size_bytes": len(content),
+        "size_bytes": size,
         "url": absolute_url,
         "relative_url": relative_url,
     }
 
 
 def get_signed_upload(content_type: str, folder: str = "posts"):
+    folder = _media_folder(folder)
     content_type = (content_type or "").lower().strip()
 
     if content_type not in ALLOWED_CONTENT_TYPES:

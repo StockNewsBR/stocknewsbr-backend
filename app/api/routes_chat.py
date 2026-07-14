@@ -8,6 +8,7 @@ from app.dependencies import require_active_plan
 from app.models import User
 from app.security import resolve_token_user
 from app.services.access_service import has_channel_access, refresh_user_access
+from app.services.browser_ticket_service import consume_browser_ticket
 from app.services.symbol_registry import canonical_symbol
 from app.services.ticker_room_service import append_room_message, list_room_messages
 from app.system.room_websocket_manager import room_ws_manager
@@ -101,6 +102,18 @@ async def websocket_chat(websocket: WebSocket, symbol: str):
     # Mission 31B: browser clients authenticate via the httpOnly session
     # cookie; the query-param token remains for bearer clients (mobile app).
     token = websocket.query_params.get("token")
+    protocols = [value.strip() for value in websocket.headers.get("sec-websocket-protocol", "").split(",")]
+    browser_ticket = protocols[1] if len(protocols) == 2 and protocols[0] == "stocknewsbr-ticket" else None
+
+    if browser_ticket:
+        ticket_user = consume_browser_ticket(browser_ticket, scope="chat", target=symbol)
+        user = (
+            {"id": ticket_user["user_id"], "display_name": ticket_user["display_name"]}
+            if ticket_user
+            else None
+        )
+    else:
+        user = None
 
     if not token:
         cookie_token = websocket.cookies.get(session_cookie_name())
@@ -111,7 +124,8 @@ async def websocket_chat(websocket: WebSocket, symbol: str):
 
         token = cookie_token
 
-    user = _resolve_user_from_token(token)
+    if user is None:
+        user = _resolve_user_from_token(token)
 
     if user is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)

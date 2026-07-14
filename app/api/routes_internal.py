@@ -95,7 +95,6 @@ def telegram_link_consume(
     db.refresh(user)
     return {
         "ok": True,
-        "email": user.email,
         "plan": user.plan,
         "plan_status": user.plan_status,
         "telegram_username": user.telegram_username,

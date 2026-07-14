@@ -146,16 +146,16 @@ def _qualifies_for_validation(db: Session, referral: Referral, now: datetime) ->
 
 def _apply_reward_months(user: User | None, stats: ReferralStats, months: int, now: datetime):
     if months <= 0:
-        return
-
-    stats.reward_balance_months = (stats.reward_balance_months or 0) + months
+        return False
 
     if not _is_paid_active(user, now):
-        return
+        return False
 
+    stats.reward_balance_months = (stats.reward_balance_months or 0) + months
     extension = timedelta(days=REFERRAL_REWARD_DAYS * months)
     expires_at = _as_naive_utc(user.plan_expires_at) or now
     user.plan_expires_at = max(expires_at, now) + extension
+    return True
 
 
 def _sync_referrer_stats(db: Session, referrer_id: int, now: datetime):
@@ -178,8 +178,9 @@ def _sync_referrer_stats(db: Session, referrer_id: int, now: datetime):
     processed_months = stats.benefit_level or 0
     new_months = max(0, earned_reward_months - processed_months)
     if new_months:
-        _apply_reward_months(db.query(User).filter(User.id == referrer_id).first(), stats, new_months, now)
-        stats.benefit_level = earned_reward_months
+        applied = _apply_reward_months(db.query(User).filter(User.id == referrer_id).first(), stats, new_months, now)
+        if applied:
+            stats.benefit_level = earned_reward_months
 
     return stats
 
@@ -266,9 +267,7 @@ def validate_referrals(db: Session, now: datetime | None = None) -> dict:
 
 
 def referral_summary(db: Session, user_id: int):
-    now = _utcnow()
-    stats = _sync_referrer_stats(db, user_id, now)
-    db.flush()
+    stats = db.query(ReferralStats).filter(ReferralStats.user_id == user_id).first()
     paid_refs = (
         db.query(Referral)
         .filter(Referral.referrer_id == user_id, Referral.status == VALID_REFERRAL_STATUS)
@@ -277,11 +276,11 @@ def referral_summary(db: Session, user_id: int):
     )
     return {
         "user_id": user_id,
-        "total_validated": stats.total_validated or 0,
-        "total_active": stats.total_active or 0,
-        "reward_balance_months": stats.reward_balance_months or 0,
-        "earned_reward_months": (stats.total_validated or 0) // REFERRAL_REWARD_EVERY,
-        "badge": referral_badge(stats.total_validated or 0),
+        "total_validated": (stats.total_validated or 0) if stats else 0,
+        "total_active": (stats.total_active or 0) if stats else 0,
+        "reward_balance_months": (stats.reward_balance_months or 0) if stats else 0,
+        "earned_reward_months": ((stats.total_validated or 0) if stats else 0) // REFERRAL_REWARD_EVERY,
+        "badge": referral_badge((stats.total_validated or 0) if stats else 0),
         "paid_referrals": [_masked_name(ref.referred_user) for ref in paid_refs],
         "rules": {
             "valid_after_days": REFUND_WINDOW_DAYS + 1,
@@ -293,18 +292,6 @@ def referral_summary(db: Session, user_id: int):
 
 
 def referral_leaderboard(db: Session, limit: int = 50):
-    now = _utcnow()
-    referrer_ids = [
-        row[0]
-        for row in db.query(Referral.referrer_id)
-        .filter(Referral.status == VALID_REFERRAL_STATUS)
-        .distinct()
-        .all()
-    ]
-    for referrer_id in referrer_ids:
-        _sync_referrer_stats(db, referrer_id, now)
-    db.flush()
-
     stats_rows = (
         db.query(ReferralStats)
         .filter(ReferralStats.total_validated > 0)
@@ -315,7 +302,6 @@ def referral_leaderboard(db: Session, limit: int = 50):
 
     rows = []
     for position, stats in enumerate(stats_rows, start=1):
-        _sync_referrer_stats(db, stats.user_id, now)
         validated_refs = (
             db.query(Referral)
             .filter(Referral.referrer_id == stats.user_id, Referral.status == VALID_REFERRAL_STATUS)
@@ -335,7 +321,6 @@ def referral_leaderboard(db: Session, limit: int = 50):
             }
         )
 
-    db.flush()
     return {
         "items": rows,
         "rules": {

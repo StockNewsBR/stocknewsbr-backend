@@ -74,10 +74,7 @@ def _read_from_disk() -> Dict[str, Any]:
     if not SOCIAL_STORE_PATH.exists():
         return _default_state()
 
-    try:
-        payload = json.loads(SOCIAL_STORE_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return _default_state()
+    payload = json.loads(SOCIAL_STORE_PATH.read_text(encoding="utf-8"))
 
     return _deserialize_state(payload)
 

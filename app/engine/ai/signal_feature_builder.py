@@ -18,4 +18,4 @@ def build_features(signals):
             s.get("trend", 0)
         ])
 
-    return np.array(features)
+    return np.asarray(features).reshape((-1, 4))

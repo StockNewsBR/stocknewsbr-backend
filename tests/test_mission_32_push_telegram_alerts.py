@@ -817,7 +817,9 @@ class TelegramTransportTests(_EnvCleanMixin):
         self.assertEqual(eng.retry.total, 3)
         self.assertGreater(eng.retry.backoff_factor, 0)
         self.assertIn(429, eng.retry.status_forcelist)
-        self.assertIn(500, eng.retry.status_forcelist)
+        for status_code in (500, 502, 503, 504):
+            self.assertNotIn(status_code, eng.retry.status_forcelist)
+        self.assertIn("POST", eng.retry.allowed_methods)
         self.assertNotIn(400, eng.retry.status_forcelist)
         self.assertNotIn(401, eng.retry.status_forcelist)
         if hasattr(eng.retry, "backoff_jitter"):
@@ -879,7 +881,8 @@ class RouteAuthorizationTests(unittest.TestCase):
     def test_push_routes_require_authentication(self):
         source = self._source("app/api/routes_push.py")
         for route in ("push_status", "push_tokens", "push_register", "push_unregister"):
-            self.assertIn("require_active_plan", source)
+            block = source.split(f"def {route}", 1)[1].split("\n\n", 1)[0]
+            self.assertIn("require_active_plan", block)
         self.assertIn("require_internal_token", source)
         # Endpoint de teste jamais aberto a usuário comum.
         test_send_block = source.split("push_test_send")[1]

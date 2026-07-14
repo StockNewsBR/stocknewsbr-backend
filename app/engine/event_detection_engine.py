@@ -6,6 +6,13 @@ def detect_events(data, indicators):
 
     events = {}
 
+    if not isinstance(data, dict) or not isinstance(indicators, dict):
+        return events
+    if any(key not in data for key in ("Close", "Volume")):
+        return events
+    if any(key not in indicators for key in ("ema20", "ema50", "volume_mean")):
+        return events
+
     close = data["Close"]
     volume = data["Volume"]
 

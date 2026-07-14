@@ -53,7 +53,7 @@ async function registerUser(label) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       email,
-      password: "123456",
+      password: "12345678",
       display_name: `Mission 31A ${label}`,
       channel: "web",
       accepted_terms: true,
@@ -199,7 +199,7 @@ async function runBrowserAudit(reporter) {
   };
 
   try {
-    await page.goto(`${WEB_BASE}/panel/PETR4?token=${encodeURIComponent(reporter.token)}&ticker=PETR4`, {
+    await page.goto(`${WEB_BASE}/panel/PETR4?ticker=PETR4`, {
       waitUntil: "domcontentloaded",
     });
     await page.locator("main").waitFor({ state: "visible", timeout: 20000 });

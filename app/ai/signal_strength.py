@@ -3,6 +3,7 @@
 # =====================================================
 
 import logging
+import math
 
 logger = logging.getLogger("stocknewsbr.signal_strength")
 
@@ -11,7 +12,7 @@ def calculate_signal_strength(score, confluence):
 
     try:
 
-        if not isinstance(score, (int, float)):
+        if not isinstance(score, (int, float)) or not math.isfinite(score):
             score = 0.0
 
         percentage = 0.0
@@ -20,7 +21,7 @@ def calculate_signal_strength(score, confluence):
 
             val = confluence.get("percentage")
 
-            if isinstance(val, (int, float)):
+            if isinstance(val, (int, float)) and math.isfinite(val):
                 percentage = float(val)
 
         strength = (score * 0.6) + (percentage * 0.4)

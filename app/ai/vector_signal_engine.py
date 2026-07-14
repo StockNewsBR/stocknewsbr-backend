@@ -28,9 +28,6 @@ def volatility(values: Iterable[float] | Sequence[float]) -> float:
 
     mean_value = sum(rows) / len(rows)
 
-    if mean_value == 0:
-        return 0.0
-
     variance = sum((row - mean_value) ** 2 for row in rows) / len(rows)
     return round(math.sqrt(variance), 4)
 

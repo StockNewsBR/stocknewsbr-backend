@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 
@@ -41,8 +41,10 @@ export default function TickerDetailScreen() {
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const loadGeneration = useRef(0);
 
   async function loadDetail() {
+    const generation = ++loadGeneration.current;
     if (!token) {
       return;
     }
@@ -57,6 +59,7 @@ export default function TickerDetailScreen() {
         getPoll(ticker).catch(() => null),
         getPollHistory(ticker).catch(() => ({ history: [] })),
       ]);
+      if (generation !== loadGeneration.current) return;
       setSnapshot(nextSnapshot);
       setChart(nextChart);
       setNews(nextNews);
@@ -64,7 +67,7 @@ export default function TickerDetailScreen() {
       setPoll(nextPoll);
       setHistory(Array.isArray(nextHistory?.history) ? nextHistory.history : []);
     } finally {
-      setLoading(false);
+      if (generation === loadGeneration.current) setLoading(false);
     }
   }
 
@@ -229,6 +232,8 @@ export default function TickerDetailScreen() {
         />
         <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("bullLabel")}
             onPress={() => setSentiment(sentiment === "bullish" ? "neutral" : "bullish")}
             style={{
               flexDirection: "row",
@@ -246,6 +251,8 @@ export default function TickerDetailScreen() {
             <Text style={{ color: sentiment === "bullish" ? theme.colors.accent : theme.colors.muted, fontWeight: "800" }}>{t("bullLabel")}</Text>
           </Pressable>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("bearLabel")}
             onPress={() => setSentiment(sentiment === "bearish" ? "neutral" : "bearish")}
             style={{
               flexDirection: "row",

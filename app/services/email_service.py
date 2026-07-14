@@ -114,7 +114,11 @@ def _deliver(email: str, subject: str, body: str, *, kind: str, metadata: dict |
         message["From"] = EMAIL_FROM
         message["To"] = email
         message.set_content(body)
-        _send_via_smtp(message)
+        try:
+            _send_via_smtp(message)
+        except Exception:
+            logger.error("SMTP delivery failed | kind=%s | to=%s", kind, _mask_email(email))
+            return {"mode": "smtp", "delivered": False}
         logger.info("Email delivered | kind=%s | to=%s", kind, _mask_email(email))
         return {"mode": "smtp", "delivered": True}
 
