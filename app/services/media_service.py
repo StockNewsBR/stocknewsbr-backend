@@ -28,6 +28,15 @@ ALLOWED_CONTENT_TYPES = {
 MEDIA_FOLDER_RE = re.compile(r"^[a-z0-9_-]+$")
 
 
+def _matches_image_signature(content_type: str, header: bytes) -> bool:
+    return {
+        "image/jpeg": header.startswith(b"\xff\xd8\xff"),
+        "image/png": header.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/gif": header.startswith((b"GIF87a", b"GIF89a")),
+        "image/webp": header.startswith(b"RIFF") and header[8:12] == b"WEBP",
+    }.get(content_type, False)
+
+
 def _media_folder(folder: str) -> str:
     value = str(folder or "").strip().lower()
     if not MEDIA_FOLDER_RE.fullmatch(value):
@@ -83,13 +92,20 @@ async def save_upload(file: UploadFile, folder: str = "posts"):
     max_size_bytes = MEDIA_MAX_MB * 1024 * 1024
 
     size = 0
+    header = b""
     try:
         with temporary.open("xb") as output:
             while chunk := await file.read(1024 * 1024):
+                if not header:
+                    header = chunk[:16]
                 size += len(chunk)
                 if size > max_size_bytes:
                     raise HTTPException(status_code=413, detail="media_too_large")
                 output.write(chunk)
+        if not size:
+            raise HTTPException(status_code=400, detail="empty_media_file")
+        if not _matches_image_signature(content_type, header):
+            raise HTTPException(status_code=400, detail="invalid_media_content")
         temporary.replace(destination)
     except Exception:
         temporary.unlink(missing_ok=True)

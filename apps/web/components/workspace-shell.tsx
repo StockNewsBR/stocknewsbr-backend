@@ -27,6 +27,7 @@ import {
   getChatHistory,
   getFeed,
   getNews,
+  getPublicAiTools,
   getPublicMarketBundle,
   getPublicQuotesRobust,
   getPoll,
@@ -39,14 +40,14 @@ import {
   logoutAuth,
   muteUser,
   postChatMessage,
-  repostPost,
   reportPost,
   requestEmailChange,
   requestLoginCode,
   requestTelegramLink,
   resolveApiBase,
+  resolveMediaUrl,
   saveWorkspaceLayout,
-  unrepostPost,
+  searchGifs,
   unfollowUser,
   unlikePost,
   updateProfile,
@@ -55,6 +56,7 @@ import {
   verifyLoginOtp,
   votePoll,
 } from "@/lib/api";
+import { formatSocialTimestamp } from "@/lib/social-time";
 import {
   canonicalSymbol as resolveCanonicalSymbol,
   canonicalSymbolAliases as resolveCanonicalSymbolAliases,
@@ -66,6 +68,7 @@ import type {
   ChatHistoryPayload,
   FeedPayload,
   FeedPost,
+  GifSearchItem,
   NewsItem,
   NewsPayload,
   PollPayload,
@@ -94,7 +97,6 @@ type ChartSettings = {
   show_zones: boolean;
   show_price_line: boolean;
   show_vwap: boolean;
-  show_averages: boolean;
   show_macd: boolean;
   show_rsi: boolean;
   show_support: boolean;
@@ -103,10 +105,21 @@ type ChartSettings = {
   show_volume: boolean;
 };
 
+type CommentComposerState = {
+  active: boolean;
+  sentiment: "bullish" | "bearish";
+  file: File | null;
+  previewUrl: string | null;
+  gif: GifSearchItem | null;
+  tool: "emoji" | "gif" | null;
+  error: string;
+};
+
 type WatchlistItem = {
   symbol: string;
   label: string;
   category: string;
+  logoUrl?: string | null;
   price?: number | null;
   changePct?: number | null;
   change?: number | null;
@@ -352,16 +365,13 @@ const TOP_BAR_TAB_IDS = TAB_ORDER.filter((id) => id !== "busca");
 const SIMPLE_TOP_TAB_IDS = new Set([
   "grafico",
   "news",
-  "flow",
-  "liquidity",
-  "trend",
-  "momentum",
-  "smart-money",
   "referrals",
   "education",
 ]);
 const INTERNAL_AI_TAB_IDS = new Set(["risk", "news-ia", "macro", "regime"]);
 const WORKSPACE_MODE_STORAGE_KEY = "stocknewsbr.workspace_mode";
+const WATCHLIST_STATE_STORAGE_KEY = "stocknewsbr.watchlist_state.v1";
+const STRATEGIC_PANEL_STORAGE_KEY = "stocknewsbr.strategic_panel.open.v1";
 // Non-sensitive resend-cooldown deadline (epoch ms) — survives reloads.
 const CODE_COOLDOWN_STORAGE_KEY = "stocknewsbr.code_cooldown_until";
 const DETACHABLE_IA_TABS = new Set([
@@ -400,7 +410,6 @@ const DEFAULT_CHART_SETTINGS: ChartSettings = {
   show_zones: true,
   show_price_line: true,
   show_vwap: true,
-  show_averages: true,
   show_macd: false,
   show_rsi: false,
   show_support: true,
@@ -488,19 +497,19 @@ function b3FutureLabel(symbol: string, locale: AppLocale = "pt-BR") {
 const WATCHLIST_B3 = [
   "ITUB4.SA", "BBDC4.SA", "BBAS3.SA", "SANB11.SA", "BPAC11.SA",
   "VALE3.SA", "PETR4.SA", "PETR3.SA", "SUZB3.SA", "KLBN11.SA",
-  "ELET3.SA", "AXIA6.SA", "CPFE3.SA", "EQTL3.SA",
+  "AXIA3.SA", "AXIA7.SA", "CPFE3.SA", "EQTL3.SA",
   "MGLU3.SA", "LREN3.SA", "AMER3.SA", "VIIA3.SA", "ASAI3.SA",
   "WEGE3.SA", "GGBR4.SA", "CSNA3.SA", "USIM5.SA",
   "TOTS3.SA", "POSI3.SA",
   "RAIL3.SA", "CCRO3.SA", "NTCO3.SA",
-  "ABEV3.SA", "B3SA3.SA", "BBSE3.SA", "BRAP4.SA", "BRFS3.SA",
-  "CMIG4.SA", "COGN3.SA", "CPLE6.SA", "CRFB3.SA", "CSAN3.SA",
-  "CYRE3.SA", "DXCO3.SA", "EMBR3.SA", "ENEV3.SA", "ENGI11.SA",
-  "EZTC3.SA", "HAPV3.SA", "HYPE3.SA", "IRBR3.SA", "JBSS3.SA",
-  "MRFG3.SA", "MRVE3.SA", "MULT3.SA", "PCAR3.SA", "PRIO3.SA",
-  "RADL3.SA", "RAIZ4.SA", "RDOR3.SA", "RENT3.SA", "RRRP3.SA",
+  "ABEV3.SA", "B3SA3.SA", "BBSE3.SA", "BRAP4.SA",
+  "CMIG4.SA", "COGN3.SA", "CPLE3.SA", "CSAN3.SA",
+  "CYRE3.SA", "DXCO3.SA", "EMBJ3.SA", "ENEV3.SA", "ENGI11.SA",
+  "EZTC3.SA", "HAPV3.SA", "HYPE3.SA", "IRBR3.SA", "JBSS32.SA",
+  "MBRF3.SA", "MRVE3.SA", "MULT3.SA", "PCAR3.SA", "PRIO3.SA",
+  "RADL3.SA", "RAIZ4.SA", "RDOR3.SA", "RENT3.SA", "BRAV3.SA",
   "SBSP3.SA", "SLCE3.SA", "SMTO3.SA", "TAEE11.SA", "TIMS3.SA",
-  "UGPA3.SA", "VBBR3.SA", "VIVT3.SA", "YDUQ3.SA", "AZUL4.SA",
+  "UGPA3.SA", "VBBR3.SA", "VIVT3.SA", "YDUQ3.SA",
 ];
 
 const WATCHLIST_BDR = [
@@ -1006,9 +1015,8 @@ const COMPANY_HINTS: Record<string, string> = {
   BPAC11: "BTG Pactual Units",
   SUZB3: "Suzano",
   KLBN11: "Klabin Units",
-  ELET3: "Eletrobras ON",
-  ELET6: "Eletrobras PNB",
-  AXIA6: "Axia Energia",
+  AXIA3: "Axia Energia ON",
+  AXIA7: "Axia Energia PNB",
   CPFE3: "CPFL Energia",
   EQTL3: "Equatorial",
   ENBR3: "EDP Brasil",
@@ -1026,8 +1034,9 @@ const COMPANY_HINTS: Record<string, string> = {
   RAIL3: "Rumo",
   CCRO3: "CCR",
   NTCO3: "Natura",
-  BRFS3: "BRF",
-  JBSS3: "JBS",
+  ABEV3: "Ambev S.A.",
+  MBRF3: "MBRF (BRF+Marfrig)",
+  JBSS32: "JBS",
   AAPL34: "Apple BDR",
   MSFT34: "Microsoft BDR",
   GOGL34: "Alphabet BDR",
@@ -1183,8 +1192,29 @@ const HELP_GUIDES = [
   })),
 ];
 
-const TIMEFRAME_OPTIONS = ["1D", "1W", "1M", "3M", "6M", "YTD", "1Y", "All"];
-const COMPOSER_EMOJIS = ["🔥", "📈", "🚀", "💰", "⚠️", "👀", "✅", "🔻"];
+const COMPOSER_EMOJI_CATEGORIES: Array<{ key: string; labelPt: string; labelEn: string; emojis: string[] }> = [
+  { key: "faces", labelPt: "Carinhas", labelEn: "Faces", emojis: ["🙂", "😄", "😉", "😎", "🤔", "🙁", "😢", "😡", "🤯", "😱", "🥳", "😴"] },
+  { key: "gestures", labelPt: "Gestos", labelEn: "Gestures", emojis: ["👍", "👎", "👏", "🙌", "💪", "🙏", "🤝", "✌️", "👌", "🤙", "✊", "👊"] },
+  { key: "money", labelPt: "Dinheiro", labelEn: "Money", emojis: ["💰", "🤑", "💵", "💲", "💸", "🏦", "💳", "🪙", "💎", "🧾", "📊", "❤️"] },
+  { key: "market", labelPt: "Mercado", labelEn: "Market", emojis: ["🐂", "🐻", "📈", "📉", "🚀", "🔥", "⚠️", "👀", "✅", "❌", "🎯", "🔻"] },
+];
+const RECENT_EMOJIS_STORAGE_KEY = "stocknewsbr.recent_emojis.v1";
+const EMOJI_SHORTCUT_MAP: Record<string, string> = {
+  "$$$": "🤑",
+  "$$": "💰",
+  "$": "💲",
+  ":)": "🙂",
+  ":(": "🙁",
+  ";)": "😉",
+  ":D": "😄",
+  "<3": "❤️",
+};
+// Whitespace-token match only: "$PETR4" and "$10" never convert.
+const EMOJI_SHORTCUT_REGEX = /(^|\s)(\$\$\$|\$\$|\$|:\)|:\(|;\)|:D|<3)(?=\s|$)/g;
+
+function applyEmojiShortcuts(text: string) {
+  return text.replace(EMOJI_SHORTCUT_REGEX, (_match, prefix: string, token: string) => `${prefix}${EMOJI_SHORTCUT_MAP[token] || token}`);
+}
 const QUICK_GIF_TERMS = ["bull market", "bear market", "stocks rally", "market crash"];
 const SOCIAL_REPORT_REASONS = [
   { key: "spam", labelPt: "Spam", labelEn: "Spam" },
@@ -1197,6 +1227,11 @@ const SOCIAL_REPORT_REASONS = [
 
 function cx(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
+}
+
+function publicSocialName(value?: string | null) {
+  const name = String(value || "").trim();
+  return name && !name.includes("@") && !/^user_/i.test(name) && !/^Trader\s+\d+$/i.test(name) ? name : "Trader";
 }
 
 function titleFromKey(key: string) {
@@ -1298,8 +1333,9 @@ function symbolName(symbol: string, locale: AppLocale = "pt-BR") {
 }
 
 function displayWatchlistLabel(item: { symbol: string; label?: string | null }, locale: AppLocale = "pt-BR") {
-  if (locale !== "en-US") return item.label || symbolName(item.symbol, locale);
-  return b3FutureLabel(item.symbol, locale) || DERIVATIVE_HINTS[item.symbol] || COMPANY_HINTS[item.symbol] || item.label || item.symbol;
+  const symbol = normalizeSymbol(item.symbol);
+  const label = b3FutureLabel(symbol, locale) || DERIVATIVE_HINTS[symbol] || COMPANY_HINTS[symbol] || String(item.label || "").trim();
+  return normalizeSymbol(label) === symbol || normalizeSymbol(label).replace(/\.SA$/, "") === symbol ? "" : label;
 }
 
 function sortWatchlistItemsAlphabetically(items: WatchlistItem[], locale: AppLocale = "pt-BR") {
@@ -1350,15 +1386,9 @@ function initialsFromName(value?: string | null) {
   return `${parts[0][0] || ""}${parts[parts.length - 1][0] || ""}`.toUpperCase();
 }
 
-function formatRelativeTime(timestamp?: number | null, locale: AppLocale = "pt-BR") {
-  const nowText = locale === "en-US" ? "now" : "agora";
-  if (!timestamp) return nowText;
-
-  const diffSeconds = Math.max(0, Math.floor(Date.now() / 1000) - Number(timestamp));
-  if (diffSeconds < 60) return nowText;
-  if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)} min`;
-  if (diffSeconds < 86400) return `${Math.floor(diffSeconds / 3600)} h`;
-  return `${Math.floor(diffSeconds / 86400)} d`;
+function renderSocialTimestamp(value: string | number | null | undefined, locale: AppLocale) {
+  const formatted = formatSocialTimestamp(value, locale);
+  return <time dateTime={formatted.dateTime} title={formatted.title}>{formatted.label}</time>;
 }
 
 function formatNewsClock(value?: string | null, locale: AppLocale = "pt-BR") {
@@ -2174,8 +2204,47 @@ function formatLocalePrice(value?: unknown, locale: AppLocale = "pt-BR") {
 
 function formatAssetMoney(value: unknown, symbol: string, locale: AppLocale) {
   if (parsePriceNumber(value) == null) return locale === "en-US" ? "No confirmed quote" : "Sem cotação confirmada";
-  const prefix = isBrazilianMarketSymbol(symbol) ? "R$" : locale === "en-US" ? "$" : "US$";
+  const prefix = isBrazilianMarketSymbol(symbol) ? "R$" : "$";
   return `${prefix} ${formatLocalePrice(value, locale)}`;
+}
+
+function formatSignedPrice(value: unknown, locale: AppLocale) {
+  const numeric = parsePriceNumber(value);
+  if (numeric == null) return "n/a";
+  return `${numeric > 0 ? "+" : ""}${formatLocalePrice(numeric, locale)}`;
+}
+
+function safeAssetLogoUrl(...values: Array<unknown>) {
+  for (const value of values) {
+    const url = String(value || "").trim();
+    if (url.startsWith("/") && !url.startsWith("//")) return url;
+    if (/^https:\/\//i.test(url)) return url;
+  }
+  return null;
+}
+
+function AssetMark({ symbol, name, logoUrl, compact = false }: { symbol: string; name?: string | null; logoUrl?: string | null; compact?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+    setLoaded(false);
+  }, [logoUrl]);
+
+  if (!logoUrl || failed) return null;
+
+  return (
+    <span className={cx("snbr-asset-mark", compact && "compact")} aria-label={name || symbol}>
+      <img
+        className={loaded ? "loaded" : ""}
+        src={logoUrl}
+        alt=""
+        onLoad={() => setLoaded(true)}
+        onError={() => setFailed(true)}
+      />
+    </span>
+  );
 }
 
 function friendlyAuthErrorMessage(error: unknown, locale: AppLocale = "pt-BR") {
@@ -2435,18 +2504,6 @@ function derivePublicScore(input: {
   return clampNumber(Number(score.toFixed(1)), 1, 10);
 }
 
-function derivePublicRsi(changePct?: number | null, trend?: string | null) {
-  const change = Number(changePct);
-  const trendText = String(trend || "").toLowerCase();
-  let value = 50;
-
-  if (Number.isFinite(change)) value += clampNumber(change * 7, -18, 18);
-  if (trendText.includes("alta") || trendText.includes("bull") || trendText.includes("buy")) value += 4;
-  if (trendText.includes("baixa") || trendText.includes("bear") || trendText.includes("sell")) value -= 4;
-
-  return clampNumber(Number(value.toFixed(1)), 20, 80);
-}
-
 function deriveRelativeVolume(volume?: number | null) {
   const numeric = Number(volume);
   if (!Number.isFinite(numeric) || numeric <= 0) return 1;
@@ -2504,7 +2561,7 @@ function firstFiniteNumber(...values: Array<unknown>) {
 function firstValidRsiNumber(...values: Array<unknown>) {
   for (const value of values) {
     const numeric = Number(value);
-    if (Number.isFinite(numeric) && numeric > 0 && numeric <= 100) return numeric;
+    if (Number.isFinite(numeric) && numeric >= 0 && numeric <= 100) return numeric;
   }
   return null;
 }
@@ -2519,50 +2576,45 @@ function describeRsiValue(value: number | null, locale: AppLocale = "pt-BR") {
     };
   }
 
+  // Canonical RSI copy thresholds (same on every surface): <30 sobrevenda,
+  // 30-45 pressão vendedora, 45-55 neutro, 55-70 pressão compradora, >70 sobrecompra.
   const formatted = value.toFixed(1);
-  if (value >= 70) {
+  const timeframeTag = locale === "en-US" ? "Daily RSI (D1)" : "RSI diário (D1)";
+  if (value > 70) {
     return {
       label: formatted,
-      hint: locale === "en-US" ? `${formatted}: strong up momentum, but overbought; avoid chasing late.` : `${formatted}: alta forte, mas sobrecomprado; evite perseguir preço atrasado.`,
+      hint: locale === "en-US" ? `${timeframeTag} at ${formatted}: overbought; avoid chasing late entries.` : `${timeframeTag} em ${formatted}: sobrecompra; evite perseguir preço atrasado.`,
       tone: "up" as const,
-      basis: locale === "en-US" ? `RSI: strong/up and overbought at ${formatted}.` : `RSI: alta forte e sobrecomprado nos ${formatted}.`,
+      basis: locale === "en-US" ? `RSI: overbought at ${formatted}.` : `RSI: sobrecompra nos ${formatted}.`,
     };
   }
-  if (value > 60) {
+  if (value >= 55) {
     return {
       label: formatted,
-      hint: locale === "en-US" ? `${formatted}: strong uptrend momentum; buyers still dominate.` : `${formatted}: tendência de alta forte; compradores ainda dominam.`,
+      hint: locale === "en-US" ? `${timeframeTag} at ${formatted}: buying pressure; buyers dominate.` : `${timeframeTag} em ${formatted}: pressão compradora; compradores dominam.`,
       tone: "up" as const,
-      basis: locale === "en-US" ? `RSI: strong up momentum at ${formatted}.` : `RSI: tendência de alta forte nos ${formatted}.`,
+      basis: locale === "en-US" ? `RSI: buying pressure at ${formatted}.` : `RSI: pressão compradora nos ${formatted}.`,
     };
   }
-  if (value >= 50) {
+  if (value >= 45) {
     return {
       label: formatted,
-      hint: locale === "en-US" ? `${formatted}: moderate up bias, still needs confirmation.` : `${formatted}: alta moderada, ainda precisa de confirmação.`,
+      hint: locale === "en-US" ? `${timeframeTag} at ${formatted}: neutral; wait for price/volume confirmation.` : `${timeframeTag} em ${formatted}: neutro; aguarde confirmação de preço/volume.`,
       tone: "watch" as const,
-      basis: locale === "en-US" ? `RSI: neutral to moderately bullish at ${formatted}.` : `RSI: neutro a alta moderada nos ${formatted}.`,
+      basis: locale === "en-US" ? `RSI: neutral at ${formatted}.` : `RSI: neutro nos ${formatted}.`,
     };
   }
-  if (value >= 40) {
+  if (value >= 30) {
     return {
       label: formatted,
-      hint: locale === "en-US" ? `${formatted}: seller bias; buyers need confirmation.` : `${formatted}: viés vendedor; compradores precisam confirmar reação.`,
-      tone: "watch" as const,
-      basis: locale === "en-US" ? `RSI: seller bias at ${formatted}.` : `RSI: viés vendedor nos ${formatted}.`,
-    };
-  }
-  if (value > 30) {
-    return {
-      label: formatted,
-      hint: locale === "en-US" ? `${formatted}: relevant downtrend pressure.` : `${formatted}: pressão de baixa relevante.`,
+      hint: locale === "en-US" ? `${timeframeTag} at ${formatted}: selling pressure; buyers need confirmation.` : `${timeframeTag} em ${formatted}: pressão vendedora; compradores precisam confirmar reação.`,
       tone: "down" as const,
-      basis: locale === "en-US" ? `RSI: bearish pressure at ${formatted}.` : `RSI: pressão de baixa nos ${formatted}.`,
+      basis: locale === "en-US" ? `RSI: selling pressure at ${formatted}.` : `RSI: pressão vendedora nos ${formatted}.`,
     };
   }
   return {
     label: formatted,
-    hint: locale === "en-US" ? `${formatted}: extreme sell pressure/oversold; watch for technical bounce before selling late.` : `${formatted}: venda extrema/sobrevenda; observe repique antes de vender atrasado.`,
+    hint: locale === "en-US" ? `${timeframeTag} at ${formatted}: oversold; watch for a technical bounce before selling late.` : `${timeframeTag} em ${formatted}: sobrevenda; observe repique antes de vender atrasado.`,
     tone: "down" as const,
     basis: locale === "en-US" ? `RSI: oversold at ${formatted}.` : `RSI: sobrevenda nos ${formatted}.`,
   };
@@ -2616,6 +2668,66 @@ function describeBiasValue(value: string, locale: AppLocale = "pt-BR") {
   return locale === "en-US"
     ? "No clear directional edge. Wait for confirmation before increasing exposure."
     : "Sem vantagem direcional clara. Aguarde confirmação antes de aumentar exposição.";
+}
+
+// Coherence invariant (single reconciliation point for the three voices):
+// - painel decision AGUARDAR/WAIT => Bias card may NOT say "Alta forte"/"Baixa forte";
+// - price < VWAP => bullish bias copy gets the VWAP qualification line;
+// - Score Mestre copy uses fixed bands (0-4 fraqueza, 4-6 neutro, 6-8 força moderada,
+//   8-10 força forte) and matches the painel decision state.
+function reconcileStatsWithDecision<T extends { label: string; value: string; hint: string }>(
+  stats: T[],
+  decisionAction: string,
+  price: number | null,
+  vwap: number | null,
+  locale: AppLocale,
+): T[] {
+  const isEnglish = locale === "en-US";
+  const waiting = /AGUARDAR|WAIT/i.test(String(decisionAction || ""));
+  const belowVwap = price != null && vwap != null && price < vwap;
+  return stats.map((item) => {
+    const label = normalizeUiText(item.label);
+    if (label === "bias") {
+      let value = item.value;
+      let hint = item.hint;
+      const normalizedValue = normalizeUiText(item.value);
+      if (waiting && (normalizedValue.includes("alta forte") || normalizedValue.includes("strong uptrend"))) {
+        value = isEnglish ? "Buyer bias (awaiting confirmation)" : "Viés comprador (aguardando confirmação)";
+        hint = isEnglish
+          ? "The panel decision is WAIT: buyer bias only counts after price/volume confirmation."
+          : "O painel está em AGUARDAR: o viés comprador só vale após confirmação de preço/volume.";
+      } else if (waiting && (normalizedValue.includes("baixa forte") || normalizedValue.includes("strong downtrend"))) {
+        value = isEnglish ? "Seller bias (awaiting confirmation)" : "Viés vendedor (aguardando confirmação)";
+        hint = isEnglish
+          ? "The panel decision is WAIT: seller bias only counts after price/volume confirmation."
+          : "O painel está em AGUARDAR: o viés vendedor só vale após confirmação de preço/volume.";
+      }
+      if (belowVwap && /alta|uptrend|compra|buyer/.test(normalizeUiText(value))) {
+        hint = `${hint} ${isEnglish ? "Price below VWAP — limited strength." : "Preço abaixo do VWAP — força limitada."}`;
+      }
+      return value === item.value && hint === item.hint ? item : { ...item, value, hint };
+    }
+    if (label.includes("score")) {
+      const numeric = Number(item.value);
+      if (!Number.isFinite(numeric)) return item;
+      const strength = numeric < 4
+        ? (isEnglish ? "weakness" : "fraqueza")
+        : numeric < 6
+          ? (isEnglish ? "neutral" : "neutro")
+          : numeric < 8
+            ? (isEnglish ? "moderate strength" : "força moderada")
+            : (isEnglish ? "strong strength" : "força forte");
+      const sentence = numeric < 4
+        ? (isEnglish ? "avoid longs without confirmation." : "evite compras sem confirmação.")
+        : numeric < 6
+          ? (isEnglish ? "wait for price/volume confirmation." : "aguarde confirmação de preço/volume.")
+          : waiting
+            ? (isEnglish ? "favors buying AFTER confirmation." : "favorece compra APÓS confirmação.")
+            : (isEnglish ? "favors buying with confirmation." : "favorece compra com confirmação.");
+      return { ...item, hint: `${item.value}: ${strength} — ${sentence}` };
+    }
+    return item;
+  });
 }
 
 function firstPositiveFiniteNumber(...values: Array<unknown>) {
@@ -3665,6 +3777,10 @@ function strategicPanelText(value: unknown, fallback = "") {
 }
 
 function strategicPanelTone(panel?: StrategicPanel | null): DecisionTone {
+  const canonical = panel?.canonical_analysis;
+  if (canonical?.decision === "CONFLICT" || canonical?.decision === "BLOCKED" || canonical?.suggested_trade === "NO_TRADE") return "watch";
+  if (canonical?.direction === "BULLISH") return "bullish";
+  if (canonical?.direction === "BEARISH") return "bearish";
   const action = strategicPanelText(panel?.recommended_action).toUpperCase();
   const direction = strategicPanelText(panel?.probable_direction_block?.direction).toUpperCase();
   const risk = strategicPanelText(panel?.risk_block?.level).toLowerCase();
@@ -3679,7 +3795,12 @@ function strategicPanelDecisionCards(panel: StrategicPanel, locale: AppLocale): 
   const isEnglish = locale === "en-US";
   const score = firstFiniteNumber((panel.master_score_block as any)?.score);
   const displayScore = normalizeMasterScoreForDisplay(score);
-  const direction = strategicPanelText(panel.probable_direction_block?.visual_label || panel.probable_direction_block?.label, isEnglish ? "Neutral" : "Neutra");
+  const canonicalAnalysis = panel.canonical_analysis;
+  const direction = canonicalAnalysis?.direction === "BULLISH"
+    ? (isEnglish ? "Up" : "Alta")
+    : canonicalAnalysis?.direction === "BEARISH"
+      ? (isEnglish ? "Down" : "Baixa")
+      : (isEnglish ? "Neutral" : "Neutra");
   const action = strategicPanelText(panel.recommended_action, isEnglish ? "WAIT" : "AGUARDAR");
   const audit = strategicPanelText(panel.auditor_block?.visual_status, isEnglish ? "Attention" : "Atenção");
   const risk = strategicPanelText(panel.risk_block?.visual_level || panel.risk_block?.level, isEnglish ? "Moderate" : "Moderado");
@@ -3764,6 +3885,7 @@ function strategicConclusionFromPanel(panel: StrategicPanel, locale: AppLocale):
 function operationalDecisionFromPanel(panel: StrategicPanel, locale: AppLocale): OperationalDecision {
   const isEnglish = locale === "en-US";
   const tone = strategicPanelTone(panel);
+  const canonicalAnalysis = panel.canonical_analysis;
   const score = firstFiniteNumber((panel.master_score_block as any)?.score);
   const action = strategicPanelText(panel.recommended_action, isEnglish ? "WAIT" : "AGUARDAR");
   const confidence = strategicPanelText((panel.master_score_block as any)?.confidence, isEnglish ? "Low" : "Baixa");
@@ -3778,7 +3900,7 @@ function operationalDecisionFromPanel(panel: StrategicPanel, locale: AppLocale):
     tone,
     confidence: score != null ? clampNumber(score, 0, 100) : null,
     confidenceLabel: confidence,
-    bias: strategicPanelText(panel.probable_direction_block?.visual_label || panel.probable_direction_block?.label, isEnglish ? "Neutral" : "Neutra"),
+    bias: canonicalAnalysis?.bias === "BULLISH" ? (isEnglish ? "Bullish" : "Comprador") : canonicalAnalysis?.bias === "BEARISH" ? (isEnglish ? "Bearish" : "Vendedor") : (isEnglish ? "Neutral" : "Neutro"),
     risk: strategicPanelText(panel.risk_block?.visual_level || panel.risk_block?.level, isEnglish ? "Moderate" : "Moderado"),
     reasons: reasons.length ? reasons : [strategicPanelText(panel.strategic_panel_summary, isEnglish ? "Strategic panel still has limited context." : "Painel estratégico ainda com contexto limitado.")],
     levels: conditions.length
@@ -3929,6 +4051,7 @@ type CanonicalChartLevelZone = {
   kind: "support" | "resistance";
   label: string;
   price: number;
+  as_of?: string | null;
 };
 
 function resolveCanonicalChartLevelZones(chart: ChartPayload | null): CanonicalChartLevelZone[] {
@@ -5739,75 +5862,6 @@ function formatToolMetricValue(value: unknown, locale: AppLocale = "pt-BR") {
   return humanizeMachineLabel(String(value ?? "sem leitura"), locale);
 }
 
-function buildQuoteFallbackChart(
-  symbol: string,
-  interval: string,
-  quote?: QuotePayload | null,
-  trend?: string | null,
-): ChartPayload | null {
-  const price = firstFiniteNumber(quote?.price);
-  if (price == null || price <= 0) return null;
-
-  const normalizedInterval = String(interval || "1D").toUpperCase();
-  const { count, stepMs, startMs } = chartFallbackShape(normalizedInterval);
-  const change = firstFiniteNumber(quote?.change);
-  const changePct = firstFiniteNumber(quote?.change_pct) ?? 0;
-  const startPrice = change != null ? Math.max(price - change, price * 0.97) : price * (1 - changePct / 100);
-  const seed = normalizeSymbol(symbol).split("").reduce((total, char) => total + char.charCodeAt(0), 0);
-  const trendText = String(trend || "").toLowerCase();
-  const bullish = changePct > 0 || trendText.includes("alta") || trendText.includes("buy") || trendText.includes("compra");
-  const volatility = Math.max(price * 0.0015, Math.abs(price - startPrice) * 0.18, price * 0.0008);
-  const ohlc = Array.from({ length: count }, (_, index) => {
-    const t = count === 1 ? 1 : index / (count - 1);
-    const wave = Math.sin((index + seed) * 0.72) * volatility + Math.cos((index + seed) * 0.31) * volatility * 0.55;
-    const close = index === count - 1 ? price : startPrice + (price - startPrice) * t + wave;
-    const previousBase = index === 0 ? startPrice : startPrice + (price - startPrice) * ((index - 1) / (count - 1));
-    const open = index === 0 ? startPrice : previousBase + Math.sin((index - 1 + seed) * 0.72) * volatility;
-    const high = Math.max(open, close) + volatility * (0.8 + ((index + seed) % 5) / 10);
-    const low = Math.min(open, close) - volatility * (0.8 + ((index + seed) % 4) / 10);
-    return {
-      time: new Date(startMs + index * stepMs).toISOString(),
-      open,
-      high,
-      low,
-      close,
-      volume: Math.max(1, Number(quote?.volume || 0) / count) * (0.65 + ((index + seed) % 9) / 10),
-      ema9: close,
-      ema21: close,
-      supertrend: close,
-      supertrend_side: bullish ? "buy" : "sell",
-      source: "quote_visual_fallback",
-    };
-  });
-  const highs = ohlc.map((bar) => bar.high);
-  const lows = ohlc.map((bar) => bar.low);
-  const resistance = Math.max(...highs);
-  const support = Math.min(...lows);
-
-  return {
-    ticker: normalizeSymbol(symbol),
-    interval: normalizedInterval,
-    ohlc,
-    series: ohlc,
-    markers: [],
-    zones: [
-      { label: "resistência", price: resistance },
-      { label: "suporte", price: support },
-    ],
-    summary: {
-      ticker: normalizeSymbol(symbol),
-      latest_close: price,
-      trend_bias: bullish ? "alta" : changePct < 0 ? "baixa" : "lateral",
-      source: "quote_visual_fallback",
-      fallback: true,
-      synthetic: true,
-      interval: normalizedInterval,
-    },
-    fallback: true,
-    synthetic: true,
-  };
-}
-
 function buildPublicToolNarrative(input: {
   tabId: string;
   symbol: string;
@@ -6448,10 +6502,11 @@ function buildWatchlist(
   insight: PublicInsightPayload | null = null,
   selectedTicker: string,
   customItems: WatchlistItem[] = [],
+  canonicalItems: WatchlistItem[] = PRELOADED_UNIVERSE,
 ) {
   const bySymbol = new Map<string, WatchlistItem>();
 
-  for (const item of [...PRELOADED_UNIVERSE, ...customItems]) {
+  for (const item of [...canonicalItems, ...customItems]) {
     if (isRemovedFutureSymbol(item.symbol)) continue;
     bySymbol.set(item.symbol, { ...item });
   }
@@ -6501,21 +6556,16 @@ function buildWatchlist(
         category: guessCategory(normalized),
       };
       const derivedChangePct = liveQuote.change_pct ?? deriveChangePercent(liveQuote.change ?? null, liveQuote.price ?? null);
-      const derivedTrend = current.trend || (derivedChangePct != null ? (derivedChangePct >= 0 ? "alta" : "baixa") : null);
       bySymbol.set(normalized, {
         ...current,
+        logoUrl: safeAssetLogoUrl(liveQuote.logo_url, liveQuote.icon_url, current.logoUrl),
         price: liveQuote.price ?? current.price ?? null,
         change: liveQuote.change ?? current.change ?? null,
         changePct: derivedChangePct ?? current.changePct ?? null,
         volume: liveQuote.volume ?? current.volume ?? null,
-        score: current.score ?? derivePublicScore({
-          changePct: derivedChangePct ?? null,
-          rsi: current.rsi ?? null,
-          trend: derivedTrend,
-          volume: liveQuote.volume ?? current.volume ?? null,
-        }),
-        trend: derivedTrend ?? current.trend ?? null,
-        rsi: current.rsi ?? derivePublicRsi(derivedChangePct, derivedTrend),
+        score: current.score ?? null,
+        trend: current.trend ?? null,
+        rsi: current.rsi ?? null,
       });
     }
 
@@ -6565,30 +6615,6 @@ function buildSyntheticSearchCandidate(query: string, existingSymbols: string[])
   } satisfies WatchlistItem;
 }
 
-function buildFallbackPoll(symbol: string): PollPayload {
-  const normalized = normalizeSymbol(symbol);
-  return {
-    symbol: normalized,
-    status: "fallback_missing_backend_poll",
-    question: `${normalized}: sem enquete institucional carregada; qual confirmação falta para validar a tese da semana?`,
-    total_votes: 0,
-    options: [
-      {
-        key: "price_volume_confirmation",
-        label: "Preço romper nível com volume real",
-        votes: 0,
-        pct: 0,
-      },
-      {
-        key: "flow_news_confirmation",
-        label: "Fluxo ou notícia confirmar contexto",
-        votes: 0,
-        pct: 0,
-      },
-    ],
-  };
-}
-
 type NormalizedPollOption = PollOption & {
   pct: number;
 };
@@ -6598,11 +6624,10 @@ type NormalizedPoll = PollPayload & {
   total_votes: number;
 };
 
-function normalizePollPayload(poll: PollPayload | null | undefined, symbol: string): NormalizedPoll {
-  const fallback = buildFallbackPoll(symbol);
-  const source = poll?.options?.length && !isGenericPollQuestion(poll.question)
-    ? poll
-    : fallback;
+function normalizePollPayload(poll: PollPayload | null | undefined, symbol: string): NormalizedPoll | null {
+  if (!poll || !sameSymbol(poll.symbol, symbol)) return null;
+  if (!poll.question || !poll.options?.length || isGenericPollQuestion(poll.question)) return null;
+  const source = poll;
   const rawOptions = Array.isArray(source.options) ? source.options : [];
   const sanitizedOptions = rawOptions.map((option) => ({
     ...option,
@@ -6617,19 +6642,13 @@ function normalizePollPayload(poll: PollPayload | null | undefined, symbol: stri
     ...option,
     pct: totalVotes > 0 ? (option.pct || Math.round((option.votes / totalVotes) * 100)) : 0,
   }));
-  const fallbackOptions = fallback.options || [];
-
   return {
-    ...fallback,
     ...source,
     symbol,
-    question: source.question || fallback.question,
+    question: source.question,
     status: source.status || "active",
     total_votes: totalVotes,
-    options: normalizedOptions.length ? normalizedOptions : fallbackOptions.map((option) => ({
-      ...option,
-      pct: 0,
-    })),
+    options: normalizedOptions,
   };
 }
 
@@ -6654,9 +6673,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [, setBootstrap] = useState<PublicBootstrap | null>(null);
+  const [bootstrap, setBootstrap] = useState<PublicBootstrap | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
   const [publicAiTools, setPublicAiTools] = useState<PublicAiToolsPayload | null>(null);
+  const [publicAiCatalog, setPublicAiCatalog] = useState<PublicAiToolsPayload | null>(null);
   const [access, setAccess] = useState<UserAccess | null>(null);
   const [chart, setChart] = useState<any>(null);
   const [publicChart, setPublicChart] = useState<any>(null);
@@ -6692,10 +6712,37 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [watchCategory, setWatchCategory] = useState<"Todos" | (typeof CATEGORY_ORDER)[number]>("Todos");
   const [remoteSearchSymbols, setRemoteSearchSymbols] = useState<string[]>([]);
   const [customWatchItems, setCustomWatchItems] = useState<WatchlistItem[]>([]);
-  const [activeWatchSymbols, setActiveWatchSymbols] = useState<string[]>(() => PRELOADED_UNIVERSE.map((item) => item.symbol));
-  const [advancedMode, setAdvancedMode] = useState(false);
-  const [appLocale, setAppLocale] = useState<AppLocale>(readInitialLocale);
+  const [removedWatchSymbols, setRemovedWatchSymbols] = useState<string[]>([]);
+  const [watchlistHydrated, setWatchlistHydrated] = useState(false);
+  const [appLocale, setAppLocale] = useState<AppLocale>("pt-BR");
+  const [appLocaleHydrated, setAppLocaleHydrated] = useState(false);
   const isUsLocale = appLocale === "en-US";
+  const canonicalUniverse = useMemo<WatchlistItem[]>(() => {
+    const fromBackend = bootstrap?.market_universe?.items;
+    if (!Array.isArray(fromBackend) || !fromBackend.length) return PRELOADED_UNIVERSE;
+    const validCategories = new Set<string>(CATEGORY_ORDER);
+    const byIdentity = new Map<string, WatchlistItem>();
+    for (const item of fromBackend) {
+      const symbol = normalizeSymbol(item.symbol);
+      const category = String(item.category || "");
+      if (!symbol || !validCategories.has(category) || isRemovedFutureSymbol(symbol)) continue;
+      const identity = `${String(item.market || category).toUpperCase()}|${String(item.exchange || "").toUpperCase()}|${symbol}`;
+      byIdentity.set(identity, {
+        symbol,
+        label: displayWatchlistLabel({ symbol, label: item.label }, appLocale),
+        category,
+        logoUrl: safeAssetLogoUrl(item.logo_url, item.icon_url),
+      });
+    }
+    return byIdentity.size ? Array.from(byIdentity.values()) : PRELOADED_UNIVERSE;
+  }, [appLocale, bootstrap?.market_universe?.items]);
+  const activeWatchSymbols = useMemo(() => {
+    const removed = new Set(removedWatchSymbols.map(normalizeSymbol));
+    return Array.from(new Set([...canonicalUniverse, ...customWatchItems]
+      .map((item) => normalizeSymbol(item.symbol))
+      .filter((symbol) => symbol && !removed.has(symbol))));
+  }, [canonicalUniverse, customWatchItems, removedWatchSymbols]);
+  const [advancedMode, setAdvancedMode] = useState(false);
   const normalizedAccessPlan = String(access?.plan || "").toLowerCase();
   const normalizedAccessStatus = String(access?.plan_status || "").toLowerCase();
   const proModeLocked = Boolean(
@@ -6706,11 +6753,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   );
 
   useEffect(() => {
+    setAppLocale(readInitialLocale());
+    setAppLocaleHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!appLocaleHydrated) return;
     if (typeof window === "undefined") return;
     writeStorageValue(APP_LOCALE_STORAGE_KEY, appLocale);
     document.documentElement.lang = appLocale === "en-US" ? "en-US" : "pt-BR";
     document.documentElement.dataset.locale = appLocale;
-  }, [appLocale]);
+  }, [appLocale, appLocaleHydrated]);
 
   useEffect(() => {
     if ((focusedTab || activeTab) !== "referrals") return;
@@ -6739,8 +6792,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, [activeTab, focusedTab]);
 
   const publicWatchSymbols = useMemo(
-    () => Array.from(new Set([...PRELOADED_UNIVERSE.map((item) => item.symbol), ...customWatchItems.map((item) => item.symbol), selectedTicker].map(normalizeSymbol).filter(Boolean))).filter((symbol) => !isRemovedFutureSymbol(symbol)),
-    [customWatchItems, selectedTicker],
+    () => Array.from(new Set([...canonicalUniverse.map((item) => item.symbol), ...customWatchItems.map((item) => item.symbol), selectedTicker].map(normalizeSymbol).filter(Boolean))).filter((symbol) => !isRemovedFutureSymbol(symbol)),
+    [canonicalUniverse, customWatchItems, selectedTicker],
   );
   const publicTickerTapeSymbols = useMemo(
     () => Array.from(new Set([selectedTicker, ...FIXED_TAPE_SYMBOLS])),
@@ -6750,19 +6803,19 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     () =>
       Array.from(
         new Set(
-          [...PRELOADED_UNIVERSE, ...customWatchItems]
+          [...canonicalUniverse, ...customWatchItems]
             .filter((item) => !isRemovedFutureSymbol(item.symbol))
             .filter((item) => activeWatchSymbols.map(normalizeSymbol).includes(item.symbol))
             .filter((item) => watchCategory === "Todos" || item.category === watchCategory)
             .map((item) => item.symbol),
         ),
     ),
-    [activeWatchSymbols, customWatchItems, watchCategory],
+    [activeWatchSymbols, canonicalUniverse, customWatchItems, watchCategory],
   );
   const priorityPublicWatchSymbols = useMemo(() => {
     const activeSet = new Set(activeWatchSymbols.map(normalizeSymbol).filter(Boolean));
     const fromCategory = (category: WatchlistItem["category"], limit: number) =>
-      PRELOADED_UNIVERSE
+      canonicalUniverse
         .filter((item) => item.category === category)
         .filter((item) => !activeSet.size || activeSet.has(item.symbol))
         .slice(0, limit)
@@ -6779,7 +6832,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         ...customWatchItems.map((item) => normalizeSymbol(item.symbol)).filter((symbol) => symbol && !isRemovedFutureSymbol(symbol)),
       ]),
     );
-  }, [activeWatchSymbols, customWatchItems, selectedTicker]);
+  }, [activeWatchSymbols, canonicalUniverse, customWatchItems, selectedTicker]);
   const publicTickerTapeKey = publicTickerTapeSymbols.join("|");
   const publicWatchKey = publicWatchSymbols.join("|");
   const priorityPublicWatchKey = priorityPublicWatchSymbols.join("|");
@@ -6791,6 +6844,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [accountPanel, setAccountPanel] = useState<AccountPanel>("perfil");
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [pollOpen, setPollOpen] = useState(false);
+  const [accessOpen, setAccessOpen] = useState(false);
+  const [strategicPanelOpen, setStrategicPanelOpen] = useState(true);
+  const [strategicPanelHydrated, setStrategicPanelHydrated] = useState(false);
   const [strategicConclusionOpen, setStrategicConclusionOpen] = useState(true);
   const [strategicAnalysisMinute, setStrategicAnalysisMinute] = useState(() => currentFiveMinuteBucket());
   const [selectedInstitutionalSectionId, setSelectedInstitutionalSectionId] = useState<string | null>(null);
@@ -6798,7 +6855,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [showZones, setShowZones] = useState(DEFAULT_CHART_SETTINGS.show_zones);
   const [showPriceLine, setShowPriceLine] = useState(DEFAULT_CHART_SETTINGS.show_price_line);
   const [showVwap, setShowVwap] = useState(DEFAULT_CHART_SETTINGS.show_vwap);
-  const [showAverages, setShowAverages] = useState(DEFAULT_CHART_SETTINGS.show_averages);
   const [showMacd, setShowMacd] = useState(DEFAULT_CHART_SETTINGS.show_macd);
   const [showRsi, setShowRsi] = useState(DEFAULT_CHART_SETTINGS.show_rsi);
   const [showSupport, setShowSupport] = useState(DEFAULT_CHART_SETTINGS.show_support);
@@ -6811,10 +6867,30 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [postText, setPostText] = useState("");
   const [postSentiment, setPostSentiment] = useState("bullish");
   const [postFile, setPostFile] = useState<File | null>(null);
+  const postFilePreviewUrl = useMemo(() => (postFile ? URL.createObjectURL(postFile) : null), [postFile]);
+  useEffect(() => () => {
+    if (postFilePreviewUrl) URL.revokeObjectURL(postFilePreviewUrl);
+  }, [postFilePreviewUrl]);
   const [posting, setPosting] = useState(false);
   const [composerEmojiOpen, setComposerEmojiOpen] = useState(false);
+  const [recentComposerEmojis, setRecentComposerEmojis] = useState<string[]>(() => {
+    try {
+      const parsed = JSON.parse(readStorageValue(RECENT_EMOJIS_STORAGE_KEY) || "[]");
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string").slice(0, 10) : [];
+    } catch {
+      return [];
+    }
+  });
   const [composerGifOpen, setComposerGifOpen] = useState(false);
   const [gifQuery, setGifQuery] = useState("");
+  const [gifResults, setGifResults] = useState<GifSearchItem[]>([]);
+  const [gifSearchStatus, setGifSearchStatus] = useState<"idle" | "loading" | "ready" | "empty" | "unavailable" | "error">("idle");
+  const [gifSearchReason, setGifSearchReason] = useState("");
+  const [selectedGif, setSelectedGif] = useState<GifSearchItem | null>(null);
+  const [pollStatus, setPollStatus] = useState<"loading" | "ready" | "empty" | "error">("loading");
+  const [pollReason, setPollReason] = useState("");
+  const [aiRequestNonce, setAiRequestNonce] = useState(0);
+  const [aiRequestState, setAiRequestState] = useState<{ key: string; status: string; reason: string }>({ key: "", status: "IDLE", reason: "" });
   const [predictionOpen, setPredictionOpen] = useState(false);
   const [predictionSymbol, setPredictionSymbol] = useState(queryTicker);
   const [predictionTargetPrice, setPredictionTargetPrice] = useState("");
@@ -6824,7 +6900,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [pollCommentText, setPollCommentText] = useState("");
   const [pollCommentPosting, setPollCommentPosting] = useState(false);
   const [commentDrafts, setCommentDrafts] = useState<Record<number, string>>({});
+  const [commentComposers, setCommentComposers] = useState<Record<number, CommentComposerState>>({});
+  const commentFileInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const [commentingPostId, setCommentingPostId] = useState<number | null>(null);
+  const pendingLikePostIdsRef = useRef(new Set<number>());
+  const [pendingLikePostIds, setPendingLikePostIds] = useState<Set<number>>(new Set());
   const [postMenuId, setPostMenuId] = useState<number | null>(null);
   const [reportTargetPost, setReportTargetPost] = useState<FeedPost | null>(null);
   const [reportReason, setReportReason] = useState("spam");
@@ -6845,11 +6925,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const profileFileInputRef = useRef<HTMLInputElement | null>(null);
   const loginEmailInputRef = useRef<HTMLInputElement | null>(null);
   const pollCommentInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const tabListRef = useRef<HTMLDivElement | null>(null);
   const composerCardRef = useRef<HTMLDivElement | null>(null);
   const leftRailRef = useRef<HTMLElement | null>(null);
   const aiSoundLastKeyRef = useRef<string | null>(null);
   const aiSoundSuppressedUntilRef = useRef<number>(0);
+  const gifSearchAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     publicQuotesRef.current = publicQuotes;
@@ -6935,6 +7015,53 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, []);
 
   useEffect(() => {
+    try {
+      const raw = readStorageValue(WATCHLIST_STATE_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { removed_symbols?: unknown; custom_items?: unknown };
+        if (Array.isArray(parsed.removed_symbols)) {
+          setRemovedWatchSymbols(Array.from(new Set(parsed.removed_symbols.map((item) => normalizeSymbol(String(item))).filter(Boolean))));
+        }
+        if (Array.isArray(parsed.custom_items)) {
+          const allowedCategories = new Set<string>(CATEGORY_ORDER);
+          setCustomWatchItems(parsed.custom_items.flatMap((rawItem) => {
+            if (!rawItem || typeof rawItem !== "object") return [];
+            const item = rawItem as Partial<WatchlistItem>;
+            const symbol = normalizeSymbol(String(item.symbol || ""));
+            const category = String(item.category || "");
+            if (!symbol || !allowedCategories.has(category) || isRemovedFutureSymbol(symbol)) return [];
+            return [{ symbol, category, label: String(item.label || symbolName(symbol)) }];
+          }));
+        }
+      }
+    } catch {
+      setRemovedWatchSymbols([]);
+      setCustomWatchItems([]);
+    } finally {
+      setWatchlistHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!watchlistHydrated) return;
+    writeStorageValue(WATCHLIST_STATE_STORAGE_KEY, JSON.stringify({
+      removed_symbols: removedWatchSymbols,
+      custom_items: customWatchItems.map(({ symbol, label, category }) => ({ symbol, label, category })),
+    }));
+  }, [customWatchItems, removedWatchSymbols, watchlistHydrated]);
+
+  useEffect(() => {
+    const stored = readStorageValue(STRATEGIC_PANEL_STORAGE_KEY);
+    setStrategicPanelOpen(stored !== "closed");
+    setStrategicPanelHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!strategicPanelHydrated) return;
+    writeStorageValue(STRATEGIC_PANEL_STORAGE_KEY, strategicPanelOpen ? "open" : "closed");
+  }, [strategicPanelHydrated, strategicPanelOpen]);
+
+  useEffect(() => {
     const storedMode = readStorageValue(WORKSPACE_MODE_STORAGE_KEY);
     setAdvancedMode(storedMode === "pro");
   }, []);
@@ -6999,7 +7126,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     setShowZones(chartSettings?.show_zones ?? DEFAULT_CHART_SETTINGS.show_zones);
     setShowPriceLine(chartSettings?.show_price_line ?? DEFAULT_CHART_SETTINGS.show_price_line);
     setShowVwap(chartSettings?.show_vwap ?? DEFAULT_CHART_SETTINGS.show_vwap);
-    setShowAverages(chartSettings?.show_averages ?? DEFAULT_CHART_SETTINGS.show_averages);
     setShowMacd(chartSettings?.show_macd ?? DEFAULT_CHART_SETTINGS.show_macd);
     setShowRsi(chartSettings?.show_rsi ?? DEFAULT_CHART_SETTINGS.show_rsi);
     setShowSupport(chartSettings?.show_support ?? DEFAULT_CHART_SETTINGS.show_support);
@@ -7011,7 +7137,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     workspace?.layout?.chart_settings?.show_zones,
     workspace?.layout?.chart_settings?.show_price_line,
     workspace?.layout?.chart_settings?.show_vwap,
-    workspace?.layout?.chart_settings?.show_averages,
     workspace?.layout?.chart_settings?.show_macd,
     workspace?.layout?.chart_settings?.show_rsi,
     workspace?.layout?.chart_settings?.show_support,
@@ -7021,16 +7146,25 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   ]);
 
   useEffect(() => {
-    if (focusedTab || (!postMenuId && !composerEmojiOpen && !composerGifOpen)) return;
+    const commentToolOpen = Object.values(commentComposers).some((composer) => Boolean(composer.tool));
+    if (!postMenuId && !composerEmojiOpen && !composerGifOpen && !commentToolOpen) return;
+
+    function closeCommentTools() {
+      setCommentComposers((current) => Object.fromEntries(
+        Object.entries(current).map(([postId, composer]) => [postId, { ...composer, tool: null }]),
+      ));
+    }
 
     function handlePointerDown(event: PointerEvent) {
       const target = event.target as Element | null;
       if (!target) return;
       if (postMenuId && target.closest("[data-post-menu-root]")) return;
       if ((composerEmojiOpen || composerGifOpen) && target.closest("[data-composer-controls]")) return;
+      if (commentToolOpen && target.closest("[data-comment-composer]")) return;
       setPostMenuId(null);
       setComposerEmojiOpen(false);
       setComposerGifOpen(false);
+      closeCommentTools();
     }
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -7038,6 +7172,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setPostMenuId(null);
       setComposerEmojiOpen(false);
       setComposerGifOpen(false);
+      closeCommentTools();
     }
 
     document.addEventListener("pointerdown", handlePointerDown);
@@ -7046,7 +7181,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [composerEmojiOpen, composerGifOpen, focusedTab, postMenuId]);
+  }, [commentComposers, composerEmojiOpen, composerGifOpen, postMenuId]);
 
   useEffect(() => {
     if (!token || !watchlistQuery.trim()) {
@@ -7117,27 +7252,65 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     const requestedTicker = deferredTicker;
+    setPoll(null);
+    setPollStatus("loading");
+    setPollReason("");
 
-    getPoll(requestedTicker)
+    getPoll(requestedTicker, appLocale, controller.signal)
       .then((nextPoll) => {
         if (cancelled) return;
-        setPoll(normalizePollPayload(nextPoll, requestedTicker));
+        const normalized = normalizePollPayload(nextPoll, requestedTicker);
+        setPoll(normalized);
+        setPollStatus(normalized ? "ready" : "empty");
+        setPollReason(normalized ? "" : String(nextPoll?.reason || nextPoll?.status || "NO_CONTEXTUAL_EVENT"));
       })
-      .catch(() => {
+      .catch((requestError: Error) => {
         if (cancelled) return;
-        setPoll((current) => (sameSymbol(current?.symbol, requestedTicker) ? current : buildFallbackPoll(requestedTicker)));
+        if (requestError.name === "AbortError") return;
+        setPoll(null);
+        setPollStatus("error");
+        setPollReason(requestError.message || "poll_request_failed");
       });
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [deferredTicker]);
+  }, [appLocale, deferredTicker]);
+
+  useEffect(() => {
+    // Anonymous AI tab badges: the bundle/ai-tools calls are symbol-filtered and
+    // return empty tool arrays whenever the selected ticker has no qualified
+    // finding, which zeroed every badge. Fetch the unfiltered public catalog
+    // once so badges can show the real per-tool counts from the endpoint.
+    if (token) {
+      setPublicAiCatalog(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    fetch(`${resolveApiBase()}/public/market/ai-tools`, { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (!cancelled && payload && typeof payload === "object") {
+          setPublicAiCatalog(payload as PublicAiToolsPayload);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [token]);
 
   useEffect(() => {
     if (!token) {
       let cancelled = false;
+      const controller = new AbortController();
       setLoading(true);
+      setError("");
       setAccess(null);
       setWorkspace(null);
       setChart(null);
@@ -7147,14 +7320,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setPushStatus(null);
       setMediaStatus(null);
 
-      getPublicMarketBundle(deferredTicker, chartInterval)
+      getPublicMarketBundle(deferredTicker, chartInterval, appLocale, controller.signal)
         .then((bundle) => {
           if (cancelled) return;
 
           const nextQuote = bundle?.quote || null;
           const nextInsight = bundle?.insight || null;
           const nextChart = bundle?.chart || null;
-          const nextNews = bundle?.news || null;
+          const nextNews = !bundle?.news?.locale || bundle.news.locale === appLocale ? bundle.news : null;
           const nextPublicAiTools = bundle?.ai_tools || null;
 
           if (nextQuote?.symbol) {
@@ -7170,7 +7343,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             const currentCount = Number(current?.count ?? current?.items?.length ?? 0);
             const nextCount = Number(nextNews?.count ?? nextNews?.items?.length ?? 0);
             if (sameSymbol(current?.symbol, deferredTicker) && currentCount > 0 && nextCount <= 0) return current;
-            return nextNews;
+            return nextNews ?? null;
           });
           setPublicAiTools(nextPublicAiTools);
         })
@@ -7216,6 +7389,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
       return () => {
         cancelled = true;
+        controller.abort();
         window.clearTimeout(fullWatchlistTimer);
       };
     }
@@ -7224,13 +7398,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     setPublicAiTools(null);
 
     let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setError("");
 
     Promise.all([
       getAccess(token),
       getWorkspace(token),
-      getWorkspaceTickerBundle(token, deferredTicker, chartInterval),
+      getWorkspaceTickerBundle(token, deferredTicker, chartInterval, appLocale, controller.signal),
     ])
       .then(([nextAccess, nextWorkspace, nextTickerBundle]) => {
         if (cancelled) return;
@@ -7240,6 +7415,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           setAccess(nextAccess);
           setWorkspace(nextWorkspace);
           setChart(nextTickerBundle.chart || null);
+          setPublicInsight(
+            sameSymbol(nextTickerBundle.insight?.symbol, deferredTicker)
+              ? { ...nextTickerBundle.insight, symbol: deferredTicker }
+              : null,
+          );
           setPublicChart(null);
           setFeed(nextTickerBundle.feed || null);
           setNews((current) => {
@@ -7273,8 +7453,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [token, deferredTicker, chartInterval, focusedTab, priorityPublicWatchKey, publicTickerTapeKey, publicWatchKey]);
+  }, [token, deferredTicker, chartInterval, appLocale, focusedTab, priorityPublicWatchKey, publicTickerTapeKey, publicWatchKey]);
 
   useEffect(() => {
     if (token) return;
@@ -7287,16 +7468,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     if (chartReady && insightReady && (!newsTabOpen || newsReady)) return;
 
     let cancelled = false;
+    const controller = new AbortController();
     const retries = [1800, 5200, 9500];
     const timers = retries.map((delay) =>
       window.setTimeout(() => {
-        getPublicMarketBundle(deferredTicker, chartInterval)
+        getPublicMarketBundle(deferredTicker, chartInterval, appLocale, controller.signal)
           .then((bundle) => {
             if (cancelled) return;
             const nextQuote = bundle?.quote || null;
             const nextInsight = bundle?.insight || null;
             const nextChart = bundle?.chart || null;
-            const nextNews = bundle?.news || null;
+            const nextNews = !bundle?.news?.locale || bundle.news.locale === appLocale ? bundle.news : null;
             const nextPublicAiTools = bundle?.ai_tools || null;
             if (nextQuote?.symbol) {
               const normalizedQuoteSymbol = normalizeSymbol(nextQuote.symbol);
@@ -7335,6 +7517,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
     return () => {
       cancelled = true;
+      controller.abort();
       timers.forEach((timer) => window.clearTimeout(timer));
     };
   }, [
@@ -7355,18 +7538,23 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     activeTab,
     focusedTab,
     strategicAnalysisMinute,
+    appLocale,
   ]);
 
   useEffect(() => {
-    const newsTabOpen = (focusedTab || activeTab) === "news";
+    // "Notícia agora" lives on the grafico tab (default), so the public news
+    // fallback must also run there — not only when the news tab is open.
+    const activePanel = focusedTab || activeTab;
+    const newsCardVisible = activePanel === "news" || activePanel === "grafico";
     const newsReady = sameSymbol(news?.symbol, deferredTicker) && Number(news?.count ?? news?.items?.length ?? 0) > 0;
-    if (!newsTabOpen || newsReady) return;
+    if (!newsCardVisible || newsReady) return;
 
     let cancelled = false;
+    const controller = new AbortController();
     const refreshNews = () => {
-      getNews(token, deferredTicker, Date.now())
+      getNews(token, deferredTicker, appLocale, true, controller.signal)
         .then((payload) => {
-          if (cancelled || !sameSymbol(payload?.symbol, deferredTicker)) return;
+          if (cancelled || !sameSymbol(payload?.symbol, deferredTicker) || (payload.locale && payload.locale !== appLocale)) return;
           setNews((current) => {
             const currentCount = Number(current?.count ?? current?.items?.length ?? 0);
             const nextCount = Number(payload?.count ?? payload?.items?.length ?? 0);
@@ -7380,9 +7568,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const timers = [0, 2400, 6500, 12000, 22000].map((delay) => window.setTimeout(refreshNews, delay));
     return () => {
       cancelled = true;
+      controller.abort();
       timers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [token, deferredTicker, activeTab, focusedTab, news?.symbol, news?.count, news?.items?.length, strategicAnalysisMinute]);
+  }, [token, deferredTicker, appLocale, activeTab, focusedTab, news?.symbol, news?.count, news?.items?.length, strategicAnalysisMinute]);
 
   useEffect(() => {
     if (token) return;
@@ -7790,7 +7979,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         show_zones: chartSettings?.show_zones ?? workspace?.layout?.chart_settings?.show_zones ?? showZones,
         show_price_line: chartSettings?.show_price_line ?? workspace?.layout?.chart_settings?.show_price_line ?? showPriceLine,
         show_vwap: chartSettings?.show_vwap ?? workspace?.layout?.chart_settings?.show_vwap ?? showVwap,
-        show_averages: chartSettings?.show_averages ?? workspace?.layout?.chart_settings?.show_averages ?? showAverages,
         show_macd: chartSettings?.show_macd ?? workspace?.layout?.chart_settings?.show_macd ?? showMacd,
         show_rsi: chartSettings?.show_rsi ?? workspace?.layout?.chart_settings?.show_rsi ?? showRsi,
         show_support: chartSettings?.show_support ?? workspace?.layout?.chart_settings?.show_support ?? showSupport,
@@ -7813,14 +8001,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }
   }
 
-  function scrollTabs(direction: "left" | "right") {
-    if (!tabListRef.current) return;
-    tabListRef.current.scrollBy({
-      left: direction === "left" ? -280 : 280,
-      behavior: "smooth",
-    });
-  }
-
   function updateChartSetting(key: keyof ChartSettings, value: boolean) {
     if (key === "show_markers") {
       setShowMarkers(value);
@@ -7833,9 +8013,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }
     if (key === "show_vwap") {
       setShowVwap(value);
-    }
-    if (key === "show_averages") {
-      setShowAverages(value);
     }
     if (key === "show_macd") {
       setShowMacd(value);
@@ -7867,9 +8044,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setTickerInput(normalized);
       setSelectedTicker(normalized);
       setChart(null);
+      setPublicChart(null);
       setFeed(null);
       setNews(null);
-      setPoll(buildFallbackPoll(normalized));
+      setPoll(null);
+      setPollStatus("loading");
+      setPollReason("");
       setRoom(null);
       setQuote(null);
       setError("");
@@ -7920,7 +8100,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       }
     }
     const baseItem =
-      PRELOADED_UNIVERSE.find((item) => item.symbol === symbol) ||
+      canonicalUniverse.find((item) => item.symbol === symbol) ||
       remoteSearchItems.find((item) => item.symbol === symbol) ||
       buildSyntheticSearchCandidate(symbol, watchUniverse.map((item) => item.symbol));
 
@@ -7944,25 +8124,24 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       });
     }
 
-    setActiveWatchSymbols((current) => (current.includes(symbol) ? current : [...current, symbol]));
+    setRemovedWatchSymbols((current) => current.filter((item) => normalizeSymbol(item) !== symbol));
     selectTicker(symbol);
   }
 
   function handleRemoveFromActiveList(symbolToRemove = selectedTicker) {
-    setActiveWatchSymbols((current) => {
-      const next = current.filter((symbol) => symbol !== symbolToRemove);
-      if (!next.length) return current;
-      if (symbolToRemove === selectedTicker) {
-        const fallbackSymbol = next[0];
-        aiSoundSuppressedUntilRef.current = Date.now() + 1500;
-        startTransition(() => {
-          setSelectedTicker(fallbackSymbol);
-          setTickerInput(fallbackSymbol);
-        });
-        void persistLayout(tabs, undefined, fallbackSymbol);
-      }
-      return next;
-    });
+    const normalized = normalizeSymbol(symbolToRemove);
+    const next = activeWatchSymbols.filter((symbol) => normalizeSymbol(symbol) !== normalized);
+    if (!normalized || !next.length) return;
+    setRemovedWatchSymbols((current) => Array.from(new Set([...current, normalized])));
+    if (normalized === selectedTicker) {
+      const fallbackSymbol = next[0];
+      aiSoundSuppressedUntilRef.current = Date.now() + 1500;
+      startTransition(() => {
+        setSelectedTicker(fallbackSymbol);
+        setTickerInput(fallbackSymbol);
+      });
+      void persistLayout(tabs, undefined, fallbackSymbol);
+    }
   }
 
   function promptLogin(actionLabel = "usar este recurso") {
@@ -7984,11 +8163,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       promptLogin("publicar");
       return;
     }
-    if (!postText.trim()) return;
+    if (!postText.trim() && !selectedGif && !postFile) return;
 
     try {
       setPosting(true);
-      let imageUrl: string | null = null;
+      let imageUrl: string | null = selectedGif?.media_url || null;
 
       if (postFile) {
         const upload = await uploadMedia(token, postFile);
@@ -7996,7 +8175,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       }
 
       await createPost(token, selectedTicker, {
-        text: postText,
+        text: applyEmojiShortcuts(postText),
         sentiment: postSentiment,
         image_url: imageUrl,
       });
@@ -8006,6 +8185,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         setFeed(nextFeed);
         setPostText("");
         setPostFile(null);
+        setSelectedGif(null);
         setComposerEmojiOpen(false);
         setComposerGifOpen(false);
       });
@@ -8031,17 +8211,67 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       return;
     }
 
+    if (pendingLikePostIdsRef.current.has(post.id)) return;
+    pendingLikePostIdsRef.current.add(post.id);
+    setPendingLikePostIds(new Set(pendingLikePostIdsRef.current));
+
     try {
+      let result;
       if (post.liked_by_me) {
-        await unlikePost(token, post.id);
+        result = await unlikePost(token, post.id);
       } else {
-        await likePost(token, post.id);
+        result = await likePost(token, post.id);
       }
 
+      const updatePost = (item: FeedPost) => item.id === post.id
+        ? { ...item, likes: result.likes, liked_by_me: !post.liked_by_me }
+        : item;
+      setFeed((current) => current ? {
+        ...current,
+        posts: current.posts.map(updatePost),
+        featured_posts: current.featured_posts?.map(updatePost),
+      } : current);
       await refreshFeedState();
     } catch (requestError) {
       setError(friendlyNetworkErrorMessage(requestError, appLocale));
+    } finally {
+      pendingLikePostIdsRef.current.delete(post.id);
+      setPendingLikePostIds(new Set(pendingLikePostIdsRef.current));
     }
+  }
+
+  function updateCommentComposer(postId: number, patch: Partial<CommentComposerState>) {
+    setCommentComposers((current) => {
+      const existing = current[postId] || {
+        active: false,
+        sentiment: "bullish",
+        file: null,
+        previewUrl: null,
+        gif: null,
+        tool: null,
+        error: "",
+      };
+      return { ...current, [postId]: { ...existing, ...patch } };
+    });
+  }
+
+  function activateCommentComposer(postId: number) {
+    updateCommentComposer(postId, { active: true });
+    window.setTimeout(() => {
+      document.querySelector<HTMLInputElement>(`[data-comment-input="${postId}"]`)?.focus();
+    }, 0);
+  }
+
+  function selectCommentFile(postId: number, file: File | null) {
+    const previous = commentComposers[postId]?.previewUrl;
+    if (previous?.startsWith("blob:")) URL.revokeObjectURL(previous);
+    updateCommentComposer(postId, {
+      active: true,
+      file,
+      gif: null,
+      previewUrl: file ? URL.createObjectURL(file) : null,
+      error: "",
+    });
   }
 
   async function handleComment(postId: number) {
@@ -8050,18 +8280,42 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       return;
     }
 
+    const composer = commentComposers[postId];
     const text = (commentDrafts[postId] || "").trim();
-    if (!text) return;
+    if (!text && !composer?.file && !composer?.gif) return;
 
     try {
       setCommentingPostId(postId);
-      await commentOnPost(token, postId, { text });
-      await refreshFeedState();
+      updateCommentComposer(postId, { error: "" });
+      let imageUrl = composer?.gif?.media_url || null;
+      if (composer?.file) {
+        const upload = await uploadMedia(token, composer.file);
+        imageUrl = upload.url;
+      }
+      const sentiment = composer?.sentiment === "bearish" ? "🐻" : "🐂";
+      const comment = await commentOnPost(token, postId, {
+        text: `${sentiment} ${applyEmojiShortcuts(text)}`.trim(),
+        image_url: imageUrl,
+      });
+      const appendComment = (post: FeedPost) => post.id === postId
+        ? { ...post, comments: [...(post.comments || []), comment] }
+        : post;
+      setFeed((current) => current ? {
+        ...current,
+        posts: current.posts.map(appendComment),
+        featured_posts: current.featured_posts?.map(appendComment),
+      } : current);
       startTransition(() => {
         setCommentDrafts((current) => ({ ...current, [postId]: "" }));
       });
+      if (composer?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(composer.previewUrl);
+      updateCommentComposer(postId, { file: null, gif: null, previewUrl: null, tool: null, error: "" });
+      if (commentFileInputRefs.current[postId]) commentFileInputRefs.current[postId]!.value = "";
+      await refreshFeedState();
     } catch (requestError) {
-      setError(friendlyNetworkErrorMessage(requestError, appLocale));
+      const message = friendlyNetworkErrorMessage(requestError, appLocale);
+      updateCommentComposer(postId, { error: message });
+      setError(message);
     } finally {
       setCommentingPostId(null);
     }
@@ -8076,7 +8330,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     try {
       await blockUser(token, post.user_id);
       setPostMenuId(null);
-      setBlockedUsers((current) => rememberUser(current, buildUserListEntry(post.user_id, post.user, post.user_email, post.user_avatar_url)));
+      setBlockedUsers((current) => rememberUser(current, buildUserListEntry(post.user_id, publicSocialName(post.user), null, post.user_avatar_url)));
       await refreshFeedState();
     } catch (requestError) {
       setError(friendlyNetworkErrorMessage(requestError, appLocale));
@@ -8138,7 +8392,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       await muteUser(token, post.user_id);
       setPostMenuId(null);
       setSilencedUserIds((current) => (current.includes(post.user_id) ? current : [...current, post.user_id]));
-      setSilencedUsers((current) => rememberUser(current, buildUserListEntry(post.user_id, post.user, post.user_email, post.user_avatar_url)));
+      setSilencedUsers((current) => rememberUser(current, buildUserListEntry(post.user_id, publicSocialName(post.user), null, post.user_avatar_url)));
     } catch (requestError) {
       setError(friendlyNetworkErrorMessage(requestError, appLocale));
     }
@@ -8185,7 +8439,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       await reportPost(token, postId, "golpe", "report_and_block");
       await blockUser(token, post.user_id);
       setPostMenuId(null);
-      setBlockedUsers((current) => rememberUser(current, buildUserListEntry(post.user_id, post.user, post.user_email, post.user_avatar_url)));
+      setBlockedUsers((current) => rememberUser(current, buildUserListEntry(post.user_id, publicSocialName(post.user), null, post.user_avatar_url)));
       await refreshFeedState();
     } catch (requestError) {
       setError(friendlyNetworkErrorMessage(requestError, appLocale));
@@ -8220,56 +8474,141 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     try {
       await deletePost(token, postId);
       setPostMenuId(null);
+      setFeed((current) => current ? {
+        ...current,
+        count: Math.max(0, current.count - Number(current.posts.some((post) => post.id === postId))),
+        posts: current.posts.filter((post) => post.id !== postId),
+        featured_posts: current.featured_posts?.filter((post) => post.id !== postId),
+      } : current);
       await refreshFeedState();
     } catch (requestError) {
       setError(friendlyNetworkErrorMessage(requestError, appLocale));
-    }
-  }
-
-  async function handleRepost(post: FeedPost) {
-    if (!token) {
-      promptLogin("repostar trades");
-      return;
-    }
-
-    try {
-      if (post.reposted_by_me) {
-        await unrepostPost(token, post.id);
-      } else {
-        const quoteText = window.prompt(
-          `Repostar ${post.ticker || selectedTicker} com comentário? Opcional.`
-        );
-        await repostPost(token, post.id, {
-          quote_text: quoteText?.trim() || null,
-        });
-      }
-
-      await refreshFeedState();
-    } catch (requestError) {
-      setError(friendlyNetworkErrorMessage(requestError, appLocale));
-    } finally {
-      setPostMenuId(null);
     }
   }
 
   function appendComposerEmoji(emoji: string) {
     setPostText((current) => `${current}${current ? " " : ""}${emoji}`);
+    const nextRecents = [emoji, ...recentComposerEmojis.filter((item) => item !== emoji)].slice(0, 10);
+    setRecentComposerEmojis(nextRecents);
+    writeStorageValue(RECENT_EMOJIS_STORAGE_KEY, JSON.stringify(nextRecents));
     setComposerEmojiOpen(false);
   }
 
-  function appendComposerGif(term: string) {
-    const query = term.trim() || `${selectedTicker} stock market`;
-    setPostText((current) => `${current}${current ? " " : ""}[GIF: ${query}]`);
+  async function handleGifSearch(term?: string) {
+    if (!token) {
+      promptLogin(isUsLocale ? "search GIFs" : "buscar GIFs");
+      return;
+    }
+    const query = (term?.trim() || gifQuery.trim() || `${selectedTicker} stock market`).replace(/\s+/g, " ");
+    setGifQuery(query);
+    gifSearchAbortRef.current?.abort();
+    const controller = new AbortController();
+    gifSearchAbortRef.current = controller;
+    setGifSearchStatus("loading");
+    setGifSearchReason("");
+    try {
+      const payload = await searchGifs(token, query, appLocale, controller.signal);
+      if (controller.signal.aborted) return;
+      setGifResults(payload.items || []);
+      setGifSearchReason(payload.reason || "");
+      setGifSearchStatus(
+        payload.status === "READY"
+          ? (payload.items?.length ? "ready" : "empty")
+          : payload.status === "UNAVAILABLE"
+            ? "unavailable"
+            : payload.status === "ERROR"
+              ? "error"
+              : "empty"
+      );
+    } catch (requestError) {
+      if (controller.signal.aborted) return;
+      setGifResults([]);
+      setGifSearchStatus("error");
+      setGifSearchReason(friendlyNetworkErrorMessage(requestError, appLocale));
+    }
+  }
+
+  function selectComposerGif(item: GifSearchItem) {
+    setSelectedGif(item);
+    setPostFile(null);
+    if (composerFileInputRef.current) composerFileInputRef.current.value = "";
     setComposerGifOpen(false);
   }
 
-  function openGifSearch() {
-    const queryText = (gifQuery.trim() || `${selectedTicker} ${symbolName(selectedTicker)} stock market gif`).replace(/\s+/g, " ");
-    const query = encodeURIComponent(queryText);
-    const opened = window.open(`https://tenor.com/search/${query}-gifs`, "_blank", "noopener,noreferrer");
-    if (!opened) {
-      setError(isUsLocale ? "The GIF window was blocked. Allow pop-ups and try again." : "A janela de GIF foi bloqueada. Libere pop-ups e tente novamente.");
+  function toggleComposerGifPicker() {
+    const opening = !composerGifOpen;
+    setComposerGifOpen(opening);
+    setComposerEmojiOpen(false);
+    if (opening && gifSearchStatus === "idle") void handleGifSearch();
+  }
+
+  function renderComposerGifPicker(onSelect: (item: GifSearchItem) => void = selectComposerGif) {
+    if (gifSearchStatus === "unavailable") {
+      return <div className="snbr-gif-picker"><p className="snbr-muted" role="status">{isUsLocale ? "GIF search is currently unavailable" : "Busca de GIF indisponível no momento"}</p></div>;
     }
+    return (
+      <div className="snbr-gif-picker" aria-label={isUsLocale ? "Select GIF" : "Selecionar GIF"}>
+        <div className="snbr-gif-search">
+          <input
+            className="snbr-input"
+            value={gifQuery}
+            onChange={(event) => setGifQuery(event.target.value)}
+            placeholder={isUsLocale ? `Search GIF: ${selectedTicker}` : `Buscar GIF: ${selectedTicker}`}
+          />
+          <button className="snbr-button subtle" onClick={() => void handleGifSearch()} type="button">
+            {gifSearchStatus === "loading" ? (isUsLocale ? "Searching..." : "Buscando...") : isUsLocale ? "Search" : "Buscar"}
+          </button>
+        </div>
+        <div className="snbr-gif-quick-grid">
+          {QUICK_GIF_TERMS.map((term) => (
+            <button key={term} className="snbr-gif-chip" onClick={() => void handleGifSearch(term)} type="button">
+              {term}
+            </button>
+          ))}
+        </div>
+        {gifSearchStatus === "ready" ? (
+          <div className="snbr-gif-results">
+            {gifResults.map((item) => (
+              <button key={item.id || item.media_url} className="snbr-gif-result" onClick={() => onSelect(item)} type="button">
+                <img src={item.preview_url} alt={item.title} loading="lazy" />
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {["empty", "unavailable", "error"].includes(gifSearchStatus) ? (
+          <p className="snbr-muted" role="status">{gifSearchReason || (isUsLocale ? "No GIFs available." : "Nenhum GIF disponível.")}</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderComposerEmojiPicker(onSelect: (emoji: string) => void = appendComposerEmoji) {
+    const sections = [
+      ...(recentComposerEmojis.length
+        ? [{ key: "recents", label: isUsLocale ? "Recent" : "Recentes", emojis: recentComposerEmojis }]
+        : []),
+      ...COMPOSER_EMOJI_CATEGORIES.map((category) => ({
+        key: category.key,
+        label: isUsLocale ? category.labelEn : category.labelPt,
+        emojis: category.emojis,
+      })),
+    ];
+    return (
+      <div className="snbr-emoji-picker" aria-label={isUsLocale ? "Select emoji" : "Selecionar emoji"}>
+        {sections.map((section) => (
+          <div key={section.key} className="snbr-emoji-section">
+            <span className="snbr-emoji-section-label">{section.label}</span>
+            <div className="snbr-emoji-grid">
+              {section.emojis.map((emoji) => (
+                <button key={`${section.key}-${emoji}`} className="snbr-emoji-option" onClick={() => onSelect(emoji)} type="button">
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   }
 
   async function handleSendChat() {
@@ -8416,8 +8755,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     [publicQuotes, tickerTapeQuotes],
   );
   const watchUniverse = useMemo(
-    () => buildWatchlist(rankingRows, radarRows, activeQuote, mergedQuoteMap, publicInsight, selectedTicker, customWatchItems),
-    [rankingRows, radarRows, activeQuote, mergedQuoteMap, publicInsight, selectedTicker, customWatchItems],
+    () => buildWatchlist(rankingRows, radarRows, activeQuote, mergedQuoteMap, publicInsight, selectedTicker, customWatchItems, canonicalUniverse),
+    [rankingRows, radarRows, activeQuote, mergedQuoteMap, publicInsight, selectedTicker, customWatchItems, canonicalUniverse],
   );
   const activeWatchlist = useMemo(() => {
     const liveWatchlist = buildWatchlist(
@@ -8428,15 +8767,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       publicInsight,
       selectedTicker,
       customWatchItems,
+      canonicalUniverse,
     );
     const activeSet = new Set(
-      (activeWatchSymbols.length ? activeWatchSymbols : PRELOADED_UNIVERSE.map((item) => item.symbol))
+      (activeWatchSymbols.length ? activeWatchSymbols : canonicalUniverse.map((item) => item.symbol))
         .map(normalizeSymbol)
         .filter(Boolean),
     );
     const bySymbol = new Map(liveWatchlist.map((item) => [item.symbol, item]));
 
-    for (const item of [...PRELOADED_UNIVERSE, ...customWatchItems]) {
+    for (const item of [...canonicalUniverse, ...customWatchItems]) {
       if (isRemovedFutureSymbol(item.symbol)) continue;
       if (!activeSet.has(normalizeSymbol(item.symbol))) continue;
       if (!bySymbol.has(item.symbol)) {
@@ -8454,6 +8794,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     selectedTicker,
     customWatchItems,
     activeWatchSymbols,
+    canonicalUniverse,
   ]);
   const filteredActiveWatchlist = useMemo(
     () => sortWatchlistItemsAlphabetically(
@@ -8461,14 +8802,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       appLocale,
     ),
     [activeWatchlist, appLocale, watchCategory],
-  );
-  const availableActiveWatchlist = useMemo(
-    () => filteredActiveWatchlist.filter(hasWatchlistSnapshotData),
-    [filteredActiveWatchlist],
-  );
-  const unavailableActiveWatchlist = useMemo(
-    () => filteredActiveWatchlist.filter((item) => !hasWatchlistSnapshotData(item)),
-    [filteredActiveWatchlist],
   );
   const activeWatchCategoryCounts = useMemo(
     () => CATEGORY_ORDER.reduce((counts, category) => {
@@ -8516,17 +8849,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     () =>
       CATEGORY_ORDER.map((category) => ({
         category,
-        items: availableActiveWatchlist.filter((item) => item.category === category),
+        items: filteredActiveWatchlist.filter((item) => item.category === category),
       })).filter((group) => group.items.length),
-    [availableActiveWatchlist],
-  );
-  const unavailableGroupedActiveWatchlist = useMemo(
-    () =>
-      CATEGORY_ORDER.map((category) => ({
-        category,
-        items: unavailableActiveWatchlist.filter((item) => item.category === category),
-      })).filter((group) => group.items.length),
-    [unavailableActiveWatchlist],
+    [filteredActiveWatchlist],
   );
   const searchResults = useMemo(
     () =>
@@ -8566,6 +8891,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }
     return null;
   }, [currentRanking?.strategic_panel, currentSnapshotRow?.strategic_panel, currentTopSignal?.strategic_panel, selectedTicker, workspace?.strategic_panel]);
+  const canonicalAnalysis = currentStrategicPanel?.canonical_analysis || null;
   const snapshotQuote = useMemo(
     () => snapshotQuoteFromRow(selectedTicker, currentSnapshotRow),
     [currentSnapshotRow, selectedTicker],
@@ -8691,46 +9017,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     selectedTicker,
     snapshotInsight,
   ]);
-  const chartFallbackQuote = useMemo(() => {
-    if (quoteHasMarketValue(displayQuote)) return displayQuote;
-    const watchPrice = firstFiniteNumber(currentWatchItem?.price);
-    if (watchPrice == null || watchPrice <= 0) return displayQuote;
-    return {
-      ...(displayQuote || {}),
-      symbol: selectedTicker,
-      price: watchPrice,
-      change_pct: currentWatchItem?.changePct ?? displayQuote?.change_pct ?? null,
-      volume: currentWatchItem?.volume ?? displayQuote?.volume ?? null,
-      average_volume: currentWatchItem?.averageVolume ?? (displayQuote as any)?.average_volume ?? null,
-      rel_volume: currentWatchItem?.relVolume ?? (displayQuote as any)?.rel_volume ?? null,
-      source: "watchlist_fallback",
-      quote_status: "reference",
-    } as QuotePayload;
-  }, [
-    currentWatchItem?.averageVolume,
-    currentWatchItem?.changePct,
-    currentWatchItem?.price,
-    currentWatchItem?.relVolume,
-    currentWatchItem?.volume,
-    displayQuote,
-    selectedTicker,
-  ]);
   const chartForDisplay = useMemo(() => {
     const hasLiveSeries = Boolean(activeChart?.ohlc?.length || activeChart?.series?.length);
-    if (hasLiveSeries && activeChart) return activeChart;
-    return buildQuoteFallbackChart(
-      selectedTicker,
-      chartInterval,
-      chartFallbackQuote,
-      derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || currentRanking?.trend || null,
-    );
+    return hasLiveSeries && activeChart && sameChartRequest(activeChart, selectedTicker, chartInterval) ? activeChart : null;
   }, [
     activeChart,
     chartInterval,
-    chartFallbackQuote,
-    currentRanking?.trend,
-    derivedPublicInsight?.signal,
-    derivedPublicInsight?.trend_bias,
     selectedTicker,
   ]);
   const chartCanonicalLevelZones = useMemo(
@@ -8750,13 +9042,32 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     () => displayQuoteHasCoreData ? usableScore(derivedPublicInsight?.score, currentRanking?.score, currentDerivedScore) : null,
     [derivedPublicInsight?.score, currentRanking?.score, currentDerivedScore, displayQuoteHasCoreData],
   );
+  // ONE RSI for every surface (top card, chart chip, bottom panel): the daily
+  // RSI-14 served by /public/market/bundle (insight.rsi, canonical_indicator_engine).
+  // Snapshot/ranking RSI is only a fallback when the bundle has no value.
   const panelRsiValue = useMemo(
     () =>
       displayQuoteHasCoreData
-        ? firstValidRsiNumber(derivedPublicInsight?.rsi, currentRanking?.rsi, (displayQuote as any)?.rsi)
+        ? firstValidRsiNumber(currentPublicInsight?.rsi, derivedPublicInsight?.rsi, currentRanking?.rsi, (displayQuote as any)?.rsi)
         : null,
-    [displayQuoteHasCoreData, derivedPublicInsight?.rsi, currentRanking?.rsi, displayQuote],
+    [displayQuoteHasCoreData, currentPublicInsight?.rsi, derivedPublicInsight?.rsi, currentRanking?.rsi, displayQuote],
   );
+  // Mission 68: the chart chip + RSI panel follow the SELECTED timeframe, computed on
+  // the exact chart candle series (activeChart is gated on ticker+interval, so it clears
+  // on a switch). Feature-detect the field; fall back to the D1 panel value on old payloads.
+  const chartTimeframeRsi = useMemo(() => {
+    if (activeChart && Object.prototype.hasOwnProperty.call(activeChart, "rsi")) {
+      return firstValidRsiNumber((activeChart as any).rsi);
+    }
+    return panelRsiValue;
+  }, [activeChart, panelRsiValue]);
+  const chartRsiMetadata = useMemo(() => {
+    if (activeChart && Object.prototype.hasOwnProperty.call(activeChart, "rsi")) {
+      return (activeChart as any).rsi_metadata || null;
+    }
+    return currentPublicInsight?.rsi_metadata || derivedPublicInsight?.rsi_metadata || null;
+  }, [activeChart, currentPublicInsight?.rsi_metadata, derivedPublicInsight?.rsi_metadata]);
+  const rsiTimeframeLabel = chartInterval === "1D" ? "D1" : chartInterval;
   const priceMovementValue = firstFiniteNumber(displayQuote?.change) ?? null;
   const priceMovementPercent = firstFiniteNumber(displayQuote?.change_pct) ?? null;
   const headerVolume = firstPositiveFiniteNumber(displayQuote?.volume);
@@ -8768,13 +9079,32 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     () => backendMissingFields.map((field) => quoteMissingFieldLabel(field, appLocale)),
     [appLocale, backendMissingFields],
   );
-  const symbolLabel = currentWatchItem?.label || symbolName(selectedTicker);
+  const symbolLabel = displayWatchlistLabel({ symbol: selectedTicker, label: currentWatchItem?.label }, appLocale);
+  const symbolLogoUrl = safeAssetLogoUrl(displayQuote?.logo_url, displayQuote?.icon_url, currentWatchItem?.logoUrl);
   const selectedTickerMarketLabel = currentWatchItem?.category || guessCategory(selectedTicker);
   const currentAiKey = AI_TOOL_TAB_MAP[currentTab as keyof typeof AI_TOOL_TAB_MAP];
   const currentAiRows: AiToolRow[] = useMemo(
     () => (currentAiKey ? workspace?.ai_tools?.[currentAiKey] || publicAiTools?.tools?.[currentAiKey] : undefined) || [],
     [currentAiKey, workspace?.ai_tools, publicAiTools?.tools],
   );
+  useEffect(() => {
+    if (!currentAiKey) return undefined;
+    const controller = new AbortController();
+    const key = `${selectedTicker}|${currentAiKey}|${chartInterval}|${aiRequestNonce}`;
+    setAiRequestState({ key, status: "LOADING", reason: "" });
+    getPublicAiTools(selectedTicker, currentAiKey, chartInterval, controller.signal)
+      .then((payload) => {
+        if (controller.signal.aborted) return;
+        setPublicAiTools(payload);
+        setAiRequestState({ key, status: payload.status || "READY", reason: payload.reason || "" });
+      })
+      .catch((requestError: Error) => {
+        if (controller.signal.aborted) return;
+        setPublicAiTools(null);
+        setAiRequestState({ key, status: "ERROR", reason: requestError.message || "ai_request_failed" });
+      });
+    return () => controller.abort();
+  }, [aiRequestNonce, chartInterval, currentAiKey, selectedTicker]);
   const aiToolFindingCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const [tabId, toolKey] of Object.entries(AI_TOOL_TAB_MAP)) {
@@ -8793,9 +9123,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         unique.add(aiAlertSignalKey(candidate));
       });
       counts[tabId] = unique.size;
+      if (!counts[tabId]) {
+        // No fresh finding for the selected ticker: fall back to the real
+        // per-tool count from the unfiltered public catalog (anonymous only).
+        counts[tabId] = (publicAiCatalog?.tools?.[typedKey] || []).length;
+      }
     }
     return counts;
-  }, [publicAiTools?.tools, selectedTicker, workspace?.ai_tools]);
+  }, [publicAiCatalog?.tools, publicAiTools?.tools, selectedTicker, workspace?.ai_tools]);
   const aiFindingSignalKey = useMemo(() => {
     const signatures: string[] = [];
     for (const [, toolKey] of Object.entries(AI_TOOL_TAB_MAP)) {
@@ -8832,7 +9167,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, [aiFindingSignalKey]);
   const newsRows = useMemo(
     () => {
-      const sortedTickerNews = ((activeNews?.items || []) as NewsItem[])
+      const sortedTickerNews = ([...(activeNews?.items || [])] as NewsItem[])
         .filter((item) => newsMatchesSelectedTicker(item, selectedTicker))
         .sort((a, b) => {
           const bTime = Date.parse(newsSourceTimestamp(b) || "");
@@ -8840,7 +9175,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           if (Number.isFinite(bTime) && Number.isFinite(aTime) && bTime !== aTime) return bTime - aTime;
           if (Number.isFinite(bTime)) return -1;
           if (Number.isFinite(aTime)) return 1;
-          return 0;
+          return String(a.id || "").localeCompare(String(b.id || ""));
         });
       const matchedNews = dedupeNewsForTicker(
         sortedTickerNews,
@@ -8996,12 +9331,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
     const quoteStats = [
       {
-        label: isUsLocale ? "Price" : "Preço",
-        value: displayQuoteHasCoreData ? formatLocalePrice(displayQuote?.price, appLocale) : (isUsLocale ? "no confirmed quote" : "sem cotação confirmada"),
-        hint: displayQuoteHasCoreData ? (isUsLocale ? "Current quote" : "Cotação atual") : (isUsLocale ? "No confirmed real quote in the current payload." : "Sem cotação real confirmada no payload atual."),
-        tone: "neutral",
-      },
-      {
         label: isUsLocale ? "Change" : "Variação",
         value: changeValue,
         hint: displayQuoteHasCoreData
@@ -9063,12 +9392,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const displayStats = useMemo(
     () => {
       if (advancedMode) return stats;
-      const lockedValue = isUsLocale ? "Available in Pro Plan" : "Disponível no Plano Pro";
-      const lockedHint = isUsLocale ? "Open Pro Mode to see this institutional metric." : "Abra o Modo Pro para ver esta métrica institucional.";
+      const lockedValue = isUsLocale ? "🔒 Available on Pro" : "🔒 Disponível no Pro";
       return stats.map((item) => ({
         ...item,
         value: lockedValue,
-        hint: lockedHint,
+        hint: "",
         tone: "neutral",
       }));
     },
@@ -9130,20 +9458,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       });
     };
 
-    rankingRows.forEach(addCandidate);
-    radarRows.forEach(addCandidate);
-    watchUniverse.forEach(addCandidate);
-    PRELOADED_UNIVERSE.forEach(addCandidate);
-    customWatchItems.forEach(addCandidate);
+    currentAiRows.forEach(addCandidate);
 
     return Array.from(bySymbol.values());
   }, [
-    rankingRows,
-    radarRows,
+    currentAiRows,
     watchUniverse,
     publicQuotes,
     tickerTapeQuotes,
-    customWatchItems,
     selectedTicker,
     symbolLabel,
     effectiveAiScore,
@@ -9182,28 +9504,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       }),
     [toolCandidatesSource, selectedTicker, currentTab, currentAiKey],
   );
-  const expandedToolCandidates = useMemo(
-    () =>
-      Array.from({ length: 20 }, (_, index) => {
-        const fallback = toolCandidates[index % Math.max(toolCandidates.length, 1)] || {
-          id: `${selectedTicker}-${index}`,
-          symbol: selectedTicker,
-          label: symbolLabel,
-          score: normalizeMasterScoreForDisplay(currentRanking?.score),
-          trend: currentRanking?.trend || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || "monitorando",
-          price: displayQuote?.price ?? null,
-          changePct: displayQuote?.change_pct ?? null,
-          rsi: firstValidRsiNumber(currentRanking?.rsi),
-          volume: displayQuote?.volume ?? null,
-          data_quality: (currentRanking as any)?.data_quality ?? displayQuote?.data_quality ?? null,
-          quote_status: displayQuote?.quote_status ?? null,
-          status: displayQuote?.status ?? null,
-          timestamp: null,
-        };
-        return { ...fallback, id: `${fallback.symbol}-${index}` };
-      }),
-    [toolCandidates, selectedTicker, symbolLabel, currentRanking?.score, currentRanking?.trend, currentRanking?.rsi, derivedPublicInsight?.trend_bias, derivedPublicInsight?.signal, displayQuote?.price, displayQuote?.change_pct, displayQuote?.volume],
-  );
+  const backendToolCandidates = toolCandidates;
   const visibleAiRows = useMemo<AiToolRow[]>(() => {
     if (!currentAiKey) return [];
 
@@ -9217,7 +9518,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           row.signal ||
           (symbol === selectedTicker ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal : null) ||
           null;
-        const rsi = firstValidRsiNumber(row.rsi, symbol === selectedTicker ? derivedPublicInsight?.rsi : null, derivePublicRsi(changePct, trend));
+        const rsi = firstValidRsiNumber(row.rsi, symbol === selectedTicker ? derivedPublicInsight?.rsi : null);
         const resolvedVolume = firstPositiveFiniteNumber(row.volume, (row as any).volume_24h, quote?.volume);
         const score = usableScore(
           row.score,
@@ -9309,7 +9610,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         .slice(0, 20);
     }
 
-    const sourceCandidates = expandedToolCandidates
+    const sourceCandidates = backendToolCandidates
       .map((item) => {
         const normalizedItemSymbol = normalizeSymbol(item.symbol);
         if (normalizedItemSymbol !== selectedTicker) return null;
@@ -9317,7 +9618,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         const watchItem = watchUniverse.find((candidate) => candidate.symbol === normalizedItemSymbol);
         const changePct = quote?.change_pct ?? watchItem?.changePct ?? null;
         const trend = item.trend || (normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal : null) || "monitorando";
-        const rsi = firstValidRsiNumber(item.rsi, normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.rsi : null, derivePublicRsi(changePct, trend));
+        const rsi = firstValidRsiNumber(item.rsi, normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.rsi : null);
         const resolvedVolume = firstPositiveFiniteNumber(quote?.volume, item.volume, watchItem?.volume);
         const rvol = deriveRelativeVolume(resolvedVolume);
         const adx = deriveAdx(changePct, rsi, trend);
@@ -9414,7 +9715,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, [
     currentAiRows,
     currentAiKey,
-    expandedToolCandidates,
+    backendToolCandidates,
     watchUniverse,
     publicQuotes,
     tickerTapeQuotes,
@@ -9554,15 +9855,34 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     () => visibleAiRows.map((row) => withAlertTimestamp(row)),
     [visibleAiRows],
   );
+  // Anonymous AI tabs are a market-wide ranked list, not a per-symbol read: the
+  // per-selected-ticker pipeline above collapses each tab to 0-1 rows even though
+  // the badge counts the full catalog. For logged-out users render the whole
+  // unfiltered catalog (already backend-ranked and shaped) so lists match badges;
+  // a row click switches the ticker.
+  const anonymousCatalogRows = useMemo<AiToolRow[]>(() => {
+    if (token || !currentAiKey) return [];
+    const rows = publicAiCatalog?.tools?.[currentAiKey as keyof WorkspaceData["ai_tools"]];
+    if (!Array.isArray(rows) || !rows.length) return [];
+    return rows.map((row) =>
+      withAlertTimestamp({
+        ...(row as AiToolRow),
+        tool: currentAiKey,
+        ticker: normalizeSymbol(String((row as any).ticker || (row as any).symbol || "")),
+      }),
+    );
+  }, [token, currentAiKey, publicAiCatalog?.tools]);
   const currentTabHistory =
     aiAlertHistory[currentTab]?.resetKey === aiAlertResetKey &&
     aiAlertHistory[currentTab]?.source === "real" &&
     aiAlertHistory[currentTab]?.rows.length
       ? aiAlertHistory[currentTab].rows
       : null;
-  const currentTabAlertRows = (currentTabHistory?.length ? currentTabHistory : visibleAiRowsWithTimestamps)
-    .filter((row) => isFreshAiFindingForReset(row))
-    .filter(isAiDealFinding);
+  const currentTabAlertRows = anonymousCatalogRows.length
+    ? anonymousCatalogRows
+    : (currentTabHistory?.length ? currentTabHistory : visibleAiRowsWithTimestamps)
+        .filter((row) => isFreshAiFindingForReset(row))
+        .filter(isAiDealFinding);
   const currentAiStaleRows = useMemo(
     () => currentAiRows
       .map((row) => ({
@@ -9625,24 +9945,31 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     return null;
   }, [currentAiKey, currentAiPayloadAvailable, currentAiRows.length, currentAiStaleRows.length, currentTabAlertRows.length, isUsLocale, loading]);
   const showSymbolHeader = currentTab === "grafico";
-  const profileName = access?.display_name || access?.email || "Trader";
+  const profileName = publicSocialName(access?.display_name);
   const activePoll = useMemo(
-    () => (sameSymbol(poll?.symbol, selectedTicker) ? normalizePollPayload(poll, selectedTicker) : buildFallbackPoll(selectedTicker)),
+    () => (sameSymbol(poll?.symbol, selectedTicker) ? normalizePollPayload(poll, selectedTicker) : null),
     [poll, selectedTicker],
   );
   const localizedActivePoll = useMemo(
-    () => ({
+    () => activePoll ? ({
       ...activePoll,
       question: localizePollText(activePoll.question, appLocale, selectedTicker),
       status: appLocale === "en-US"
-        ? (String(activePoll.status || "").includes("fallback") ? "no backend poll" : localizeUiText(activePoll.status || "open", appLocale, selectedTicker))
+        ? localizeUiText(activePoll.status || "open", appLocale, selectedTicker)
         : activePoll.status,
-      options: (activePoll.options || []).map((option) => ({
+      options: activePoll.options.map((option) => ({
         ...option,
         label: localizePollText(option.label, appLocale, selectedTicker),
       })),
+    }) : ({
+      symbol: selectedTicker,
+      question: "",
+      options: [],
+      total_votes: 0,
+      status: pollStatus,
+      reason: pollReason,
     }),
-    [activePoll, appLocale, selectedTicker],
+    [activePoll, appLocale, pollReason, pollStatus, selectedTicker],
   );
   const hasPublicSignal = Boolean(
     displayQuoteHasCoreData &&
@@ -9974,6 +10301,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     () => operationalDecisionFromStrategicContract(strategicDecisionContract),
     [strategicDecisionContract],
   );
+  const coherentDisplayStats = useMemo(
+    () => reconcileStatsWithDecision(
+      displayStats,
+      operationalDecision.action,
+      firstFiniteNumber(displayQuote?.price),
+      firstFiniteNumber((displayQuote as any)?.vwap),
+      appLocale,
+    ),
+    [appLocale, displayStats, operationalDecision.action, displayQuote],
+  );
   const decisionCardsForRender = useMemo(
     () => alignDecisionCardsWithStrategicContract(essentialDecisionCards, strategicDecisionContract, appLocale),
     [appLocale, essentialDecisionCards, strategicDecisionContract],
@@ -10022,9 +10359,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             aria-label={isUsLocale ? `Open ${item.symbol} on chart` : `Abrir ${item.symbol} no gráfico`}
             title={`${item.symbol} • ${itemLabel}`}
           >
-            <div className="snbr-watch-main">
-              <strong>{item.symbol}</strong>
-              <span>{itemLabel}</span>
+            <div className="snbr-watch-identity">
+              <AssetMark symbol={item.symbol} name={itemLabel} logoUrl={item.logoUrl} compact />
+              <div className="snbr-watch-main">
+                <strong>{item.symbol}</strong>
+                {itemLabel ? <span>{itemLabel}</span> : null}
+              </div>
             </div>
             <div className="snbr-watch-side">
               <span>{formatWatchlistPrimaryValue(item, appLocale)}</span>
@@ -10047,8 +10387,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       );
     };
 
-    const unavailableCount = unavailableActiveWatchlist.length;
-
     return (
       <div className="snbr-watchlist">
         {groupedActiveWatchlist.length ? groupedActiveWatchlist.map((group) => (
@@ -10058,38 +10396,20 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               <span>{group.items.length} {isUsLocale ? "assets" : "ativos"}</span>
             </header>
             <div className="snbr-watch-group-list">
-              {group.items.map((item) => renderWatchRow(item))}
+              {group.items.map((item) => renderWatchRow(item, !hasWatchlistSnapshotData(item)))}
             </div>
           </section>
         )) : (
           <div className="snbr-empty-thread">
-            <strong>{isUsLocale ? "No asset with data in this filter." : "Nenhum ativo com dados neste filtro."}</strong>
-            <p>{isUsLocale ? "Assets without a confirmed snapshot are grouped below and do not pollute the main list." : "Ativos sem snapshot confirmado ficam agrupados abaixo e não poluem a lista principal."}</p>
+            <strong>{isUsLocale ? "No asset in this filter." : "Nenhum ativo neste filtro."}</strong>
+            <p>{isUsLocale ? "The filter does not remove assets from your active list." : "O filtro não remove ativos da sua lista ativa."}</p>
           </div>
         )}
-        {unavailableCount ? (
-          <details className="snbr-watch-unavailable-section">
-            <summary>
-              <span>{isUsLocale ? "Assets temporarily without data" : "Ativos temporariamente sem dados"}</span>
-              <strong>{unavailableCount}</strong>
-            </summary>
-            <p>
-              {isUsLocale
-                ? "These assets stay searchable and removable, but are not mixed with working quotes until a valid snapshot returns."
-                : "Eles continuam disponíveis para busca e remoção, mas não ficam misturados com cotações funcionando até o snapshot voltar."}
-            </p>
-            {unavailableGroupedActiveWatchlist.map((group) => (
-              <section key={`unavailable-${group.category}`} className="snbr-watch-group">
-                <header className="snbr-watch-group-head">
-                  <strong>{group.category}</strong>
-                  <span>{group.items.length} {isUsLocale ? "without data" : "sem dados"}</span>
-                </header>
-                <div className="snbr-watch-group-list">
-                  {group.items.map((item) => renderWatchRow(item, true))}
-                </div>
-              </section>
-            ))}
-          </details>
+        {filteredActiveWatchlist.length ? (
+          <footer className="snbr-watch-total">
+            <strong>{watchCategory === "Todos" ? (isUsLocale ? "All" : "Todos") : watchCategory}</strong>
+            <span>{filteredActiveWatchlist.length} {isUsLocale ? "assets" : "ativos"}</span>
+          </footer>
         ) : null}
       </div>
     );
@@ -10099,7 +10419,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const initials = initialsFromName(name || email || "SN");
     return (
       <div className="snbr-avatar">
-        {avatarUrl ? <img src={avatarUrl} alt={name || email || "avatar"} /> : initials}
+        {avatarUrl ? <img src={resolveMediaUrl(avatarUrl)} alt={name || "avatar"} /> : initials}
       </div>
     );
   }
@@ -10198,7 +10518,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }
 
   function renderComposer() {
-    const profileName = access?.display_name || access?.email || "Trader";
+    const profileName = access?.display_name && !access.display_name.includes("@") ? access.display_name : "Trader";
 
     if (!token) {
       return (
@@ -10220,8 +10540,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             id="snbr-post-textarea"
             value={postText}
             onChange={(event) => setPostText(event.target.value)}
-            aria-label={isUsLocale ? `Write your thesis on ${selectedTicker}` : `Escreva sua tese sobre ${selectedTicker}`}
-            placeholder={isUsLocale ? `Write your thesis on ${selectedTicker}` : `Escreva sua tese em ${selectedTicker}`}
+            aria-label={isUsLocale ? `Write your idea for ${selectedTicker}` : `Escreva sua ideia para ${selectedTicker}`}
+            placeholder={isUsLocale ? `Write your idea for ${selectedTicker}` : `Escreva sua ideia para ${selectedTicker}`}
           />
           <p className="snbr-composer-helper">
             {isUsLocale ? "Tip: cite the trigger, timeframe and invalidation level." : "Dica: cite gatilho, timeframe e o ponto em que sua tese invalida."}
@@ -10265,10 +10585,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   </button>
                   <button
                     className={cx("snbr-toolbar-icon", composerGifOpen && "active")}
-                    onClick={() => {
-                      setComposerGifOpen((value) => !value);
-                      setComposerEmojiOpen(false);
-                    }}
+                    onClick={toggleComposerGifPicker}
                     title={isUsLocale ? "Add GIF" : "Adicionar GIF"}
                     aria-label={isUsLocale ? "Add GIF" : "Adicionar GIF"}
                     aria-expanded={composerGifOpen}
@@ -10289,38 +10606,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   {postFile ? <span className="snbr-file-pill">{postFile.name}</span> : null}
                 </div>
 
-                {composerGifOpen ? (
-                  <div className="snbr-gif-picker" aria-label={isUsLocale ? "Select GIF" : "Selecionar GIF"}>
-                    <div className="snbr-gif-search">
-                      <input
-                        className="snbr-input"
-                        value={gifQuery}
-                        onChange={(event) => setGifQuery(event.target.value)}
-                        placeholder={isUsLocale ? `Search GIF: ${selectedTicker}` : `Buscar GIF: ${selectedTicker}`}
-                      />
-                      <button className="snbr-button subtle" onClick={openGifSearch} type="button">
-                        {isUsLocale ? "Open GIFs" : "Abrir GIFs"}
-                      </button>
-                    </div>
-                    <div className="snbr-gif-quick-grid">
-                      {QUICK_GIF_TERMS.map((term) => (
-                        <button key={term} className="snbr-gif-chip" onClick={() => appendComposerGif(term)} type="button">
-                          {term}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
+                {renderComposerAttachmentPreview()}
 
-                {composerEmojiOpen ? (
-                  <div className="snbr-emoji-picker" aria-label={isUsLocale ? "Select emoji" : "Selecionar emoji"}>
-                    {COMPOSER_EMOJIS.map((emoji) => (
-                      <button key={emoji} className="snbr-emoji-option" onClick={() => appendComposerEmoji(emoji)} type="button">
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
+                {composerGifOpen ? renderComposerGifPicker() : null}
+
+                {composerEmojiOpen ? renderComposerEmojiPicker() : null}
               </div>
 
               {predictionOpen ? (
@@ -10376,7 +10666,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 className="snbr-hidden-file-input"
                 type="file"
                 accept="image/png,image/jpeg,image/webp,image/gif"
-                onChange={(event) => setPostFile(event.target.files?.[0] || null)}
+                onChange={(event) => {
+                  setPostFile(event.target.files?.[0] || null);
+                  setSelectedGif(null);
+                }}
               />
             </div>
 
@@ -10392,10 +10685,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       <div className="snbr-editor-card snbr-social-composer-card" ref={composerCardRef}>
         <div className="snbr-composer-head">
           <div className="snbr-post-user">
-            {renderAvatar(profileName, access?.email, access?.avatar_url)}
+            {renderAvatar(profileName, null, access?.avatar_url)}
             <div className="snbr-composer-user">
               <strong>{profileName}</strong>
-              <span>{access?.email}</span>
             </div>
           </div>
           <button aria-label={isUsLocale ? "More post options" : "Mais opcoes do post"} className="snbr-toolbar-icon" type="button">
@@ -10408,8 +10700,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           id="snbr-post-textarea"
           value={postText}
           onChange={(event) => setPostText(event.target.value)}
-          aria-label={isUsLocale ? `Write your thesis on ${selectedTicker}` : `Escreva sua tese sobre ${selectedTicker}`}
-          placeholder={isUsLocale ? `Write your thesis on ${selectedTicker}` : `Escreva sua tese em ${selectedTicker}`}
+          aria-label={isUsLocale ? `Write your idea for ${selectedTicker}` : `Escreva sua ideia para ${selectedTicker}`}
+          placeholder={isUsLocale ? `Write your idea for ${selectedTicker}` : `Escreva sua ideia para ${selectedTicker}`}
         />
 
         <p className="snbr-composer-helper">
@@ -10455,10 +10747,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 </button>
                 <button
                   className={cx("snbr-toolbar-icon", composerGifOpen && "active")}
-                  onClick={() => {
-                    setComposerGifOpen((value) => !value);
-                    setComposerEmojiOpen(false);
-                  }}
+                  onClick={toggleComposerGifPicker}
                   title={isUsLocale ? "Add GIF" : "Adicionar GIF"}
                   aria-label={isUsLocale ? "Add GIF" : "Adicionar GIF"}
                   aria-expanded={composerGifOpen}
@@ -10479,38 +10768,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 {postFile ? <span className="snbr-file-pill">{postFile.name}</span> : null}
               </div>
 
-              {composerGifOpen ? (
-                <div className="snbr-gif-picker" aria-label={isUsLocale ? "Select GIF" : "Selecionar GIF"}>
-                  <div className="snbr-gif-search">
-                    <input
-                      className="snbr-input"
-                      value={gifQuery}
-                      onChange={(event) => setGifQuery(event.target.value)}
-                      placeholder={isUsLocale ? `Search GIF: ${selectedTicker}` : `Buscar GIF: ${selectedTicker}`}
-                    />
-                    <button className="snbr-button subtle" onClick={openGifSearch} type="button">
-                      {isUsLocale ? "Open GIFs" : "Abrir GIFs"}
-                    </button>
-                  </div>
-                  <div className="snbr-gif-quick-grid">
-                    {QUICK_GIF_TERMS.map((term) => (
-                      <button key={term} className="snbr-gif-chip" onClick={() => appendComposerGif(term)} type="button">
-                        {term}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+              {renderComposerAttachmentPreview()}
 
-              {composerEmojiOpen ? (
-                <div className="snbr-emoji-picker" aria-label={isUsLocale ? "Select emoji" : "Selecionar emoji"}>
-                  {COMPOSER_EMOJIS.map((emoji) => (
-                    <button key={emoji} className="snbr-emoji-option" onClick={() => appendComposerEmoji(emoji)} type="button">
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-                ) : null}
+              {composerGifOpen ? renderComposerGifPicker() : null}
+
+              {composerEmojiOpen ? renderComposerEmojiPicker() : null}
               </div>
 
               {predictionOpen ? (
@@ -10566,7 +10828,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 className="snbr-hidden-file-input"
                 type="file"
               accept="image/png,image/jpeg,image/webp,image/gif"
-              onChange={(event) => setPostFile(event.target.files?.[0] || null)}
+              onChange={(event) => {
+                setPostFile(event.target.files?.[0] || null);
+                setSelectedGif(null);
+              }}
             />
           </div>
 
@@ -10574,6 +10839,27 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             {posting ? (isUsLocale ? "Posting..." : "Postando...") : "Post"}
           </button>
         </div>
+      </div>
+    );
+  }
+
+  function renderComposerAttachmentPreview() {
+    const previewUrl = postFilePreviewUrl || selectedGif?.media_url || null;
+    if (!previewUrl) return null;
+    return (
+      <div className="snbr-composer-attachment-preview">
+        <img className="snbr-image" src={previewUrl} alt={postFile?.name || (isUsLocale ? "Selected GIF" : "GIF selecionado")} />
+        <button
+          aria-label={isUsLocale ? "Remove attachment" : "Remover anexo"}
+          onClick={() => {
+            setPostFile(null);
+            setSelectedGif(null);
+            if (composerFileInputRef.current) composerFileInputRef.current.value = "";
+          }}
+          type="button"
+        >
+          ✕
+        </button>
       </div>
     );
   }
@@ -10594,26 +10880,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           <article key={post.id} className="snbr-post">
             <div className="snbr-post-head snbr-post-head-top">
               <div className="snbr-post-user">
-                {renderAvatar(post.user, post.user_email, post.user_avatar_url)}
+                {renderAvatar(publicSocialName(post.user), null, post.user_avatar_url)}
                 <div>
-                  <strong>{post.user}</strong>
-                  <span>{post.user_email || post.ticker || selectedTicker} • {formatRelativeTime(post.timestamp, appLocale)}</span>
+                  <strong>{publicSocialName(post.user)}</strong>
+                  <span>{post.ticker || selectedTicker} • {renderSocialTimestamp(post.created_at ?? post.timestamp, appLocale)}</span>
                 </div>
               </div>
               <div className="snbr-post-head-actions">
-                <span className={cx("snbr-tone-tag", post.sentiment || "neutral")}>
-                  <SentimentLabel sentiment={post.sentiment} locale={appLocale} />
-                </span>
-                <span
-                  className={cx(
-                    "snbr-social-guardian-pill",
-                    String(post.social_guardian_label || "Amarelo").toLowerCase(),
-                  )}
-                  data-social-guardian-score={post.social_guardian_score ?? ""}
-                  data-social-guardian-label={post.social_guardian_label || "Amarelo"}
-                >
-                  {isUsLocale ? "Guardian" : "Guardian"} {post.social_guardian_label || "Amarelo"}
-                </span>
                 {post.user_id !== access?.id ? (
                   <button
                     className={cx("snbr-follow-pill", post.is_followed_by_me && "active")}
@@ -10631,7 +10904,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                     aria-expanded={postMenuId === post.id}
                     aria-haspopup="menu"
                     aria-controls={`post-menu-${post.id}`}
-                    aria-label={isUsLocale ? `Open post actions by ${post.user}` : `Abrir ações do post de ${post.user}`}
+                    aria-label={isUsLocale ? `Open post actions by ${publicSocialName(post.user)}` : `Abrir ações do post de ${publicSocialName(post.user)}`}
                   >
                     ⋯
                   </button>
@@ -10661,12 +10934,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               </span>
             </div>
             <p className="snbr-rich-text">{renderCashtagText(localizeUiText(post.text, appLocale, post.ticker || selectedTicker), `post-${post.id}`)}</p>
-            {post.image_url ? <img className="snbr-image" src={post.image_url} alt={isUsLocale ? "post media" : "midia do post"} /> : null}
+            {post.image_url ? <div className="snbr-published-media"><img className="snbr-image" src={resolveMediaUrl(post.image_url)} alt={isUsLocale ? "post media" : "mídia do post"} /></div> : null}
             <div className="snbr-post-actions snbr-post-actions-bar">
               <button
                 className="snbr-post-action snbr-feed-action"
-                onClick={() => document.getElementById(`comment-input-${post.id}`)?.focus()}
-                aria-label={isUsLocale ? `Reply to ${post.user}'s post` : `Responder ao post de ${post.user}`}
+                onClick={() => activateCommentComposer(post.id)}
+                aria-label={isUsLocale ? `Reply to ${publicSocialName(post.user)}'s post` : `Responder ao post de ${publicSocialName(post.user)}`}
                 type="button"
               >
                 <span aria-hidden="true">💬</span>
@@ -10674,19 +10947,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 <span>{post.comments?.length || 0}</span>
               </button>
               <button
-                className={cx("snbr-post-action", "snbr-feed-action", (post.reposted_by_me || (post.reposts || 0) > 0) && "reposted")}
-                onClick={() => void handleRepost(post)}
-                aria-label={isUsLocale ? `Repost ${post.ticker || selectedTicker}` : `Repostar ${post.ticker || selectedTicker}`}
-                type="button"
-              >
-                <span aria-hidden="true">🔁</span>
-                <span>{isUsLocale ? "Repost" : "Repostar"}</span>
-                <span>{post.reposts ?? 0}</span>
-              </button>
-              <button
                 className={cx("snbr-post-action", "snbr-feed-action", (post.liked_by_me || (post.likes || 0) > 0) && "liked")}
                 onClick={() => void handleToggleLike(post)}
-                aria-label={isUsLocale ? `Like ${post.user}'s post` : `Curtir post de ${post.user}`}
+                aria-label={isUsLocale ? `Like ${publicSocialName(post.user)}'s post` : `Curtir post de ${publicSocialName(post.user)}`}
+                aria-pressed={Boolean(post.liked_by_me)}
+                disabled={pendingLikePostIds.has(post.id)}
                 type="button"
               >
                 <span aria-hidden="true">{(post.liked_by_me || (post.likes || 0) > 0) ? "♥" : "♡"}</span>
@@ -10696,7 +10961,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               <button
                 className="snbr-post-action snbr-feed-action snbr-report-action"
                 onClick={() => openReportDialog(post)}
-                aria-label={isUsLocale ? `Report ${post.user}'s post` : `Denunciar post de ${post.user}`}
+                aria-label={isUsLocale ? `Report ${publicSocialName(post.user)}'s post` : `Denunciar post de ${publicSocialName(post.user)}`}
                 data-social-report-button="true"
                 type="button"
               >
@@ -10704,13 +10969,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 <span>{isUsLocale ? "Report" : "Denunciar"}</span>
               </button>
             </div>
-
-            {post.reposted_by_me ? (
-              <div className="snbr-quote-repost">
-                <span className="snbr-quote-repost-label">{isUsLocale ? "Your repost" : "Seu repost"}</span>
-                <p>{localizeUiText(post.my_repost_quote_text || (isUsLocale ? "Repost without comment." : "Repost sem comentário."), appLocale, post.ticker || selectedTicker)}</p>
-              </div>
-            ) : null}
 
               <div className="snbr-post-comments">
                 {(post.comments || []).length ? (
@@ -10722,27 +10980,90 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 {(post.comments || []).map((comment) => (
                   <article key={comment.id} className="snbr-comment-card snbr-reply-card">
                     <div className="snbr-post-user">
-                      {renderAvatar(comment.user, comment.user_email, comment.user_avatar_url)}
+                      {renderAvatar(publicSocialName(comment.user), null, comment.user_avatar_url)}
                       <div>
-                        <strong>{comment.user}</strong>
-                        <span>{comment.user_email || (isUsLocale ? "comment" : "comentario")} • {formatRelativeTime(comment.timestamp, appLocale)}</span>
+                        <strong>{publicSocialName(comment.user)}</strong>
+                        <span>{isUsLocale ? "comment" : "comentário"} • {renderSocialTimestamp(comment.created_at ?? comment.timestamp, appLocale)}</span>
                       </div>
                     </div>
                   <p className="snbr-rich-text">{renderCashtagText(localizeUiText(comment.text, appLocale, post.ticker || selectedTicker), `comment-${comment.id}`)}</p>
-                  {comment.image_url ? <img className="snbr-image" src={comment.image_url} alt={isUsLocale ? "comment image" : "imagem do comentario"} /> : null}
+                  {comment.image_url ? <div className="snbr-published-media"><img className="snbr-image" src={resolveMediaUrl(comment.image_url)} alt={isUsLocale ? "comment image" : "imagem do comentário"} /></div> : null}
                 </article>
               ))}
 
               {token ? (
-                <div className="snbr-comment-compose">
-                  <input
-                    id={`comment-input-${post.id}`}
-                    className="snbr-input"
+                <div className="snbr-comment-compose" data-comment-composer={post.id}>
+                  <textarea
+                    data-comment-input={post.id}
+                    className="snbr-textarea"
                     value={commentDrafts[post.id] || ""}
                     onChange={(event) => setCommentDrafts((current) => ({ ...current, [post.id]: event.target.value }))}
-                    aria-label={isUsLocale ? `Reply to ${post.user}'s post` : `Responder ao post de ${post.user}`}
-                    placeholder={isUsLocale ? `Reply to ${post.user}'s post` : `Responder ao post de ${post.user}`}
+                    onFocus={() => updateCommentComposer(post.id, { active: true })}
+                    aria-label={isUsLocale ? `Reply to ${publicSocialName(post.user)}'s post` : `Responder ao post de ${publicSocialName(post.user)}`}
+                    placeholder={isUsLocale ? `Reply to ${publicSocialName(post.user)}'s post` : `Responder ao post de ${publicSocialName(post.user)}`}
                   />
+                  {commentComposers[post.id]?.active ? (
+                    <div className="snbr-composer-left">
+                      <div className="snbr-composer-sentiment">
+                        <button
+                          className={cx("snbr-sentiment-pill", "bullish", commentComposers[post.id]?.sentiment !== "bearish" && "active")}
+                          onClick={() => updateCommentComposer(post.id, { sentiment: "bullish" })}
+                          aria-pressed={commentComposers[post.id]?.sentiment !== "bearish"}
+                          type="button"
+                        ><MarketAnimalIcon tone="bullish" /><span>{isUsLocale ? "Bullish" : "Touro"}</span></button>
+                        <button
+                          className={cx("snbr-sentiment-pill", "bearish", commentComposers[post.id]?.sentiment === "bearish" && "active")}
+                          onClick={() => updateCommentComposer(post.id, { sentiment: "bearish" })}
+                          aria-pressed={commentComposers[post.id]?.sentiment === "bearish"}
+                          type="button"
+                        ><MarketAnimalIcon tone="bearish" /><span>{isUsLocale ? "Bearish" : "Urso"}</span></button>
+                      </div>
+                      <div className="snbr-composer-toolbar">
+                        <button className="snbr-toolbar-icon" onClick={() => commentFileInputRefs.current[post.id]?.click()} aria-label={isUsLocale ? "Add photo to reply" : "Adicionar foto à resposta"} type="button">🖼️</button>
+                        <button
+                          className={cx("snbr-toolbar-icon", commentComposers[post.id]?.tool === "gif" && "active")}
+                          onClick={() => {
+                            const opening = commentComposers[post.id]?.tool !== "gif";
+                            updateCommentComposer(post.id, { tool: opening ? "gif" : null });
+                            if (opening && gifSearchStatus === "idle") void handleGifSearch();
+                          }}
+                          aria-expanded={commentComposers[post.id]?.tool === "gif"}
+                          type="button"
+                        >GIF</button>
+                        <button
+                          className={cx("snbr-toolbar-icon", commentComposers[post.id]?.tool === "emoji" && "active")}
+                          onClick={() => updateCommentComposer(post.id, { tool: commentComposers[post.id]?.tool === "emoji" ? null : "emoji" })}
+                          aria-expanded={commentComposers[post.id]?.tool === "emoji"}
+                          aria-label={isUsLocale ? "Add emoji to reply" : "Adicionar emoji à resposta"}
+                          type="button"
+                        >😊</button>
+                      </div>
+                      {commentComposers[post.id]?.previewUrl || commentComposers[post.id]?.gif?.media_url ? (
+                        <div className="snbr-composer-attachment-preview">
+                          <img className="snbr-image" src={commentComposers[post.id]?.previewUrl || commentComposers[post.id]?.gif?.media_url || ""} alt={isUsLocale ? "Reply attachment preview" : "Prévia do anexo da resposta"} />
+                          <button onClick={() => selectCommentFile(post.id, null)} aria-label={isUsLocale ? "Remove reply attachment" : "Remover anexo da resposta"} type="button">✕</button>
+                        </div>
+                      ) : null}
+                      {commentComposers[post.id]?.tool === "emoji" ? renderComposerEmojiPicker((emoji) => {
+                        setCommentDrafts((current) => ({ ...current, [post.id]: `${current[post.id] || ""}${current[post.id] ? " " : ""}${emoji}` }));
+                        updateCommentComposer(post.id, { tool: null });
+                      }) : null}
+                      {commentComposers[post.id]?.tool === "gif" ? renderComposerGifPicker((item) => {
+                        const preview = commentComposers[post.id]?.previewUrl;
+                        if (preview?.startsWith("blob:")) URL.revokeObjectURL(preview);
+                        updateCommentComposer(post.id, { file: null, previewUrl: null, gif: item, tool: null });
+                        if (commentFileInputRefs.current[post.id]) commentFileInputRefs.current[post.id]!.value = "";
+                      }) : null}
+                      <input
+                        ref={(element) => { commentFileInputRefs.current[post.id] = element; }}
+                        className="snbr-hidden-file-input"
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        onChange={(event) => selectCommentFile(post.id, event.target.files?.[0] || null)}
+                      />
+                      {commentComposers[post.id]?.error ? <p className="snbr-error" role="alert">{commentComposers[post.id].error}</p> : null}
+                    </div>
+                  ) : null}
                   <button
                     className="snbr-button secondary"
                     disabled={commentingPostId === post.id}
@@ -10863,7 +11184,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 const resolvedChangePct = item.change_pct ?? watchItem?.changePct ?? null;
                 const resolvedPrice = firstFiniteNumber(item.price, watchItem?.price, quote?.price);
                 const resolvedVolume = firstPositiveFiniteNumber(item.volume, watchItem?.volume, quote?.volume);
-                const resolvedRsi = firstValidRsiNumber(item.rsi, derivePublicRsi(resolvedChangePct, item.state || item.signal || watchItem?.trend || null));
+                const resolvedRsi = firstValidRsiNumber(item.rsi);
                 const resolvedRvol = item.rel_volume ?? deriveRelativeVolume(resolvedVolume);
                 const resolvedAdx = item.adx ?? deriveAdx(resolvedChangePct, resolvedRsi, item.state || item.signal || watchItem?.trend || null);
                 const resolvedAtrPct = item.atr_pct ?? deriveAtrPct(resolvedChangePct, resolvedRsi, resolvedVolume);
@@ -11034,7 +11355,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         </div>
 
         <div className="snbr-tool-stack">
-          {expandedToolCandidates.map((item, index) => {
+          {backendToolCandidates.map((item, index) => {
             const watchItem = watchUniverse.find((candidate) => candidate.symbol === item.symbol);
             const tone = String(item.trend || "").toLowerCase().includes("alta") || String(item.trend || "").toLowerCase().includes("bull")
               ? "bullish"
@@ -11051,7 +11372,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   const resolvedChangePct = item.changePct ?? watchItem?.changePct ?? quote?.change_pct ?? null;
                   const resolvedPrice = firstFiniteNumber(item.price, watchItem?.price, quote?.price);
                   const resolvedVolume = firstPositiveFiniteNumber(item.volume, watchItem?.volume, quote?.volume);
-                  const resolvedRsi = firstValidRsiNumber(item.rsi, derivePublicRsi(resolvedChangePct, item.trend || watchItem?.trend || null));
+                  const resolvedRsi = firstValidRsiNumber(item.rsi);
                   const resolvedRvol = deriveRelativeVolume(resolvedVolume);
                   const resolvedAdx = deriveAdx(resolvedChangePct, resolvedRsi, item.trend || watchItem?.trend || null);
                   const resolvedAtrPct = deriveAtrPct(resolvedChangePct, resolvedRsi, resolvedVolume);
@@ -11174,12 +11495,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const showChartNewsBody = !sameUiText(chartNewsTitle, chartNewsText);
     const chartToolToggles: Array<{ key: keyof ChartSettings; checked: boolean; label: string }> = [
       { key: "show_vwap", checked: showVwap, label: "VWAP" },
-      { key: "show_averages", checked: showAverages, label: isUsLocale ? "Averages" : "Médias" },
       { key: "show_macd", checked: showMacd, label: "MACD" },
       { key: "show_rsi", checked: showRsi, label: isUsLocale ? "Panel RSI" : "RSI painel" },
       { key: "show_volume", checked: showVolume, label: isUsLocale ? "Chart volume" : "Volume gráfico" },
-      { key: "show_support", checked: showSupport, label: isUsLocale ? "Support" : "Suporte" },
-      { key: "show_resistance", checked: showResistance, label: isUsLocale ? "Resistance" : "Resistência" },
     ];
 
     return (
@@ -11214,7 +11532,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             showZones={showZones}
             showPriceLine={showPriceLine}
             showVwap={showVwap}
-            showAverages={showAverages}
             showMacd={showMacd}
             showRsi={showRsi}
             showSupertrend={showSupertrend}
@@ -11223,22 +11540,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             showResistance={showResistance}
             supportLevel={chartSupportResistanceLevels.support}
             resistanceLevel={chartSupportResistanceLevels.resistance}
-            institutionalRsiValue={panelRsiValue}
+            institutionalRsiValue={chartTimeframeRsi}
+            rsiTimeframeLabel={rsiTimeframeLabel}
+            rsiMetadata={chartRsiMetadata}
+            levelMetadata={{
+              symbol: selectedTicker,
+              timeframe: chartInterval,
+              as_of: chartSupportResistanceLevels.zones[0]?.as_of || null,
+            }}
             locale={appLocale}
           />
-
-          <div className="snbr-timeframes">
-            {TIMEFRAME_OPTIONS.map((timeframe) => (
-              <button
-                key={timeframe}
-                className={cx("snbr-timeframe", chartInterval === timeframe && "active")}
-                onClick={() => setChartInterval(timeframe)}
-                type="button"
-              >
-                {timeframe}
-              </button>
-            ))}
-          </div>
 
           <div className="snbr-chart-now-strip">
             <div>
@@ -11250,7 +11561,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               {showChartNewsBody ? <p>{chartNewsText}</p> : null}
             </div>
             {chartNews?.url ? (
-              <a className="snbr-button ghost" href={chartNews.url} rel="noreferrer" target="_blank">
+              <a className="snbr-section-head-action snbr-collapse-toggle snbr-open-news" href={chartNews.url} rel="noreferrer" target="_blank">
                 {isUsLocale ? "Open news" : "Abrir notícia"}
               </a>
             ) : (
@@ -11286,17 +11597,28 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
         <section className="snbr-poll-inline">
           <div className="snbr-plain-panel snbr-poll-shell">
-            <div className="snbr-section-head">
+            <button
+              className="snbr-side-card-trigger"
+              onClick={() => setPollOpen((value) => !value)}
+              type="button"
+              aria-expanded={pollOpen}
+            >
               <div>
-                <h3>✦ {isUsLocale ? "Poll/Vote" : "Poll/Votar"}</h3>
-                <p>{isUsLocale ? "Below the sentiment monitor, the community votes on this asset's weekly thesis." : "Abaixo do monitor de sentimento, a comunidade vota na tese da semana do ativo."}</p>
+                <h3>✦ {isUsLocale ? "Vote" : "Votar"}</h3>
+                <p>{isUsLocale ? "Asset strategy vote" : "Votação da estratégia do ativo"}</p>
               </div>
-            </div>
+              <span className="snbr-collapse-toggle">{pollOpen ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}</span>
+            </button>
+            {pollOpen && activePoll ? (
             <div className="snbr-poll-card">
-              <h4>{localizedActivePoll.question || (isUsLocale ? `Active Poll/Vote for ${selectedTicker}` : `Poll/Votar ativa para ${selectedTicker}`)}</h4>
+              <h4>{localizedActivePoll.question}</h4>
               <div className="snbr-poll-meta">
                 <span>{localizedActivePoll.total_votes} {isUsLocale ? "votes" : "votos"}</span>
                 <span>{localizedActivePoll.status || (isUsLocale ? "open" : "aberta")}</span>
+                {activePoll.event_type ? <span>{localizeUiText(activePoll.event_type, appLocale, selectedTicker)}</span> : null}
+                {activePoll.event_date ? <span>{new Date(activePoll.event_date).toLocaleDateString(appLocale)}</span> : null}
+                {activePoll.event_source ? <span>{isUsLocale ? "Source" : "Fonte"}: {activePoll.event_source}</span> : null}
+                {activePoll.valid_until ? <span>{isUsLocale ? "Valid until" : "Válida até"}: {new Date(activePoll.valid_until).toLocaleDateString(appLocale)}</span> : null}
               </div>
               <div className="snbr-poll-options">
                 {(localizedActivePoll.options || []).map((option) => {
@@ -11350,6 +11672,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 </div>
               ) : null}
             </div>
+            ) : null}
           </div>
         </section>
 
@@ -11369,8 +11692,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         selectedTicker={selectedTicker}
         newsRows={newsRows}
         newsStateText={newsStateText}
-        discussionStateText={discussionStateText}
-        featuredDiscussion={renderDiscussionList(featuredDiscussionPosts.slice(0, 4), discussionStateText || "Sem discussões em destaque ainda.")}
       />
     );
   }
@@ -11595,7 +11916,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             />
             <div className="snbr-profile-meta">
               <div className="snbr-account-line"><span>{isUsLocale ? "Plan" : "Plano"}</span><strong>{access?.plan || "guest"}</strong></div>
-              <div className="snbr-account-line"><span>Status</span><strong>{isUsLocale ? localizeUiText(access?.plan_status || "n/a", appLocale) : (access?.plan_status || "n/a")}</strong></div>
+              <div className="snbr-account-line"><span>{isUsLocale ? "System" : "Sistema"}</span><strong>{statusLabel(access?.plan_status)}</strong></div>
               <div className="snbr-account-line"><span>Telegram</span><strong>{access?.telegram_linked ? `@${access?.telegram_username || (isUsLocale ? "linked" : "vinculado")}` : (access?.access?.telegram ? (isUsLocale ? "ready to link" : "pronto para vincular") : (isUsLocale ? "blocked on current plan" : "bloqueado no plano atual"))}</strong></div>
             </div>
             <button className="snbr-button primary" disabled={profileSaving} onClick={() => void handleSaveProfile()} type="button">
@@ -11784,10 +12105,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     return date.toLocaleDateString("pt-BR");
   }
 
+  function statusLabel(status?: string | null) {
+    const normalized = String(status || "").toLowerCase();
+    if (normalized === "trialing" || normalized === "trial") return isUsLocale ? "TEST" : "TESTE";
+    if (["active", "premium", "paid", "ativo"].includes(normalized)) return "PRO";
+    return status || "n/a";
+  }
+
   function planLabel(plan?: string | null) {
     const normalized = String(plan || "").toLowerCase();
     if (normalized === "premium") return "Premium";
-    if (normalized === "trial") return isUsLocale ? "90-day trial" : "Trial 90 dias";
+    if (normalized === "trial") return isUsLocale ? "30-day trial" : "Trial 30 dias";
     if (normalized === "free") return isUsLocale ? "Free" : "Basico";
     return plan || (isUsLocale ? "Guest" : "Visitante");
   }
@@ -11833,8 +12161,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         </div>
         <small className="snbr-legal-note">
           {isUsLocale
-            ? "The first app access starts a 90-day trial. After it ends, the account moves to Free if Premium is not active."
-            : "O primeiro acesso pelo app entra em Trial por 90 dias. Ao final, a conta migra automaticamente para Basico se nao houver Premium ativo."}
+            ? "The first app access starts a 30-day trial. After it ends, the account moves to Free if Premium is not active."
+            : "O primeiro acesso pelo app entra em Trial por 30 dias. Ao final, a conta migra automaticamente para Basico se nao houver Premium ativo."}
         </small>
       </div>
     );
@@ -11844,12 +12172,19 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     if (token) {
       return (
         <div className="snbr-side-card snbr-side-card-highlight">
-          <div className="snbr-section-head compact">
+          <button
+            className="snbr-side-card-trigger"
+            onClick={() => setAccessOpen((value) => !value)}
+            type="button"
+            aria-expanded={accessOpen}
+          >
             <div>
-              <h3>{isUsLocale ? "Platform access" : "Acesso a plataforma"}</h3>
+              <h3>{isUsLocale ? "Platform access" : "Acesso à plataforma"}</h3>
               <p>{isUsLocale ? "Account ready for website, app and Telegram according to the plan." : "Conta pronta para website, app e Telegram de acordo com o plano."}</p>
             </div>
-          </div>
+            <span className="snbr-collapse-toggle">{accessOpen ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}</span>
+          </button>
+          {accessOpen ? <>
           <div className="snbr-profile-card">
             {renderAvatar(profileName, access?.email, access?.avatar_url)}
             <div className="snbr-profile-card-copy">
@@ -11870,8 +12205,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           </div>
           <div className="snbr-profile-meta">
             <div className="snbr-account-line"><span>{isUsLocale ? "Plan" : "Plano"}</span><strong>{planLabel(access?.plan || "trial")}</strong></div>
-            <div className="snbr-account-line"><span>Status</span><strong>{isUsLocale ? localizeUiText(access?.plan_status || "ativo", appLocale) : (access?.plan_status || "ativo")}</strong></div>
-            <div className="snbr-account-line"><span>{isUsLocale ? "Trial ends" : "Trial termina"}</span><strong>{formatDatePtBr(access?.trial_expires_at)}</strong></div>
+            <div className="snbr-account-line"><span>{isUsLocale ? "System" : "Sistema"}</span><strong>{statusLabel(access?.plan_status)}</strong></div>
+            <div className="snbr-account-line"><span>{isUsLocale ? "Test ends" : "Teste termina"}</span><strong>{formatDatePtBr(access?.trial_expires_at)}</strong></div>
             <div className="snbr-account-line"><span>Telegram</span><strong>{access?.telegram_linked ? `@${access?.telegram_username || (isUsLocale ? "linked" : "vinculado")}` : (isUsLocale ? "available to link" : "disponível para vincular")}</strong></div>
             <div className="snbr-account-line"><span>Legal</span><strong>{legalAccepted(access) ? (isUsLocale ? "accepted" : "aceito") : (isUsLocale ? "pending" : "pendente")}</strong></div>
           </div>
@@ -11951,6 +12286,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           <button className="snbr-button secondary" onClick={() => void handleLogoutAll()} type="button">
             {isUsLocale ? "Sign out of all devices" : "Sair de todos os dispositivos"}
           </button>
+          </> : null}
         </div>
       );
     }
@@ -11958,12 +12294,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     if (pendingLoginToken) {
       return (
         <div className="snbr-side-card snbr-side-card-highlight">
-          <div className="snbr-section-head compact">
+          <button className="snbr-side-card-trigger" onClick={() => setAccessOpen((value) => !value)} type="button" aria-expanded={accessOpen}>
             <div>
               <h3>{isUsLocale ? "Platform access" : "Acesso à plataforma"}</h3>
               <p>{isUsLocale ? "Enter the 6-digit code we sent to your e-mail." : "Digite o código de 6 dígitos enviado para o seu e-mail."}</p>
             </div>
-          </div>
+            <span className="snbr-collapse-toggle">{accessOpen ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}</span>
+          </button>
+          {accessOpen ? (
           <div className="snbr-auth">
             <label className="snbr-profile-field">
               <span>{isUsLocale ? "Access code" : "Código de acesso"}</span>
@@ -12004,18 +12342,21 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             {loginNotice ? <div className="snbr-empty">{loginNotice}</div> : null}
             {loginError ? <div className="snbr-empty">{loginError}</div> : null}
           </div>
+          ) : null}
         </div>
       );
     }
 
     return (
       <div className="snbr-side-card snbr-side-card-highlight">
-        <div className="snbr-section-head compact">
+        <button className="snbr-side-card-trigger" onClick={() => setAccessOpen((value) => !value)} type="button" aria-expanded={accessOpen}>
           <div>
             <h3>{isUsLocale ? "Platform access" : "Acesso à plataforma"}</h3>
             <p>{isUsLocale ? "Enter your e-mail to receive a secure access code." : "Informe seu e-mail para receber um código de acesso seguro."}</p>
           </div>
-        </div>
+          <span className="snbr-collapse-toggle">{accessOpen ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}</span>
+        </button>
+        {accessOpen ? (
         <div className="snbr-auth">
           <label className="snbr-profile-field">
             <span>E-mail</span>
@@ -12035,6 +12376,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           {loginNotice ? <div className="snbr-empty">{loginNotice}</div> : null}
           {loginError ? <div className="snbr-empty">{loginError}</div> : null}
         </div>
+        ) : null}
       </div>
     );
   }
@@ -12054,7 +12396,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             <h3>{isUsLocale ? "Notifications" : "Notificação"}</h3>
             <p>{isUsLocale ? "Notices to be published on website, app and Telegram." : "Avisos a serem publicados no website, app e Telegram."}</p>
           </div>
-          <span>{notificationOpen ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}</span>
+          <span className="snbr-collapse-toggle">{notificationOpen ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}</span>
         </button>
         {notificationOpen ? (
           <div className="snbr-settings-detail-row">
@@ -12079,7 +12421,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             <h3>{isUsLocale ? "Tools" : "Ferramentas"}</h3>
             <p>{isUsLocale ? "Account preferences, blocked and muted users." : "Preferências da conta, bloqueados e silenciados."}</p>
           </div>
-          <span>{toolsOpen ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}</span>
+          <span className="snbr-collapse-toggle">{toolsOpen ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}</span>
         </button>
         {toolsOpen ? (
           <>
@@ -12162,7 +12504,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       <WorkspaceRightRail
         mobileInsightsOpen={mobileInsightsOpen}
         onToggleMobileInsights={() => setMobileInsightsOpen((value) => !value)}
-        stats={displayStats}
+        stats={coherentDisplayStats}
         newsRows={newsRows}
         discussionPosts={discussionPosts}
         activePoll={localizedActivePoll}
@@ -12290,6 +12632,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           watchCategory={watchCategory}
           onSetWatchCategory={setWatchCategory}
           activeWatchCount={activeWatchCountForFilter}
+          watchCategoryCounts={activeWatchCategoryCounts}
           accessCard={renderAccessCard()}
           authCard={null}
           notificationCard={renderNotificationCard()}
@@ -12300,11 +12643,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         />
 
       <main className="snbr-symbol-page" id="snbr-main-content">
+        <div className="snbr-sticky-top">
         <nav className="snbr-symbol-tabs snbr-top-tabs" aria-label={isUsLocale ? "Symbol tabs" : "Tabs do símbolo"} role="tablist">
-          <button className="snbr-tab-scroll" onClick={() => scrollTabs("left")} type="button" aria-label={isUsLocale ? "Move tabs left" : "Mover tabs para a esquerda"}>
-            ◀
-          </button>
-          <div className="snbr-tab-list" ref={tabListRef}>
+          <div className="snbr-tab-list">
             {visibleTabs.map((tab) => {
               const meta = getTabMeta(tab, appLocale);
               const isAiTab = Boolean(AI_TOOL_TAB_MAP[tab.id as keyof typeof AI_TOOL_TAB_MAP]);
@@ -12343,9 +12684,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               );
             })}
           </div>
-          <button className="snbr-tab-scroll" onClick={() => scrollTabs("right")} type="button" aria-label={isUsLocale ? "Move tabs right" : "Mover tabs para a direita"}>
-            ▶
-          </button>
           <button
             className={cx("snbr-mode-toggle", advancedMode && "active", proModeLocked && "locked")}
             onClick={() => {
@@ -12358,6 +12696,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             type="button"
             aria-pressed={advancedMode}
             aria-disabled={proModeLocked}
+            aria-label={
+              proModeLocked
+                ? (isUsLocale ? "Pro Mode locked" : "Modo Pro bloqueado")
+                : advancedMode
+                  ? (isUsLocale ? "Switch to Basic Mode" : "Mudar para Modo Básico")
+                  : (isUsLocale ? "Switch to Pro Mode" : "Mudar para Modo Pro")
+            }
             title={
               proModeLocked
                 ? (isUsLocale ? "Pro Mode locked after trial unless Premium is active" : "Modo Pro bloqueado após o trial sem Premium ativo")
@@ -12366,7 +12711,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   : (isUsLocale ? "Open Pro details" : "Abrir detalhes Pro")
             }
           >
-            {proModeLocked ? (isUsLocale ? "🔒 Pro Mode" : "🔒 Modo Pro") : (isUsLocale ? "Pro Mode" : "Modo Pro")}
+            {proModeLocked
+              ? (isUsLocale ? "🔒 Pro Mode" : "🔒 Modo Pro")
+              : advancedMode
+                ? (isUsLocale ? "Basic Mode" : "Modo Básico")
+                : (isUsLocale ? "Pro Mode" : "Modo Pro")}
           </button>
           <div className="snbr-locale-switch" aria-label={isUsLocale ? "Language selector" : "Seletor de idioma"}>
             <button
@@ -12426,43 +12775,44 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             </div>
           </div>
         </section>
+        </div>
 
         {showSymbolHeader ? (
           <section className="snbr-symbol-header">
             <div className="snbr-symbol-main">
               <div className="snbr-breadcrumb">Home / Symbol / {selectedTicker}</div>
               <div className="snbr-symbol-title-row">
+                {symbolLogoUrl ? <AssetMark symbol={selectedTicker} name={symbolLabel} logoUrl={symbolLogoUrl} /> : null}
                 <div>
                   <h2>{selectedTicker}</h2>
-                  <p>{symbolLabel}</p>
+                  {symbolLabel ? <p>{symbolLabel}</p> : null}
                 </div>
                 <span className="snbr-chip">{selectedTickerMarketLabel}</span>
               </div>
               <div className="snbr-price-line">
                 <strong>{formatAssetMoney(displayQuote?.price, selectedTicker, appLocale)}</strong>
-                <span className={cx("snbr-price-change", priceDirectionClass)}>
-                  {displayQuoteHasCoreData
-                    ? formatSignedPercent(displayQuote?.change_pct)
-                    : (isUsLocale ? "no confirmed change" : "sem variação confirmada")}
-                </span>
+              </div>
+              <div className={cx("snbr-daily-change-line", priceDirectionClass)}>
+                {displayQuoteHasCoreData ? (
+                  <>
+                    <span aria-hidden="true">{movementArrow(priceDirectionClass)}</span>
+                    <strong>{formatSignedPrice(priceMovementValue, appLocale)}</strong>
+                    <span>({formatSignedPercent(priceMovementPercent)})</span>
+                    <small>{isUsLocale ? "Today" : "Hoje"} · {priceMovementLabel}</small>
+                  </>
+                ) : (
+                  <small>{isUsLocale ? "No confirmed daily change" : "Sem variação diária confirmada"}</small>
+                )}
               </div>
               {!advancedMode ? (
                 <div className="snbr-basic-pro-lock" aria-label={isUsLocale ? "Premium metrics hidden in Basic Mode" : "Métricas premium ocultas no Modo Básico"}>
-                  {isUsLocale ? "Premium metrics available in Pro Plan" : "🔒 Disponível no Pro"}
-                </div>
-              ) : null}
-              {advancedMode && hasPriceMovement ? (
-                <div className={cx("snbr-after-hours-line", priceDirectionClass)}>
-                  <span>{movementArrow(priceDirectionClass)}</span>
-                  <strong>{priceMovementValue != null ? formatLocalePrice(priceMovementValue, appLocale) : "n/a"}</strong>
-                  <span>{priceMovementPercent != null ? `(${formatSignedPercent(priceMovementPercent)})` : ""}</span>
-                  <small>{priceMovementLabel}</small>
+                  {isUsLocale ? "Premium metrics available on the Pro Plan" : "Métricas premium disponíveis no Plano Pro"}
                 </div>
               ) : null}
             </div>
 
             <div className="snbr-stat-strip" aria-label={isUsLocale ? "Indicator explanation boxes" : "Boxes explicativos dos indicadores"}>
-              {displayStats.map((item) => (
+              {coherentDisplayStats.map((item) => (
                 <div key={item.label} className={cx("snbr-stat-cell", item.tone)}>
                   <span className="snbr-stat-label">{item.label}</span>
                   <strong className="snbr-stat-value">{item.value}</strong>
@@ -12493,22 +12843,26 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   <strong className="snbr-decision-mode-label">
                     {advancedMode ? (isUsLocale ? "Pro Mode" : "Modo Pro") : (isUsLocale ? "Basic Mode" : "Modo Básico")}
                   </strong>
-                  {!advancedMode ? (
-                    <button
-                      aria-label={isUsLocale ? "Open strategic analysis panel" : "Abrir painel de análise estratégica"}
-                      className="snbr-section-head-action"
-                      onClick={() => {
-                        if (!proModeLocked) setAdvancedMode(true);
-                      }}
-                      type="button"
-                    >
-                      {isUsLocale ? "Open" : "Abrir"}
-                    </button>
-                  ) : null}
+                  <button
+                    aria-controls="strategic-analysis-panel-body"
+                    aria-expanded={advancedMode && strategicPanelOpen}
+                    className="snbr-section-head-action snbr-collapse-toggle"
+                    onClick={() => {
+                      if (advancedMode) {
+                        setStrategicPanelOpen((current) => !current);
+                      } else if (!proModeLocked) {
+                        setAdvancedMode(true);
+                        setStrategicPanelOpen(true);
+                      }
+                    }}
+                    type="button"
+                  >
+                    {advancedMode && strategicPanelOpen ? (isUsLocale ? "Close" : "Fechar") : (isUsLocale ? "Open" : "Abrir")}
+                  </button>
                 </div>
               </div>
-              {advancedMode ? (
-                <>
+              {advancedMode && strategicPanelOpen ? (
+                <div id="strategic-analysis-panel-body" data-canonical-analysis={canonicalAnalysis?.validation_status || "UNAVAILABLE"}>
                   <article className={cx("snbr-operational-decision", operationalDecision.tone)}>
                     <div className="snbr-operational-main">
                       <span className="snbr-operational-kicker">{isUsLocale ? "Decision Now" : "Decisão Agora"}</span>
@@ -12575,6 +12929,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       <small>{isUsLocale ? `AI Analysis Time ${strategicConclusion.stamp}` : `IA Análise Hora ${strategicConclusion.stamp}`}</small>
                       <button
                         aria-expanded={strategicConclusionExpanded}
+                        className="snbr-collapse-toggle"
                         disabled={!strategicConclusionExpanded && proModeLocked}
                         onClick={toggleStrategicConclusion}
                         type="button"
@@ -12628,7 +12983,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                     )}
                     </article>
                   ) : null}
-                </>
+                </div>
               ) : null}
             </section>
           ) : null}

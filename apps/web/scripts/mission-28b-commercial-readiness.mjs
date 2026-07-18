@@ -48,37 +48,50 @@ assertIncludes(workspaceShell, "snbr-basic-pro-lock", "Basic Mode keeps the asse
 assertIncludes(workspaceShell, "<div className=\"snbr-price-line\">", "Basic Mode keeps public price/change visible in the symbol header");
 assertIncludes(workspaceShell, "selectedTickerMarketLabel", "asset header keeps the market/category identity visible");
 assertIncludes(workspaceShell, "activeWatchCount={activeWatchCountForFilter}", "active list counter uses the selected filter count");
-assertIncludes(workspaceShell, "watchCategory === \"Todos\" ? activeWatchlist.length", "Todos counter aggregates all monitored categories");
+assertIncludes(workspaceShell, "CATEGORY_ORDER.reduce((total, category)", "Todos counter aggregates B3 + BDR + Crypto + USA explicitly");
 assertIncludes(workspaceRails, "activeCountLabel", "left rail shows the active filter name next to its count");
 
 assertIncludes(workspaceShell, "RSI SCORE", "RSI score is explicit in the top card");
-assertIncludes(tickerChart, "RSI SCORE:", "RSI score is explicit in the chart badge and lower panel");
-assertIncludes(tickerChart, "snbr-chart-top-overlays", "chart renders top row for RSI, support and resistance");
-assertIncludes(tickerChart, "? \"\" : \"hidden\"", "RSI badge reserves space when toggled off");
-assertIncludes(css, ".snbr-chart-panel-rsi-badge.hidden", "RSI toggle uses visibility instead of shifting level overlays");
 assertIncludes(tickerChart, "aria-hidden={!showRsi}", "institutional RSI panel can hide without unmounting chart overlays");
 assertIncludes(css, ".snbr-institutional-rsi-panel.hidden", "RSI panel keeps reserved layout space when toggled off");
 assertIncludes(workspaceShell, "resolveCanonicalChartLevelZones", "support/resistance uses canonical chart zones");
 assertIncludes(workspaceShell, "supportLevel={chartSupportResistanceLevels.support}", "support overlay consumes canonical support value");
 assertIncludes(workspaceShell, "resistanceLevel={chartSupportResistanceLevels.resistance}", "resistance overlay consumes canonical resistance value");
-if (tickerChart.indexOf("snbr-chart-panel-rsi-badge") > tickerChart.indexOf("snbr-chart-level-overlays")) {
-  throw new Error("Mission 28B regression: RSI SCORE must render before support/resistance chips");
-}
+assertNotIncludes(tickerChart, '<div className="snbr-chart-top-overlays"', "RSI/support/resistance badges are not rendered over chart");
+assertNotIncludes(tickerChart, "<LevelLinesPane", "verified support/resistance pane is not rendered");
+assertNotIncludes(workspaceShell, '{ key: "show_support"', "support toggle is not rendered");
+assertNotIncludes(workspaceShell, '{ key: "show_resistance"', "resistance toggle is not rendered");
+assertNotIncludes(workspaceShell, '<div className="snbr-timeframes">', "duplicate timeframe row below RSI is not rendered");
 assertNotIncludes(tickerChart, "RSI@tv-basicstudies", "TradingView RSI stays removed");
 assertNotIncludes(tickerChart, "RSI 14 close", "TradingView RSI legend stays removed");
 assertNotIncludes(tickerChart, "snbr-chart-level-line ${level.key}`}>\n                <span>", "support/resistance lines do not repeat labels");
 assertNotIncludes(css, ".snbr-chart-level-line span", "support/resistance line label CSS removed");
 
+assertIncludes(workspaceShell, '<div className="snbr-sticky-top">', "tabs and ticker tape share one sticky wrapper");
+assertIncludes(css, ".snbr-sticky-top {", "sticky header class exists");
+assertIncludes(css, "position: sticky;\n  top: 0;\n  z-index: 30;", "sticky header keeps the real top without spacer");
+assertIncludes(css, "grid-template-rows: auto auto minmax(0, 1fr);", "active list consumes remaining rail height");
+assertIncludes(css, ".snbr-active-list-scroll {\n  min-height: 0;\n  height: 100%;\n  max-height: none;", "active list owns its internal scroll height");
+assertIncludes(workspaceShell, 'return normalizeSymbol(label) === symbol', "watchlist suppresses a duplicated symbol label");
+assertIncludes(workspaceShell, '{itemLabel ? <span>{itemLabel}</span> : null}', "watchlist second line only renders a canonical name");
+assertIncludes(workspaceShell, '{symbolLabel ? <p>{symbolLabel}</p> : null}', "asset header second line only renders a canonical name");
+assertNotIncludes(workspaceShell, 'label: isUsLocale ? "Price" : "Preço"', "separate current-price card is not rendered");
+assertIncludes(css, "font-size: clamp(30px, 2.4vw, 38px);", "main price uses the reduced responsive size");
+assertIncludes(workspaceShell, 'advancedMode\n                ? (isUsLocale ? "Basic Mode" : "Modo Básico")', "Pro mode button offers Basic mode");
+assertIncludes(workspaceShell, 'const SIMPLE_TOP_TAB_IDS = new Set([\n  "grafico",\n  "referrals",\n  "education",\n]);', "Basic mode keeps only chart/social, referrals and trader help tabs");
+assertIncludes(workspaceShell, 'setActiveTab("grafico")', "invalid Pro tab safely returns to chart in Basic mode");
+
 assertNotIncludes(workspaceShell, "Card usa volume do quote/snapshot", "old volume snapshot explanation removed");
 assertNotIncludes(workspaceShell, "RSI do painel: indicador institucional do snapshot/ranking", "old RSI snapshot explanation removed");
 
-assertIncludes(workspaceShell, "Detectado às", "AI detection time is shown separately");
+assertIncludes(workspaceShell, "resolveAiFindingTimestamp", "AI detection timestamp is resolved separately");
+assertIncludes(workspaceShell, "isUsLocale ? \"Detected\" : \"Detectado\"", "AI detection time has bilingual label");
 assertIncludes(workspaceShell, "Publicado às", "AI publication time can be shown separately");
-assertIncludes(workspaceShell, "Visualizado às", "AI viewed time is explicit");
+assertIncludes(workspaceShell, "isUsLocale ? \"Viewed\" : \"Visualizado\"", "AI viewed time has bilingual label");
 assertIncludes(workspaceSections, "Publicado às", "news publication time is explicit");
 assertIncludes(workspaceSections, "Fonte", "news source is explicit");
 assertIncludes(workspaceSections, "Sentimento", "news sentiment is explicit");
-assertIncludes(workspaceSections, "Nenhuma notícia encontrada para este ativo no momento.", "news area has explicit empty-state fallback");
+assertIncludes(workspaceSections, "Sem notícias relevantes para este ativo agora. Tente atualizar mais tarde.", "news area has explicit ticker-safe empty-state fallback");
 assertIncludes(workspaceShell, "Nenhuma análise de notícia disponível para este ativo no momento.", "news AI area has explicit empty-state fallback");
 assertIncludes(workspaceShell, "Sem leitura disponível para este ativo no momento.", "AI tool tabs have explicit empty-state fallback");
 assertIncludes(workspaceShell, "Nenhum achado desta IA para este ativo agora.", "AI zero counter state explains no asset finding");

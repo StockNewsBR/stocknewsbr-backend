@@ -83,6 +83,14 @@ async function createComment(token, postId, text) {
   });
 }
 
+async function deletePost(token, postId) {
+  if (!postId) return;
+  await api(`/post/${postId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 async function createRepost(token, postId, quoteText) {
   return api(`/post/${postId}/repost`, {
     method: "POST",
@@ -190,6 +198,7 @@ async function runBrowserAudit(reporter) {
   const page = await context.newPage();
   const browserPostText = `Post normal Mission 31A navegador ${Date.now()} PETR4 suporte, volume, fluxo e risco controlado.`;
   const result = {
+    post_id: null,
     created_post_text: browserPostText,
     report_button_count: 0,
     reason_button_count: 0,
@@ -213,6 +222,7 @@ async function runBrowserAudit(reporter) {
     );
     await page.locator(".snbr-post-submit").first().click();
     const postResponse = await postResponsePromise;
+    if (postResponse.ok()) result.post_id = (await postResponse.json()).id || null;
     if (!postResponse.ok()) {
       result.failures.push(`post normal no navegador falhou: ${postResponse.status()}`);
     }
@@ -251,7 +261,13 @@ async function main() {
   const author = await registerUser("author");
   const reporter = await registerUser("reporter");
   const apiAudit = await runApiAudit(author.token, reporter.token);
-  const browserAudit = await runBrowserAudit(reporter);
+  let browserAudit;
+  try {
+    browserAudit = await runBrowserAudit(reporter);
+  } finally {
+    await deletePost(author.token, apiAudit.post_id);
+    await deletePost(reporter.token, browserAudit?.post_id);
+  }
   const guardianState = readGuardianState();
   const auditActions = (guardianState.guardian_audit || []).map((item) => item.action);
   const scores = guardianState.guardian_scores || {};

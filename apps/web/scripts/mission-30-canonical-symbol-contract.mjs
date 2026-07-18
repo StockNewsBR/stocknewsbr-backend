@@ -35,9 +35,12 @@ const mobileApi = read("apps/mobile/lib/api.ts");
 
 for (const expected of [
   "PETR4: [\"PETR4.SA\", \"PETR4 B3\", \"PETR\"",
-  "AXIA6: [\"AXIA6.SA\", \"AXIA6 B3\", \"ELET6\"",
+  "AXIA3: [\"AXIA3.SA\", \"AXIA3 B3\", \"AXIA6\"",
+  "ELET3",
+  "ELET6",
+  "AXIA7: [\"AXIA7.SA\", \"AXIA7 B3\"]",
   "ASAI3: [\"ASAI3.SA\"",
-  "AZUL4: [\"AZUL4.SA\"",
+  "AZUL54: [\"AZUL54.SA\"",
   "B3SA3: [\"B3SA3.SA\"",
   "BTC",
   "XBTUSD",
@@ -55,7 +58,7 @@ for (const expected of [
   "export function providerSymbolFor",
   "export function symbolCategoryFor",
   "BMFBOVESPA:PETR4",
-  "BMFBOVESPA:AXIA6",
+  "BMFBOVESPA:AXIA7",
   "BINANCE:${canonical.slice(0, -3)}USDT",
   "NASDAQ:AAPL",
   "NYSE:CRM",
@@ -67,13 +70,14 @@ for (const expected of [
 
 assertIncludes(workspaceShell, "resolveCanonicalSymbol", "workspace uses canonical symbol resolver");
 assertIncludes(workspaceShell, "resolveCanonicalSymbolAliases", "workspace uses canonical alias resolver");
-assertIncludes(workspaceShell, "\"AXIA6.SA\"", "active B3 watchlist uses AXIA6 instead of retired ELET6");
+assertIncludes(workspaceShell, "\"AXIA3.SA\", \"AXIA7.SA\"", "active B3 watchlist uses current AXIA codes");
 assertIncludes(workspaceShell, "friendlyNetworkErrorMessage", "frontend maps fetch failures to product-safe copy");
 assertIncludes(workspaceShell, "sem snapshot", "watchlist has clear missing-price fallback");
 assertIncludes(workspaceShell, "sem cotação confirmada", "symbol header avoids R$ n/a for missing quotes");
 assertIncludes(workspaceShell, "activeWatchCategoryCounts", "active list counts by canonical category");
 assertIncludes(workspaceShell, "CATEGORY_ORDER.reduce((total, category)", "Todos equals B3 + BDR + Crypto + USA");
-assertIncludes(workspaceRails, "}: ${activeWatchCount}", "active list count label cannot be mistaken for a negative number");
+assertIncludes(workspaceRails, "Total: ${totalWatchCount}", "active list count label cannot be mistaken for a negative number");
+assertIncludes(workspaceRails, "watchCategoryCounts[category] || 0", "each category chip shows its own asset count");
 assertIncludes(workspaceShell, "INTERNAL_AI_TAB_IDS", "internal AI tools remain hidden from top tabs");
 assertIncludes(workspaceShell, "shouldShowTopBarTabId", "top bar has explicit visibility rules");
 assertIncludes(workspaceShell, "if (INTERNAL_AI_TAB_IDS.has(id)) return false", "Risk, News AI, Macro and Regime tabs are hidden visually");
@@ -83,8 +87,8 @@ assertNotIncludes(workspaceShell, "no data\" : \"sem dados", "top bar does not r
 assertIncludes(workspaceShell, "news: { label: \"📰 Notícias\"", "common news tab remains available");
 assertIncludes(workspaceSections, "Sem notícias relevantes para este ativo agora. Tente atualizar mais tarde.", "empty common news tab explains absence inside the panel");
 assertIncludes(workspaceShell, "hasWatchlistSnapshotData", "active list separates assets by valid snapshot");
-assertIncludes(workspaceShell, "unavailableGroupedActiveWatchlist", "assets without snapshot are grouped separately");
-assertIncludes(workspaceShell, "Ativos temporariamente sem dados", "UI labels the temporary no-data asset section");
+assertIncludes(workspaceShell, "items: filteredActiveWatchlist.filter", "active list keeps every asset in its canonical category");
+assertIncludes(workspaceShell, "renderWatchRow(item, !hasWatchlistSnapshotData(item))", "assets without snapshot remain visible and are marked unavailable");
 assertIncludes(css, ".snbr-watch-unavailable-section", "temporary no-data assets have separated styling");
 assertIncludes(css, "clamp(360px, 24vw, 420px)", "left rail is wide enough for full ticker symbols");
 assertIncludes(workspaceShell, "decisionTradeLabel(tradeTone", "mixed/conflicting scenarios render Aguardar instead of a forced side");
@@ -115,7 +119,7 @@ assertIncludes(workspaceShell, "Visualizado", "AI findings show viewer timestamp
 assertIncludes(workspaceSections, "data-news-state-count={newsRows.length}", "news panel exposes frontend state count for DOM audit");
 assertIncludes(css, ".snbr-chip.fresh", "fresh AI status has visual styling");
 assertIncludes(css, ".snbr-chip.stale", "stale AI status has visual styling");
-assertIncludes(workspaceShell, "getNews(token, deferredTicker, Date.now())", "common news tab fetches the ticker-specific public news route when bundle is empty");
+assertIncludes(workspaceShell, "getNews(token, deferredTicker, appLocale, true, controller.signal)", "common news tab fetches ticker-specific news with locale and request cancellation");
 assertIncludes(webApi, "/public/market/news/${encodeURIComponent(ticker)}?limit=6", "frontend uses the public ticker-specific news endpoint");
 assertIncludes(publicNewsService, "_item_belongs_to_symbol(item, ticker)", "public news payload filters items by requested ticker");
 assertIncludes(publicNewsService, "\"mixed_ticker_allowed\": False", "public news payload forbids cross-ticker reuse");
@@ -151,7 +155,8 @@ assertNotIncludes(css, "top: 55%", "support is not fixed to viewport percentage"
 assertNotIncludes(tickerChart, "style={{ top:", "component does not position levels by local top style");
 
 assertIncludes(mobileRegistry, "export function canonicalSymbol", "mobile has canonical symbol resolver");
-assertIncludes(mobileRegistry, "AXIA6: [\"AXIA6.SA\", \"AXIA6 B3\", \"ELET6\"", "mobile registry resolves retired ELET6 to AXIA6");
+assertIncludes(mobileRegistry, "AXIA3: [\"AXIA3.SA\", \"AXIA3 B3\", \"AXIA6\"", "mobile registry resolves retired AXIA6/ELET6 to AXIA3");
+assertIncludes(mobileRegistry, "AXIA7: [\"AXIA7.SA\", \"AXIA7 B3\"]", "mobile registry keeps AXIA7 separate from retired AXIA6/ELET6");
 assertIncludes(mobileApi, "tickerPathValue", "mobile API canonicalizes ticker path values");
 assertIncludes(mobileApi, "canonicalSymbol(ticker)", "mobile API uses canonical symbol resolver");
 

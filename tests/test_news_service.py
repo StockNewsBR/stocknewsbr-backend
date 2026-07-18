@@ -304,7 +304,7 @@ class NewsServiceTests(unittest.TestCase):
         ), patch(
             "app.services.news_service._now_ts",
             return_value=10_000.0,
-        ):
+        ), patch("app.services.news_service._persist_news_cache"):
             items = get_symbol_news("PETR4", limit=6)
             cache = get_news_cache_info("PETR4")
 
@@ -312,6 +312,8 @@ class NewsServiceTests(unittest.TestCase):
         self.assertEqual(cache["status"], "stale_fallback")
         self.assertTrue(cache["fallback_used"])
         self.assertEqual(cache["fetched_from"], "stale_cache")
+        self.assertIsNone(cache["timestamp"])
+        self.assertEqual(cache["checked_at"], 10_000.0)
 
     def test_get_symbol_news_exposes_provider_error_when_yahoo_unavailable(self):
         with patch("app.services.news_service._NEWS_CACHE", {}), patch(
@@ -469,11 +471,65 @@ class NewsServiceTests(unittest.TestCase):
                 news_service._NEWS_CACHE_LOADED = True
                 news_service._NEWS_CACHE_FILE_MTIME = disk_mtime - 10
 
-                news_service._persist_news_cache_locked()
+                news_service._persist_news_cache()
 
                 payload = json.loads(cache_file.read_text(encoding="utf-8"))
                 self.assertIn("AAPL", payload["news_cache"])
                 self.assertIn("NVDA", payload["news_cache"])
+
+    def test_news_cache_io_never_holds_memory_lock(self):
+        original_read = news_service.read_json_file_consistent
+        original_write = news_service.write_json_file_atomic
+
+        def guarded_read(*args, **kwargs):
+            self.assertFalse(news_service._CACHE_LOCK.locked())
+            return original_read(*args, **kwargs)
+
+        def guarded_write(*args, **kwargs):
+            self.assertFalse(news_service._CACHE_LOCK.locked())
+            return original_write(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_file = Path(tmpdir) / "news_cache.json"
+            cache_file.write_text(json.dumps({"news_cache": {}, "provider_status": {}}), encoding="utf-8")
+            with patch("app.services.news_service._NEWS_CACHE_FILE", cache_file), patch.object(
+                news_service, "read_json_file_consistent", side_effect=guarded_read,
+            ), patch.object(news_service, "write_json_file_atomic", side_effect=guarded_write):
+                news_service._NEWS_CACHE.clear()
+                news_service._NEWS_PROVIDER_STATUS.clear()
+                news_service._NEWS_CACHE_LOADED = False
+                news_service._NEWS_CACHE_FILE_MTIME = None
+
+                news_service._load_news_cache_once()
+                news_service._persist_news_cache()
+
+    def test_persist_news_cache_preserves_concurrent_locale_update(self):
+        pt_entry = {"timestamp": 3.0, "checked_at": 3.0, "items": [{"title": "AAPL em português"}]}
+        en_entry = {"timestamp": 4.0, "checked_at": 4.0, "items": [{"title": "AAPL in English"}]}
+        original_write = news_service.write_json_file_atomic
+
+        def write_with_concurrent_update(*args, **kwargs):
+            with news_service._CACHE_LOCK:
+                news_service._set_news_cache_entry_locked("AAPL", "en-US", en_entry)
+            return original_write(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_file = Path(tmpdir) / "news_cache.json"
+            with patch("app.services.news_service._NEWS_CACHE_FILE", cache_file), patch.object(
+                news_service, "write_json_file_atomic", side_effect=write_with_concurrent_update,
+            ):
+                news_service._NEWS_CACHE.clear()
+                news_service._NEWS_PROVIDER_STATUS.clear()
+                news_service._NEWS_CACHE_LOADED = True
+                news_service._NEWS_CACHE_FILE_MTIME = None
+                with news_service._CACHE_LOCK:
+                    news_service._set_news_cache_entry_locked("AAPL", "pt-BR", pt_entry)
+
+                news_service._persist_news_cache()
+
+                with news_service._CACHE_LOCK:
+                    self.assertEqual(news_service._get_news_cache_entry_locked("AAPL", "pt-BR")["items"], pt_entry["items"])
+                    self.assertEqual(news_service._get_news_cache_entry_locked("AAPL", "en-US")["items"], en_entry["items"])
 
 
 if __name__ == "__main__":

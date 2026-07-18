@@ -10,6 +10,7 @@ from app.services.news_service import (
     get_news_cache_info,
     get_news_cached_report,
     get_symbol_news,
+    normalize_news_locale,
 )
 
 _SYMBOL_NEWS_ALIASES = {
@@ -334,17 +335,20 @@ def _translate_english_news_text(value: Any, ticker: str, field: str) -> Any:
     return translated[:1].upper() + translated[1:]
 
 
-def _normalize_public_news_item(item: dict[str, Any], ticker: str) -> dict[str, Any]:
+def _normalize_public_news_item(item: dict[str, Any], ticker: str, locale: str) -> dict[str, Any]:
     normalized = dict(item)
     title = normalized.get("title") or normalized.get("headline")
+    normalized["original_title"] = normalized.get("original_title") or title
+    normalized["content_locale"] = normalize_news_locale(locale)
     if _is_generic_news_title(title, ticker):
         url_title = _headline_from_url(normalized.get("url"))
         if url_title:
             normalized["title"] = url_title
             normalized["headline"] = url_title
-    for field in ("title", "headline", "summary", "card_summary", "impact_reason", "why_it_matters", "editorial", "market_context", "trader_takeaway", "sector", "industry"):
+    for field in ("summary", "card_summary", "impact_reason", "why_it_matters", "editorial", "market_context", "trader_takeaway", "sector", "industry"):
         if field in normalized:
-            normalized[field] = _translate_english_news_text(normalized.get(field), ticker, field)
+            if normalized["content_locale"] == "pt-BR":
+                normalized[field] = _translate_english_news_text(normalized.get(field), ticker, field)
     return normalized
 
 
@@ -480,7 +484,9 @@ def _build_news_state(
     report: dict[str, Any],
     *,
     warmup_requested: bool = False,
+    locale: str = "pt-BR",
 ) -> dict[str, Any]:
+    is_english = normalize_news_locale(locale) == "en-US"
     cache_status = str(cache.get("status") or "cold")
     provider_status = str(cache.get("provider_status") or "not_checked")
     provider_error = cache.get("provider_error")
@@ -490,13 +496,13 @@ def _build_news_state(
 
     if items:
         status = "ok"
-        message = f"NOTÍCIAS ENCONTRADAS: {len(items)} notícia(s) real(is) validada(s) para {symbol}."
+        message = f"NEWS FOUND: {len(items)} validated item(s) for {symbol}." if is_english else f"NOTÍCIAS ENCONTRADAS: {len(items)} notícia(s) real(is) validada(s) para {symbol}."
         if cache_status == "stale_fallback":
             status = "stale_fallback"
             message = f"CACHE ANTIGO: usando notícia anterior de {symbol}; provider atual não entregou item novo."
     else:
         status = "empty"
-        message = f"SEM NOTÍCIA REAL AGORA: Sem notícia real para {symbol} agora; nenhuma notícia de outro ticker foi reaproveitada."
+        message = f"NO VERIFIED NEWS NOW: no item from another ticker was reused for {symbol}." if is_english else f"SEM NOTÍCIA REAL AGORA: Sem notícia real para {symbol} agora; nenhuma notícia de outro ticker foi reaproveitada."
         if provider_error:
             status = "provider_error"
             message = f"PROVIDER INDISPONÍVEL: provider de news falhou para {symbol}: {provider_error}."
@@ -531,29 +537,32 @@ def build_public_news_payload(
     source: str | None = None,
     allow_fetch: bool = False,
     schedule_warmup: bool = False,
+    locale: str = "pt-BR",
 ) -> dict:
     ticker = _normalize_symbol(symbol)
+    content_locale = normalize_news_locale(locale)
     safe_limit = max(1, min(int(limit or 6), 20))
-    cached_items = get_cached_symbol_news(ticker, limit=safe_limit)
+    cached_items = get_cached_symbol_news(ticker, limit=safe_limit, locale=content_locale)
     fetched_items = cached_items
     if allow_fetch and len(cached_items) < safe_limit:
-        fetched_items = get_symbol_news(ticker, limit=safe_limit)
+        fetched_items = get_symbol_news(ticker, limit=safe_limit, locale=content_locale)
     warmup_requested = False
     if not allow_fetch and schedule_warmup and len(cached_items) < safe_limit:
         warmup_requested = _request_news_warmup_safe(ticker, safe_limit)
     normalized_items = [
-        _enrich_public_news_item(_normalize_public_news_item(item, ticker), ticker)
+        _enrich_public_news_item(_normalize_public_news_item(item, ticker, content_locale), ticker)
         for item in fetched_items
         if isinstance(item, dict)
     ]
     scoped_items = [item for item in normalized_items if _item_belongs_to_symbol(item, ticker)]
     scoped_items = sorted(scoped_items, key=_news_timestamp_epoch, reverse=True)
     items = _dedupe_news_items(scoped_items, safe_limit)
-    report = get_news_cached_report(ticker, items)
-    cache = get_news_cache_info(ticker)
-    state = _build_news_state(ticker, items, cache, report, warmup_requested=warmup_requested)
+    report = get_news_cached_report(ticker, items, locale=content_locale)
+    cache = get_news_cache_info(ticker, locale=content_locale)
+    state = _build_news_state(ticker, items, cache, report, warmup_requested=warmup_requested, locale=content_locale)
     payload = {
         "symbol": ticker,
+        "locale": content_locale,
         "requested_symbol": str(symbol or "").upper().strip(),
         "items": items,
         "count": len(items),

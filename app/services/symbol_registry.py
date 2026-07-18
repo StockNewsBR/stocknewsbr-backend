@@ -5,8 +5,8 @@ from typing import Any, Iterable
 
 
 _QUERY_RE = re.compile(r"[?&=]")
-_B3_RE = re.compile(r"^[A-Z][A-Z0-9]{3,4}(3|4|5|6|11|34)$")
-_B3_WITH_SUFFIX_RE = re.compile(r"^([A-Z][A-Z0-9]{3,4}(?:3|4|5|6|11|34))SA$")
+_B3_RE = re.compile(r"^[A-Z][A-Z0-9]{3,4}(3|4|5|6|7|11|32|34)$")
+_B3_WITH_SUFFIX_RE = re.compile(r"^([A-Z][A-Z0-9]{3,4}(?:3|4|5|6|7|11|32|34))SA$")
 _B3_FUTURE_RE = re.compile(r"^(WIN|WDO)[FGHJKMNQUVXZ]\d{2}$")
 _CRYPTO_RE = re.compile(r"^([A-Z0-9]{2,8})(USD|USDT)$")
 _US_RE = re.compile(r"^[A-Z][A-Z0-9]{0,9}$")
@@ -34,6 +34,7 @@ KNOWN_BDR_SYMBOLS = {
     "BERK34",
     "GOGL34",
     "ITLC34",
+    "JBSS32",
     "M1TA34",
     "MELI34",
     "MSFT34",
@@ -100,9 +101,18 @@ US_EXCHANGE_BY_SYMBOL = {
 
 _CURATED_ALIASES: dict[str, tuple[str, ...]] = {
     "ASAI3": ("ASAI3.SA", "ASAI3 B3", "BVMF:ASAI3", "BMFBOVESPA:ASAI3"),
-    "AZUL4": ("AZUL4.SA", "AZUL4 B3", "BVMF:AZUL4", "BMFBOVESPA:AZUL4"),
+    # Corporate-action remaps (old B3 tickers -> live successors on Yahoo):
+    "BRAV3": ("BRAV3.SA", "BRAV3 B3", "RRRP3", "RRRP3.SA", "BVMF:BRAV3", "BMFBOVESPA:BRAV3", "BVMF:RRRP3", "BMFBOVESPA:RRRP3"),
+    "MBRF3": ("MBRF3.SA", "MBRF3 B3", "MRFG3", "MRFG3.SA", "BRFS3", "BRFS3.SA", "BVMF:MBRF3", "BMFBOVESPA:MBRF3", "BVMF:MRFG3", "BMFBOVESPA:MRFG3", "BVMF:BRFS3", "BMFBOVESPA:BRFS3"),
+    "EMBJ3": ("EMBJ3.SA", "EMBJ3 B3", "EMBR3", "EMBR3.SA", "BVMF:EMBJ3", "BMFBOVESPA:EMBJ3", "BVMF:EMBR3", "BMFBOVESPA:EMBR3"),
+    # B3 renamed AZUL ON from AZUL4 to AZUL54 (Dec/2025); Yahoo serves AZUL54.SA.
+    "AZUL54": ("AZUL54.SA", "AZUL54 B3", "AZUL4", "AZUL4.SA", "BVMF:AZUL54", "BMFBOVESPA:AZUL54", "BVMF:AZUL4", "BMFBOVESPA:AZUL4"),
+    # CPLE6 still trades on B3 as its own line — do NOT fold it into CPLE3.
+    "CPLE3": ("CPLE3.SA", "CPLE3 B3", "CPLE5", "CPLE5.SA", "BVMF:CPLE3", "BMFBOVESPA:CPLE3"),
+    "JBSS32": ("JBSS32.SA", "JBSS32 B3", "JBSS3", "JBSS3.SA", "BVMF:JBSS32", "BMFBOVESPA:JBSS32", "BVMF:JBSS3", "BMFBOVESPA:JBSS3"),
     "B3SA3": ("B3SA3.SA", "B3SA3 B3", "BVMF:B3SA3", "BMFBOVESPA:B3SA3"),
-    "AXIA6": ("AXIA6.SA", "AXIA6 B3", "ELET6", "ELET6.SA", "BVMF:ELET6", "BMFBOVESPA:ELET6", "BMFBOVESPA:AXIA6"),
+    "AXIA3": ("AXIA3.SA", "AXIA3 B3", "AXIA6", "AXIA6.SA", "ELET3", "ELET3.SA", "ELET6", "ELET6.SA", "BVMF:ELET3", "BVMF:ELET6", "BMFBOVESPA:ELET3", "BMFBOVESPA:ELET6", "BMFBOVESPA:AXIA6"),
+    "AXIA7": ("AXIA7.SA", "AXIA7 B3"),
     "PETR4": ("PETR4.SA", "PETR4 B3", "PETR", "BVMF:PETR4", "BMFBOVESPA:PETR4"),
     "VALE3": ("VALE3.SA", "VALE3 B3", "VALE", "BVMF:VALE3", "BMFBOVESPA:VALE3"),
     "ITUB4": ("ITUB4.SA", "ITUB4 B3", "ITUB", "BVMF:ITUB4", "BMFBOVESPA:ITUB4"),
@@ -129,7 +139,8 @@ _CURATED_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 _TRADINGVIEW_SYMBOL_FALLBACKS: dict[str, tuple[str, ...]] = {
-    "AXIA6": ("BMFBOVESPA:ELET6", "BMFBOVESPA:AXIA6", "BMFBOVESPA:ELET3"),
+    "AXIA3": ("BMFBOVESPA:AXIA3", "BMFBOVESPA:AXIA6", "BMFBOVESPA:ELET6", "BMFBOVESPA:ELET3"),
+    "AXIA7": ("BMFBOVESPA:AXIA7",),
 }
 
 
@@ -275,7 +286,7 @@ def _is_disallowed_qualified_b3_key(key: str, value: Any) -> bool:
 
 
 def _is_unlisted_bdr_key(key: str) -> bool:
-    return key.endswith("34") and key not in KNOWN_BDR_SYMBOLS
+    return key.endswith(("32", "34")) and key not in KNOWN_BDR_SYMBOLS
 
 
 def canonical_symbol_or_none(value: Any) -> str | None:

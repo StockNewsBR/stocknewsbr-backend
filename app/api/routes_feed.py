@@ -18,10 +18,11 @@ from app.social.posts import create_post, delete_post, get_post, get_posts
 from app.services.social_discussion_service import build_discussion_state, rank_featured_discussions
 from app.services.symbol_registry import canonical_symbol
 from app.services.social_realtime_service import broadcast_ticker_event
+from app.services.official_identity_service import ROLE_ADMIN, ROLE_MODERATOR
 
 
 class PostCreateRequest(BaseModel):
-    text: str = Field(..., min_length=1, max_length=1000)
+    text: str = Field(default="", max_length=1000)
     image_url: str | None = Field(default=None, max_length=2048)
     sentiment: str | None = Field(default=None, max_length=32)
 
@@ -92,7 +93,7 @@ async def create_ticker_post(
         ticker=canonical_symbol(symbol),
         image_url=payload.image_url,
         sentiment=payload.sentiment,
-        display_name=current_user.display_name or current_user.email,
+        display_name=current_user.display_name or "Trader",
         email=current_user.email,
         avatar_url=current_user.avatar_url,
     )
@@ -129,7 +130,7 @@ async def create_post_comment(
         user_id=current_user.id,
         text=payload.text,
         image_url=payload.image_url,
-        display_name=current_user.display_name or current_user.email,
+        display_name=current_user.display_name or "Trader",
         email=current_user.email,
         avatar_url=current_user.avatar_url,
     )
@@ -223,7 +224,8 @@ async def delete_ticker_post(
     if not post:
         raise HTTPException(status_code=404, detail="post_not_found")
 
-    if not delete_post(post_id, current_user.id):
+    can_moderate = str(getattr(current_user, "role", "") or "").lower() in {ROLE_ADMIN, ROLE_MODERATOR}
+    if not delete_post(post_id, current_user.id, can_moderate=can_moderate):
         raise HTTPException(status_code=403, detail="post_delete_forbidden")
 
     await broadcast_ticker_event(

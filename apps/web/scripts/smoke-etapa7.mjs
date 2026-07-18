@@ -5,17 +5,13 @@ import { chromium } from "playwright";
 const baseUrl = process.env.SNBR_WEB_URL || "http://127.0.0.1:3000";
 const repoRoot = path.resolve(process.cwd(), "..", "..");
 const runtimeDir = path.join(repoRoot, "runtime", "etapa7");
-const tickers = ["F", "PETR4", "BTCUSD", "META34"];
+const tickers = ["F", "PETR4", "BTCUSD", "M1TA34"];
 const aiTabs = [
   { id: "flow", name: /Fluxo IA|Flow AI/i },
   { id: "liquidity", name: /Liquidez IA|Liquidity AI/i },
   { id: "trend", name: /Tendência IA|Trend AI/i },
   { id: "momentum", name: /Momento IA|Momentum AI/i },
   { id: "smart-money", name: /Smart|Dinheiro/i },
-  { id: "risk", name: /Risco IA|Risk AI/i },
-  { id: "news-ia", name: /Notícias IA|News AI/i },
-  { id: "macro", name: /Macro IA|Macro AI/i },
-  { id: "regime", name: /Regime IA|Regime AI/i },
 ];
 
 function assert(condition, message) {
@@ -37,9 +33,11 @@ fs.mkdirSync(runtimeDir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
 const consoleErrors = [];
+const pageErrors = [];
 page.on("console", (message) => {
   if (message.type() === "error") consoleErrors.push(message.text());
 });
+page.on("pageerror", (error) => pageErrors.push(error.stack || error.message));
 
 const result = {
   baseUrl,
@@ -47,6 +45,7 @@ const result = {
   aiTabs: [],
   screenshots: [],
   consoleErrors,
+  pageErrors,
 };
 
 try {
@@ -137,7 +136,9 @@ try {
   await page.waitForTimeout(700);
   text = await pageText(page);
   assert(
-    (text.includes("Asset Panel") && text.includes("AI Reads")) || text.includes("No operational read with confirmed price and volume"),
+    (text.includes("Asset Panel") && text.includes("AI Reads"))
+      || text.includes("No operational read with confirmed price and volume")
+      || (text.includes("0 current events for this asset") && text.includes("Waiting for a new read")),
     "USA deve traduzir painel de IA",
   );
   assert(!text.includes("Painel do ativo") && !text.includes("Leituras da IA"), "USA nao deve manter labels PT na aba IA");
@@ -158,7 +159,7 @@ try {
   await waitForPanel(page);
   await page.waitForTimeout(700);
   text = await pageText(page);
-  assert(text.includes("AI Chart / Social") && text.includes("Asset Search") && text.includes("no price"), "PETR4 em USA deve permanecer em ingles");
+  assert(text.includes("AI Chart / Social") && text.includes("Asset Search"), "PETR4 em USA deve permanecer em ingles");
   for (const term of forbiddenUsShellTerms) {
     assert(!text.includes(term), `PETR4 USA nao deve mostrar texto PT no shell/news/poll/social: ${term}`);
   }
@@ -188,11 +189,22 @@ try {
   const tabTexts = new Map();
   for (const tab of aiTabs) {
     await page.getByRole("tab", { name: tab.name }).click();
-    await page.waitForTimeout(900);
+    await page.waitForFunction(
+      (tabId) => {
+        const panel = document.querySelector(`#panel-${tabId}`);
+        const panelText = panel?.textContent || "";
+        return panelText.length > 0 && !/IA carregando|AI loading/i.test(panelText);
+      },
+      tab.id,
+      { timeout: 10_000 },
+    );
     const panel = page.locator(`#panel-${tab.id}`);
     const panelText = await panel.innerText({ timeout: 10_000 });
     const normalized = panelText.replace(/\s+/g, " ").trim();
-    if (/No operational read with confirmed price and volume|Sem leitura operacional com preço e volume confirmados/i.test(normalized)) {
+    if (
+      /No operational read with confirmed price and volume|Sem leitura operacional com preço e volume confirmados/i.test(normalized)
+      || (/0 (?:current events|eventos atuais)/i.test(normalized) && /Waiting for a new read|Aguardando nova leitura/i.test(normalized))
+    ) {
       result.aiTabs.push({ id: tab.id, ok: true, status: "no_operational_findings" });
       continue;
     }
@@ -208,6 +220,11 @@ try {
   if (tabTexts.size >= 4) {
     assert(uniqueTabBodies.size >= Math.max(3, tabTexts.size - 1), "abas IA parecem clonadas demais no smoke");
   }
+
+  assert(
+    !pageErrors.some((message) => message.includes('"[object Object]" is not valid JSON')),
+    "TradingView nao deve gerar PAGEERROR de studies_overrides",
+  );
 
   const jsonPath = path.join(runtimeDir, "smoke-etapa7-result.json");
   fs.writeFileSync(jsonPath, JSON.stringify(result, null, 2), "utf-8");

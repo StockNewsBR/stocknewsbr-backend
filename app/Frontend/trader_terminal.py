@@ -467,7 +467,7 @@ function renderHome() {{
           <h2>Lancamento principal Android + Web + Telegram</h2>
           <p class="muted">O ecossistema premium ja nasce orientado a workspace profissional, social por ticker, videos de ajuda e IA aplicada ao fluxo.</p>
           <div class="metric-grid">
-            <div class="metric"><span class="muted">Trial</span><b>${{pricing.trial_days || 90}} dias</b><span class="muted">Acesso inicial ao ecossistema</span></div>
+            <div class="metric"><span class="muted">Trial</span><b>${{pricing.trial_days || 30}} dias</b><span class="muted">Acesso inicial ao ecossistema</span></div>
             <div class="metric"><span class="muted">Premium mensal</span><b>R$ ${{pricing.premium_monthly?.price_brl || 49}}</b><span class="muted">App + Web + Telegram</span></div>
             <div class="metric"><span class="muted">Premium anual</span><b>R$ ${{pricing.premium_annual?.price_brl || 500}}</b><span class="muted">Google app primeiro, Apple depois</span></div>
           </div>

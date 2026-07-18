@@ -37,12 +37,12 @@ class Mission28B2RegressionTests(unittest.TestCase):
         news_service._remember_news_provider_status("F", "ok", raw_count=10)
 
         with patch.object(news_service, "_fetch_yfinance_news", return_value=_raw_ford_news()), \
-             patch.object(news_service, "_persist_news_cache_locked"):
+             patch.object(news_service, "_persist_news_cache"):
             items = news_service.get_symbol_news("F", limit=6)
 
         self.assertGreater(len(items), 0)
         self.assertIn("F", news_service._NEWS_CACHE)
-        self.assertGreater(len(news_service._NEWS_CACHE["F"]["items"]), 0)
+        self.assertGreater(len(news_service.get_cached_symbol_news("F", limit=6)), 0)
 
         payload = build_public_news_payload("F", limit=6, allow_fetch=False)
 

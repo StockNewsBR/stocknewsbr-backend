@@ -12,7 +12,7 @@ const screenshotDir = path.join(repoRoot, "output", "playwright", "mission30f2")
 
 const WEB_BASE = process.env.MISSION30F2_WEB_BASE || "http://127.0.0.1:3000";
 const HEADLESS = process.env.MISSION30F2_HEADLESS !== "false";
-const SYMBOLS = (process.env.MISSION30F2_SYMBOLS || "CRM,F,BULL,BYDDY,AXIA6,ELET6,PETR4,VALE3,AAPL,NVDA,BTCUSD")
+const SYMBOLS = (process.env.MISSION30F2_SYMBOLS || "CRM,F,BULL,BYDDY,AXIA3,AXIA7,PETR4,VALE3,AAPL,NVDA,BTCUSD")
   .split(",")
   .map((item) => item.trim().toUpperCase())
   .filter(Boolean);
@@ -29,8 +29,8 @@ const EXPECTED_TRADINGVIEW = {
   F: "NYSE:F",
   BULL: "NASDAQ:BULL",
   BYDDY: "OTC:BYDDY",
-  AXIA6: "BMFBOVESPA:ELET6",
-  ELET6: "BMFBOVESPA:ELET6",
+  AXIA3: "BMFBOVESPA:AXIA3",
+  AXIA7: "BMFBOVESPA:AXIA7",
   PETR4: "BMFBOVESPA:PETR4",
   VALE3: "BMFBOVESPA:VALE3",
   AAPL: "NASDAQ:AAPL",
@@ -128,6 +128,8 @@ async function auditChart(page, symbol) {
     levelPath: document.querySelectorAll(".snbr-chart-level-price-path").length,
     levelLine: document.querySelectorAll(".snbr-chart-level-line").length,
     levelLabel: document.querySelectorAll(".snbr-chart-level-label").length,
+    supportLine: document.querySelectorAll("[data-chart-level-line='support']").length,
+    resistanceLine: document.querySelectorAll("[data-chart-level-line='resistance']").length,
   }));
   const mainText = await page.locator("main").innerText().catch(() => "");
   const panel = page.locator(".snbr-decision-panel").first();
@@ -165,11 +167,22 @@ async function auditChart(page, symbol) {
     result.failures.push(`TradingView esperado ${EXPECTED_TRADINGVIEW[symbol]}, recebido ${result.tradingview_symbol}`);
   }
   if (result.symbol_not_found_text_visible) result.failures.push("texto de símbolo inexistente apareceu no DOM");
-  if (result.support_anchor_mode !== "card_only") result.failures.push("suporte não está marcado como card_only");
-  if (result.resistance_anchor_mode !== "card_only") result.failures.push("resistência não está marcada como card_only");
-  for (const [key, count] of Object.entries(overlayCounts)) {
-    if (count > 0) result.failures.push(`overlay customizado ainda presente: ${key}=${count}`);
+  for (const [key, mode, lineCount] of [
+    ["suporte", result.support_anchor_mode, overlayCounts.supportLine],
+    ["resistência", result.resistance_anchor_mode, overlayCounts.resistanceLine],
+  ]) {
+    if (!["price_scaled_overlay", "pending_chart_scale", "hidden"].includes(mode || "")) {
+      result.failures.push(`${key} usa modo de ancoragem desconhecido: ${mode || "ausente"}`);
+    }
+    if (mode === "price_scaled_overlay" && lineCount < 1) {
+      result.failures.push(`${key} marcado como price_scaled_overlay sem linha na escala de preço`);
+    }
+    if (mode !== "price_scaled_overlay" && lineCount > 0) {
+      result.failures.push(`${key} renderiza linha sem escala de preço válida`);
+    }
   }
+  if (overlayCounts.levelArea > 0) result.failures.push(`área fixa/fabricada ainda presente: ${overlayCounts.levelArea}`);
+  if (overlayCounts.levelPath > 0) result.failures.push(`price path fabricado ainda presente: ${overlayCounts.levelPath}`);
   const contradictions = contradictionIssues(result);
   result.contradiction_count = contradictions.length;
   result.failures.push(...contradictions);

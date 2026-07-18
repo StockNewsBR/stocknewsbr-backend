@@ -3,6 +3,8 @@ import type {
   ChartPayload,
   ChatHistoryPayload,
   FeedPayload,
+  FeedComment,
+  GifSearchPayload,
   LoginCodeRequestResponse,
   NewsPayload,
   PollPayload,
@@ -20,6 +22,11 @@ import type {
 
 export function resolveApiBase() {
   return (process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000").replace(/\/$/, "");
+}
+
+export function resolveMediaUrl(value?: string | null) {
+  const url = String(value || "").trim();
+  return url.startsWith("/media/") ? `${resolveApiBase()}${url}` : url;
 }
 
 function buildUrl(path: string) {
@@ -80,6 +87,16 @@ function pruneGetRequestCache() {
   }
 }
 
+function invalidateFeedRequestCache() {
+  for (const key of getRequestCache.keys()) {
+    if (key.includes(":GET:/ticker/") && key.includes("/feed?")) getRequestCache.delete(key);
+  }
+}
+
+function isSocialMutation(path: string, method: string) {
+  return method !== "GET" && /^(?:\/ticker\/[^/]+\/post|\/post\/\d+|\/(?:block|mute|report)|\/social\/users\/\d+\/follow)(?:[/?]|$)/.test(path);
+}
+
 async function request<T>(path: string, options?: ApiRequestOptions) {
   const { token, cacheTtlMs, ...fetchOptions } = options || {};
   const method = String(fetchOptions.method || "GET").toUpperCase();
@@ -112,6 +129,7 @@ async function request<T>(path: string, options?: ApiRequestOptions) {
     });
 
     const payload = await parseJson<T>(response);
+    if (isSocialMutation(path, method)) invalidateFeedRequestCache();
     if (cacheKey) {
       const current = getRequestCache.get(cacheKey);
       if (current) current.lastValue = payload;
@@ -273,12 +291,21 @@ export function getFeed(token: string, ticker: string) {
   return request<FeedPayload>(`/ticker/${encodeURIComponent(ticker)}/feed?limit=500`, { token, cacheTtlMs: 15000 });
 }
 
-export function getNews(token: string | null | undefined, ticker: string, refreshKey?: number | string) {
-  const refresh = refreshKey == null ? "" : `&refresh=${encodeURIComponent(String(refreshKey))}`;
+export function getNews(
+  token: string | null | undefined,
+  ticker: string,
+  locale: "pt-BR" | "en-US" = "pt-BR",
+  refresh = false,
+  signal?: AbortSignal,
+) {
+  const refreshParam = refresh ? "&refresh=true" : "";
+  const localeParam = `&locale=${encodeURIComponent(locale)}`;
   const route = token
-    ? `/news/${encodeURIComponent(ticker)}?limit=6${refresh}`
-    : `/public/market/news/${encodeURIComponent(ticker)}?limit=6${refresh}`;
-  return request<NewsPayload>(route, token ? { token, cacheTtlMs: refreshKey == null ? 30000 : 0 } : { cacheTtlMs: refreshKey == null ? 30000 : 0 });
+    ? `/news/${encodeURIComponent(ticker)}?limit=6${localeParam}${refreshParam}`
+    : `/public/market/news/${encodeURIComponent(ticker)}?limit=6${localeParam}${refreshParam}`;
+  return request<NewsPayload>(route, token
+    ? { token, signal, cacheTtlMs: refresh ? 0 : 30000 }
+    : { signal, cacheTtlMs: refresh ? 0 : 30000 });
 }
 
 export function getPublicQuote(ticker: string, options?: { refresh?: boolean }) {
@@ -291,21 +318,38 @@ export function getPublicQuotes(symbols: string[]) {
   return request<{ items: QuotePayload[]; count: number }>(`/public/market/quotes?symbols=${params}`, { cacheTtlMs: 8000 });
 }
 
-export function getPublicAiTools() {
-  return request<PublicAiToolsPayload>("/public/market/ai-tools", { cacheTtlMs: 15000 });
+export function getPublicAiTools(
+  symbol: string,
+  tool: string,
+  timeframe = "1D",
+  signal?: AbortSignal,
+) {
+  const query = new URLSearchParams({ symbol, tool, timeframe });
+  return request<PublicAiToolsPayload>(`/public/market/ai-tools?${query.toString()}`, { signal, cacheTtlMs: 15000 });
 }
 
-export function getPublicMarketBundle(ticker: string, interval = "1D") {
+export function getPublicMarketBundle(
+  ticker: string,
+  interval = "1D",
+  locale: "pt-BR" | "en-US" = "pt-BR",
+  signal?: AbortSignal,
+) {
   return request<PublicMarketBundlePayload>(
-    `/public/market/bundle/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}&limit=6`,
-    { cacheTtlMs: 10000 },
+    `/public/market/bundle/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}&limit=6&locale=${encodeURIComponent(locale)}`,
+    { signal, cacheTtlMs: 10000 },
   );
 }
 
-export function getWorkspaceTickerBundle(token: string, ticker: string, interval = "1D") {
+export function getWorkspaceTickerBundle(
+  token: string,
+  ticker: string,
+  interval = "1D",
+  locale: "pt-BR" | "en-US" = "pt-BR",
+  signal?: AbortSignal,
+) {
   return request<WorkspaceTickerBundlePayload>(
-    `/web/workspace/ticker/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}&limit=6`,
-    { token, cacheTtlMs: 10000 },
+    `/web/workspace/ticker/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}&limit=6&locale=${encodeURIComponent(locale)}`,
+    { token, signal, cacheTtlMs: 10000 },
   );
 }
 
@@ -474,7 +518,7 @@ export function commentOnPost(
   postId: number,
   payload: { text: string; image_url?: string | null },
 ) {
-  return request(`/post/${postId}/comment`, {
+  return request<FeedComment>(`/post/${postId}/comment`, {
     method: "POST",
     token,
     headers: { "Content-Type": "application/json" },
@@ -564,8 +608,12 @@ export function deletePost(token: string, postId: number) {
   });
 }
 
-export function getPoll(ticker: string) {
-  return request<PollPayload>(`/poll/${encodeURIComponent(ticker)}`);
+export function getPoll(
+  ticker: string,
+  locale: "pt-BR" | "en-US" = "pt-BR",
+  signal?: AbortSignal,
+) {
+  return request<PollPayload>(`/poll/${encodeURIComponent(ticker)}?locale=${encodeURIComponent(locale)}`, { signal });
 }
 
 export function getQuote(token: string | null | undefined, ticker: string) {
@@ -603,6 +651,16 @@ export function getPushStatus(token: string) {
 
 export function getMediaStatus(token: string) {
   return request("/api/media/status", { token });
+}
+
+export function searchGifs(
+  token: string,
+  query: string,
+  locale: "pt-BR" | "en-US" = "pt-BR",
+  signal?: AbortSignal,
+) {
+  const params = new URLSearchParams({ q: query, locale, limit: "12" });
+  return request<GifSearchPayload>(`/api/media/gifs/search?${params.toString()}`, { token, signal });
 }
 
 export async function uploadMedia(token: string, file: File) {

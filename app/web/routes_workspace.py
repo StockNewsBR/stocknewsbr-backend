@@ -4,6 +4,7 @@ import logging
 
 from app.dependencies import require_channel_access
 from app.api.routes_feed import ticker_feed
+from app.api.routes_public_market_live import public_market_insight
 from app.models import User
 from app.services.help_center_service import get_help_center_blueprint, get_help_guide
 from app.services.public_news_service import build_public_news_payload
@@ -53,6 +54,7 @@ def workspace_ticker_bundle(
     symbol: str,
     interval: str = "1D",
     limit: int = 6,
+    locale: str = "pt-BR",
     current_user: User = Depends(require_channel_access("web")),
 ):
     ticker = canonical_symbol(symbol)
@@ -62,9 +64,16 @@ def workspace_ticker_bundle(
     return {
         "symbol": ticker,
         "chart": _safe_call(lambda: build_workspace_chart_payload(ticker, interval=interval), {}, "chart"),
+        "insight": _safe_call(
+            lambda: public_market_insight(ticker, interval=interval),
+            {"symbol": ticker, "score": None, "rsi": None, "trend_bias": None, "signal": None, "status": "empty"},
+            "insight",
+        ),
         "feed": _safe_call(lambda: ticker_feed(ticker, limit=500, current_user=current_user), {"items": [], "symbol": ticker}, "feed"),
         "news": _safe_call(
-            lambda: build_public_news_payload(ticker, limit=min(safe_limit, 20), source="web_bundle", allow_fetch=False),
+            lambda: build_public_news_payload(
+                ticker, limit=min(safe_limit, 20), source="web_bundle", locale=locale, allow_fetch=False,
+            ),
             {"symbol": ticker, "items": [], "count": 0, "status": "empty", "source": "web_bundle"},
             "news",
         ),

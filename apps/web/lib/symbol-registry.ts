@@ -1,6 +1,6 @@
 const QUERY_RE = /[?&=]/;
-const B3_RE = /^[A-Z][A-Z0-9]{3,4}(3|4|5|6|11|34)$/;
-const B3_WITH_SUFFIX_RE = /^([A-Z][A-Z0-9]{3,4}(?:3|4|5|6|11|34))SA$/;
+const B3_RE = /^[A-Z][A-Z0-9]{3,4}(3|4|5|6|7|11|32|34)$/;
+const B3_WITH_SUFFIX_RE = /^([A-Z][A-Z0-9]{3,4}(?:3|4|5|6|7|11|32|34))SA$/;
 const B3_FUTURE_RE = /^(WIN|WDO)[FGHJKMNQUVXZ]\d{2}$/;
 const CRYPTO_RE = /^([A-Z0-9]{2,8})(USD|USDT)$/;
 const US_RE = /^[A-Z][A-Z0-9]{0,9}$/;
@@ -15,6 +15,7 @@ const KNOWN_BDR_SYMBOLS = new Set([
   "BERK34",
   "GOGL34",
   "ITLC34",
+  "JBSS32",
   "M1TA34",
   "MELI34",
   "MSFT34",
@@ -77,9 +78,18 @@ const US_EXCHANGE_BY_SYMBOL: Record<string, string> = {
 
 const CURATED_ALIASES: Record<string, string[]> = {
   ASAI3: ["ASAI3.SA", "ASAI3 B3", "BVMF:ASAI3", "BMFBOVESPA:ASAI3"],
-  AZUL4: ["AZUL4.SA", "AZUL4 B3", "BVMF:AZUL4", "BMFBOVESPA:AZUL4"],
+  // Corporate-action remaps (old B3 tickers -> live successors), mirrors backend registry:
+  BRAV3: ["BRAV3.SA", "BRAV3 B3", "RRRP3", "RRRP3.SA", "BVMF:BRAV3", "BMFBOVESPA:BRAV3", "BVMF:RRRP3", "BMFBOVESPA:RRRP3"],
+  MBRF3: ["MBRF3.SA", "MBRF3 B3", "MRFG3", "MRFG3.SA", "BRFS3", "BRFS3.SA", "BVMF:MBRF3", "BMFBOVESPA:MBRF3", "BVMF:MRFG3", "BMFBOVESPA:MRFG3", "BVMF:BRFS3", "BMFBOVESPA:BRFS3"],
+  EMBJ3: ["EMBJ3.SA", "EMBJ3 B3", "EMBR3", "EMBR3.SA", "BVMF:EMBJ3", "BMFBOVESPA:EMBJ3", "BVMF:EMBR3", "BMFBOVESPA:EMBR3"],
+  // B3 renamed AZUL ON from AZUL4 to AZUL54 (Dec/2025); Yahoo serves AZUL54.SA.
+  AZUL54: ["AZUL54.SA", "AZUL54 B3", "AZUL4", "AZUL4.SA", "BVMF:AZUL54", "BMFBOVESPA:AZUL54", "BVMF:AZUL4", "BMFBOVESPA:AZUL4"],
+  // CPLE6 still trades on B3 as its own line — do NOT fold it into CPLE3.
+  CPLE3: ["CPLE3.SA", "CPLE3 B3", "CPLE5", "CPLE5.SA", "BVMF:CPLE3", "BMFBOVESPA:CPLE3"],
+  JBSS32: ["JBSS32.SA", "JBSS32 B3", "JBSS3", "JBSS3.SA", "BVMF:JBSS32", "BMFBOVESPA:JBSS32", "BVMF:JBSS3", "BMFBOVESPA:JBSS3"],
   B3SA3: ["B3SA3.SA", "B3SA3 B3", "BVMF:B3SA3", "BMFBOVESPA:B3SA3"],
-  AXIA6: ["AXIA6.SA", "AXIA6 B3", "ELET6", "ELET6.SA", "BVMF:ELET6", "BMFBOVESPA:ELET6", "BMFBOVESPA:AXIA6"],
+  AXIA3: ["AXIA3.SA", "AXIA3 B3", "AXIA6", "AXIA6.SA", "ELET3", "ELET3.SA", "ELET6", "ELET6.SA", "BVMF:ELET3", "BVMF:ELET6", "BMFBOVESPA:ELET3", "BMFBOVESPA:ELET6", "BMFBOVESPA:AXIA6"],
+  AXIA7: ["AXIA7.SA", "AXIA7 B3"],
   PETR4: ["PETR4.SA", "PETR4 B3", "PETR", "BVMF:PETR4", "BMFBOVESPA:PETR4"],
   VALE3: ["VALE3.SA", "VALE3 B3", "VALE", "BVMF:VALE3", "BMFBOVESPA:VALE3"],
   ITUB4: ["ITUB4.SA", "ITUB4 B3", "ITUB", "BVMF:ITUB4", "BMFBOVESPA:ITUB4"],
@@ -106,7 +116,8 @@ const CURATED_ALIASES: Record<string, string[]> = {
 };
 
 const TRADING_VIEW_SYMBOL_FALLBACKS: Record<string, string[]> = {
-  AXIA6: ["BMFBOVESPA:ELET6", "BMFBOVESPA:AXIA6", "BMFBOVESPA:ELET3"],
+  AXIA3: ["BMFBOVESPA:AXIA3", "BMFBOVESPA:AXIA6", "BMFBOVESPA:ELET6", "BMFBOVESPA:ELET3"],
+  AXIA7: ["BMFBOVESPA:AXIA7"],
 };
 
 function aliasKey(value: unknown) {
@@ -197,7 +208,7 @@ export function canonicalSymbol(value: unknown) {
 
   const mapped = ALIAS_TO_CANONICAL.get(key);
   if (mapped) return mapped;
-  if (key.endsWith("34") && !KNOWN_BDR_SYMBOLS.has(key)) return "";
+  if ((key.endsWith("34") || key.endsWith("32")) && !KNOWN_BDR_SYMBOLS.has(key)) return "";
   if (B3_RE.test(key) || B3_FUTURE_RE.test(key)) return key;
 
   if (cryptoMatch && CRYPTO_BASES.has(cryptoMatch[1])) return `${cryptoMatch[1]}USD`;

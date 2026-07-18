@@ -1,28 +1,32 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from app.database import SessionLocal
 from app.models import SocialComment
-from app.social.db import ensure_social_tables
+from app.social.db import ensure_social_tables, utc_social_datetime
 from app.social.moderation import can_publish, get_user_guardian_score, record_content_approved, validate_attachment_url
 
 
 def _serialize_comment(comment: SocialComment) -> dict:
     guardian_score = get_user_guardian_score(comment.user_id)
+    created_at = utc_social_datetime(comment.created_at)
     return {
         "id": comment.id,
         "post_id": comment.post_id,
         "user_id": comment.user_id,
-        "user": comment.display_name or f"user_{comment.user_id}",
-        "user_email": comment.email,
+        "user": _public_name(comment.display_name),
         "user_avatar_url": comment.avatar_url,
         "text": comment.text,
         "image_url": comment.image_url,
-        "timestamp": int((comment.created_at or datetime.utcnow()).timestamp()),
+        "timestamp": int(created_at.timestamp()) if created_at else None,
+        "created_at": created_at.isoformat().replace("+00:00", "Z") if created_at else None,
         "social_guardian_score": guardian_score.get("score"),
         "social_guardian_label": guardian_score.get("label"),
     }
+
+
+def _public_name(value) -> str:
+    name = str(value or "").strip()
+    return name if name and "@" not in name and not name.lower().startswith("user_") else "Trader"
 
 
 def add_comment(post_id, user_id, text, image_url=None, display_name=None, email=None, avatar_url=None):
@@ -54,7 +58,7 @@ def add_comment(post_id, user_id, text, image_url=None, display_name=None, email
             user_id=resolved_user_id,
             text=str(text)[:600],
             image_url=image_url,
-            display_name=display_name or f"user_{user_id}",
+            display_name=_public_name(display_name),
             email=email,
             avatar_url=avatar_url,
         )

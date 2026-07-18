@@ -158,6 +158,30 @@ def test_media_upload_streams_enforces_limit_and_removes_partial(tmp_path, monke
     assert not list(tmp_path.rglob("*.png"))
 
 
+@pytest.mark.parametrize("payload,detail", [(b"", "empty_media_file"), (b"not-a-png", "invalid_media_content")])
+def test_media_upload_rejects_empty_or_spoofed_images_without_partial(tmp_path, monkeypatch, payload, detail):
+    monkeypatch.setattr(media_service, "MEDIA_ROOT", tmp_path)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(media_service.save_upload(_upload(payload)))
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == detail
+    assert not list(tmp_path.rglob("*.tmp"))
+    assert not list(tmp_path.rglob("*.png"))
+
+
+def test_media_upload_persists_valid_png_with_public_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(media_service, "MEDIA_ROOT", tmp_path)
+    png = b"\x89PNG\r\n\x1a\n" + b"valid-test-payload"
+
+    payload = asyncio.run(media_service.save_upload(_upload(png)))
+
+    assert payload["url"].startswith("/media/posts/")
+    assert not payload["url"].startswith(("blob:", "file:"))
+    assert (tmp_path / "posts" / payload["filename"]).read_bytes() == png
+
+
 def test_social_store_does_not_replace_malformed_state(tmp_path, monkeypatch):
     path = tmp_path / "state.json"
     path.write_text("{broken", encoding="utf-8")

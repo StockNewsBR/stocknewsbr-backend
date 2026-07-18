@@ -7,6 +7,7 @@ from app.database import apply_rls_context, get_db
 from app.models import User
 from app.services.media_service import get_media_status, get_signed_upload, save_upload
 from app.services.media_asset_service import create_media_asset, get_media_asset, serialize_media_asset
+from app.services.gif_service import search_tenor_gifs
 
 
 class SignedUploadRequest(BaseModel):
@@ -94,6 +95,17 @@ def media_presign(
         **signed,
         "asset": serialize_media_asset(asset),
     }
+
+
+@router.get("/gifs/search")
+def media_gif_search(
+    q: str,
+    locale: str = "pt-BR",
+    limit: int = 12,
+    current_user: User = Depends(require_active_plan),
+):
+    del current_user
+    return search_tenor_gifs(q, locale=locale, limit=limit)
 
 
 @router.get("/{asset_id}")

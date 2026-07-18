@@ -5,6 +5,8 @@ stocknewsbr.db
 .env
 .playwright-cli/
 runtime/
+data/moderation_state.json
+data/moderation_state.json.lock
 tmp/
 stocknews.db
 stocknews.db-shm

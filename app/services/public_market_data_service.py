@@ -6,6 +6,7 @@ import os
 import time
 from pathlib import Path
 
+from app.engine.indicators.vector_indicator_engine import RSI_PERIOD, compute_latest_rsi
 from app.market.market_data_loader import (
     get_cached_chart_data,
     get_cached_price_snapshots,
@@ -25,6 +26,9 @@ _QUOTE_CACHE_FILE = Path(os.getenv("MARKET_QUOTES_CACHE_FILE") or _PROJECT_ROOT 
 _CHART_CACHE_FILE = Path(os.getenv("MARKET_CHARTS_CACHE_FILE") or _PROJECT_ROOT / "runtime" / "cache" / "market_charts.json")
 _QUOTE_DIRECT_MAX_AGE_SECONDS = 60 * 60 * 24 * 7
 _CHART_DIRECT_MAX_AGE_SECONDS = 60 * 60 * 24 * 14
+_PUBLIC_RSI_SOURCE = "canonical_indicator_engine"
+_CHART_LEVEL_SOURCE = "chart_overlay"
+_CHART_LEVEL_ALGORITHM_VERSION = "recent_extrema_v1"
 
 
 def _read_json_cache(path: Path) -> dict:
@@ -46,6 +50,179 @@ def _finite_positive(value) -> float | None:
     if not math.isfinite(number) or number <= 0:
         return None
     return number
+
+
+def _context_symbol(symbol: str) -> str:
+    normalized = canonical_symbol(symbol)
+    if normalized:
+        return normalized
+    return str(symbol or "").upper().strip()
+
+
+def _context_timeframe(timeframe: str) -> str:
+    return str(timeframe or "1D").upper().strip() or "1D"
+
+
+def _row_as_of(row: dict | None) -> str | None:
+    if not isinstance(row, dict):
+        return None
+    for key in ("time", "timestamp", "datetime", "as_of"):
+        value = row.get(key)
+        if value in (None, ""):
+            continue
+        if hasattr(value, "isoformat"):
+            try:
+                return value.isoformat()
+            except (TypeError, ValueError):
+                pass
+        return str(value)
+    return None
+
+
+def public_chart_as_of(rows: list[dict] | None) -> str | None:
+    for row in reversed(rows or []):
+        as_of = _row_as_of(row)
+        if as_of is not None:
+            return as_of
+    return None
+
+
+def _valid_chart_closes(rows: list[dict] | None) -> list[float]:
+    closes: list[float] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        close = _finite_positive(row.get("close"))
+        if close is not None:
+            closes.append(close)
+    return closes
+
+
+def _rsi_as_of(rows: list[dict] | None) -> str | None:
+    for row in reversed(rows or []):
+        if not isinstance(row, dict) or _finite_positive(row.get("close")) is None:
+            continue
+        return _row_as_of(row)
+    return None
+
+
+def _is_quote_fallback_chart(rows: list[dict] | None) -> bool:
+    return bool(rows) and all(
+        isinstance(row, dict) and str(row.get("source") or "").lower().strip() == "quote_cache_fallback"
+        for row in rows or []
+    )
+
+
+def build_public_rsi_contract(
+    symbol: str,
+    timeframe: str,
+    rows: list[dict] | None,
+    *,
+    empty_status: str = "INSUFFICIENT_DATA",
+    empty_reason: str | None = None,
+    period: int = RSI_PERIOD,
+) -> dict:
+    normalized_period = int(period) if isinstance(period, int) and period > 0 else RSI_PERIOD
+    required_count = normalized_period + 1
+    closes = _valid_chart_closes(rows)
+    candle_count = len(closes)
+    metadata = {
+        "symbol": _context_symbol(symbol),
+        "timeframe": _context_timeframe(timeframe),
+        "as_of": _rsi_as_of(rows),
+        "source": _PUBLIC_RSI_SOURCE,
+        "candle_count": candle_count,
+        "required_count": required_count,
+        "status": "INSUFFICIENT_DATA",
+        "reason": "insufficient_candles",
+    }
+
+    if _is_quote_fallback_chart(rows):
+        metadata["reason"] = "non_canonical_chart_source"
+        return {"rsi": None, "rsi_metadata": metadata}
+    if candle_count == 0:
+        metadata["status"] = str(empty_status or "INSUFFICIENT_DATA").upper()
+        metadata["reason"] = empty_reason or "no_candles"
+        return {"rsi": None, "rsi_metadata": metadata}
+    if candle_count < required_count:
+        return {"rsi": None, "rsi_metadata": metadata}
+
+    rsi = compute_latest_rsi(closes, period=normalized_period)
+    if rsi is None:
+        metadata["reason"] = "calculation_unavailable"
+        return {"rsi": None, "rsi_metadata": metadata}
+
+    metadata["status"] = "AVAILABLE"
+    metadata["reason"] = None
+    return {"rsi": round(float(rsi), 4), "rsi_metadata": metadata}
+
+
+def _chart_level_kind(zone: dict) -> str | None:
+    explicit = str(zone.get("kind") or "").lower().strip()
+    if explicit in {"support", "resistance"}:
+        return explicit
+    label = str(zone.get("label") or "").lower().strip()
+    if "support" in label or "suport" in label:
+        return "support"
+    if "resist" in label:
+        return "resistance"
+    return None
+
+
+def normalize_public_chart_zones(
+    zones: list[dict] | None,
+    *,
+    symbol: str,
+    timeframe: str,
+    rows: list[dict] | None,
+) -> list[dict]:
+    if _is_quote_fallback_chart(rows):
+        return []
+
+    normalized_symbol = _context_symbol(symbol)
+    normalized_timeframe = _context_timeframe(timeframe)
+    as_of = public_chart_as_of(rows)
+    rows_stale = any(
+        isinstance(row, dict)
+        and (row.get("stale") is True or "stale" in str(row.get("source") or "").lower())
+        for row in rows or []
+    )
+    seen_prices: set[float] = set()
+    seen_kinds: set[str] = set()
+    normalized: list[dict] = []
+
+    for zone in zones or []:
+        if not isinstance(zone, dict):
+            continue
+        kind = _chart_level_kind(zone)
+        price = _finite_positive(zone.get("price"))
+        if kind is not None and price is None:
+            continue
+        price_key = round(price, 10) if price is not None else None
+        if price_key is not None and price_key in seen_prices:
+            continue
+        if kind is not None and kind in seen_kinds:
+            continue
+
+        item = dict(zone)
+        item.update({
+            "symbol": normalized_symbol,
+            "timeframe": normalized_timeframe,
+            "as_of": as_of,
+            "source": zone.get("source") or _CHART_LEVEL_SOURCE,
+            "algorithm_version": zone.get("algorithm_version") or _CHART_LEVEL_ALGORITHM_VERSION,
+            "stale": bool(zone.get("stale")) or rows_stale,
+        })
+        if price is not None:
+            item["price"] = price
+        if kind is not None:
+            item["kind"] = kind
+            seen_kinds.add(kind)
+        if price_key is not None:
+            seen_prices.add(price_key)
+        normalized.append(item)
+
+    return normalized
 
 
 def _fresh_enough(entry: dict, allow_stale: bool, max_age_seconds: int) -> bool:

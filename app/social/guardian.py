@@ -7,6 +7,8 @@ from pathlib import PurePosixPath
 from typing import Iterable
 from urllib.parse import unquote
 
+from app.services.gif_service import is_approved_gif_url
+
 
 @dataclass(frozen=True)
 class SocialGuardianDecision:
@@ -278,6 +280,8 @@ class SocialGuardian:
     def validate_attachment_url(cls, image_url: str | None) -> SocialGuardianDecision:
         value = str(image_url or "").strip()
         if not value:
+            return SocialGuardianDecision(True, "allowed")
+        if is_approved_gif_url(value):
             return SocialGuardianDecision(True, "allowed")
         if cls._is_safe_media_path(value):
             return SocialGuardianDecision(True, "allowed")

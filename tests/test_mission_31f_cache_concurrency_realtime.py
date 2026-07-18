@@ -6,6 +6,7 @@ import threading
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
@@ -600,11 +601,18 @@ class Mission31FCacheConcurrencyRealtimeTests(unittest.TestCase):
             poll_service.POLL_STORE_PATH = Path(tmp) / "weekly_polls.json"
             poll_service._store_cache = {"path": "", "mtime": 0.0, "data": {"polls": {}}}
             try:
-                poll_service.ensure_weekly_poll("BTCUSDT", market_type="crypto")
-                with ThreadPoolExecutor(max_workers=12) as executor:
-                    list(executor.map(lambda user_id: poll_service.vote_poll("BTCUSDT", "A", user_id=user_id), range(1, 101)))
+                # Event-only poll policy: pin the clock to a week with a US
+                # economic event so an active poll deterministically exists.
+                with patch.object(
+                    poll_service,
+                    "_utc_now",
+                    return_value=datetime(2026, 7, 27, 9, 0, tzinfo=UTC),
+                ):
+                    poll_service.ensure_weekly_poll("BTCUSDT", market_type="crypto")
+                    with ThreadPoolExecutor(max_workers=12) as executor:
+                        list(executor.map(lambda user_id: poll_service.vote_poll("BTCUSDT", "A", user_id=user_id), range(1, 101)))
 
-                poll = poll_service.get_weekly_poll("BTCUSDT")
+                    poll = poll_service.get_weekly_poll("BTCUSDT")
                 option_a = next(item for item in poll["options"] if item["key"] == "A")
                 self.assertEqual(option_a["votes"], 100)
                 self.assertEqual(poll["total_votes"], 100)

@@ -11,8 +11,8 @@ logger = logging.getLogger("stocknewsbr.access")
 
 SAAS_LAUNCH_DATE = date.fromisoformat(os.getenv("SAAS_LAUNCH_DATE", "2026-05-14"))
 TRIAL_SHORTEN_AFTER_DAYS = max(1, int(os.getenv("TRIAL_SHORTEN_AFTER_DAYS", "30")))
-INITIAL_TRIAL_DAYS = max(1, int(os.getenv("INITIAL_TRIAL_DAYS", "90")))
-POST_LAUNCH_TRIAL_DAYS = max(1, int(os.getenv("POST_LAUNCH_TRIAL_DAYS", "90")))
+INITIAL_TRIAL_DAYS = max(1, int(os.getenv("INITIAL_TRIAL_DAYS", "30")))
+POST_LAUNCH_TRIAL_DAYS = max(1, int(os.getenv("POST_LAUNCH_TRIAL_DAYS", "30")))
 DEFAULT_TRIAL_DAYS = INITIAL_TRIAL_DAYS
 REFUND_WINDOW_DAYS = max(1, int(os.getenv("REFUND_WINDOW_DAYS", "7")))
 MONTHLY_PLAN_DAYS = 31

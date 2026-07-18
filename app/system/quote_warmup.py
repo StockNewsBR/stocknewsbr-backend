@@ -9,6 +9,7 @@ from typing import Iterable
 
 from app.market.market_data_loader import get_chart_data, get_price_snapshots
 from app.market.universe_engine_v3 import B3_UNIVERSE, BDR_UNIVERSE, CRYPTO_UNIVERSE, ETF_UNIVERSE, US_UNIVERSE
+from app.market.universe_registry import universe_registry
 from app.services.symbol_sanitizer import (
     is_symbol_on_cooldown,
     mark_symbol_cooldown,
@@ -187,6 +188,9 @@ def public_quote_symbols(limit: int | None = None) -> list[str]:
     symbols = _dedupe(
         [
             *_PUBLIC_QUOTE_PRIORITY,
+            # Watchlist (canonical public universes) right after priority so the
+            # warmup limit can never cut website-visible symbols (e.g. AVGO).
+            *universe_registry.get_all_assets(),
             *B3_UNIVERSE,
             *BDR_UNIVERSE,
             *US_UNIVERSE,

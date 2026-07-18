@@ -59,7 +59,7 @@ class PublicMarketRouteTests(unittest.TestCase):
             side_effect=[
                 None,
                 {
-                    "symbol": "AXIA6.SA",
+                    "symbol": "AXIA7.SA",
                     "price": 55.78,
                     "change": 0.0,
                     "change_pct": 0.0,
@@ -68,10 +68,10 @@ class PublicMarketRouteTests(unittest.TestCase):
                 },
             ],
         ):
-            payload = quote_service.get_quote_payload("AXIA6", allow_fetch=True)
+            payload = quote_service.get_quote_payload("AXIA7", allow_fetch=True)
 
         self.assertIsNotNone(payload)
-        self.assertEqual(payload["symbol"], "AXIA6")
+        self.assertEqual(payload["symbol"], "AXIA7")
         self.assertEqual(payload["price"], 55.78)
         self.assertTrue(payload["core_data"])
 

@@ -101,6 +101,15 @@ def access_denied_message():
     )
 
 
+def upgrade_required_message():
+    return (
+        "Recurso Premium. Faca upgrade para voltar a usar o Telegram.\n\n"
+        "Seu periodo de teste terminou e sua conta voltou para o plano Basico.\n"
+        "O app Android e o site continuam liberados; o Telegram volta assim que "
+        "voce assinar o Premium no app Google Play."
+    )
+
+
 async def consume_link_code(update: Update, link_code: str):
     if not update.effective_user:
         return None
@@ -123,7 +132,12 @@ async def require_access(update: Update):
     access = await get_telegram_access(update)
 
     if not access or not access.get("allowed"):
-        await update.message.reply_text(access_denied_message())
+        # A linked account that lost Telegram access (trial -> Basico) gets the
+        # upgrade path; a never-linked account gets the linking guidance.
+        if access and access.get("linked"):
+            await update.message.reply_text(upgrade_required_message())
+        else:
+            await update.message.reply_text(access_denied_message())
         return None
 
     return access

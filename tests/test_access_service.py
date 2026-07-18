@@ -82,14 +82,14 @@ class AccessServiceTests(unittest.TestCase):
         self.assertEqual(_default_plan_days("premium_anual"), 365)
         self.assertEqual(_default_plan_days("premium_mensal"), 31)
 
-    def test_trial_policy_uses_90_days_before_and_after_launch_window(self):
+    def test_trial_policy_uses_30_days_before_and_after_launch_window(self):
         launch_day = datetime(2026, 5, 14)
         after_launch_window = datetime(2026, 6, 14)
 
-        self.assertEqual(trial_days_for_market("BR", launch_day), 90)
-        self.assertEqual(trial_days_for_market("USA", launch_day), 90)
-        self.assertEqual(trial_days_for_market("BR", after_launch_window), 90)
-        self.assertEqual(trial_days_for_market("USA", after_launch_window), 90)
+        self.assertEqual(trial_days_for_market("BR", launch_day), 30)
+        self.assertEqual(trial_days_for_market("USA", launch_day), 30)
+        self.assertEqual(trial_days_for_market("BR", after_launch_window), 30)
+        self.assertEqual(trial_days_for_market("USA", after_launch_window), 30)
 
     def test_grant_trial_access_uses_current_trial_policy(self):
         user = DummyUser()
@@ -98,7 +98,7 @@ class AccessServiceTests(unittest.TestCase):
         grant_trial_access(user, now=datetime(2026, 5, 14))
 
         self.assertEqual(user.plan, "trial")
-        self.assertEqual((user.trial_expires_at - datetime(2026, 5, 14)).days, 90)
+        self.assertEqual((user.trial_expires_at - datetime(2026, 5, 14)).days, 30)
         self.assertTrue(user.access_app)
         self.assertTrue(user.access_web)
         self.assertTrue(user.access_telegram)

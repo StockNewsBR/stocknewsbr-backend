@@ -18,7 +18,7 @@ DEFAULT_SYMBOL_COOLDOWN_SECONDS = 300
 _QUERY_TOKENS = ("interval=", "limit=", "period=", "range=", "symbol=", "ticker=")
 _QUERY_NAMES = {"INTERVAL", "LIMIT", "PERIOD", "RANGE", "SYMBOL", "TICKER"}
 _BLOCKED_CHARS = ("&", "?", "/", "\\")
-_B3_RE = re.compile(r"^[A-Z][A-Z0-9]{3,4}(3|4|5|6|11|34)$")
+_B3_RE = re.compile(r"^[A-Z][A-Z0-9]{3,4}(3|4|5|6|7|11|34)$")
 _B3_FUTURE_RE = re.compile(r"^(WIN|WDO)[FGHJKMNQUVXZ]\d{2}$")
 _CRYPTO_RE = re.compile(r"^[A-Z]{2,8}(USD|USDT)$")
 _CRYPTO_PROVIDER_RE = re.compile(r"^[A-Z0-9]{2,8}-USD$")

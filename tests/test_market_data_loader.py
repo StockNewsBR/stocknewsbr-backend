@@ -63,8 +63,14 @@ class MarketDataLoaderTests(unittest.TestCase):
 
         self.assertEqual(market_data_loader._normalize_symbol("BTCUSDT"), "BTC-USD")
         self.assertEqual(market_data_loader.get_display_symbol("BTCUSDT"), "BTCUSD")
+        self.assertEqual(market_data_loader._normalize_symbol("AXIA7"), "AXIA7.SA")
+        self.assertEqual(market_data_loader._normalize_symbol("AXIA3"), "AXIA3.SA")
         self.assertEqual(market_data_loader._normalize_symbol("PETR4"), "PETR4.SA")
         self.assertEqual(market_data_loader._normalize_symbol("TSLA"), "TSLA")
+        self.assertEqual(market_data_loader.get_display_symbol("AXIA7"), "AXIA7")
+        self.assertEqual(market_data_loader.get_display_symbol("AXIA3"), "AXIA3")
+        self.assertEqual(market_data_loader.get_display_symbol("PETR4"), "PETR4")
+        self.assertEqual(market_data_loader.get_display_symbol("TSLA"), "TSLA")
 
     def test_batch_download_sends_crypto_provider_symbol_to_yfinance(self):
         fake_yf = FakeYFinance()
@@ -156,15 +162,81 @@ class MarketDataLoaderTests(unittest.TestCase):
             payloads = market_data_loader.get_price_snapshots(["M1TA34.SA"])
 
         batch_download.assert_called_once()
-        self.assertEqual(batch_download.call_args.args[0], ["META34"])
-        get_price_snapshot.assert_called_once_with("META34")
-        self.assertEqual(payloads["META34"]["symbol"], "META34")
-        self.assertEqual(payloads["META34"]["requested_symbol"], "META34")
-        self.assertEqual(payloads["META34"]["display_symbol"], "META34")
-        self.assertEqual(payloads["META34"]["canonical_symbol"], "M1TA34")
-        self.assertEqual(payloads["META34"]["provider_symbol"], "M1TA34.SA")
-        self.assertEqual(payloads["META34"]["source"], "market")
-        self.assertEqual(payloads["META34"]["price"], 83.2)
+        self.assertEqual(batch_download.call_args.args[0], ["M1TA34"])
+        get_price_snapshot.assert_called_once_with("M1TA34")
+        self.assertEqual(payloads["M1TA34"]["symbol"], "M1TA34")
+        self.assertEqual(payloads["M1TA34"]["display_symbol"], "M1TA34")
+        self.assertEqual(payloads["M1TA34"]["canonical_symbol"], "M1TA34")
+        self.assertEqual(payloads["M1TA34"]["provider_symbol"], "M1TA34.SA")
+        self.assertEqual(payloads["M1TA34"]["source"], "market")
+        self.assertEqual(payloads["M1TA34"]["price"], 83.2)
+
+    def test_legacy_aliases_keep_canonical_snapshot_and_cache_identity(self):
+        expected_provider_symbols = {
+            "AXIA3": "AXIA3.SA",
+            "AXIA7": "AXIA7.SA",
+            "AMZO34": "AMZO34.SA",
+            "M1TA34": "M1TA34.SA",
+            "A1MD34": "A1MD34.SA",
+        }
+        aliases = {
+            "ELET3": "AXIA3",
+            "ELET6": "AXIA3",
+            "AXIA6": "AXIA3",
+            "AMZN34": "AMZO34",
+            "META34": "M1TA34",
+            "AMD34": "A1MD34",
+        }
+        for alias, canonical in aliases.items():
+            with self.subTest(alias=alias):
+                self.assertEqual(market_data_loader.get_display_symbol(alias), canonical)
+                self.assertEqual(market_data_loader._normalize_symbol(alias), expected_provider_symbols[canonical])
+
+        frame = pd.DataFrame(
+            [
+                {"Open": 10.0, "High": 10.5, "Low": 9.5, "Close": 10.0, "Volume": 1_000},
+                {"Open": 10.0, "High": 11.5, "Low": 9.8, "Close": 11.0, "Volume": 2_000},
+            ],
+            index=pd.date_range("2026-01-01", periods=2, freq="h"),
+        )
+
+        def snapshot_for(symbol):
+            return market_data_loader._price_payload_from_frame(symbol, frame)
+
+        requested = [
+            "ELET3",
+            "AXIA3",
+            "ELET6",
+            "AXIA7",
+            "AMZN34",
+            "AMZO34",
+            "META34",
+            "M1TA34",
+            "AMD34",
+            "A1MD34",
+        ]
+        with patch.object(market_data_loader, "get_cached_price_snapshots", return_value={}), patch.object(
+            market_data_loader, "batch_download", return_value=None
+        ) as batch_download, patch.object(
+            market_data_loader, "get_price_snapshot", side_effect=snapshot_for
+        ), patch.object(market_data_loader, "_persist_price_cache"):
+            payloads = market_data_loader.get_price_snapshots(requested, force_refresh=True)
+
+        canonical_symbols = set(expected_provider_symbols)
+        self.assertEqual(set(payloads), canonical_symbols)
+        self.assertEqual(batch_download.call_args.args[0], ["AXIA3", "AXIA7", "AMZO34", "M1TA34", "A1MD34"])
+        for canonical, expected_provider in expected_provider_symbols.items():
+            with self.subTest(canonical=canonical):
+                self.assertEqual(payloads[canonical]["symbol"], canonical)
+                self.assertEqual(payloads[canonical]["display_symbol"], canonical)
+                self.assertEqual(payloads[canonical]["canonical_symbol"], canonical)
+                self.assertEqual(payloads[canonical]["provider_symbol"], expected_provider)
+
+        with market_data_loader._PRICE_SNAPSHOT_CACHE_LOCK:
+            self.assertTrue(canonical_symbols.issubset(market_data_loader._PRICE_SNAPSHOT_CACHE))
+            self.assertTrue(set(aliases).isdisjoint(market_data_loader._PRICE_SNAPSHOT_CACHE))
+            self.assertEqual(market_data_loader._PRICE_SNAPSHOT_CACHE["AXIA3"]["payload"]["provider_symbol"], "AXIA3.SA")
+            self.assertEqual(market_data_loader._PRICE_SNAPSHOT_CACHE["AXIA7"]["payload"]["provider_symbol"], "AXIA7.SA")
 
     def test_bdr_rejects_cached_us_proxy_payload(self):
         self.assertFalse(

@@ -12,7 +12,6 @@ type Props = {
   showZones?: boolean;
   showPriceLine?: boolean;
   showVwap?: boolean;
-  showAverages?: boolean;
   showMacd?: boolean;
   showRsi?: boolean;
   showSupertrend?: boolean;
@@ -22,6 +21,11 @@ type Props = {
   supportLevel?: number | null;
   resistanceLevel?: number | null;
   institutionalRsiValue?: number | null;
+  // Timeframe tag for the chart chip + panel ("D1", "1m", "30m", "1h"): the panel
+  // value follows the selected chart timeframe (per-timeframe RSI from the bundle).
+  rsiTimeframeLabel?: string;
+  rsiMetadata?: { status?: string | null; reason?: string | null; candle_count?: number | null; required_count?: number | null } | null;
+  levelMetadata?: { symbol: string; timeframe: string; as_of?: string | null } | null;
   locale?: "pt-BR" | "en-US";
 };
 
@@ -29,10 +33,6 @@ type ChartLevelOverlay = {
   key: "support" | "resistance";
   label: string;
   price: number;
-};
-
-type ChartLevelLine = ChartLevelOverlay & {
-  y: number;
 };
 
 const TIMEFRAME_TO_TRADING_VIEW: Record<string, { interval: string; range: string }> = {
@@ -62,13 +62,11 @@ function getTheme() {
   return "dark";
 }
 
-function buildStudies(showVwap: boolean, showAverages: boolean, showMacd: boolean) {
+function buildStudies(showVwap: boolean, showMacd: boolean, showRsi: boolean) {
   const studies: string[] = [];
   if (showVwap) studies.push("VWAP@tv-basicstudies");
-  if (showAverages) {
-    studies.push("MASimple@tv-basicstudies");
-  }
   if (showMacd) studies.push("MACD@tv-basicstudies");
+  if (showRsi) studies.push("RSI@tv-basicstudies");
   return studies;
 }
 
@@ -91,11 +89,13 @@ function formatRsiValue(value: number, locale: "pt-BR" | "en-US") {
   }).format(value);
 }
 
+// Same canonical thresholds as the top-card RSI copy in workspace-shell:
+// <30 oversold, 30-45 bearish, 45-55 neutral, 55-70 bullish, >70 overbought.
 function rsiToneClass(value: number) {
-  if (value >= 70) return "overbought";
-  if (value <= 30) return "oversold";
+  if (value > 70) return "overbought";
+  if (value < 30) return "oversold";
   if (value >= 55) return "bullish";
-  if (value <= 45) return "bearish";
+  if (value < 45) return "bearish";
   return "neutral";
 }
 
@@ -140,44 +140,81 @@ function buildLevelOverlays(
   return overlays;
 }
 
-function chartNumber(value: unknown) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
-}
+const LEVEL_PANE_HEIGHT = 120;
+const LEVEL_PANE_PAD = { top: 12, bottom: 12, left: 8, right: 10 };
 
-function chartScaleBounds(chart: ChartPayload | null, levels: ChartLevelOverlay[]) {
-  const rows = Array.isArray(chart?.ohlc) && chart?.ohlc?.length
-    ? chart.ohlc
-    : Array.isArray(chart?.series)
-      ? chart.series
-      : [];
-  const prices: number[] = [];
+function LevelLinesPane({
+  closes,
+  overlays,
+  currencyPrefix,
+  locale,
+}: {
+  closes: number[];
+  overlays: ChartLevelOverlay[];
+  currencyPrefix: string;
+  locale: "pt-BR" | "en-US";
+}) {
+  const paneRef = useRef<HTMLElement | null>(null);
+  const [paneWidth, setPaneWidth] = useState(640);
 
-  rows.forEach((row: any) => {
-    for (const key of ["high", "low", "close", "open"]) {
-      const value = chartNumber(row?.[key]);
-      if (value != null) prices.push(value);
-    }
-  });
-  levels.forEach((level) => {
-    const value = chartNumber(level.price);
-    if (value != null) prices.push(value);
-  });
+  useEffect(() => {
+    const node = paneRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const next = Math.round(entries[0]?.contentRect?.width || 0);
+      if (next > 0) setPaneWidth(next);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
-  if (!prices.length) return null;
-  const min = Math.min(...prices);
-  const max = Math.max(...prices);
-  const span = Math.max(max - min, max * 0.004, 0.01);
-  const padding = span * 0.12;
-  return {
-    min: Math.max(0, min - padding),
-    max: max + padding,
-  };
-}
+  const values = [...closes, ...overlays.map((level) => level.price)];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = (max - min) || Math.max(Math.abs(max) * 0.01, 1e-6);
+  const plotWidth = Math.max(60, paneWidth - LEVEL_PANE_PAD.left - LEVEL_PANE_PAD.right);
+  const plotHeight = LEVEL_PANE_HEIGHT - LEVEL_PANE_PAD.top - LEVEL_PANE_PAD.bottom;
+  const yFor = (value: number) => LEVEL_PANE_PAD.top + (1 - (value - min) / span) * plotHeight;
+  const xFor = (index: number) => LEVEL_PANE_PAD.left + (index / Math.max(1, closes.length - 1)) * plotWidth;
+  const points = closes.map((value, index) => `${xFor(index).toFixed(1)},${yFor(value).toFixed(1)}`).join(" ");
+  const clampLabelY = (value: number) => Math.min(LEVEL_PANE_HEIGHT - 3, Math.max(11, value));
 
-function priceToPlotYPercent(price: number, bounds: { min: number; max: number }) {
-  const span = Math.max(bounds.max - bounds.min, 0.01);
-  return Math.min(96, Math.max(4, ((bounds.max - price) / span) * 100));
+  return (
+    <section
+      className="snbr-chart-level-lines"
+      aria-label={locale === "en-US" ? "Support/Resistance (verified levels)" : "Suporte/Resistência (níveis verificados)"}
+      ref={paneRef}
+    >
+      <header>{locale === "en-US" ? "Support/Resistance (verified levels)" : "Suporte/Resistência (níveis verificados)"}</header>
+      <svg aria-hidden="true" height={LEVEL_PANE_HEIGHT} viewBox={`0 0 ${paneWidth} ${LEVEL_PANE_HEIGHT}`} width="100%">
+        <polyline className="snbr-chart-level-closes" points={points} />
+        {overlays.map((level) => {
+          const lineY = yFor(level.price);
+          return (
+            <g key={level.key}>
+              <line
+                className={`snbr-chart-level-line ${level.key}`}
+                data-chart-level-line={level.key}
+                data-chart-level-price={String(level.price)}
+                x1={LEVEL_PANE_PAD.left}
+                x2={LEVEL_PANE_PAD.left + plotWidth}
+                y1={lineY}
+                y2={lineY}
+              />
+              <text
+                className={`snbr-chart-level-label ${level.key}`}
+                textAnchor="end"
+                x={LEVEL_PANE_PAD.left + plotWidth - 4}
+                y={clampLabelY(level.key === "resistance" ? lineY - 5 : lineY + 14)}
+              >
+                {level.label} {currencyPrefix}{formatLevelPrice(level.price, locale)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </section>
+  );
 }
 
 export function TickerChart({
@@ -185,7 +222,6 @@ export function TickerChart({
   ticker,
   interval = "1D",
   showVwap = true,
-  showAverages = true,
   showMacd = false,
   showRsi = false,
   showVolume = true,
@@ -194,6 +230,9 @@ export function TickerChart({
   supportLevel = null,
   resistanceLevel = null,
   institutionalRsiValue = null,
+  rsiMetadata = null,
+  rsiTimeframeLabel = "D1",
+  levelMetadata = null,
   locale = "pt-BR",
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -204,6 +243,7 @@ export function TickerChart({
   const tradingViewSymbol = tradingViewCandidates[0] || "BMFBOVESPA:PETR4";
   const timeframe = TIMEFRAME_TO_TRADING_VIEW[interval] || TIMEFRAME_TO_TRADING_VIEW["1D"];
   const tradingViewUrl = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tradingViewSymbol)}`;
+  const currencyPrefix = tradingViewSymbol.startsWith("BMFBOVESPA:") ? "R$" : "$";
   const levelOverlays = useMemo(
     () =>
       buildLevelOverlays({
@@ -215,29 +255,37 @@ export function TickerChart({
       }),
     [showSupport, showResistance, supportLevel, resistanceLevel, locale],
   );
-  const levelLines = useMemo<ChartLevelLine[]>(() => {
-    const bounds = chartScaleBounds(chart, levelOverlays);
-    if (!bounds) return [];
-    return levelOverlays.map((level) => ({
-      ...level,
-      y: priceToPlotYPercent(level.price, bounds),
-    }));
-  }, [chart, levelOverlays]);
-  const supportOverlayStatus = showSupport && firstFiniteNumber(supportLevel) != null
-    ? (levelLines.some((level) => level.key === "support") ? "price_scaled_overlay" : "pending_chart_scale")
+  // The free tv.js embed iframe has no drawing API, so S/R lines are drawn on our own mini price
+  // pane below the iframe: real backend closes + real levels sharing one price scale
+  // (price_scaled_overlay). Nothing is painted over the third-party chart; chips stay as summary.
+  const paneCloses = useMemo(() => {
+    const bars = (chart?.series?.length ? chart.series : chart?.ohlc) || [];
+    const closes: number[] = [];
+    for (const bar of bars) {
+      const value = Number(bar?.close);
+      if (Number.isFinite(value) && value > 0) closes.push(value);
+    }
+    return closes.slice(-90);
+  }, [chart]);
+  const hasPaneScale = paneCloses.length >= 2;
+  // mission-30f2 audit only accepts price_scaled_overlay|pending_chart_scale|hidden for anchor mode.
+  const supportOverlayStatus = levelOverlays.some((level) => level.key === "support")
+    ? (hasPaneScale ? "price_scaled_overlay" : "pending_chart_scale")
     : "hidden";
-  const resistanceOverlayStatus = showResistance && firstFiniteNumber(resistanceLevel) != null
-    ? (levelLines.some((level) => level.key === "resistance") ? "price_scaled_overlay" : "pending_chart_scale")
+  const resistanceOverlayStatus = levelOverlays.some((level) => level.key === "resistance")
+    ? (hasPaneScale ? "price_scaled_overlay" : "pending_chart_scale")
     : "hidden";
+  const showLevelPane = hasPaneScale && levelOverlays.length > 0;
   const institutionalRsi = useMemo(() => {
     const numeric = firstFiniteNumber(institutionalRsiValue);
-    if (numeric == null || numeric <= 0 || numeric > 100) return null;
+    if (numeric == null || numeric < 0 || numeric > 100) return null;
     return numeric;
   }, [institutionalRsiValue]);
+  const rsiTimeframeTag = (rsiTimeframeLabel || "D1").trim() || "D1";
   const rsiPanelLabel = useMemo(() => {
     if (institutionalRsi == null) return null;
-    return `RSI SCORE: ${formatRsiValue(institutionalRsi, locale)}`;
-  }, [institutionalRsi, locale]);
+    return `RSI ${rsiTimeframeTag}: ${formatRsiValue(institutionalRsi, locale)}`;
+  }, [institutionalRsi, locale, rsiTimeframeTag]);
   const rsiPanelStyle = useMemo(() => {
     if (institutionalRsi == null) return undefined;
     return { "--snbr-rsi-position": `${clampRsi(institutionalRsi)}%` } as CSSProperties;
@@ -265,18 +313,8 @@ export function TickerChart({
     setLoadFailed(false);
     container.innerHTML = "";
 
-    const widget = document.createElement("div");
-    widget.className = "tradingview-widget-container__widget";
-    widget.style.width = "100%";
-    widget.style.height = "100%";
-    container.appendChild(widget);
-
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
-    script.async = true;
-    script.type = "text/javascript";
-    script.onerror = () => setLoadFailed(true);
-    script.innerHTML = JSON.stringify({
+    const widgetLocale = locale === "en-US" ? "en" : "br";
+    const iframeSettings = {
       autosize: true,
       symbol: tradingViewSymbol,
       interval: timeframe.interval,
@@ -284,7 +322,6 @@ export function TickerChart({
       timezone: tradingViewSymbol.startsWith("BMFBOVESPA:") ? "America/Sao_Paulo" : "Etc/UTC",
       theme,
       style: "1",
-      locale: locale === "en-US" ? "en" : "br",
       backgroundColor: theme === "dark" ? "rgba(7, 16, 26, 1)" : "rgba(255, 255, 255, 1)",
       gridColor: theme === "dark" ? "rgba(226, 232, 240, 0.16)" : "rgba(100, 116, 139, 0.18)",
       withdateranges: true,
@@ -296,27 +333,45 @@ export function TickerChart({
       hotlist: false,
       hide_volume: !showVolume,
       support_host: "https://www.tradingview.com",
-      studies: buildStudies(showVwap, showAverages, showMacd),
-      studies_overrides: {
-        "vwap.plot.color": "#f59e0b",
-        "vwap.plot.color.0": "#f59e0b",
-        "vwap.plot.linewidth": 4,
-        "vwap.plot.linewidth.0": 4,
-        "VWAP.plot.color": "#f59e0b",
-        "VWAP.plot.color.0": "#f59e0b",
-        "VWAP.plot.linewidth": 4,
-        "VWAP.plot.linewidth.0": 4,
-        "moving average.length": 9,
-        "moving average.ma.color": "#38bdf8",
-      },
-    });
+      studies: buildStudies(showVwap, showMacd, showRsi),
+      studies_overrides: JSON.stringify({
+        // tv.js embed override keys use the lowercase study title + plot id.
+        "volume weighted average price.vwap.color": "#f97316",
+        "volume weighted average price.vwap.linewidth": 4,
+        "vwap.vwap.color": "#f97316",
+        "vwap.vwap.linewidth": 4,
+      }),
+      width: "100%",
+      height: "100%",
+      utm_source: window.location.hostname,
+      utm_medium: "widget",
+      utm_campaign: "advanced-chart",
+      "page-uri": `${window.location.host}${window.location.pathname}`,
+    };
+    const iframeUrl = new URL("https://www.tradingview-widget.com/embed-widget/advanced-chart/");
+    iframeUrl.searchParams.set("locale", widgetLocale);
+    iframeUrl.hash = encodeURIComponent(JSON.stringify(iframeSettings));
 
-    container.appendChild(script);
+    const iframe = document.createElement("iframe");
+    iframe.className = "tradingview-widget-container__widget";
+    iframe.src = iframeUrl.toString();
+    iframe.title = locale === "en-US" ? `TradingView chart for ${sourceSymbol}` : `Gráfico TradingView de ${sourceSymbol}`;
+    iframe.lang = widgetLocale;
+    iframe.setAttribute("allowtransparency", "true");
+    iframe.setAttribute("frameborder", "0");
+    iframe.setAttribute("scrolling", "no");
+    iframe.style.width = "100%";
+    iframe.style.height = "100%";
+    iframe.style.display = "block";
+    iframe.style.border = "0";
+    iframe.addEventListener("load", () => setLoadFailed(false));
+    iframe.addEventListener("error", () => setLoadFailed(true));
+    container.appendChild(iframe);
 
     return () => {
       container.innerHTML = "";
     };
-  }, [tradingViewSymbol, timeframe.interval, timeframe.range, theme, locale, showVwap, showAverages, showMacd, showVolume]);
+  }, [tradingViewSymbol, sourceSymbol, timeframe.interval, timeframe.range, theme, locale, showVwap, showMacd, showRsi, showVolume]);
 
   return (
     <div
@@ -325,53 +380,19 @@ export function TickerChart({
       data-source-symbol={sourceSymbol}
       data-tradingview-symbol={tradingViewSymbol}
       data-tradingview-candidates={tradingViewCandidates.join(",")}
+      data-anchor-mode={showLevelPane ? "price_scaled_overlay" : "card_only"}
       data-support-anchor-mode={supportOverlayStatus}
       data-resistance-anchor-mode={resistanceOverlayStatus}
       data-support-overlay-status={supportOverlayStatus}
       data-resistance-overlay-status={resistanceOverlayStatus}
-      data-vwap-color="#f59e0b"
+      data-vwap-color="#f97316"
       data-vwap-width="4"
+      data-level-symbol={levelMetadata?.symbol || ""}
+      data-level-timeframe={levelMetadata?.timeframe || ""}
+      data-level-as-of={levelMetadata?.as_of || ""}
     >
       <div className="snbr-tv-plot-area">
         <div className="tradingview-widget-container snbr-tv-widget" ref={containerRef} />
-        {levelLines.length ? (
-          <div className="snbr-chart-level-lines" aria-hidden="true">
-            {levelLines.map((level) => (
-              <div
-                key={`${level.key}-line`}
-                className={`snbr-chart-level-line ${level.key}`}
-                data-chart-level-line={level.key}
-                data-chart-level-price={String(level.price)}
-                style={{ "--snbr-level-y": `${level.y}%` } as CSSProperties}
-              >
-                <span>
-                  {level.label}: {formatLevelPrice(level.price, locale)}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : null}
-        {rsiPanelLabel || levelOverlays.length ? (
-          <div className="snbr-chart-top-overlays" aria-hidden="true">
-            <div className={`snbr-chart-panel-rsi-badge ${showRsi && rsiPanelLabel ? "" : "hidden"}`}>
-              {rsiPanelLabel || "RSI SCORE: --"}
-            </div>
-            {levelOverlays.length ? (
-              <div className="snbr-chart-level-overlays">
-                {levelOverlays.map((level) => (
-                  <div
-                    key={level.key}
-                    className={`snbr-chart-level-overlay ${level.key}`}
-                  >
-                    <span>
-                      {level.label}: {formatLevelPrice(level.price, locale)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
         {loadFailed ? (
           <div className="snbr-tv-fallback">
             <strong>{locale === "en-US" ? "TradingView chart could not load here." : "O gráfico TradingView não carregou aqui."}</strong>
@@ -388,24 +409,26 @@ export function TickerChart({
       >
           <div className="snbr-institutional-rsi-head">
             <div>
-              <strong>RSI SCORE</strong>
+              <strong>RSI {rsiTimeframeTag}</strong>
               <span>
                 {institutionalRsi == null
-                  ? (locale === "en-US" ? "No institutional RSI in the current payload." : "Sem RSI institucional no payload atual.")
+                  ? (rsiMetadata?.reason === "insufficient_candles"
+                    ? (locale === "en-US" ? `Insufficient data: ${rsiMetadata.candle_count || 0} of ${rsiMetadata.required_count || 14} required candles.` : `Dados insuficientes: ${rsiMetadata.candle_count || 0} de ${rsiMetadata.required_count || 14} candles necessários.`)
+                    : (locale === "en-US" ? "Institutional RSI temporarily unavailable." : "RSI institucional temporariamente indisponível."))
                   : (locale === "en-US"
-                    ? "Same snapshot/ranking value used by the top card."
-                    : "Mesmo valor do snapshot/ranking usado no card do topo.")}
+                    ? `RSI ${rsiTimeframeTag} — computed on the selected ${rsiTimeframeTag} candles. The top card always shows daily RSI (D1).`
+                    : `RSI ${rsiTimeframeTag} — calculado nos candles ${rsiTimeframeTag} selecionados. O card do topo sempre mostra o RSI diário (D1).`)}
               </span>
             </div>
             <strong className="snbr-institutional-rsi-value">
-              {institutionalRsi == null ? "n/a" : `RSI SCORE: ${formatRsiValue(institutionalRsi, locale)}`}
+              {institutionalRsi == null ? "n/a" : `RSI ${rsiTimeframeTag}: ${formatRsiValue(institutionalRsi, locale)}`}
             </strong>
           </div>
           {institutionalRsi == null ? (
             <div className="snbr-institutional-rsi-empty">
               {locale === "en-US"
-                ? "The TradingView RSI remains disabled to avoid divergent reads."
-                : "O RSI do TradingView continua desativado para evitar leituras divergentes."}
+                ? "The TradingView RSI study stays visible on the chart while this panel waits for data."
+                : "O RSI do TradingView segue visível no gráfico enquanto este painel aguarda dados."}
             </div>
           ) : (
             <div className="snbr-institutional-rsi-track" style={rsiPanelStyle}>
@@ -416,7 +439,7 @@ export function TickerChart({
               <span className="snbr-rsi-threshold threshold-50">50</span>
               <span className="snbr-rsi-threshold threshold-75">75</span>
               <span className="snbr-institutional-rsi-marker">
-                <span>RSI SCORE: {formatRsiValue(institutionalRsi, locale)}</span>
+                <span>RSI {rsiTimeframeTag}: {formatRsiValue(institutionalRsi, locale)}</span>
               </span>
             </div>
           )}

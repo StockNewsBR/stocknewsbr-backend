@@ -1,4 +1,5 @@
 from app.services.access_service import pricing_catalog
+from app.market.universe_registry import universe_registry
 
 
 LEGAL_NOTICE_TEXT = (
@@ -42,8 +43,8 @@ EDUCATION_DESCRIPTION = (
 )
 
 PRICING = {
-    "trial_days": 90,
-    "trial_policy": "Trial inicial de 90 dias. Ao vencer, a conta migra automaticamente para Basico se nao houver Premium ativo.",
+    "trial_days": 30,
+    "trial_policy": "Trial inicial de 30 dias. Ao vencer, a conta migra automaticamente para Basico se nao houver Premium ativo.",
     "refund_window_days": 7,
     "refund_policy": "Cancelamento com reembolso em ate 7 dias para contas Brasil e internacionais. Apos 7 dias nao ha reembolso.",
     "free_plan": {
@@ -246,4 +247,5 @@ def get_public_bootstrap():
         "social_features": SOCIAL_FEATURES,
         "weekly_ai_polls": WEEKLY_AI_POLLS,
         "official_channels": OFFICIAL_CHANNELS,
+        "market_universe": universe_registry.get_public_payload(),
     }

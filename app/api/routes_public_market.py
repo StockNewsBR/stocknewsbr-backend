@@ -135,16 +135,13 @@ def public_quote(symbol: str, refresh: str | None = None):
 
 
 @router.get("/market/news/{symbol}")
-def public_news(symbol: str, limit: int = 6, refresh: str | None = None):
-    return build_public_news_payload(
-        _normalize_symbol(symbol),
-        limit=limit,
-        source="public",
-        allow_fetch=False,
-        schedule_warmup=True,
-    )
+def public_news(symbol: str, limit: int = 6, refresh: str | None = None, locale: str = "pt-BR"):
+    kwargs = {"limit": limit, "source": "public", "allow_fetch": False, "schedule_warmup": True}
+    if locale != "pt-BR":
+        kwargs["locale"] = locale
+    return build_public_news_payload(_normalize_symbol(symbol), **kwargs)
 
 
 @router.get("/market/ai-tools")
-def public_ai_tools():
-    return build_public_ai_tools_payload()
+def public_ai_tools(symbol: str | None = None, tool: str | None = None, timeframe: str | None = None):
+    return build_public_ai_tools_payload(symbol=symbol, tool=tool, timeframe=timeframe)

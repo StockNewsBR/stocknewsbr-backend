@@ -65,7 +65,6 @@ from app.services.auth_session_service import (
     invalidate_open_challenges,
     issue_access_token_for_user,
     login_code_rate_limit_state,
-    login_requires_email_otp,
     mark_challenge_delivery,
     normalize_channel,
     normalize_email,
@@ -337,62 +336,54 @@ def _complete_login(
     if not user.is_active:
         raise HTTPException(status_code=403, detail="user_inactive")
 
-    if login_requires_email_otp(user):
-        challenge, code = start_login_challenge(
-            db,
-            user,
-            channel=normalized_channel,
-            device_id=device_id,
-            device_label=device_label,
-            request_ip_hash=_client_ip_hash(request),
-            correlation_id=correlation_id,
-        )
-        db.commit()
-
-        expires_minutes = challenge_expiry_minutes(challenge)
-
-        if background_tasks is not None:
-            background_tasks.add_task(
-                _deliver_challenge_email,
-                challenge.id,
-                email=user.email,
-                code=code,
-                purpose=challenge.purpose,
-                plan=user.plan,
-                channel=normalized_channel,
-                expires_minutes=expires_minutes,
-                correlation_id=correlation_id,
-            )
-        else:
-            _deliver_challenge_email(
-                challenge.id,
-                email=user.email,
-                code=code,
-                purpose=challenge.purpose,
-                plan=user.plan,
-                channel=normalized_channel,
-                expires_minutes=expires_minutes,
-                correlation_id=correlation_id,
-            )
-
-        return AuthFlowResponse(
-            otp_required=True,
-            login_token=challenge.login_token,
-            otp_expires_at=challenge.expires_at,
-            session_policy=session_policy_for_user(user),
-            channel=normalized_channel,
-            detail="premium_email_code_required",
-        )
-
-    return _issue_session(
-        db=db,
-        response=response,
-        user=user,
+    # Owner policy: EVERY new login requires a fresh e-mail OTP, on every plan
+    # and channel. The password paths (/login, /login-json) verify the first
+    # factor; the OTP below is a mandatory second step and no login path may
+    # skip it (the passwordless request-code flow already enforces this).
+    challenge, code = start_login_challenge(
+        db,
+        user,
         channel=normalized_channel,
         device_id=device_id,
         device_label=device_label,
-        request=request,
+        request_ip_hash=_client_ip_hash(request),
         correlation_id=correlation_id,
+    )
+    db.commit()
+
+    expires_minutes = challenge_expiry_minutes(challenge)
+
+    if background_tasks is not None:
+        background_tasks.add_task(
+            _deliver_challenge_email,
+            challenge.id,
+            email=user.email,
+            code=code,
+            purpose=challenge.purpose,
+            plan=user.plan,
+            channel=normalized_channel,
+            expires_minutes=expires_minutes,
+            correlation_id=correlation_id,
+        )
+    else:
+        _deliver_challenge_email(
+            challenge.id,
+            email=user.email,
+            code=code,
+            purpose=challenge.purpose,
+            plan=user.plan,
+            channel=normalized_channel,
+            expires_minutes=expires_minutes,
+            correlation_id=correlation_id,
+        )
+
+    return AuthFlowResponse(
+        otp_required=True,
+        login_token=challenge.login_token,
+        otp_expires_at=challenge.expires_at,
+        session_policy=session_policy_for_user(user),
+        channel=normalized_channel,
+        detail="premium_email_code_required",
     )
 
 

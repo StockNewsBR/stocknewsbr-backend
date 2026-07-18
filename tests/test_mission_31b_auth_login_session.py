@@ -2,6 +2,8 @@
 # MISSION 31B - LOGIN SEGURO, EMAIL CODE, SESSAO UNICA
 # ==========================================================
 
+import asyncio
+import inspect
 import logging
 import os
 import re
@@ -31,10 +33,12 @@ import app.social.comments as social_comments
 import app.social.likes as social_likes
 import app.social.moderation as moderation
 import app.social.posts as social_posts
+import app.social.reposts as social_reposts
+from app.api import routes_feed as social_feed_routes
 from app.core import settings as core_settings
 from app.core.csrf import csrf_rejection
 from app.database import Base, get_db
-from app.models import AuthAuditEvent, LoginChallenge, User, UserSession
+from app.models import AuthAuditEvent, LoginChallenge, SocialComment, SocialLike, SocialPost, SocialRepost, User, UserSession
 from app.security import ALGORITHM, create_access_token, get_jwt_secret, hash_password
 from app.services import auth_audit_service as auth_audit
 from app.services import email_service
@@ -748,6 +752,27 @@ class AuthEndpointTests(_EndpointTestCase):
         decoded = jwt.decode(payload["access_token"], get_jwt_secret(), algorithms=[ALGORITHM])
         self.assertIn("sid", decoded)
 
+    def test_password_login_requires_otp_on_every_plan(self):
+        # Owner policy: no login path skips the code. The password endpoint
+        # must issue an OTP challenge for trial/free accounts too, not only
+        # premium.
+        for plan in ("trial", "premium", "free"):
+            with self.subTest(plan=plan):
+                email = f"pwd-{plan}@example.com"
+                _make_user(self.db, email, plan=plan)
+
+                response = self.client.post(
+                    "/auth/login-json",
+                    json={"email": email, "password": "123456", "channel": "web"},
+                    headers={"Origin": self.ORIGIN},
+                )
+
+                self.assertEqual(response.status_code, 200, response.text)
+                body = response.json()
+                self.assertTrue(body["otp_required"], body)
+                self.assertIsNone(body.get("access_token"))
+                self.assertTrue(body["login_token"])
+
     def test_replayed_code_fails_after_success(self):
         _make_user(self.db, "replay@example.com")
 
@@ -1371,7 +1396,7 @@ class SocialProtectionTests(unittest.TestCase):
         moderation.MODERATION_STORE_PATH = Path(self.tempdir.name) / "moderation_state.json"
 
         self._patched_sessionlocals = []
-        for module in (social_posts, social_comments, social_likes):
+        for module in (social_posts, social_comments, social_likes, social_reposts):
             self._patched_sessionlocals.append((module, module.SessionLocal))
             module.SessionLocal = self.SessionLocal
 
@@ -1473,6 +1498,94 @@ class SocialProtectionTests(unittest.TestCase):
 
         allowed = self.client.delete(f"/post/{post_id}", headers=owner_headers)
         self.assertEqual(allowed.status_code, 200)
+
+    def test_feed_orders_post_3_post_2_post_1_with_id_tiebreaker(self):
+        user, _ = self._bearer("feed-order@example.com")
+        older = datetime(2026, 1, 1, 12, 0, 0)
+        newer = datetime(2026, 1, 1, 13, 0, 0)
+        rows = [
+            SocialPost(user_id=user.id, ticker="PETR4", text="post 1", created_at=older),
+            SocialPost(user_id=user.id, ticker="PETR4", text="post 2", created_at=newer),
+            SocialPost(user_id=user.id, ticker="PETR4", text="post 3", created_at=newer),
+        ]
+        self.db.add_all(rows)
+        self.db.commit()
+
+        with mock.patch.object(
+            social_posts,
+            "get_user_guardian_scores",
+            return_value={user.id: {"score": 100, "label": "Verde"}},
+        ), mock.patch.object(social_posts, "get_hidden_post_ids", return_value=set()):
+            posts = social_posts.get_posts("PETR4")
+
+        self.assertEqual([post["text"] for post in posts], ["post 3", "post 2", "post 1"])
+        source = inspect.getsource(social_posts.get_posts)
+        self.assertIn("SocialPost.created_at.desc(), SocialPost.id.desc()", source)
+        self.assertNotIn("reverse(", source)
+
+    def test_comments_stay_with_their_post_persist_media_and_hide_email(self):
+        user, _ = self._bearer("public-email@example.com")
+        posts = [
+            SocialPost(user_id=user.id, ticker="PETR4", text="post 1", display_name=user.email),
+            SocialPost(user_id=user.id, ticker="PETR4", text="post 2", display_name=user.email),
+        ]
+        self.db.add_all(posts)
+        self.db.commit()
+        gif_url = "https://media.tenor.com/comment.gif"
+        comment = social_comments.add_comment(
+            posts[1].id,
+            user.id,
+            "🐂 comentário",
+            image_url=gif_url,
+            display_name=user.email,
+            email=user.email,
+        )
+
+        first = social_comments.get_comments_for_posts([posts[0].id, posts[1].id])
+        second = social_comments.get_comments_for_posts([posts[0].id, posts[1].id])
+
+        self.assertEqual(first[posts[0].id], [])
+        self.assertEqual(first[posts[1].id], [comment])
+        self.assertEqual(second, first)
+        self.assertEqual(comment["post_id"], posts[1].id)
+        self.assertEqual(comment["image_url"], gif_url)
+        self.assertEqual(comment["user"], "Trader")
+        self.assertNotIn("user_email", comment)
+        self.assertNotIn("email", comment)
+        public_post = social_posts._serialize_post(posts[0], guardian_score={"score": 100, "label": "Verde"})
+        self.assertEqual(public_post["user"], "Trader")
+        self.assertNotIn("user_email", public_post)
+        self.assertNotIn("email", public_post)
+
+    def test_delete_post_removes_dependents_and_moderator_is_authorized(self):
+        owner, _ = self._bearer("dependent-owner@example.com")
+        moderator, _ = self._bearer("social-moderator@example.com")
+        moderator.role = "moderator"
+        self.db.commit()
+        post = SocialPost(user_id=owner.id, ticker="PETR4", text="with dependencies")
+        self.db.add(post)
+        self.db.commit()
+        self.db.add_all([
+            SocialComment(post_id=post.id, user_id=owner.id, text="comment"),
+            SocialLike(post_id=post.id, user_id=owner.id),
+            SocialRepost(post_id=post.id, user_id=owner.id, quote_text="quote"),
+        ])
+        self.db.commit()
+
+        self.assertTrue(social_posts.delete_post(post.id, moderator.id, can_moderate=True))
+        for model in (SocialPost, SocialComment, SocialLike, SocialRepost):
+            self.assertEqual(self.db.query(model).count(), 0)
+
+    def test_delete_route_grants_moderator_role(self):
+        moderator, _ = self._bearer("route-moderator@example.com")
+        moderator.role = "moderator"
+        with mock.patch.object(social_feed_routes, "get_post", return_value={"id": 7, "ticker": "PETR4"}), mock.patch.object(
+            social_feed_routes, "delete_post", return_value=True
+        ) as delete, mock.patch.object(social_feed_routes, "broadcast_ticker_event", new=mock.AsyncMock()):
+            response = asyncio.run(social_feed_routes.delete_ticker_post(7, current_user=moderator))
+
+        self.assertEqual(response, {"status": "deleted", "post_id": 7})
+        delete.assert_called_once_with(7, moderator.id, can_moderate=True)
 
     def test_revoked_session_cannot_post(self):
         user, headers = self._bearer("revoked-social@example.com")

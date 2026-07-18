@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timezone
 
 from app.core.settings import is_production_environment
 from app.database import Base, engine
@@ -17,6 +18,12 @@ SOCIAL_REQUIRED_TABLES = (
     "social_follows",
     "social_sentiment_votes",
 )
+
+
+def utc_social_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 def ensure_social_tables():

@@ -225,30 +225,65 @@ class Mission30CanonicalSymbolRegistryTests(unittest.TestCase):
         self.assertIn("BTC/USD", aliases)
         self.assertNotIn("BTC", aliases)
 
-    def test_mission30_complement_axia6_replaces_elet6_alias(self):
-        self.assertEqual(canonical_symbol("ELET6"), "AXIA6")
-        self.assertEqual(canonical_symbol("ELET6.SA"), "AXIA6")
-        self.assertEqual(canonical_symbol("BMFBOVESPA:ELET6"), "AXIA6")
-        self.assertEqual(provider_symbol("ELET6"), "AXIA6.SA")
-        self.assertEqual(provider_symbol("AXIA6"), "AXIA6.SA")
-        self.assertEqual(tradingview_symbol("ELET6"), "BMFBOVESPA:ELET6")
-        self.assertEqual(tradingview_symbol("AXIA6"), "BMFBOVESPA:ELET6")
-        self.assertEqual(resolve_tradingview_symbol_candidates("AXIA6")[0], "BMFBOVESPA:ELET6")
-        self.assertIn("BMFBOVESPA:AXIA6", resolve_tradingview_symbol_candidates("AXIA6"))
-        self.assertEqual(market_data_loader._normalize_symbol("ELET6"), "AXIA6.SA")
-        self.assertEqual(market_data_loader.get_display_symbol("ELET6"), "AXIA6")
-        self.assertEqual(market_data_loader.get_display_symbol("AXIA6.SA"), "AXIA6")
+    def test_axia_current_codes_replace_legacy_elet_aliases(self):
+        self.assertEqual(canonical_symbol("ELET3"), "AXIA3")
+        self.assertEqual(canonical_symbol("ELET6"), "AXIA3")
+        self.assertEqual(canonical_symbol("AXIA6"), "AXIA3")
+        self.assertEqual(provider_symbol("ELET3"), "AXIA3.SA")
+        self.assertEqual(provider_symbol("ELET6"), "AXIA3.SA")
+        self.assertEqual(provider_symbol("AXIA6"), "AXIA3.SA")
+        self.assertEqual(provider_symbol("AXIA7"), "AXIA7.SA")
+        self.assertEqual(tradingview_symbol("ELET3"), "BMFBOVESPA:AXIA3")
+        self.assertEqual(tradingview_symbol("ELET6"), "BMFBOVESPA:AXIA3")
+        self.assertEqual(resolve_tradingview_symbol_candidates("AXIA7")[0], "BMFBOVESPA:AXIA7")
+        self.assertNotIn("BMFBOVESPA:AXIA6", resolve_tradingview_symbol_candidates("AXIA7"))
+        self.assertIn("BMFBOVESPA:AXIA6", resolve_tradingview_symbol_candidates("AXIA3"))
+        self.assertNotIn("AXIA6", canonical_symbol_aliases("AXIA7"))
+        self.assertNotIn("ELET6", canonical_symbol_aliases("AXIA7"))
+        self.assertEqual(market_data_loader._normalize_symbol("ELET6"), "AXIA3.SA")
+        self.assertEqual(market_data_loader._normalize_symbol("AXIA6"), "AXIA3.SA")
+        self.assertEqual(market_data_loader.get_display_symbol("AXIA6"), "AXIA3")
+        self.assertEqual(market_data_loader.get_display_symbol("ELET6"), "AXIA3")
+        self.assertEqual(market_data_loader.get_display_symbol("ELET3"), "AXIA3")
+        self.assertEqual(market_data_loader.get_display_symbol("AXIA7.SA"), "AXIA7")
+
+    def test_current_bdr_codes_replace_legacy_aliases(self):
+        cases = {
+            "AMD34": ("A1MD34", "A1MD34.SA"),
+            "AMZN34": ("AMZO34", "AMZO34.SA"),
+            "META34": ("M1TA34", "M1TA34.SA"),
+        }
+        for alias, (canonical, expected_provider) in cases.items():
+            with self.subTest(alias=alias):
+                self.assertEqual(canonical_symbol(alias), canonical)
+                self.assertEqual(provider_symbol(alias), expected_provider)
+                self.assertEqual(market_data_loader.get_display_symbol(alias), canonical)
+                self.assertEqual(market_data_loader._normalize_symbol(alias), expected_provider)
+                self.assertIn(alias, canonical_symbol_aliases(canonical))
 
     def test_mission30_complement_listed_assets_have_provider_identity(self):
-        for symbol in ("ASAI3", "AZUL4", "B3SA3", "AXIA6"):
+        for symbol in ("ASAI3", "AZUL54", "CPLE6", "B3SA3", "AXIA3", "AXIA7"):
             with self.subTest(symbol=symbol):
                 self.assertEqual(canonical_symbol(f"{symbol}.SA"), symbol)
                 self.assertEqual(provider_symbol(symbol), f"{symbol}.SA")
-                expected_tradingview = "BMFBOVESPA:ELET6" if symbol == "AXIA6" else f"BMFBOVESPA:{symbol}"
-                self.assertEqual(tradingview_symbol(symbol), expected_tradingview)
+                self.assertEqual(tradingview_symbol(symbol), f"BMFBOVESPA:{symbol}")
                 self.assertIn(f"BMFBOVESPA:{symbol}", resolve_tradingview_symbol_candidates(symbol))
                 self.assertEqual(symbol_category(symbol), "B3")
                 self.assertEqual(sanitize_market_symbol(symbol), symbol)
+
+    def test_azul4_is_legacy_alias_of_azul54_and_cple6_is_its_own_canonical(self):
+        # B3 renamed AZUL ON from AZUL4 to AZUL54 (Dec/2025): AZUL4 is now legacy.
+        self.assertEqual(canonical_symbol("AZUL4"), "AZUL54")
+        self.assertEqual(canonical_symbol("AZUL4.SA"), "AZUL54")
+        self.assertEqual(provider_symbol("AZUL4"), "AZUL54.SA")
+        self.assertEqual(tradingview_symbol("AZUL4"), "BMFBOVESPA:AZUL54")
+        self.assertEqual(market_data_loader.get_display_symbol("AZUL4"), "AZUL54")
+        self.assertIn("AZUL4", canonical_symbol_aliases("AZUL54"))
+        # CPLE6 still trades on its own line — it must not collapse into CPLE3.
+        self.assertEqual(canonical_symbol("CPLE6"), "CPLE6")
+        self.assertEqual(canonical_symbol("CPLE3"), "CPLE3")
+        self.assertEqual(provider_symbol("CPLE6"), "CPLE6.SA")
+        self.assertNotIn("CPLE6", canonical_symbol_aliases("CPLE3"))
 
     def test_mission30_complement_unpriced_asset_is_not_actionable(self):
         row = actionable_row("ASAI3", score=99, price=None, volume=1_000_000, data_quality="missing")
@@ -269,10 +304,12 @@ class Mission30CanonicalSymbolRegistryTests(unittest.TestCase):
                 "industry": "Petroleo e gás",
             },
             "PETR4",
+            "pt-BR",
         )
 
-        self.assertIn("Resultados", item["title"])
-        self.assertNotIn("results improve", item["title"].lower())
+        self.assertEqual(item["title"], item["original_title"])
+        self.assertIn("results improve", item["title"].lower())
+        self.assertEqual(item["content_locale"], "pt-BR")
         self.assertNotIn("market reads", item["summary"].lower())
         self.assertNotIn("live", item["summary"].lower())
         self.assertNotIn("Trader note", item["trader_takeaway"])

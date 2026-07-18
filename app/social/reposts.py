@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from sqlalchemy import func
 
 from app.database import SessionLocal
 from app.models import SocialRepost
-from app.social.db import ensure_social_tables
+from app.social.db import ensure_social_tables, utc_social_datetime
 from app.social.moderation import can_publish, record_content_approved
 
 
@@ -212,13 +210,12 @@ def get_user_repost(post_id: int, user_id: int) -> dict | None:
 
 
 def serialize_repost(repost: SocialRepost) -> dict:
-    created_at = repost.created_at or datetime.now(timezone.utc)
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
+    created_at = utc_social_datetime(repost.created_at)
     return {
         "id": repost.id,
         "post_id": repost.post_id,
         "user_id": repost.user_id,
         "quote_text": repost.quote_text,
-        "timestamp": int(created_at.timestamp()),
+        "timestamp": int(created_at.timestamp()) if created_at else None,
+        "created_at": created_at.isoformat().replace("+00:00", "Z") if created_at else None,
     }

@@ -1,7 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
-
 import type { HelpGuide } from "@/lib/types";
 
 function cx(...values: Array<string | false | null | undefined>) {
@@ -226,18 +224,14 @@ type NewsPanelProps = {
   locale?: AppLocale;
   selectedTicker: string;
   newsRows: WorkspaceNewsRow[];
-  featuredDiscussion: ReactNode;
   newsStateText?: string | null;
-  discussionStateText?: string | null;
 };
 
 export function WorkspaceNewsPanel({
   locale = "pt-BR",
   selectedTicker,
   newsRows,
-  featuredDiscussion,
   newsStateText,
-  discussionStateText,
 }: NewsPanelProps) {
   const isEnglish = locale === "en-US";
   const normalizedNewsState = normalizeText(newsStateText || "");
@@ -251,7 +245,7 @@ export function WorkspaceNewsPanel({
   return (
     <section
       id="panel-news"
-      className="snbr-two-column"
+      className="snbr-news-panel"
       data-news-symbol={selectedTicker}
       data-news-state-count={newsRows.length}
     >
@@ -385,16 +379,6 @@ export function WorkspaceNewsPanel({
         </div>
       </div>
 
-      <div className="snbr-plain-panel">
-        <div className="snbr-section-head">
-          <div>
-            <h3>{isEnglish ? "Featured Discussions" : "Discussões em destaque"}</h3>
-            <p>{isEnglish ? "The most active ticker conversations and posts driving screen sentiment." : "As conversas mais ativas do ticker e os posts que mais puxam o sentimento da tela."}</p>
-          </div>
-        </div>
-        {discussionStateText ? <p className="snbr-assistive-copy" aria-live="polite">{discussionStateText}</p> : null}
-        {featuredDiscussion}
-      </div>
     </section>
   );
 }

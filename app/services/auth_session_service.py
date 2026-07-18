@@ -494,19 +494,22 @@ def create_user_session(
     normalized_channel = normalize_channel(channel)
     now = utcnow()
 
-    # Mission 31B invariant: one active session per user. Serialize the
+    # Owner policy: one active session per (user, channel). A new login on a
+    # channel kicks the previous session of THAT channel only, leaving the
+    # other channels (web/app/telegram) untouched. Serialize the
     # replace-and-create block per user with a transactional row lock so two
-    # concurrent logins cannot interleave revoke+insert on PostgreSQL and
-    # leave two active sessions. SQLite ignores FOR UPDATE (its single-writer
-    # model already serializes the transactions).
+    # concurrent logins on the same channel cannot interleave revoke+insert on
+    # PostgreSQL and leave two active sessions. SQLite ignores FOR UPDATE (its
+    # single-writer model already serializes the transactions).
     db.query(User.id).filter(User.id == user.id).with_for_update().first()
 
-    # A new login revokes every previous active session in the same
-    # transaction that creates the replacement session.
+    # A new login revokes the previous active session on the SAME channel in
+    # the same transaction that creates the replacement session.
     db.execute(
         update(UserSession)
         .where(
             UserSession.user_id == user.id,
+            UserSession.channel == normalized_channel,
             UserSession.revoked_at.is_(None),
         )
         .values(revoked_at=now, revoked_reason=SESSION_REPLACED_REASON)

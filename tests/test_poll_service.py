@@ -1,5 +1,5 @@
-import shutil
 import json
+import shutil
 import tempfile
 import unittest
 from datetime import UTC, datetime
@@ -8,9 +8,17 @@ from unittest.mock import patch
 
 try:
     from app.services import poll_service
+    from app.data.us_economic_calendar_2026 import events_in_window
     IMPORT_ERROR = None
 except ModuleNotFoundError as exc:
     IMPORT_ERROR = exc
+
+
+# Deterministic reference instants (poll window = Sunday 00:00 -> Thursday 24:00 UTC).
+QUIET_WEEK_NOW = datetime(2026, 6, 9, 12, 0, tzinfo=UTC)  # Tue; no econ events that week
+ECON_WEEK_NOW = datetime(2026, 7, 27, 9, 0, tzinfo=UTC)  # Mon; Durable Goods 27/07 etc.
+CLAIMS_WEEK_NOW = datetime(2026, 8, 17, 9, 0, tzinfo=UTC)  # Mon; only weekly jobless claims Thu 20/08
+FRIDAY_NOW = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)  # Friday: outside the window
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"runtime dependency unavailable: {IMPORT_ERROR}")
@@ -19,12 +27,109 @@ class PollServiceTests(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp()
         self.original_path = poll_service.POLL_STORE_PATH
         poll_service.POLL_STORE_PATH = Path(self.temp_dir) / "weekly_polls.json"
+        poll_service._earnings_cache.clear()
 
     def tearDown(self):
         poll_service.POLL_STORE_PATH = self.original_path
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def test_creates_stock_poll(self):
+    def _at(self, now):
+        return patch.object(poll_service, "_utc_now", return_value=now)
+
+    def _no_yfinance(self):
+        return patch.object(poll_service, "_fetch_earnings_date", return_value=None)
+
+    # ----------------------------------------------------------------- #
+    # Policy: earnings poll
+    # ----------------------------------------------------------------- #
+    def test_earnings_in_window_creates_earnings_poll(self):
+        signal = {"ticker": "VALE3", "score": 72, "earnings_date": "2026-06-10", "sector": "Materials"}
+
+        with self._at(QUIET_WEEK_NOW):
+            poll = poll_service.ensure_weekly_poll("VALE3", signal=signal)
+
+        self.assertIsNotNone(poll)
+        self.assertEqual(poll["event_type"], "earnings")
+        self.assertEqual(poll["event_date"], "2026-06-10")
+        self.assertEqual(poll["question"], "Anúncio do trimestre em 10/06/2026")
+        labels = [option["label"] for option in poll["options"]]
+        self.assertEqual(labels, ["Vai bater os números e subir", "Não vai bater e cair"])
+        self.assertTrue(poll["earnings_week"])
+        self.assertEqual(poll["timing_bucket"], "earnings_week")
+        self.assertEqual(poll["report"]["event_type"], "earnings")
+
+    def test_earnings_outside_window_is_not_earnings_poll(self):
+        # Friday 12/06 is outside the Sunday->Thursday window; no econ event either -> no poll.
+        signal = {"ticker": "VALE3", "score": 72, "earnings_date": "2026-06-12"}
+
+        with self._at(QUIET_WEEK_NOW), self._no_yfinance():
+            poll = poll_service.ensure_weekly_poll("VALE3", signal=signal)
+
+        self.assertIsNone(poll)
+
+    def test_earnings_uses_yfinance_lookup_when_signal_has_no_date(self):
+        earnings_dt = datetime(2026, 6, 10, tzinfo=UTC)
+
+        with self._at(QUIET_WEEK_NOW), patch.object(
+            poll_service, "_fetch_earnings_date", return_value=earnings_dt
+        ):
+            poll = poll_service.ensure_weekly_poll("AAPL", signal={"ticker": "AAPL", "score": 90})
+
+        self.assertIsNotNone(poll)
+        self.assertEqual(poll["event_type"], "earnings")
+        self.assertEqual(poll["event_source"], "yfinance_calendar")
+
+    # ----------------------------------------------------------------- #
+    # Policy: economic calendar poll
+    # ----------------------------------------------------------------- #
+    def test_econ_event_in_window_creates_event_poll(self):
+        with self._at(ECON_WEEK_NOW), self._no_yfinance():
+            poll = poll_service.ensure_weekly_poll("PETR4", signal={"ticker": "PETR4", "score": 80})
+
+        self.assertIsNotNone(poll)
+        self.assertEqual(poll["event_type"], "economic_calendar")
+        self.assertEqual(poll["event_name"], "Durable Goods")
+        self.assertEqual(poll["event_date"], "2026-07-27")
+        self.assertIn("Durable Goods", poll["question"])
+        self.assertIn("27/07/2026", poll["question"])
+        labels = [option["label"] for option in poll["options"]]
+        self.assertEqual(labels, ["Acima do esperado", "Abaixo do esperado"])
+
+    def test_econ_event_applies_to_crypto_symbols_too(self):
+        with self._at(ECON_WEEK_NOW):
+            poll = poll_service.ensure_weekly_poll("BTCUSDT", market_type="crypto")
+
+        self.assertIsNotNone(poll)
+        self.assertEqual(poll["event_type"], "economic_calendar")
+        self.assertEqual(poll["market_type"], "crypto")
+
+    def test_weekly_jobless_claims_generate_event(self):
+        with self._at(CLAIMS_WEEK_NOW), self._no_yfinance():
+            poll = poll_service.ensure_weekly_poll("PETR4")
+
+        self.assertIsNotNone(poll)
+        self.assertEqual(poll["event_name"], "Initial Jobless Claims")
+        self.assertEqual(poll["event_date"], "2026-08-20")
+
+    def test_earnings_takes_precedence_over_econ_event(self):
+        signal = {"ticker": "VALE3", "earnings_date": "2026-07-28"}
+
+        with self._at(ECON_WEEK_NOW):
+            poll = poll_service.ensure_weekly_poll("VALE3", signal=signal)
+
+        self.assertEqual(poll["event_type"], "earnings")
+
+    # ----------------------------------------------------------------- #
+    # Policy: neither event -> no poll, generic never created
+    # ----------------------------------------------------------------- #
+    def test_no_event_in_window_creates_no_poll(self):
+        with self._at(QUIET_WEEK_NOW), self._no_yfinance():
+            poll = poll_service.ensure_weekly_poll("PETR4", signal={"ticker": "PETR4", "score": 88})
+
+        self.assertIsNone(poll)
+        self.assertFalse(poll_service.POLL_STORE_PATH.exists())
+
+    def test_generic_poll_never_created_even_with_rich_trend_signal(self):
         signal = {
             "ticker": "PETR4",
             "score": 82,
@@ -37,120 +142,70 @@ class PollServiceTests(unittest.TestCase):
             "signal": "breakout",
         }
 
-        poll = poll_service.ensure_weekly_poll("PETR4", signal=signal)
+        with self._at(QUIET_WEEK_NOW), self._no_yfinance():
+            poll = poll_service.ensure_weekly_poll("PETR4", signal=signal)
+            with patch.object(poll_service, "get_snapshot_by_ticker", return_value={"PETR4": signal}):
+                payload = poll_service.get_weekly_poll("PETR4")
 
-        self.assertEqual(poll["symbol"], "PETR4")
-        self.assertEqual(len(poll["options"]), 2)
-        self.assertTrue(poll["question"])
-        self.assertEqual(poll["market_type"], "stock")
-        self.assertEqual(poll["timing_bucket"], "trend_following")
-        self.assertTrue(poll["report"]["why_it_matters"])
-        self.assertGreaterEqual(len(poll["question_variants"]), 2)
-        self.assertEqual(poll["context"]["signal"]["ticker"], "PETR4")
+        self.assertIsNone(poll)
+        self.assertEqual(payload["status"], "none")
+        self.assertEqual(payload["question"], "")
+        self.assertEqual(payload["options"], [])
 
-    def test_detects_earnings_week(self):
-        signal = {
-            "ticker": "VALE3",
-            "score": 76,
-            "signal": "resultado e guidance fortes",
-            "events": ["earnings release", "guidance"],
-        }
+    def test_no_poll_outside_sunday_thursday_window(self):
+        # Poll created Monday, gone on Friday of the same week.
+        with self._at(ECON_WEEK_NOW):
+            created = poll_service.ensure_weekly_poll("PETR4")
+        self.assertIsNotNone(created)
 
-        with patch.object(poll_service, "_week_key", return_value="2026-W17"):
-            poll = poll_service.ensure_weekly_poll("VALE3", signal=signal)
-
-        self.assertTrue(poll["earnings_week"])
-        self.assertEqual(poll["timing_bucket"], "earnings_week")
-        self.assertIn("result", poll["question"].lower())
-        self.assertNotIn("vai bater o anúncio", poll["question"].lower())
-        self.assertEqual(poll["report"]["market_type"], "stock")
-
-    def test_detects_structured_earnings_date_inside_current_week(self):
-        signal = {
-            "ticker": "VALE3",
-            "score": 72,
-            "earnings_date": "2026-05-14",
-            "sector": "Materials",
-        }
-        now = datetime(2026, 5, 13, 14, 0, tzinfo=UTC)
-
-        with patch.object(poll_service, "_utc_now", return_value=now), patch.object(
-            poll_service,
-            "_week_key",
-            return_value="2026-W20",
+        with self._at(FRIDAY_NOW), self._no_yfinance(), patch.object(
+            poll_service, "get_snapshot_by_ticker", return_value={}
         ):
-            poll = poll_service.ensure_weekly_poll("VALE3", signal=signal)
+            payload = poll_service.get_weekly_poll("PETR4")
 
-        self.assertTrue(poll["earnings_week"])
-        self.assertEqual(poll["timing_bucket"], "earnings_week")
-        self.assertEqual(poll["context"]["earnings_date"], "2026-05-14")
-        self.assertEqual(poll["context"]["earnings_source"], "earnings_date")
-        self.assertIn("resultado", poll["question"].lower())
-        self.assertNotIn("vai bater", poll["question"].lower())
+        self.assertEqual(payload["status"], "none")
 
-    def test_structured_earnings_date_outside_current_week_is_not_earnings_poll(self):
-        signal = {
-            "ticker": "VALE3",
-            "score": 72,
-            "earnings_date": "2026-06-03",
+    def test_legacy_generic_stored_poll_is_not_served(self):
+        week_key = poll_service._week_key(QUIET_WEEK_NOW)
+        legacy_store = {
+            "polls": {
+                f"{week_key}:PETR4": {
+                    "id": f"{week_key}:PETR4",
+                    "symbol": "PETR4",
+                    "week_key": week_key,
+                    "market_type": "stock",
+                    "question": "PETR4 vai subir ou cair?",
+                    "options": [
+                        {"key": "A", "label": "Sobe", "votes": 2},
+                        {"key": "B", "label": "Cai", "votes": 1},
+                    ],
+                    "created_at": "2026-06-07T10:00:00+00:00",
+                }
+            }
         }
-        now = datetime(2026, 5, 13, 14, 0, tzinfo=UTC)
+        poll_service.POLL_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        poll_service.POLL_STORE_PATH.write_text(
+            json.dumps(legacy_store, ensure_ascii=False), encoding="utf-8"
+        )
 
-        with patch.object(poll_service, "_utc_now", return_value=now), patch.object(
-            poll_service,
-            "_week_key",
-            return_value="2026-W20",
+        with self._at(QUIET_WEEK_NOW), self._no_yfinance(), patch.object(
+            poll_service, "get_snapshot_by_ticker", return_value={}
         ):
-            poll = poll_service.ensure_weekly_poll("VALE3", signal=signal)
+            payload = poll_service.get_weekly_poll("PETR4")
 
-        self.assertFalse(poll["earnings_week"])
-        self.assertNotEqual(poll["timing_bucket"], "earnings_week")
-        self.assertEqual(poll["context"]["earnings_date"], "2026-06-03")
-        self.assertIn("fora da semana", poll["context"]["earnings_reason"])
+        self.assertEqual(payload["status"], "none")
+        self.assertEqual(payload["question"], "")
 
-    def test_generates_crypto_specific_poll(self):
-        signal = {
-            "ticker": "BTCUSDT",
-            "score": 88,
-            "trend": 5.1,
-            "change_pct": 6.4,
-            "rsi": 77,
-            "adx": 34,
-            "rel_volume": 2.3,
-            "signal": "momentum",
-        }
-
-        poll = poll_service.ensure_weekly_poll("BTCUSDT", market_type="crypto", signal=signal)
-
-        self.assertEqual(poll["market_type"], "crypto")
-        self.assertIn(poll["timing_bucket"], {"crypto_momentum", "crypto_overheated"})
-        self.assertTrue(poll["question"])
-        self.assertEqual(poll["report"]["market_type"], "crypto")
-
-    def test_existing_poll_reclassifies_when_richer_signal_arrives(self):
-        with patch.object(poll_service, "_week_key", return_value="2026-W17"):
-            initial = poll_service.ensure_weekly_poll("VALE3")
-            enriched = poll_service.ensure_weekly_poll(
-                "VALE3",
-                signal={
-                    "ticker": "VALE3",
-                    "score": 79,
-                    "signal": "resultado forte com guidance",
-                    "events": ["earnings release"],
-                    "sector": "Materials",
-                },
-            )
-
-        self.assertEqual(initial["timing_bucket"], "weekly_direction")
-        self.assertTrue(enriched["earnings_week"])
-        self.assertEqual(enriched["timing_bucket"], "earnings_week")
-        self.assertNotEqual(initial["question"], enriched["question"])
-        self.assertEqual(enriched["context"]["sector"], "Materials")
-
+    # ----------------------------------------------------------------- #
+    # Votes / idempotency
+    # ----------------------------------------------------------------- #
     def test_vote_replaces_previous_vote(self):
-        poll_service.ensure_weekly_poll("BTCUSDT", market_type="crypto")
-        poll = poll_service.vote_poll("BTCUSDT", "A", user_id=10)
-        poll = poll_service.vote_poll("BTCUSDT", "B", user_id=10)
+        with self._at(ECON_WEEK_NOW), patch.object(
+            poll_service, "get_snapshot_by_ticker", return_value={}
+        ):
+            poll_service.ensure_weekly_poll("BTCUSDT", market_type="crypto")
+            poll = poll_service.vote_poll("BTCUSDT", "A", user_id=10)
+            poll = poll_service.vote_poll("BTCUSDT", "B", user_id=10)
 
         option_a = next(item for item in poll["options"] if item["key"] == "A")
         option_b = next(item for item in poll["options"] if item["key"] == "B")
@@ -158,175 +213,90 @@ class PollServiceTests(unittest.TestCase):
         self.assertEqual(option_a["votes"], 0)
         self.assertEqual(option_b["votes"], 1)
 
-    def test_generate_weekly_polls_for_top_symbols_is_bounded(self):
+    def test_vote_without_active_poll_raises(self):
+        with self._at(QUIET_WEEK_NOW), self._no_yfinance(), patch.object(
+            poll_service, "get_snapshot_by_ticker", return_value={}
+        ):
+            with self.assertRaises(ValueError):
+                poll_service.vote_poll("PETR4", "A", user_id=1)
+
+    def test_ensure_is_idempotent_and_preserves_votes(self):
+        with self._at(ECON_WEEK_NOW), patch.object(
+            poll_service, "get_snapshot_by_ticker", return_value={}
+        ):
+            first = poll_service.ensure_weekly_poll("BTCUSDT", market_type="crypto")
+            poll_service.vote_poll("BTCUSDT", "A", user_id=7)
+            second = poll_service.ensure_weekly_poll("BTCUSDT", market_type="crypto")
+
+        self.assertEqual(first["id"], second["id"])
+        option_a = next(item for item in second["options"] if item["key"] == "A")
+        self.assertEqual(option_a["votes"], 1)
+
+    # ----------------------------------------------------------------- #
+    # Batch generation / report
+    # ----------------------------------------------------------------- #
+    def test_generate_weekly_polls_is_bounded_and_event_driven(self):
         snapshot = {
-            "BTCUSDT": {"ticker": "BTCUSDT", "symbol": "BTCUSDT", "score": 99, "signal": "crypto"},
+            "BTCUSDT": {"ticker": "BTCUSDT", "symbol": "BTCUSDT", "score": 99},
             "PETR4": {"ticker": "PETR4", "symbol": "PETR4", "score": 85, "sector": "Energy"},
             "VALE3": {"ticker": "VALE3", "symbol": "VALE3", "score": 83, "sector": "Materials"},
-            "ITUB4": {"ticker": "ITUB4", "symbol": "ITUB4", "score": 80, "sector": "Financials"},
         }
 
-        with patch.object(poll_service, "_week_key", return_value="2026-W17"), patch.object(
-            poll_service,
-            "get_snapshot_by_ticker",
-            return_value=snapshot,
+        with self._at(ECON_WEEK_NOW), self._no_yfinance(), patch.object(
+            poll_service, "get_snapshot_by_ticker", return_value=snapshot
         ):
-            created = poll_service.generate_weekly_polls_for_top_symbols(limit=1)
+            created = poll_service.generate_weekly_polls_for_top_symbols(limit=2)
 
-        self.assertEqual(len(created), 1)
-        self.assertEqual(created[0]["symbol"], "BTCUSDT")
+        self.assertEqual(len(created), 2)
+        self.assertTrue(all(poll["event_type"] == "economic_calendar" for poll in created))
 
-    def test_generate_weekly_polls_includes_diverse_context(self):
+    def test_generate_weekly_polls_returns_empty_without_events(self):
         snapshot = {
-            "PETR4": {"ticker": "PETR4", "symbol": "PETR4", "score": 95, "sector": "Energy", "signal": "trend"},
-            "VALE3": {"ticker": "VALE3", "symbol": "VALE3", "score": 90, "sector": "Materials", "signal": "trend"},
-            "ITUB4": {"ticker": "ITUB4", "symbol": "ITUB4", "score": 85, "sector": "Financials", "signal": "trend"},
-            "BTCUSDT": {"ticker": "BTCUSDT", "symbol": "BTCUSDT", "score": 88, "signal": "crypto"},
+            "PETR4": {"ticker": "PETR4", "symbol": "PETR4", "score": 85},
+            "BTCUSDT": {"ticker": "BTCUSDT", "symbol": "BTCUSDT", "score": 99},
         }
 
-        with patch.object(poll_service, "_week_key", return_value="2026-W17"), patch.object(
-            poll_service,
-            "get_snapshot_by_ticker",
-            return_value=snapshot,
+        with self._at(QUIET_WEEK_NOW), self._no_yfinance(), patch.object(
+            poll_service, "get_snapshot_by_ticker", return_value=snapshot
         ):
-            created = poll_service.generate_weekly_polls_for_top_symbols(limit=4)
+            created = poll_service.generate_weekly_polls_for_top_symbols(limit=5)
 
-        symbols = {item["symbol"] for item in created}
-        self.assertEqual(len(created), 4)
-        self.assertIn("BTCUSDT", symbols)
-        self.assertGreaterEqual(len({item["timing_bucket"] for item in created}), 2)
-
-    def test_generate_weekly_polls_prioritizes_earnings_week_candidate(self):
-        now = datetime(2026, 5, 13, 14, 0, tzinfo=UTC)
-        snapshot = {
-            "AAPL": {"ticker": "AAPL", "symbol": "AAPL", "score": 96, "sector": "Technology", "signal": "trend"},
-            "MSFT": {"ticker": "MSFT", "symbol": "MSFT", "score": 95, "sector": "Technology", "signal": "trend"},
-            "VALE3": {"ticker": "VALE3", "symbol": "VALE3", "score": 44, "sector": "Materials", "earnings_date": "2026-05-14"},
-            "BTCUSDT": {"ticker": "BTCUSDT", "symbol": "BTCUSDT", "score": 99, "signal": "crypto"},
-        }
-
-        with patch.object(poll_service, "_utc_now", return_value=now), patch.object(
-            poll_service,
-            "_week_key",
-            return_value="2026-W20",
-        ), patch.object(
-            poll_service,
-            "get_snapshot_by_ticker",
-            return_value=snapshot,
-        ):
-            created = poll_service.generate_weekly_polls_for_top_symbols(limit=3)
-
-        by_symbol = {item["symbol"]: item for item in created}
-        self.assertIn("VALE3", by_symbol)
-        self.assertTrue(by_symbol["VALE3"]["earnings_week"])
-        self.assertEqual(by_symbol["VALE3"]["timing_bucket"], "earnings_week")
-
-    def test_generate_weekly_polls_rebalances_when_one_side_is_short(self):
-        snapshot = {
-            "AAA3": {"ticker": "AAA3", "symbol": "AAA3", "score": 99, "sector": "Energy"},
-            "BBB3": {"ticker": "BBB3", "symbol": "BBB3", "score": 98, "sector": "Energy"},
-            "CCC3": {"ticker": "CCC3", "symbol": "CCC3", "score": 97, "sector": "Energy"},
-            "DDD3": {"ticker": "DDD3", "symbol": "DDD3", "score": 96, "sector": "Energy"},
-            "EEE3": {"ticker": "EEE3", "symbol": "EEE3", "score": 95, "sector": "Energy"},
-            "BTCUSDT": {"ticker": "BTCUSDT", "symbol": "BTCUSDT", "score": 94},
-            "ETHUSDT": {"ticker": "ETHUSDT", "symbol": "ETHUSDT", "score": 93},
-        }
-
-        with patch.object(poll_service, "_week_key", return_value="2026-W17"), patch.object(
-            poll_service,
-            "get_snapshot_by_ticker",
-            return_value=snapshot,
-        ):
-            created = poll_service.generate_weekly_polls_for_top_symbols(limit=6)
-
-        self.assertEqual(len(created), 6)
-
-    def test_poll_report_does_not_persist_when_poll_is_missing(self):
-        with patch.object(
-            poll_service,
-            "get_snapshot_by_ticker",
-            return_value={"PETR4": {"ticker": "PETR4", "score": 81, "sector": "Energy"}},
-        ):
-            report = poll_service.get_poll_report("PETR4")
-
-        self.assertTrue(report["why_it_matters"])
+        self.assertEqual(created, [])
         self.assertFalse(poll_service.POLL_STORE_PATH.exists())
 
-    def test_load_store_migrates_legacy_poll_payloads(self):
-        legacy_store = {
-            "polls": {
-                "2026-W17:PETR4": {
-                    "id": "2026-W17:PETR4",
-                    "symbol": "PETR4",
-                    "week_key": "2026-W17",
-                    "market_type": "stock",
-                    "question": "Legacy poll?",
-                    "options": [
-                        {"key": "A", "label": "Up", "votes": 2},
-                        {"key": "B", "label": "Down", "votes": 1},
-                    ],
-                    "created_at": "2026-04-23T10:00:00Z",
-                    "updated_at": "2026-04-23T10:00:00Z",
-                }
-            }
-        }
-
-        poll_service.POLL_STORE_PATH.write_text(
-            json.dumps(legacy_store, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
-        with patch.object(poll_service, "_week_key", return_value="2026-W17"), patch.object(
-            poll_service,
-            "get_snapshot_by_ticker",
-            return_value={"PETR4": {"ticker": "PETR4", "score": 81, "sector": "Energy"}},
+    def test_poll_report_reflects_active_poll_or_none(self):
+        with self._at(ECON_WEEK_NOW), self._no_yfinance(), patch.object(
+            poll_service, "get_snapshot_by_ticker", return_value={"PETR4": {"ticker": "PETR4", "score": 80}}
         ):
-            poll = poll_service.get_weekly_poll("PETR4")
+            report = poll_service.get_poll_report("PETR4")
+        self.assertEqual(report["event_type"], "economic_calendar")
+        self.assertEqual(len(report["options"]), 2)
 
-        self.assertEqual(poll["schema_version"], poll_service.POLL_SCHEMA_VERSION)
-        self.assertIn("report", poll)
-        self.assertIn("context", poll)
-        self.assertIn("question_variants", poll)
-        self.assertIn("quality", poll)
-        saved = json.loads(poll_service.POLL_STORE_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(
-            saved["polls"]["2026-W17:PETR4"]["schema_version"],
-            poll_service.POLL_SCHEMA_VERSION,
-        )
-
-    def test_load_store_keeps_cache_mtime_after_migration(self):
-        legacy_store = {
-            "polls": {
-                "2026-W17:PETR4": {
-                    "id": "2026-W17:PETR4",
-                    "symbol": "PETR4",
-                    "week_key": "2026-W17",
-                    "market_type": "stock",
-                    "question": "Legacy poll?",
-                    "options": [
-                        {"key": "A", "label": "Up", "votes": 1},
-                        {"key": "B", "label": "Down", "votes": 0},
-                    ],
-                    "created_at": "2026-04-23T10:00:00Z",
-                    "updated_at": "2026-04-23T10:00:00Z",
-                }
-            }
-        }
-
-        poll_service.POLL_STORE_PATH.write_text(
-            json.dumps(legacy_store, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
-        with patch.object(poll_service, "_week_key", return_value="2026-W17"), patch.object(
-            poll_service,
-            "get_snapshot_by_ticker",
-            return_value={"PETR4": {"ticker": "PETR4", "score": 81, "sector": "Energy"}},
+        with self._at(QUIET_WEEK_NOW), self._no_yfinance(), patch.object(
+            poll_service, "get_snapshot_by_ticker", return_value={}
         ):
-            poll_service.get_weekly_poll("PETR4")
+            empty_report = poll_service.get_poll_report("ITUB4")
+        self.assertEqual(empty_report["status"], "none")
+        self.assertEqual(empty_report["options"], [])
 
-        file_mtime = poll_service.POLL_STORE_PATH.stat().st_mtime
-        self.assertEqual(poll_service._store_cache["mtime"], file_mtime)
+    # ----------------------------------------------------------------- #
+    # Calendar data helper
+    # ----------------------------------------------------------------- #
+    def test_events_in_window_sorted_with_weekly_claims(self):
+        start = datetime(2026, 7, 26, tzinfo=UTC)
+        end = datetime(2026, 7, 31, tzinfo=UTC)
+
+        events = events_in_window(start, end)
+
+        names = [event["name"] for event in events]
+        self.assertEqual(names[0], "Durable Goods")
+        self.assertIn("Decisão do FOMC", names)
+        self.assertIn("Initial Jobless Claims", names)
+        dates = [event["date"] for event in events]
+        self.assertEqual(dates, sorted(dates))
+        self.assertTrue(
+            all(start.date().isoformat() <= item < end.date().isoformat() for item in dates)
+        )
 
 
 if __name__ == "__main__":

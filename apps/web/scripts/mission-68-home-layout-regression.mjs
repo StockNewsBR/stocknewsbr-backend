@@ -1,0 +1,126 @@
+import fs from "node:fs";
+
+const shell = fs.readFileSync(new URL("../components/workspace-shell.tsx", import.meta.url), "utf8");
+const chart = fs.readFileSync(new URL("../components/ticker-chart.tsx", import.meta.url), "utf8");
+const rails = fs.readFileSync(new URL("../components/workspace-rails.tsx", import.meta.url), "utf8");
+const sections = fs.readFileSync(new URL("../components/workspace-sections.tsx", import.meta.url), "utf8");
+const css = fs.readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+
+const has = (source, value, label) => {
+  if (!source.includes(value)) throw new Error(`missing: ${label}`);
+};
+const lacks = (source, value, label) => {
+  if (source.includes(value)) throw new Error(`unexpected: ${label}`);
+};
+const cssBlock = (selector, nextSelector) => css.slice(css.indexOf(selector), css.indexOf(nextSelector, css.indexOf(selector) + selector.length));
+
+has(shell, '<div className="snbr-sticky-top">', "shared sticky header wrapper");
+has(css, ".snbr-sticky-top {\n  position: sticky;\n  top: 0;\n  z-index: 30;", "sticky header contract");
+has(css, "width: 100%;\n  min-width: 0;", "root uses available width instead of viewport units");
+lacks(css, "max-width: 100vw", "viewport-width root overflow");
+has(css, ".snbr-tape-viewport {\n  overflow-x: auto;", "ticker tape owns horizontal overflow");
+has(css, "height: 100dvh;\n  min-height: 0;", "application shell owns the viewport height");
+has(css, ".snbr-left-rail {\n  padding: 18px 14px;", "left rail remains a dedicated shell column");
+const leftRailCss = cssBlock(".snbr-left-rail {", ".snbr-left-header,");
+const activeListCss = cssBlock(".snbr-active-list-scroll {", ".snbr-news-panel {");
+const mainCss = cssBlock(".snbr-symbol-page {", ".snbr-sticky-top {");
+has(leftRailCss, "overflow-y: auto;", "left rail owns the external vertical scroll");
+has(leftRailCss, "overscroll-behavior: contain;", "left rail prevents scroll chaining");
+has(css, ".snbr-symbol-page {\n  display: grid;", "main content is an independent layout column");
+has(mainCss, "overflow-y: auto;", "main content owns vertical scrolling");
+has(mainCss, "overscroll-behavior: contain;", "main prevents scroll chaining");
+has(css, ".snbr-active-list-shell {\n  display: flex;\n  flex-direction: column;", "active list consumes the remaining rail height");
+has(css, ".snbr-active-list-scroll {\n  flex: 1 1 auto;\n  min-height: 0;", "active cards can exceed their client height");
+has(activeListCss, "overflow-y: auto;", "active list owns the internal vertical scroll");
+has(activeListCss, "overflow-x: hidden;", "active list cannot create page-width overflow");
+has(activeListCss, "overscroll-behavior: contain;", "active list prevents scroll chaining");
+if ([leftRailCss, activeListCss, mainCss].filter((block) => block.includes("overflow-y: auto;")).length !== 3) throw new Error("expected exactly three primary vertical scroll hosts");
+lacks(shell, '<div className="snbr-timeframes">', "duplicate periods below RSI");
+lacks(shell, '{ key: "show_support"', "support chart control");
+lacks(shell, '{ key: "show_resistance"', "resistance chart control");
+lacks(chart, '<div className="snbr-chart-top-overlays"', "chart RSI/support/resistance badges");
+lacks(chart, "<LevelLinesPane", "verified support/resistance pane");
+has(chart, "snbr-institutional-rsi-panel", "lower RSI panel retained");
+has(css, ".snbr-tv-widget iframe {\n  width: 100%;\n  min-width: 0;\n  max-width: 100%;", "chart iframe shrinks with its container");
+has(css, ".snbr-tv-plot-area {\n  position: relative;\n  min-width: 0;\n  max-width: 100%;\n  height: clamp(620px, 72dvh, 820px);", "chart plot has resolved responsive height");
+has(shell, 'return normalizeSymbol(label) === symbol', "duplicate symbol guard");
+has(shell, 'PETR4: "Petrobras PN"', "PETR4 canonical display name");
+has(shell, 'ABEV3: "Ambev S.A."', "ABEV3 canonical display name");
+has(shell, 'AAPL: "Apple Inc"', "USA canonical display name");
+has(shell, 'const prefix = isBrazilianMarketSymbol(symbol) ? "R$" : "$";', "central formatter uses R$ for Brazil and $ otherwise");
+lacks(shell, '"US$"', "US dollar prefix");
+has(shell, "function AssetMark", "shared safe asset logo renderer");
+has(shell, "if (!logoUrl || failed) return null;", "missing or broken logos leave no textual circle");
+has(shell, "onError={() => setFailed(true)}", "broken asset image is removed safely");
+has(shell, "{symbolLogoUrl ? <AssetMark", "Home Symbol logo only renders for a valid source URL");
+has(shell, '{itemLabel ? <span>{itemLabel}</span> : null}', "conditional watchlist name");
+has(shell, '{symbolLabel ? <p>{symbolLabel}</p> : null}', "conditional asset name");
+lacks(rails, "Use para abrir B3, BDR, cripto ou ação dos EUA na tela, sem adicionar automaticamente.", "long asset-search copy");
+has(shell, "Votação da estratégia do ativo", "compact Vote subtitle");
+has(shell, "pollOpen && activePoll", "poll body only renders for a real poll");
+lacks(shell, "no_event_in_window", "internal empty-poll code");
+lacks(shell, "Nenhum evento verificado está disponível", "technical empty-poll text");
+lacks(shell, "A StockNewsBR não criará evento genérico", "technical unverified-event text");
+lacks(shell, 'label: isUsLocale ? "Price" : "Preço"', "separate price card");
+has(css, "font-size: clamp(30px, 2.4vw, 38px);", "responsive main price");
+has(shell, 'advancedMode\n                ? (isUsLocale ? "Basic Mode" : "Modo Básico")', "inverse mode action label");
+has(shell, '"Mudar para Modo Básico"', "accessible Basic-mode action");
+has(shell, '"Mudar para Modo Pro"', "accessible Pro-mode action");
+has(shell, 'const SIMPLE_TOP_TAB_IDS = new Set([\n  "grafico",\n  "news",\n  "referrals",\n  "education",\n]);', "Basic mode tab order");
+has(shell, 'if (!advancedMode && !SIMPLE_TOP_TAB_IDS.has(id)) return false;', "premium tabs are filtered only in Basic mode");
+has(shell, 'tab.id === "news"\n                ? newsRows.length', "News keeps its live counter");
+has(shell, 'onClick={() => setActiveTab(tab.id)}', "News remains clickable through the shared tab control");
+has(shell, 'visibleTabs.some((tab) => tab.id === currentTab)', "News remains active when still visible");
+for (const premiumTab of ["flow", "liquidity", "trend", "momentum", "smart-money"]) {
+  const basicBlock = shell.slice(shell.indexOf("const SIMPLE_TOP_TAB_IDS"), shell.indexOf("const INTERNAL_AI_TAB_IDS"));
+  lacks(basicBlock, `"${premiumTab}"`, `${premiumTab} in Basic navigation`);
+}
+const tabListCss = css.slice(css.indexOf(".snbr-tab-list {"), css.indexOf(".snbr-tab-list::-webkit-scrollbar"));
+has(tabListCss, "display: flex;", "Basic navigation uses compact flex layout");
+has(tabListCss, "overflow-x: auto;", "Basic navigation owns horizontal overflow");
+has(tabListCss, "min-width: 0;", "Basic navigation can shrink without empty space");
+has(shell, 'setActiveTab("grafico")', "safe Basic-mode navigation fallback");
+has(shell, 'if (currentTab === "news") return renderNews();', "News has an explicit tab branch");
+has(sections, 'className="snbr-news-panel"', "News owns the full useful width");
+lacks(sections, "featuredDiscussion", "featured discussions inside News");
+lacks(sections, "Discussões em destaque", "social discussion heading inside News");
+lacks(sections, "Featured Discussions", "English social discussion heading inside News");
+has(shell, '<section className="snbr-ticker-tape">', "ticker tape remains outside tab branches");
+has(rails, '<div className="snbr-active-list-scroll">{watchlistContent}</div>', "watchlist always renders asset cards");
+has(rails, '<div className="snbr-left-footer">', "lower Trader Help links remain reachable through the external rail scroll");
+if (rails.indexOf("snbr-active-filter-row") > rails.indexOf("snbr-active-list-scroll")) throw new Error("filters must remain outside the card scroller");
+has(shell, "<WorkspaceEducationPanel", "institutional content remains in Trader Help");
+has(shell, 'import { formatSocialTimestamp } from "@/lib/social-time";', "shared absolute social timestamp formatter");
+has(shell, "post.created_at ?? post.timestamp", "posts prefer backend created_at");
+has(shell, "comment.created_at ?? comment.timestamp", "comments prefer backend created_at");
+lacks(shell, "function formatRelativeTime", "relative post/comment formatter");
+has(shell, "function renderSocialTimestamp", "post and comment timestamps are rendered once through the shared helper");
+has(shell, '<time dateTime={formatted.dateTime} title={formatted.title}>', "social timestamps expose machine-readable and titled values");
+has(shell, '[...(activeNews?.items || [])]', "news sorting does not mutate shared state");
+has(shell, 'return String(a.id || "").localeCompare(String(b.id || ""));', "news ordering has a deterministic tie-breaker");
+lacks(shell, "snbr-tab-scroll", "navigation arrow buttons and wrappers");
+lacks(shell, "scrollTabs", "navigation arrow handlers");
+has(css, ".snbr-symbol-tab {", "tab style exists");
+has(css, "border-bottom: 0;", "active navigation has no underline");
+lacks(css, ".snbr-tab-scroll {", "orphan navigation arrow styles");
+
+const strategicHead = shell.slice(shell.indexOf('<div className="snbr-decision-head">'), shell.indexOf('{advancedMode && strategicPanelOpen ?'));
+if ((strategicHead.match(/aria-expanded=/g) || []).length !== 1) throw new Error("strategic header must expose exactly one toggle");
+if ((strategicHead.match(/snbr-collapse-toggle/g) || []).length !== 1) throw new Error("strategic header must render exactly one shared toggle");
+has(css, ".snbr-collapse-toggle {", "shared collapse toggle style");
+has(shell, 'className="snbr-section-head-action snbr-collapse-toggle snbr-open-news"', "Open news uses shared pill style");
+has(css, ".snbr-open-news {\n  margin-left: auto;\n  text-decoration: none;\n  white-space: nowrap;", "Open news stays on one line");
+
+has(shell, 'className="snbr-published-media"><img className="snbr-image"', "published media uses compact shared class");
+if ((shell.match(/snbr-composer-attachment-preview">\s*<img className="snbr-image"/g) || []).length < 2) throw new Error("composer previews must use shared media class");
+has(css, ".snbr-image {\n  display: block;\n  width: auto;\n  max-width: min(280px, 100%);\n  max-height: 220px;\n  object-fit: contain;\n  object-position: left center;", "shared compact media dimensions");
+lacks(css.slice(css.indexOf(".snbr-image {"), css.indexOf(".snbr-help-stack")), "\n  width: 100%;", "published media card-width stretching");
+
+has(shell, '"Métricas premium disponíveis no Plano Pro"', "plain Basic-mode premium helper");
+has(shell, '"Premium metrics available on the Pro Plan"', "English Basic-mode premium helper");
+has(shell, '"🔒 Disponível no Pro"', "compact premium card lock");
+lacks(shell, '"Abra o Modo Pro para ver esta métrica institucional."', "long premium card explanation");
+has(css, ".snbr-basic-pro-lock {\n  display: block;", "premium helper is plain text");
+has(css, "border: 0;\n  border-radius: 0;\n  background: transparent;", "premium helper has no pill treatment");
+
+console.log("mission-68-home-layout-regression: ok");

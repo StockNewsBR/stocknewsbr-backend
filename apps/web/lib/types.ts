@@ -50,6 +50,22 @@ export type StrategicPanel = {
   no_trade_reasons?: string[];
   source_contracts?: string[];
   blocks?: StrategicPanelBlock[];
+  canonical_analysis?: CanonicalAnalysis | null;
+};
+
+export type CanonicalAnalysis = {
+  version?: string;
+  direction: "BULLISH" | "BEARISH" | "NEUTRAL";
+  decision: "READY" | "NO_TRADE" | "BLOCKED" | "STALE_DATA" | "INSUFFICIENT_DATA" | "CONFLICT" | "ERROR";
+  suggested_trade: "BUY" | "SELL" | "SHORT" | "COVER" | "NO_TRADE";
+  regime: "BULL_TREND" | "BEAR_TREND" | "RANGE" | "HIGH_VOLATILITY" | "UNKNOWN";
+  bias: "BULLISH" | "BEARISH" | "NEUTRAL" | "CONFLICT";
+  conclusion?: "OPPORTUNITY_CONFIRMED" | "OPPORTUNITY_FORMING" | "OBSERVE" | "WAIT" | "NO_TRADE" | "CONFLICT";
+  validation_status?: "VALID" | "NORMALIZED" | "REJECTED";
+  validation_reasons?: string[];
+  status?: "READY" | "BLOCKED" | "NO_TRADE" | "CONFLICT" | string;
+  reason?: string | null;
+  conclusion_key?: string | null;
 };
 
 export type DecisionEnvelope = {
@@ -421,6 +437,14 @@ export type PublicAiToolsPayload = {
   timezone: string;
   source?: string;
   tools: Partial<WorkspaceAiTools>;
+  selected_symbol?: string | null;
+  selected_tool?: keyof WorkspaceAiTools | null;
+  timeframe?: string | null;
+  status?: "READY" | "NO_QUALIFIED_FINDING" | "SNAPSHOT_UNAVAILABLE" | "STALE_DATA" | "ERROR" | "KILL_SWITCHED" | string;
+  reason?: string | null;
+  analyzed_at?: string | null;
+  displayable_count?: number;
+  actionable_count?: number;
 };
 
 export type HelpGuide = {
@@ -443,7 +467,6 @@ export type WorkspaceLayout = {
     show_zones?: boolean;
     show_price_line?: boolean;
     show_vwap?: boolean;
-    show_averages?: boolean;
     show_macd?: boolean;
     show_rsi?: boolean;
     show_support?: boolean;
@@ -458,11 +481,11 @@ export type FeedComment = {
   id: number;
   user: string;
   user_id?: number;
-  user_email?: string | null;
   user_avatar_url?: string | null;
   text: string;
   image_url?: string | null;
   timestamp?: number;
+  created_at?: string | null;
   social_guardian_score?: number | null;
   social_guardian_label?: string | null;
 };
@@ -471,13 +494,13 @@ export type FeedPost = {
   id: number;
   user: string;
   user_id: number;
-  user_email?: string | null;
   user_avatar_url?: string | null;
   text: string;
   ticker?: string | null;
   sentiment?: string | null;
   image_url?: string | null;
   timestamp?: number;
+  created_at?: string | null;
   likes?: number;
   liked_by_me?: boolean;
   reposts?: number;
@@ -677,6 +700,13 @@ export type ChartMarker = {
 export type ChartZone = {
   label: string;
   price: number;
+  kind?: "support" | "resistance" | string;
+  symbol?: string | null;
+  timeframe?: string | null;
+  as_of?: string | null;
+  source?: string | null;
+  algorithm_version?: string | null;
+  stale?: boolean;
 };
 
 export type ChartPayload = {
@@ -698,7 +728,20 @@ export type ChartPayload = {
     fallback?: boolean;
     synthetic?: boolean;
     interval?: string;
+    as_of?: string | null;
   };
+  // Mission 68: per-timeframe RSI computed on this chart's candle series.
+  rsi?: number | null;
+  rsi_metadata?: {
+    symbol?: string;
+    timeframe?: string;
+    as_of?: string | null;
+    source?: string;
+    candle_count?: number | null;
+    required_count?: number | null;
+    status?: string | null;
+    reason?: string | null;
+  } | null;
   fallback?: boolean;
   synthetic?: boolean;
 };
@@ -721,6 +764,8 @@ export type NewsItem = {
   id: string;
   ticker: string;
   title: string;
+  original_title?: string | null;
+  content_locale?: "pt-BR" | "en-US" | string | null;
   summary?: string;
   card_summary?: string | null;
     source: string;
@@ -781,6 +826,7 @@ export type NewsPayload = {
   scope?: Record<string, unknown>;
   report?: Record<string, unknown>;
   cache?: Record<string, unknown>;
+  locale?: "pt-BR" | "en-US" | string;
 };
 
 export type PollOption = {
@@ -802,6 +848,29 @@ export type PollPayload = {
   context?: Record<string, unknown>;
   report?: Record<string, unknown>;
   quality?: Record<string, unknown>;
+  event_type?: string | null;
+  event_date?: string | null;
+  event_source?: string | null;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  reason?: string | null;
+};
+
+export type GifSearchItem = {
+  id: string;
+  title: string;
+  preview_url: string;
+  media_url: string;
+  width?: number | null;
+  height?: number | null;
+  provider?: string | null;
+};
+
+export type GifSearchPayload = {
+  status: "READY" | "EMPTY" | "UNAVAILABLE" | "ERROR" | string;
+  query: string;
+  items: GifSearchItem[];
+  reason?: string | null;
 };
 
 export type ChatHistoryPayload = {
@@ -869,6 +938,8 @@ export type TelegramLinkSessionResponse = {
 
 export type QuotePayload = {
   symbol: string;
+  logo_url?: string | null;
+  icon_url?: string | null;
   price?: number;
   change?: number;
   change_pct?: number;
@@ -947,6 +1018,16 @@ export type PublicInsightPayload = {
   decision_status?: DecisionEnvelope["decision_status"] | null;
   decision_envelope?: DecisionEnvelope | null;
   rsi?: number | null;
+  rsi_metadata?: {
+    symbol: string;
+    timeframe: string;
+    as_of?: string | null;
+    source?: string | null;
+    candle_count: number;
+    required_count: number;
+    status: "AVAILABLE" | "INSUFFICIENT_DATA" | "PENDING" | "PROVIDER_UNAVAILABLE" | "STALE_DATA" | string;
+    reason?: string | null;
+  } | null;
   rel_volume?: number | null;
   trend_bias?: string | null;
   signal?: string | null;
@@ -966,6 +1047,7 @@ export type PublicMarketBundlePayload = {
 export type WorkspaceTickerBundlePayload = {
   symbol: string;
   chart?: ChartPayload | null;
+  insight?: PublicInsightPayload | null;
   feed?: FeedPayload | null;
   news?: NewsPayload | null;
   room?: ChatHistoryPayload | null;
@@ -992,5 +1074,19 @@ export type PublicBootstrap = {
     current?: string;
     next?: string;
     domain?: string;
+  };
+  market_universe?: {
+    items: Array<{
+      symbol: string;
+      label?: string | null;
+      category: "B3" | "BDR" | "Crypto" | "USA" | string;
+      market?: string | null;
+      exchange?: string | null;
+      logo_url?: string | null;
+      icon_url?: string | null;
+    }>;
+    counts: Record<string, number>;
+    total: number;
+    version?: string | null;
   };
 };

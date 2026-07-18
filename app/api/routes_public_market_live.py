@@ -13,10 +13,14 @@ from app.market.market_data_loader import (
 from app.services.chart_overlay_service import build_chart_overlays
 from app.services.public_ai_tools_service import build_public_ai_tools_payload
 from app.services.public_market_data_service import (
+    build_public_rsi_contract,
     cached_price_payloads,
     load_public_chart_rows,
+    normalize_public_chart_zones,
+    public_chart_as_of,
 )
 from app.services.public_news_service import build_public_news_payload
+from app.services.news_service import normalize_news_locale
 from app.services.quote_service import (
     classify_quote_payload,
     empty_quote_payload,
@@ -38,13 +42,12 @@ from app.system.system_metrics import record_cache_access
 
 
 router = APIRouter(prefix="/public", tags=["Public Market Live"])
+# BRFS3/JBSS3 left this blocklist: they now alias to live successors
+# (MBRF3 / JBSS32) in the symbol registry, and the alias-based check would
+# otherwise block the successors too.
 _PUBLIC_MARKET_BLOCKED_SYMBOLS = {
-    "BRFS3",
-    "BRFS3.SA",
     "ENBR3",
     "ENBR3.SA",
-    "JBSS3",
-    "JBSS3.SA",
 }
 
 _CME_FUTURES_PROVIDER_SYMBOLS = {
@@ -157,13 +160,20 @@ def _empty_master_context() -> dict:
     }
 
 
-def _invalid_insight_payload(symbol: str, status: str, provider_status: str) -> dict:
+def _invalid_insight_payload(symbol: str, status: str, provider_status: str, interval: str = "1D") -> dict:
     response_symbol = _safe_response_symbol(symbol)
+    rsi_contract = build_public_rsi_contract(
+        response_symbol,
+        interval,
+        [],
+        empty_status="INSUFFICIENT_DATA",
+        empty_reason=status,
+    )
     return {
         "symbol": response_symbol,
         "score": None,
         **_empty_master_context(),
-        "rsi": None,
+        **rsi_contract,
         "trend_bias": None,
         "signal": None,
         "summary": {
@@ -178,16 +188,17 @@ def _invalid_insight_payload(symbol: str, status: str, provider_status: str) -> 
     }
 
 
-def _invalid_bundle_payload(symbol: str, interval: str, limit: int, status: str, provider_status: str) -> dict:
+def _invalid_bundle_payload(symbol: str, interval: str, limit: int, status: str, provider_status: str, locale: str = "pt-BR") -> dict:
     del limit
     response_symbol = _safe_response_symbol(symbol)
     quote = _invalid_quote_payload(symbol, status, provider_status)
+    normalized_locale = normalize_news_locale(locale)
     return _json_safe_payload({
         "symbol": response_symbol,
         "quote": quote,
-        "insight": _invalid_insight_payload(symbol, status, provider_status),
+        "insight": _invalid_insight_payload(symbol, status, provider_status, interval=interval),
         "chart": _empty_chart_payload(response_symbol, interval, provider_status, status=status),
-        "news": {"symbol": response_symbol, "items": [], "count": 0, "source": status, "status": status},
+        "news": {"symbol": response_symbol, "items": [], "count": 0, "source": status, "status": status, "locale": normalized_locale},
         "ai_tools": {"tools": {}, "source": status, "using_fallback": False, "go_live_ready": False},
         "source": "cache_snapshot_bundle",
     })
@@ -495,25 +506,6 @@ def _quote_needs_background_refresh(payload) -> bool:
 
 def _is_quote_fallback_chart(ohlc) -> bool:
     return bool(ohlc) and all(row.get("source") == "quote_cache_fallback" for row in ohlc or [])
-
-
-def _compute_rsi(closes, period: int = 14):
-    if len(closes) <= period:
-        return None
-
-    gains = []
-    losses = []
-    for previous, current in zip(closes[-period - 1 : -1], closes[-period:]):
-        delta = current - previous
-        gains.append(max(delta, 0))
-        losses.append(abs(min(delta, 0)))
-
-    avg_gain = sum(gains) / period
-    avg_loss = sum(losses) / period
-    if avg_loss == 0:
-        return 100.0 if avg_gain > 0 else 50.0
-    rs = avg_gain / avg_loss
-    return round(100 - (100 / (1 + rs)), 1)
 
 
 def _fallback_bias(closes):
@@ -824,18 +816,25 @@ def public_quotes(symbols: str = Query(default="")):
 @router.get("/market/insight/{symbol}")
 def public_market_insight(symbol: str, interval: str = "1D"):
     if is_ambiguous_crypto_symbol(symbol):
-        return _invalid_insight_payload(symbol, "ambiguous_symbol", "missing_quote_asset")
+        return _invalid_insight_payload(symbol, "ambiguous_symbol", "missing_quote_asset", interval=interval)
     ticker = _normalize_public_symbol(symbol)
     if not ticker:
-        return _invalid_insight_payload(symbol, "invalid_symbol", "invalid_symbol")
+        return _invalid_insight_payload(symbol, "invalid_symbol", "invalid_symbol", interval=interval)
     response_symbol = _response_symbol(ticker)
     master_context = _snapshot_master_context(ticker)
     if _is_blocked_public_symbol(ticker):
+        rsi_contract = build_public_rsi_contract(
+            response_symbol,
+            interval,
+            [],
+            empty_status="INSUFFICIENT_DATA",
+            empty_reason="blocked_symbol",
+        )
         return {
             "symbol": response_symbol,
             "score": None,
             **master_context,
-            "rsi": None,
+            **rsi_contract,
             "trend_bias": None,
             "signal": None,
             "summary": {"source": "blocked_symbol"},
@@ -843,11 +842,18 @@ def public_market_insight(symbol: str, interval: str = "1D"):
     ohlc = _load_chart_data_fast(ticker, interval)
     empty_reason = "b3_future_exact_chart_unavailable" if _is_b3_mini_future_symbol(ticker) else "empty_chart"
     if not ohlc:
+        rsi_contract = build_public_rsi_contract(
+            response_symbol,
+            interval,
+            [],
+            empty_status="PENDING",
+            empty_reason=empty_reason,
+        )
         return {
             "symbol": response_symbol,
             "score": None,
             **master_context,
-            "rsi": None,
+            **rsi_contract,
             "trend_bias": None,
             "signal": None,
             "summary": {
@@ -868,9 +874,8 @@ def public_market_insight(symbol: str, interval: str = "1D"):
     if is_quote_fallback:
         summary.update({"source": "quote_cache_fallback", "fallback": True, "confidence": "derived"})
     closes = _numeric_close_values(ohlc)
-    rsi = insight.get("rsi")
-    if rsi is None:
-        rsi = _compute_rsi(closes)
+    rsi_contract = build_public_rsi_contract(response_symbol, interval, ohlc)
+    rsi = rsi_contract["rsi"]
     trend_bias = summary.get("trend_bias") or insight.get("trend_bias") or _fallback_bias(closes)
     score = insight.get("score")
     if score is None:
@@ -880,7 +885,7 @@ def public_market_insight(symbol: str, interval: str = "1D"):
         "symbol": response_symbol,
         "score": score,
         **master_context,
-        "rsi": rsi,
+        **rsi_contract,
         "trend_bias": trend_bias,
         "signal": insight.get("signal") or trend_bias,
         "summary": summary,
@@ -927,14 +932,28 @@ def public_market_chart(
     summary = dict(overlays["summary"] or {})
     if is_quote_fallback:
         summary.update({"source": "quote_cache_fallback", "fallback": True, "confidence": "derived"})
+    as_of = public_chart_as_of(ohlc)
+    summary["ticker"] = response_symbol
+    summary["interval"] = chart_interval
+    summary["as_of"] = as_of
+    zones = normalize_public_chart_zones(
+        overlays.get("zones"),
+        symbol=response_symbol,
+        timeframe=chart_interval,
+        rows=ohlc,
+    )
+    # Mission 68: per-timeframe RSI from the exact candle series shown, so the
+    # chart chip / RSI panel follow the selected timeframe (insight.rsi stays D1).
+    rsi_contract = build_public_rsi_contract(response_symbol, chart_interval, ohlc)
     return _json_safe_payload({
         "ticker": response_symbol,
         "interval": chart_interval,
         "ohlc": ohlc,
         "series": overlays["series"],
         "markers": overlays["markers"],
-        "zones": overlays["zones"],
+        "zones": zones,
         "summary": summary,
+        **rsi_contract,
     })
 
 
@@ -944,23 +963,32 @@ def public_market_bundle(
     interval: str = "1D",
     limit: int = 6,
     range_value: str | None = Query(default=None, alias="range"),
+    locale: str = "pt-BR",
 ):
     chart_interval = _normalize_chart_interval(interval, range_value)
     safe_limit = max(1, min(int(limit or 6), 20))
     if is_ambiguous_crypto_symbol(symbol):
-        return _invalid_bundle_payload(symbol, chart_interval, safe_limit, "ambiguous_symbol", "missing_quote_asset")
+        return _invalid_bundle_payload(symbol, chart_interval, safe_limit, "ambiguous_symbol", "missing_quote_asset", locale)
     ticker = _normalize_public_symbol(symbol)
     if not ticker:
-        return _invalid_bundle_payload(symbol, chart_interval, safe_limit, "invalid_symbol", "invalid_symbol")
+        return _invalid_bundle_payload(symbol, chart_interval, safe_limit, "invalid_symbol", "invalid_symbol", locale)
     response_symbol = _response_symbol(ticker)
     cached_payloads = cached_price_payloads(_symbol_aliases(ticker), allow_stale=True)
     quote = _resolve_cached_quote(cached_payloads, ticker)
     record_cache_access("quote", _has_usable_quote_payload(quote), "public_bundle")
 
+    insight = public_market_insight(ticker, interval=chart_interval)
+    # Mission 68: the top-card RSI is always the daily (D1) read; only the chart's
+    # own rsi follows the selected timeframe. Score/trend stay per-timeframe.
+    if isinstance(insight, dict) and str(chart_interval).upper().strip() != "1D":
+        insight = {
+            **insight,
+            **build_public_rsi_contract(response_symbol, "1D", _load_chart_data_fast(ticker, "1D")),
+        }
     return _json_safe_payload({
         "symbol": response_symbol,
         "quote": quote,
-        "insight": public_market_insight(ticker, interval=chart_interval),
+        "insight": insight,
         "chart": public_market_chart(ticker, interval=chart_interval, range_value=None),
         "news": build_public_news_payload(
             response_symbol,
@@ -968,6 +996,7 @@ def public_market_bundle(
             source="public_bundle",
             allow_fetch=False,
             schedule_warmup=True,
+            locale=locale,
         ),
         "ai_tools": build_public_ai_tools_payload([ticker, response_symbol]),
         "source": "cache_snapshot_bundle",
@@ -975,6 +1004,9 @@ def public_market_bundle(
 
 
 def _empty_chart_payload(symbol: str, interval: str, reason: str, *, status: str = "empty"):
+    rsi_contract = build_public_rsi_contract(
+        symbol, interval, [], empty_status="PENDING", empty_reason=reason
+    )
     return {
         "ticker": symbol,
         "interval": interval,
@@ -984,6 +1016,8 @@ def _empty_chart_payload(symbol: str, interval: str, reason: str, *, status: str
         "zones": [],
         "summary": {
             "ticker": symbol,
+            "interval": interval,
+            "as_of": None,
             "source": reason,
             "fallback": True,
             "status": status,
@@ -992,6 +1026,7 @@ def _empty_chart_payload(symbol: str, interval: str, reason: str, *, status: str
         "fallback": True,
         "status": status,
         "provider_status": reason,
+        **rsi_contract,
     }
 
 

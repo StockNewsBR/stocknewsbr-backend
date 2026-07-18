@@ -65,15 +65,12 @@ _PRICE_CACHE_INCLUDE_STALE = False
 _CHART_CACHE_LOADED = False
 _CHART_CACHE_MTIME = 0.0
 _SYMBOL_FAILURE_COOLDOWN_SECONDS = 180
+# BRFS3/JBSS3 removed: they now canonicalize to live successors (MBRF3 / JBSS32).
 _PERMANENT_PROVIDER_BLOCKLIST = {
-    "BRFS3",
-    "BRFS3.SA",
     "ENBR3",
     "ENBR3.SA",
     "GOLL4",
     "GOLL4.SA",
-    "JBSS3",
-    "JBSS3.SA",
 }
 
 _CRYPTO_YF_SYMBOLS = {
@@ -144,7 +141,7 @@ def _identity_contract_for_symbol(symbol: str, provider_symbol: str | None = Non
         market = "CRYPTO"
         currency = "USD"
         timezone = "UTC"
-    elif (normalized or original).endswith(".SA") or re.match(r"^[A-Z][A-Z0-9]{3,4}(3|4|5|6|11)$", display or ""):
+    elif (normalized or original).endswith(".SA") or re.match(r"^[A-Z][A-Z0-9]{3,4}(3|4|5|6|7|11)$", display or ""):
         asset_type = "B3"
         market = "B3"
         currency = "BRL"
@@ -411,20 +408,26 @@ _B3_MINI_FUTURE_REFERENCE_SYMBOLS = {
 }
 
 _BDR_PROVIDER_SYMBOLS = {
+    "A1MD34": "A1MD34.SA",
+    "A1MD34.SA": "A1MD34.SA",
     "AMD34": "A1MD34.SA",
     "AMD34.SA": "A1MD34.SA",
     "AMZN34": "AMZO34.SA",
     "AMZN34.SA": "AMZO34.SA",
     "AMZO34": "AMZO34.SA",
     "AMZO34.SA": "AMZO34.SA",
-    "AXIA6": "AXIA6.SA",
-    "AXIA6.SA": "AXIA6.SA",
+    "AXIA3": "AXIA3.SA",
+    "AXIA3.SA": "AXIA3.SA",
+    "AXIA6": "AXIA3.SA",
+    "AXIA6.SA": "AXIA3.SA",
+    "AXIA7": "AXIA7.SA",
+    "AXIA7.SA": "AXIA7.SA",
     "CCRO3": "MOTV3.SA",
     "CCRO3.SA": "MOTV3.SA",
     "ELET3": "AXIA3.SA",
     "ELET3.SA": "AXIA3.SA",
-    "ELET6": "AXIA6.SA",
-    "ELET6.SA": "AXIA6.SA",
+    "ELET6": "AXIA3.SA",
+    "ELET6.SA": "AXIA3.SA",
     "INTC34": "I1NC34.SA",
     "INTC34.SA": "I1NC34.SA",
     "META34": "M1TA34.SA",
@@ -489,24 +492,26 @@ def _record_blocked_http_provider(symbol: str, operation: str):
     )
 
 _BDR_DISPLAY_SYMBOLS = {
-    "A1MD34.SA": "AMD34",
-    "A1MD34": "AMD34",
-    "AMZN34.SA": "AMZN34",
-    "AMZN34": "AMZN34",
-    "AMZO34.SA": "AMZN34",
-    "AMZO34": "AMZN34",
-    "AXIA3.SA": "ELET3",
-    "AXIA3": "ELET3",
-    "AXIA6.SA": "AXIA6",
-    "AXIA6": "AXIA6",
+    "A1MD34.SA": "A1MD34",
+    "A1MD34": "A1MD34",
+    "AMZN34.SA": "AMZO34",
+    "AMZN34": "AMZO34",
+    "AMZO34.SA": "AMZO34",
+    "AMZO34": "AMZO34",
+    "AXIA3.SA": "AXIA3",
+    "AXIA3": "AXIA3",
+    "AXIA6.SA": "AXIA3",
+    "AXIA6": "AXIA3",
+    "AXIA7.SA": "AXIA7",
+    "AXIA7": "AXIA7",
     "BHIA3.SA": "VIIA3",
     "BHIA3": "VIIA3",
     "I1NC34.SA": "INTC34",
     "I1NC34": "INTC34",
-    "META34.SA": "META34",
-    "META34": "META34",
-    "M1TA34.SA": "META34",
-    "M1TA34": "META34",
+    "META34.SA": "M1TA34",
+    "META34": "M1TA34",
+    "M1TA34.SA": "M1TA34",
+    "M1TA34": "M1TA34",
     "MOTV3.SA": "CCRO3",
     "MOTV3": "CCRO3",
     "NATU3.SA": "NTCO3",
@@ -553,7 +558,7 @@ def _normalize_symbol(symbol: str) -> str:
     if (
         "." not in symbol
         and "-" not in symbol
-        and symbol.endswith(("3", "4", "5", "6", "11", "34"))
+        and symbol.endswith(("3", "4", "5", "6", "7", "11", "32", "34"))
     ):
         return f"{symbol}.SA"
 

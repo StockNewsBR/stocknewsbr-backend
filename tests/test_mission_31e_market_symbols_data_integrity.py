@@ -115,10 +115,11 @@ class Mission31EMarketSymbolsDataIntegrityTests(unittest.TestCase):
                 market_data_loader._load_price_cache_once(include_stale=True, force=True)
 
         with market_data_loader._PRICE_SNAPSHOT_CACHE_LOCK:
-            migrated = market_data_loader._PRICE_SNAPSHOT_CACHE.get("META34")
+            migrated = market_data_loader._PRICE_SNAPSHOT_CACHE.get("M1TA34")
 
         self.assertIsNotNone(migrated)
-        self.assertEqual(migrated["payload"]["symbol"], "META34")
+        self.assertEqual(migrated["payload"]["symbol"], "M1TA34")
+        self.assertEqual(migrated["payload"]["display_symbol"], "M1TA34")
         self.assertEqual(migrated["payload"]["canonical_symbol"], "M1TA34")
         self.assertEqual(migrated["payload"]["provider_symbol"], "M1TA34.SA")
 
@@ -192,6 +193,9 @@ class Mission31EMarketSymbolsDataIntegrityTests(unittest.TestCase):
 
     def test_client_symbol_registry_fixtures_match_backend_contract(self):
         cases = [
+            ("AXIA6", "AXIA3", False, False),
+            ("ELET6", "AXIA3", False, False),
+            ("AXIA7", "AXIA7", False, False),
             ("A1MD34", "A1MD34", True, False),
             ("AMD34", "A1MD34", True, False),
             ("IVVB11", "IVVB11", False, False),
@@ -630,19 +634,21 @@ process.stdout.write(JSON.stringify(results));
         self.assertIsNone(payload["price"])
 
     def test_public_single_quote_blocks_configured_symbol_before_cache_lookup(self):
+        # ENBR3 remains deliberately blocked; BRFS3/JBSS3 now alias to live
+        # successors (MBRF3/JBSS32) and left the blocklist.
         cached_payload = {
-            "symbol": "BRFS3",
-            "display_symbol": "BRFS3",
-            "provider_symbol": "BRFS3.SA",
+            "symbol": "ENBR3",
+            "display_symbol": "ENBR3",
+            "provider_symbol": "ENBR3.SA",
             "price": 21.0,
             "source": "market_cache",
         }
 
         with patch.object(routes_public_market, "get_cached_quote_payload", return_value=cached_payload) as cached:
-            payload = routes_public_market.public_quote("BRFS3")
+            payload = routes_public_market.public_quote("ENBR3")
 
         cached.assert_not_called()
-        self.assertEqual(payload["symbol"], "BRFS3")
+        self.assertEqual(payload["symbol"], "ENBR3")
         self.assertEqual(payload["quote_status"], "blocked_symbol")
         self.assertIsNone(payload["price"])
 
@@ -783,6 +789,20 @@ process.stdout.write(JSON.stringify(results));
         self.assertTrue(market_data_loader._is_symbol_cooling_down("AAPL"))
         self.assertFalse(record_call.call_args.kwargs["success"])
         self.assertEqual(record_call.call_args.kwargs["error"], "identity_mismatch")
+
+    def test_quote_warmup_covers_entire_public_watchlist(self):
+        """Every watchlist (public universe) symbol must fit inside the warmup limit."""
+        from app.market.universe_registry import PUBLIC_UNIVERSES
+        from app.system.quote_warmup import DEFAULT_QUOTE_WARMUP_LIMIT, public_quote_symbols
+
+        warmed = set(public_quote_symbols(DEFAULT_QUOTE_WARMUP_LIMIT))
+        watchlist = {
+            sanitize_market_symbol(symbol) or symbol
+            for symbols in PUBLIC_UNIVERSES.values()
+            for symbol in symbols
+        }
+        missing = sorted(watchlist - warmed)
+        self.assertEqual(missing, [], f"watchlist symbols never warmed (always 'sem snapshot'): {missing}")
 
 
 if __name__ == "__main__":
