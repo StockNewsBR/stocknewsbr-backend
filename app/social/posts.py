@@ -128,7 +128,7 @@ def get_posts(ticker=None, limit=50, blocked_users=None):
         guardian_scores = get_user_guardian_scores(row.user_id for row in rows)
         serialized = [
             _serialize_post(row, guardian_score=dict(guardian_scores[row.user_id]))
-            for row in rows
+            for row in reversed(rows)
         ]
         hidden_post_ids = get_hidden_post_ids(row.get("id") for row in serialized)
         return [row for row in serialized if row.get("id") not in hidden_post_ids]
