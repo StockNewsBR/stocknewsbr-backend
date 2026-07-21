@@ -307,6 +307,69 @@ class MarketDataLoaderTests(unittest.TestCase):
         self.assertEqual(payload["price"], 190.0)
         cached.assert_called_once_with("AAPL", allow_stale=True)
 
+    def test_change_uses_previous_session_close_not_previous_candle(self):
+        """PETR4 reported "+0,03 (+0,07%)" while Yahoo showed "+0,52 (+1,27%)".
+
+        Same price, wrong baseline: the payload compared the last intraday candle
+        instead of the previous SESSION close. Pins change == price - X.
+        """
+        previous_session_close = 40.90
+        rows = [
+            # Previous session: its LAST close is the only valid baseline.
+            {"Open": 40.41, "High": 41.11, "Low": 40.41, "Close": 40.50, "Volume": 1_000},
+            {"Open": 40.50, "High": 41.11, "Low": 40.41, "Close": previous_session_close, "Volume": 1_000},
+            # Current session: consecutive candles move only a few cents.
+            {"Open": 41.20, "High": 41.44, "Low": 40.47, "Close": 41.39, "Volume": 2_000},
+            {"Open": 41.39, "High": 41.44, "Low": 41.33, "Close": 41.42, "Volume": 2_000},
+        ]
+        index = [
+            pd.Timestamp("2026-07-17 17:30:00", tz="UTC"),
+            pd.Timestamp("2026-07-17 19:30:00", tz="UTC"),
+            pd.Timestamp("2026-07-20 17:30:00", tz="UTC"),
+            pd.Timestamp("2026-07-20 19:30:00", tz="UTC"),
+        ]
+        frame = pd.DataFrame(rows, index=pd.DatetimeIndex(index))
+
+        with market_data_loader._PRICE_SNAPSHOT_CACHE_LOCK:
+            market_data_loader._CHART_DATA_CACHE.clear()
+        payload = market_data_loader._price_payload_from_frame("PETR4", frame)
+
+        self.assertEqual(payload["price"], 41.42)
+        self.assertEqual(payload["previous_close"], previous_session_close)
+        self.assertEqual(payload["change"], round(41.42 - previous_session_close, 4))
+        self.assertEqual(payload["change_pct"], round((41.42 - previous_session_close) / previous_session_close * 100, 4))
+        # The previous-candle delta (+0.03) is exactly the reported bug.
+        self.assertNotEqual(payload["change"], 0.03)
+        self.assertEqual(payload["quote_time"], "2026-07-20T16:30:00-03:00")
+        self.assertIsNone(payload["market_state"])
+
+    def test_previous_session_close_helper_is_shared_and_timezone_aware(self):
+        # US post-market rolls the UTC day forward; the session day must be read in
+        # the exchange timezone or the baseline picks today's own regular close.
+        stamps = [
+            pd.Timestamp("2026-07-17 20:00:00", tz="UTC"),
+            pd.Timestamp("2026-07-20 19:59:00", tz="UTC"),
+            pd.Timestamp("2026-07-20 23:30:00", tz="UTC"),
+        ]
+        closes = [190.0, 200.0, 201.0]
+        self.assertEqual(
+            market_data_loader.previous_session_close(stamps, closes, "America/New_York"),
+            190.0,
+        )
+        # Chart-cache rows arrive as ISO strings and must work with the same helper.
+        self.assertEqual(
+            market_data_loader.previous_session_close(
+                ["2026-07-17 00:00:00+00:00", "2026-07-20 00:00:00+00:00"],
+                [40.90, 41.42],
+            ),
+            40.90,
+        )
+        self.assertIsNone(market_data_loader.previous_session_close(["2026-07-20 00:00:00+00:00"], [41.42]))
+        self.assertEqual(
+            market_data_loader.session_change(41.42, 40.90),
+            {"change": 0.52, "change_pct": 1.2714, "previous_close": 40.9},
+        )
+
     def test_http_context_blocks_batch_fetch_and_uses_cached_snapshots(self):
         with patch.object(
             market_data_loader,

@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo
 
 from app.services.symbol_registry import canonical_symbol
 from app.services.news_service import (
+    _TICKER_NEWS_ALIASES as _SYMBOL_NEWS_ALIASES,
+    NEWS_CACHE_TTL_SECONDS,
     get_cached_symbol_news,
     get_news_cache_info,
     get_news_cached_report,
@@ -13,30 +15,6 @@ from app.services.news_service import (
     normalize_news_locale,
 )
 
-_SYMBOL_NEWS_ALIASES = {
-    "F": ("ford", "ford motor", "ford motor company"),
-    "AAPL": ("apple", "apple inc"),
-    "NVDA": ("nvidia", "nvidia corp", "nvidia corporation"),
-    "TSLA": ("tesla", "tesla inc"),
-    "MSFT": ("microsoft", "microsoft corp", "microsoft corporation"),
-    "AMD": ("advanced micro devices",),
-    "AMZN": ("amazon", "amazon.com", "amazon com", "amazon.com inc"),
-    "META": ("meta", "meta platforms", "facebook"),
-    "NFLX": ("netflix",),
-    "CRM": ("salesforce", "salesforce inc"),
-    "JPM": ("jpmorgan", "jp morgan", "jpmorgan chase"),
-    "BAC": ("bank of america",),
-    "BNY": ("bank of new york mellon", "bny mellon"),
-    "BULL": ("webull", "webull corp", "webull corporation"),
-    "BYDDY": ("byd", "byd co", "byd company", "byd co ltd", "byd company limited"),
-    "PETR4": ("petrobras", "petróleo brasileiro"),
-    "PETR3": ("petrobras", "petróleo brasileiro"),
-    "VALE3": ("vale", "vale s.a", "vale sa"),
-    "ITUB4": ("itau", "itaú", "itau unibanco", "itaú unibanco"),
-    "BBAS3": ("banco do brasil",),
-    "BTCUSD": ("bitcoin", "btc"),
-    "ETHUSD": ("ethereum", "ether", "eth"),
-}
 _NEWS_LOCAL_TZ = ZoneInfo("America/Sao_Paulo")
 _TITLE_TOKEN_STOPWORDS = {"AI", "CEO", "CFO", "IPO", "ETF", "EV", "US", "UK", "F1", "S&P", "DJIA"}
 _FORBIDDEN_NEWS_HOSTS = {
@@ -91,8 +69,10 @@ def _title_mentions_other_symbol_without_requested_alias(item: dict[str, Any], s
     for candidate, aliases in _SYMBOL_NEWS_ALIASES.items():
         if candidate == normalized:
             continue
-        candidate_aliases = {candidate, *aliases}
-        if any(_text_has_news_alias(title, alias) for alias in candidate_aliases):
+        # Only company names here: the bare ticker is already covered by the uppercase
+        # token scan above, and matching it as free text blocks unrelated headlines
+        # (COST -> "cost", BULL -> "bull market").
+        if any(_text_has_news_alias(title, alias) for alias in aliases):
             return True
     return False
 
@@ -106,8 +86,11 @@ def _item_belongs_to_symbol(item: dict[str, Any], symbol: str) -> bool:
     if item_symbol and item_symbol == normalized and direct_marker is not False:
         return True
 
-    related = item.get("related_tickers") or item.get("relatedTickers") or item.get("entities")
-    related = related or []
+    # "entities" is seeded upstream with the ticker the item was filed under, so it can
+    # never prove relatedness -- using it here made this whole filter a no-op and let the
+    # generic provider feed render as per-symbol news. Only provider-supplied related
+    # tickers count.
+    related = item.get("related_tickers") or item.get("relatedTickers") or []
     if isinstance(related, list):
         normalized_related: set[str] = set()
         for value in related:
@@ -118,23 +101,18 @@ def _item_belongs_to_symbol(item: dict[str, Any], symbol: str) -> bool:
         if normalized in normalized_related:
             return True
 
-    aliases = _SYMBOL_NEWS_ALIASES.get(normalized) or ()
-    if aliases:
-        parts = [
-            item.get("title"),
-            item.get("summary"),
-            item.get("card_summary"),
-            item.get("trader_takeaway"),
-            item.get("why_it_matters"),
-            item.get("market_context"),
-        ]
-        if isinstance(related, list):
-            parts.extend(value.get("name") if isinstance(value, dict) else value for value in related)
-        text = _normalize_news_text(" ".join(str(part or "") for part in parts))
-        if any(re.search(rf"\b{re.escape(alias)}\b", text) for alias in aliases):
-            return True
-
-    return False
+    # Last resort: the article itself must name the ticker or the company. Generated
+    # commentary fields are excluded -- they always mention the requested ticker.
+    parts = (
+        item.get("title"),
+        item.get("original_title"),
+        item.get("headline"),
+        item.get("summary"),
+        item.get("original_summary"),
+        item.get("card_summary"),
+    )
+    text = _normalize_news_text(" ".join(str(part or "") for part in parts))
+    return any(_text_has_news_alias(text, alias) for alias in _symbol_news_aliases(normalized))
 
 
 def _normalize_news_text(value: Any) -> str:
@@ -171,6 +149,15 @@ def _iso_from_news_epoch(epoch: float) -> str | None:
         return None
     try:
         return datetime.fromtimestamp(float(epoch), tz=timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+def _local_iso_from_news_epoch(epoch: float) -> str | None:
+    if not epoch:
+        return None
+    try:
+        return datetime.fromtimestamp(float(epoch), tz=timezone.utc).astimezone(_NEWS_LOCAL_TZ).isoformat()
     except Exception:
         return None
 
@@ -267,6 +254,28 @@ def _fix_portuguese_news_text(value: Any) -> Any:
     return text
 
 
+# Frequent English words with no Portuguese homograph. Used to detect leftovers AFTER the
+# replacement table ran: if any survives, the table only translated part of the sentence and
+# the result would be franken-text ("Why the mercado Dipped But Petrobras Gained Today").
+# Deliberately excludes PT homographs ("a", "o", "e", "as", "no", "da", "de", "do").
+_ENGLISH_RESIDUE_RE = re.compile(
+    r"\b("
+    r"the|of|to|in|is|are|was|were|be|been|being|has|have|had|will|would|should|could|"
+    r"it|its|but|not|and|for|from|with|by|that|this|these|those|there|their|they|"
+    r"why|how|what|when|where|which|who|whose|after|before|amid|about|against|between|"
+    r"today|yesterday|tomorrow|week|month|year|quarter|day|days|"
+    r"said|says|say|report|reports|reported|expects?|expected|sees?|seen|"
+    r"up|down|higher|lower|gain|gains|gained|dip|dips|dipped|rise|rises|rose|risen|"
+    r"fall|falls|fell|fallen|jump|jumps|jumped|drop|drops|dropped|beat|beats|"
+    r"miss|misses|missed|deal|deals|plan|plans|new|top|best|worst|more|less|than"
+    r")\b"
+)
+
+
+def _has_english_residue(value: str) -> bool:
+    return bool(_ENGLISH_RESIDUE_RE.search(_normalize_news_text(value)))
+
+
 def _looks_like_english_news(value: str) -> bool:
     normalized = _normalize_news_text(value)
     return bool(
@@ -276,6 +285,12 @@ def _looks_like_english_news(value: str) -> bool:
             normalized,
         )
     )
+
+
+# Fields whose text is the article's own words (the summary falls back to the headline when
+# the provider sends none). They are never rewritten into generic copy and never half-swapped
+# -- the reader either gets the publisher's sentence or nothing invented in its place.
+_ARTICLE_TEXT_FIELDS = frozenset({"summary", "card_summary"})
 
 
 def _translate_english_news_text(value: Any, ticker: str, field: str) -> Any:
@@ -326,10 +341,14 @@ def _translate_english_news_text(value: Any, ticker: str, field: str) -> Any:
         translated = re.sub(source, target, translated, flags=re.IGNORECASE)
 
     translated = _fix_portuguese_news_text(translated)
-    still_english = _looks_like_english_news(translated)
-    if still_english:
-        if field == "title":
-            return f"Notícia relevante em {ticker}: impacto deve ser confirmado em preço e volume"
+    if _has_english_residue(translated):
+        # The table only covers a handful of finance phrases, so a sentence it cannot render
+        # end-to-end comes out as the hybrid the feed was shipping ("Why the mercado Dipped
+        # But Petrobras Gained Today"). Article text keeps the publisher's original wording
+        # -- `language` on the item tells the UI it is not in the requested locale. Our own
+        # generated commentary can safely fall back to generic localized copy instead.
+        if field in _ARTICLE_TEXT_FIELDS:
+            return text
         return f"Leitura relevante para {ticker}; confirme impacto em preço, volume e contexto setorial antes de agir."
 
     return translated[:1].upper() + translated[1:]
@@ -345,10 +364,11 @@ def _normalize_public_news_item(item: dict[str, Any], ticker: str, locale: str) 
         if url_title:
             normalized["title"] = url_title
             normalized["headline"] = url_title
+    # Headline fields are absent on purpose: a headline is either shown as published or not
+    # at all. Everything here is generated commentary that the table can render end-to-end.
     for field in ("summary", "card_summary", "impact_reason", "why_it_matters", "editorial", "market_context", "trader_takeaway", "sector", "industry"):
-        if field in normalized:
-            if normalized["content_locale"] == "pt-BR":
-                normalized[field] = _translate_english_news_text(normalized.get(field), ticker, field)
+        if field in normalized and normalized["content_locale"] == "pt-BR":
+            normalized[field] = _translate_english_news_text(normalized.get(field), ticker, field)
     return normalized
 
 
@@ -430,16 +450,13 @@ def _enrich_public_news_item(item: dict[str, Any], ticker: str) -> dict[str, Any
     source_name = normalized.get("source_name") or normalized.get("source") or "Yahoo Finance"
     source_url = _sanitize_news_url(normalized.get("source_url") or normalized.get("url"))
     fetched_at = normalized.get("fetched_at") or normalized.get("detected_at")
-    age_minutes = normalized.get("age_minutes")
-    if age_minutes is None:
-        age_minutes = _public_news_age_minutes(epoch)
-    is_today = normalized.get("is_today")
-    if is_today is None:
-        is_today = _public_news_is_today(epoch)
-    is_stale = normalized.get("is_stale")
-    if is_stale is None:
-        is_stale = not bool(is_today)
-    freshness_bucket, freshness_label = _public_news_freshness_bucket(epoch, age_minutes, bool(is_today))
+    # Always recomputed from the article's own publication time. These are derived from
+    # now(), so the values frozen into the cache at ingestion made day-old items keep
+    # reporting "Notícia de hoje" and their original age forever.
+    age_minutes = _public_news_age_minutes(epoch)
+    is_today = _public_news_is_today(epoch)
+    is_stale = not is_today
+    freshness_bucket, freshness_label = _public_news_freshness_bucket(epoch, age_minutes, is_today)
 
     normalized["source"] = source_name
     normalized["source_name"] = source_name
@@ -447,6 +464,11 @@ def _enrich_public_news_item(item: dict[str, Any], ticker: str) -> dict[str, Any
     normalized["url"] = source_url
     normalized["published_at_source"] = published_at_source
     normalized["published_at"] = normalized.get("published_at") or published_at_source
+    # Same instant in the app's display timezone, offset included, so the UI renders the
+    # article's own publication time without re-deriving it from a bare UTC string.
+    local_published = _local_iso_from_news_epoch(epoch)
+    normalized["published_at_local"] = local_published
+    normalized["published_at_tz"] = str(_NEWS_LOCAL_TZ) if local_published else None
     normalized["fetched_at"] = fetched_at
     normalized["age_minutes"] = age_minutes
     normalized["is_today"] = bool(is_today)
@@ -543,11 +565,19 @@ def build_public_news_payload(
     content_locale = normalize_news_locale(locale)
     safe_limit = max(1, min(int(limit or 6), 20))
     cached_items = get_cached_symbol_news(ticker, limit=safe_limit, locale=content_locale)
+    # A full cache is not a fresh cache. Refreshing only when the cache was SHORT meant a
+    # symbol that once returned `limit` items never asked for new ones again, so the feed
+    # froze on whatever was fetched first. get_symbol_news() is itself TTL-guarded, so this
+    # costs at most one provider call per symbol per NEWS_CACHE_TTL_SECONDS.
+    cache_age_seconds = get_news_cache_info(ticker, locale=content_locale).get("age_seconds")
+    needs_refresh = len(cached_items) < safe_limit or (
+        cache_age_seconds is not None and cache_age_seconds >= NEWS_CACHE_TTL_SECONDS
+    )
     fetched_items = cached_items
-    if allow_fetch and len(cached_items) < safe_limit:
+    if allow_fetch and needs_refresh:
         fetched_items = get_symbol_news(ticker, limit=safe_limit, locale=content_locale)
     warmup_requested = False
-    if not allow_fetch and schedule_warmup and len(cached_items) < safe_limit:
+    if not allow_fetch and schedule_warmup and needs_refresh:
         warmup_requested = _request_news_warmup_safe(ticker, safe_limit)
     normalized_items = [
         _enrich_public_news_item(_normalize_public_news_item(item, ticker, content_locale), ticker)

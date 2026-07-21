@@ -140,6 +140,10 @@ function buildLevelOverlays(
   return overlays;
 }
 
+// Hidden from the page by owner decision; the value is still computed and used by
+// the AI, and the TradingView RSI study on the chart is unaffected.
+const RSI_PANEL_VISIBLE = false;
+
 const LEVEL_PANE_HEIGHT = 120;
 const LEVEL_PANE_PAD = { top: 12, bottom: 12, left: 8, right: 10 };
 
@@ -281,11 +285,14 @@ export function TickerChart({
     if (numeric == null || numeric < 0 || numeric > 100) return null;
     return numeric;
   }, [institutionalRsiValue]);
-  const rsiTimeframeTag = (rsiTimeframeLabel || "D1").trim() || "D1";
+  // Comes from rsi_metadata (the candles the backend really used). When the backend
+  // does not say, show a bare "RSI" rather than inventing a timeframe.
+  const rsiTimeframeTag = (rsiTimeframeLabel || "").trim();
+  const rsiTitle = rsiTimeframeTag ? `RSI ${rsiTimeframeTag}` : "RSI";
   const rsiPanelLabel = useMemo(() => {
     if (institutionalRsi == null) return null;
-    return `RSI ${rsiTimeframeTag}: ${formatRsiValue(institutionalRsi, locale)}`;
-  }, [institutionalRsi, locale, rsiTimeframeTag]);
+    return `${rsiTitle}: ${formatRsiValue(institutionalRsi, locale)}`;
+  }, [institutionalRsi, locale, rsiTitle]);
   const rsiPanelStyle = useMemo(() => {
     if (institutionalRsi == null) return undefined;
     return { "--snbr-rsi-position": `${clampRsi(institutionalRsi)}%` } as CSSProperties;
@@ -341,8 +348,9 @@ export function TickerChart({
         "vwap.vwap.color": "#f97316",
         "vwap.vwap.linewidth": 4,
       }),
-      width: "100%",
-      height: "100%",
+      // No width/height here on purpose: autosize (set above) is what makes the
+      // widget track its container. Passing both made TradingView keep the size
+      // it had at load time and leave a gap when the layout widened.
       utm_source: window.location.hostname,
       utm_medium: "widget",
       utm_campaign: "advanced-chart",
@@ -402,26 +410,29 @@ export function TickerChart({
           </div>
         ) : null}
       </div>
+      {/* Owner decision: this panel is hidden from the page. The RSI value keeps
+          being computed and fed to the AI; the TradingView RSI study on the chart
+          stays visible. Flip PANEL_VISIBLE to true to bring it back. */}
       <section
-        className={`snbr-institutional-rsi-panel ${rsiPanelTone} ${showRsi ? "" : "hidden"}`}
-        aria-hidden={!showRsi}
+        className={`snbr-institutional-rsi-panel ${rsiPanelTone} ${RSI_PANEL_VISIBLE && showRsi ? "" : "hidden"}`}
+        aria-hidden={!(RSI_PANEL_VISIBLE && showRsi)}
         aria-label={locale === "en-US" ? "Institutional RSI panel" : "Painel RSI institucional"}
       >
           <div className="snbr-institutional-rsi-head">
             <div>
-              <strong>RSI {rsiTimeframeTag}</strong>
+              <strong>{rsiTitle}</strong>
               <span>
                 {institutionalRsi == null
                   ? (rsiMetadata?.reason === "insufficient_candles"
                     ? (locale === "en-US" ? `Insufficient data: ${rsiMetadata.candle_count || 0} of ${rsiMetadata.required_count || 14} required candles.` : `Dados insuficientes: ${rsiMetadata.candle_count || 0} de ${rsiMetadata.required_count || 14} candles necessários.`)
                     : (locale === "en-US" ? "Institutional RSI temporarily unavailable." : "RSI institucional temporariamente indisponível."))
                   : (locale === "en-US"
-                    ? `RSI ${rsiTimeframeTag} — computed on the selected ${rsiTimeframeTag} candles. The top card always shows daily RSI (D1).`
-                    : `RSI ${rsiTimeframeTag} — calculado nos candles ${rsiTimeframeTag} selecionados. O card do topo sempre mostra o RSI diário (D1).`)}
+                    ? `${rsiTitle} — computed on the ${rsiTimeframeTag || "chart"} candles shown. The top card always shows daily RSI (D1).`
+                    : `${rsiTitle} — calculado nos candles ${rsiTimeframeTag || "do gráfico"} exibidos. O card do topo sempre mostra o RSI diário (D1).`)}
               </span>
             </div>
             <strong className="snbr-institutional-rsi-value">
-              {institutionalRsi == null ? "n/a" : `RSI ${rsiTimeframeTag}: ${formatRsiValue(institutionalRsi, locale)}`}
+              {institutionalRsi == null ? "n/a" : `${rsiTitle}: ${formatRsiValue(institutionalRsi, locale)}`}
             </strong>
           </div>
           {institutionalRsi == null ? (
@@ -439,7 +450,7 @@ export function TickerChart({
               <span className="snbr-rsi-threshold threshold-50">50</span>
               <span className="snbr-rsi-threshold threshold-75">75</span>
               <span className="snbr-institutional-rsi-marker">
-                <span>RSI {rsiTimeframeTag}: {formatRsiValue(institutionalRsi, locale)}</span>
+                <span>{rsiTitle}: {formatRsiValue(institutionalRsi, locale)}</span>
               </span>
             </div>
           )}

@@ -4,6 +4,7 @@ import json
 import math
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 
 from app.engine.indicators.vector_indicator_engine import RSI_PERIOD, compute_latest_rsi
@@ -11,6 +12,7 @@ from app.market.market_data_loader import (
     get_cached_chart_data,
     get_cached_price_snapshots,
 )
+from app.market.universe_registry import INDEX_UNIVERSE
 from app.services.symbol_registry import (
     canonical_symbol,
     canonical_symbol_aliases,
@@ -29,6 +31,8 @@ _CHART_DIRECT_MAX_AGE_SECONDS = 60 * 60 * 24 * 14
 _PUBLIC_RSI_SOURCE = "canonical_indicator_engine"
 _CHART_LEVEL_SOURCE = "chart_overlay"
 _CHART_LEVEL_ALGORITHM_VERSION = "recent_extrema_v1"
+INDEX_SPARK_INTERVAL = "3M"
+INDEX_SPARK_MAX_POINTS = 60
 
 
 def _read_json_cache(path: Path) -> dict:
@@ -52,6 +56,15 @@ def _finite_positive(value) -> float | None:
     return number
 
 
+def _finite_number(value) -> float | None:
+    """Like _finite_positive but keeps negatives: change/change_pct go both ways."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _context_symbol(symbol: str) -> str:
     normalized = canonical_symbol(symbol)
     if normalized:
@@ -60,7 +73,10 @@ def _context_symbol(symbol: str) -> str:
 
 
 def _context_timeframe(timeframe: str) -> str:
-    return str(timeframe or "1D").upper().strip() or "1D"
+    label = str(timeframe or "1D").upper().strip() or "1D"
+    # "@5M" is a candle-size request, not a range: publish it in candle form ("5m")
+    # so the metadata never says "1D" while the candles are five minutes wide.
+    return label[1:].lower() if label.startswith("@") else label
 
 
 def _row_as_of(row: dict | None) -> str | None:
@@ -106,6 +122,41 @@ def _rsi_as_of(rows: list[dict] | None) -> str | None:
     return None
 
 
+_CANDLE_INTERVAL_STEPS = (
+    (60, "1m"),
+    (300, "5m"),
+    (900, "15m"),
+    (1800, "30m"),
+    (3600, "1h"),
+    (14400, "4h"),
+    (86400, "1d"),
+    (604800, "1wk"),
+)
+
+
+def _candle_interval(rows: list[dict] | None) -> str | None:
+    """Real spacing between the candles the RSI was computed on.
+
+    The route's `interval` is a *range* label, not a candle size: "1D" means one
+    day of 5m candles, "1M" means one month of 1d candles. Publishing only the
+    range makes the UI render an intraday RSI as "RSI D1".
+    """
+    stamps: list[float] = []
+    for row in rows or []:
+        raw = _row_as_of(row) if isinstance(row, dict) else None
+        if not raw:
+            continue
+        try:
+            stamps.append(datetime.fromisoformat(str(raw)).timestamp())
+        except (TypeError, ValueError, OverflowError, OSError):
+            return None
+    deltas = sorted(later - earlier for earlier, later in zip(stamps, stamps[1:]) if later > earlier)
+    if not deltas:
+        return None
+    median = deltas[len(deltas) // 2]
+    return min(_CANDLE_INTERVAL_STEPS, key=lambda step: abs(step[0] - median))[1]
+
+
 def _is_quote_fallback_chart(rows: list[dict] | None) -> bool:
     return bool(rows) and all(
         isinstance(row, dict) and str(row.get("source") or "").lower().strip() == "quote_cache_fallback"
@@ -126,9 +177,15 @@ def build_public_rsi_contract(
     required_count = normalized_period + 1
     closes = _valid_chart_closes(rows)
     candle_count = len(closes)
+    # The RSI is computed on these rows, so the timeframe it is published under must be
+    # the real spacing of these rows -- never the range label that produced them. Only
+    # when there are no candles to measure does the requested label stand in.
+    candle_interval = _candle_interval(rows)
     metadata = {
         "symbol": _context_symbol(symbol),
-        "timeframe": _context_timeframe(timeframe),
+        "timeframe": candle_interval or _context_timeframe(timeframe),
+        "candle_interval": candle_interval,
+        "period": normalized_period,
         "as_of": _rsi_as_of(rows),
         "source": _PUBLIC_RSI_SOURCE,
         "candle_count": candle_count,
@@ -427,6 +484,53 @@ def cached_price_payloads(symbols: list[str], allow_stale: bool = False) -> dict
     except Exception:
         pass
     return direct
+
+
+def schedule_quote_warmup(symbol: str) -> bool:
+    """Async escape hatch for a cache miss on a valid symbol.
+
+    HTTP surfaces stay cache-only (no inline provider call); this only enqueues a
+    background warmup, mirroring how public news schedules its own warmup.
+    """
+    try:
+        from app.system.quote_warmup import request_on_demand_quote_warmup
+
+        return bool(request_on_demand_quote_warmup(symbol))
+    except Exception:
+        return False
+
+
+def _cached_index_quote(provider_symbol: str) -> dict:
+    for payload in cached_price_payloads([provider_symbol], allow_stale=True).values():
+        if isinstance(payload, dict) and _finite_positive(payload.get("price")) is not None:
+            return payload
+    return {}
+
+
+def build_public_indices_payload() -> dict:
+    """Cache-only index strip; the quote/chart warmup keeps these symbols warm."""
+    items = []
+    for symbol, provider, display_name, currency in INDEX_UNIVERSE:
+        quote = _cached_index_quote(provider)
+        price = _finite_positive(quote.get("price"))
+        rows = load_public_chart_rows(_symbol_aliases(provider), INDEX_SPARK_INTERVAL, scope="public_indices")
+        items.append({
+            "symbol": symbol,
+            "display_name": display_name,
+            "price": price,
+            "change": _finite_number(quote.get("change")),
+            "change_pct": _finite_number(quote.get("change_pct")),
+            # Same baseline contract as the quote surfaces: the producer already
+            # measures against the previous SESSION close, so the strip only has
+            # to publish it for auditability.
+            "previous_close": _finite_positive(quote.get("previous_close")),
+            "quote_time": quote.get("quote_time") or None,
+            "market_state": quote.get("market_state") or None,
+            "spark": _valid_chart_closes(rows)[-INDEX_SPARK_MAX_POINTS:],
+            "currency": currency,
+            "status": "valid" if price is not None else "empty",
+        })
+    return {"items": items, "count": len(items)}
 
 
 def load_public_chart_rows(aliases: list[str], interval: str, scope: str = "public_market_live") -> list[dict]:

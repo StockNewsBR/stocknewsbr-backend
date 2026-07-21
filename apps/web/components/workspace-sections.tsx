@@ -225,29 +225,81 @@ type NewsPanelProps = {
   selectedTicker: string;
   newsRows: WorkspaceNewsRow[];
   newsStateText?: string | null;
+  /** Backend news payload status ("ok" | "empty" | "error"); inferred from newsStateText when absent. */
+  newsStatus?: string | null;
+  onRetry?: () => void;
 };
+
+/**
+ * loading = no payload for this ticker yet, or the backend only scheduled the real fetch
+ * error   = the fetch failed
+ * empty   = the backend answered for this ticker and there is genuinely nothing
+ * ready   = at least one row to render
+ */
+export function newsPanelPhase(rowCount: number, newsStateText?: string | null, newsStatus?: string | null) {
+  if (rowCount > 0) return "ready" as const;
+  const status = normalizeText(newsStatus || "");
+  const state = normalizeText(newsStateText || "");
+  if (status === "error" || state.includes("falha") || state.includes("failed")) return "error" as const;
+  if (status === "loading" || status === "pending") return "loading" as const;
+  // The backend always ships a message with a real answer, so no message means the
+  // payload for this ticker has not landed yet. "BUSCANDO NOTÍCIAS"/"searching" means
+  // the real fetch was just scheduled — still loading, not empty.
+  if (!state || state.includes("buscando") || state.includes("agendada") || state.includes("searching")) return "loading" as const;
+  return "empty" as const;
+}
 
 export function WorkspaceNewsPanel({
   locale = "pt-BR",
   selectedTicker,
   newsRows,
   newsStateText,
+  newsStatus,
+  onRetry,
 }: NewsPanelProps) {
   const isEnglish = locale === "en-US";
   const normalizedNewsState = normalizeText(newsStateText || "");
+  const phase = newsPanelPhase(newsRows.length, newsStateText, newsStatus);
   const localizedNewsStateText =
     isEnglish && normalizedNewsState.includes("sem noticia") && normalizedNewsState.includes("reaproveitada")
       ? `No real news for ${selectedTicker} right now; no other ticker news was reused.`
-      : newsStateText;
+      // Some backend states are still Portuguese-only; never leak them into the English path.
+      : isEnglish && /[áâãàéêíóôõúüç]/i.test(String(newsStateText || ""))
+        ? ""
+        : newsStateText;
   const emptyNewsText = isEnglish
-    ? `No relevant news for ${selectedTicker} right now. Try refreshing later.`
-    : "Sem notícias relevantes para este ativo agora. Tente atualizar mais tarde.";
+    ? `No news for ${selectedTicker} right now. Try refreshing later.`
+    : `Sem notícia para ${selectedTicker} agora. Tente atualizar mais tarde.`;
+  const loadingNewsText = isEnglish
+    ? `Loading news for ${selectedTicker}...`
+    : `Carregando notícias de ${selectedTicker}...`;
+  const errorNewsText = isEnglish
+    ? `Could not load the news for ${selectedTicker}.`
+    : `Não foi possível carregar as notícias de ${selectedTicker}.`;
+  const assistiveText = phase === "ready"
+    ? `${newsRows.length} ${isEnglish ? `useful news items prepared for ${selectedTicker}.` : `notícias úteis preparadas para ${selectedTicker}.`}`
+    : phase === "loading"
+      ? loadingNewsText
+      : phase === "error"
+        ? errorNewsText
+        : emptyNewsText;
+  const retryButton = (
+    <button
+      type="button"
+      className="snbr-button secondary"
+      onClick={() => (onRetry ? onRetry() : window.location.reload())}
+    >
+      {isEnglish ? "Try again" : "Tentar novamente"}
+    </button>
+  );
   return (
     <section
       id="panel-news"
       className="snbr-news-panel"
       data-news-symbol={selectedTicker}
       data-news-state-count={newsRows.length}
+      data-news-phase={phase}
+      aria-busy={phase === "loading"}
     >
       <div className="snbr-plain-panel">
         <div className="snbr-section-head">
@@ -256,11 +308,7 @@ export function WorkspaceNewsPanel({
             <p>{isEnglish ? "Relevant ticker news, cleaned, deduplicated and prioritized for a quick read." : "Notícias relevantes do ativo, limpadas, deduplicadas e priorizadas para leitura rápida."}</p>
           </div>
         </div>
-        <p className="snbr-assistive-copy" aria-live="polite">
-          {newsRows.length
-            ? `${newsRows.length} ${isEnglish ? `useful news items prepared for ${selectedTicker}.` : `notícias úteis preparadas para ${selectedTicker}.`}`
-            : emptyNewsText}
-        </p>
+        <p className="snbr-assistive-copy" aria-live="polite">{assistiveText}</p>
         <div className="snbr-headline-list">
           {newsRows.map((item) => {
             const detailLines = uniqueNewsLines(item.headline, [
@@ -370,10 +418,30 @@ export function WorkspaceNewsPanel({
             </article>
             );
           })}
-          {!newsRows.length ? (
+          {phase === "loading" ? (
+            <div className="snbr-empty-thread" data-news-skeleton="true">
+              <strong>{loadingNewsText}</strong>
+              {[0, 1, 2].map((row) => (
+                <div key={`news-skeleton-${row}`} style={{ display: "grid", gap: 6, opacity: 0.5 }}>
+                  <span style={{ display: "block", height: 12, width: "82%", borderRadius: 6, background: "var(--line)" }} />
+                  <span style={{ display: "block", height: 10, width: "46%", borderRadius: 6, background: "var(--line)" }} />
+                </div>
+              ))}
+              {retryButton}
+            </div>
+          ) : null}
+          {phase === "error" ? (
+            <div className="snbr-empty-thread" data-news-error="true">
+              <strong>{errorNewsText}</strong>
+              <p>{localizedNewsStateText || (isEnglish ? "The news feed did not answer. Try again in a moment." : "O feed de notícias não respondeu. Tente novamente em instantes.")}</p>
+              {retryButton}
+            </div>
+          ) : null}
+          {phase === "empty" ? (
             <div className="snbr-empty-thread">
-              <strong>{isEnglish ? `No relevant news for ${selectedTicker} right now.` : "Sem notícias relevantes para este ativo agora."}</strong>
-              <p>{localizedNewsStateText || (isEnglish ? "Try refreshing later. As soon as the ticker feed brings a useful headline, it appears here with source, original time and sentiment." : "Tente atualizar mais tarde. Assim que o feed do ticker trouxer uma manchete útil, ela aparece aqui com fonte, horário original e sentimento.")}</p>
+              <strong>{emptyNewsText}</strong>
+              <p>{localizedNewsStateText || (isEnglish ? "As soon as the ticker feed brings a useful headline, it appears here with source, original time and sentiment." : "Assim que o feed do ticker trouxer uma manchete útil, ela aparece aqui com fonte, horário original e sentimento.")}</p>
+              {retryButton}
             </div>
           ) : null}
         </div>
@@ -385,52 +453,31 @@ export function WorkspaceNewsPanel({
 
 type EducationPanelProps = {
   locale?: AppLocale;
-  helpManualItems: string[];
   institutionalSections: WorkspaceHelpSection[];
-  educationalSections: WorkspaceHelpSection[];
   guides: HelpGuide[];
   activeInstitutionalSectionId?: string | null;
 };
 
 export function WorkspaceEducationPanel({
   locale = "pt-BR",
-  helpManualItems,
   institutionalSections,
-  educationalSections,
   guides,
   activeInstitutionalSectionId,
 }: EducationPanelProps) {
   const isEnglish = locale === "en-US";
-  const glossarySections = institutionalSections.filter((section) => {
-    const label = `${section.label || ""} ${section.title || ""}`.toLowerCase();
-    return label.includes("glosário") || label.includes("glossary");
-  });
-  const activeInstitutionalSections = activeInstitutionalSectionId
+  const visibleInstitutionalSections = activeInstitutionalSectionId
     ? institutionalSections.filter((section) => section.id === activeInstitutionalSectionId)
     : [];
-  const visibleInstitutionalSections = [
-    ...activeInstitutionalSections,
-    ...glossarySections.filter((section) => !activeInstitutionalSections.some((active) => active.id === section.id)),
-  ];
 
   return (
     <section id="panel-education" className="snbr-plain-panel">
       <div className="snbr-section-head">
         <div>
-          <h3>{isEnglish ? "Trader Help" : "Ajuda Educacional para o Trader"}</h3>
+          <h3>{isEnglish ? "Trader Educational Help" : "Ajuda Educacional para o Trader"}</h3>
           <p>{isEnglish ? "Clear explanation of each platform module, focused on real daily trader use." : "Explicação clara de cada módulo da plataforma, com foco no uso real no dia a dia do trader."}</p>
         </div>
       </div>
       <div className="snbr-help-stack">
-        <article className="snbr-guide-card">
-          <h4>{isEnglish ? "🚀 Main Platform Modules" : "🚀 Principais Módulos da Plataforma"}</h4>
-          <ul className="snbr-bullet-list">
-            {helpManualItems.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </article>
-
         {visibleInstitutionalSections.map((section) => (
           <article id={section.id} key={section.id || section.title} className="snbr-guide-card snbr-help-section">
             <h4>{section.title}</h4>
@@ -470,17 +517,6 @@ export function WorkspaceEducationPanel({
             </div>
           </article>
         ) : null}
-
-        {educationalSections.map((section) => (
-          <article key={section.title} className="snbr-guide-card snbr-help-section">
-            <h4>{section.title}</h4>
-            <div className="snbr-help-body">
-              {section.body.map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-            </div>
-          </article>
-        ))}
 
         {guides.map((guide) => (
           <article key={guide.slug} className="snbr-guide-card snbr-help-section">

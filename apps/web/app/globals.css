@@ -784,6 +784,12 @@ a {
   text-align: left;
   cursor: pointer;
   line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.snbr-left-footer button.active {
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+  background: color-mix(in srgb, var(--blue) 10%, var(--surface));
 }
 
 .snbr-left-footer-title {
@@ -1016,13 +1022,20 @@ a {
   min-width: 0;
   width: 100%;
   flex: 1 1 auto;
+  /* The tape scrolls itself; its scrollbar was visual noise under the row. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.snbr-tape-viewport::-webkit-scrollbar {
+  display: none;
 }
 
 .snbr-tape-track {
   display: flex;
   gap: 10px;
   width: max-content;
-  animation: snbr-tape 30s linear infinite;
+  animation: snbr-tape 60s linear infinite;
 }
 
 .snbr-tape-track.paused {
@@ -1072,6 +1085,119 @@ a {
   margin-top: 6px;
 }
 
+.snbr-index-strip {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  /* Extra right padding so the last card (Dólar) is not clipped by the viewport
+     edge and the strip can scroll fully past it. */
+  padding: 10px 32px 0 24px;
+  background: var(--surface);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.snbr-index-strip > :last-child {
+  margin-right: 8px;
+}
+
+.snbr-index-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.snbr-index-card {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  flex: 1 1 0;
+  /* Six cards must share the row without clipping the last one (Dólar): at
+     190px they summed past the available width and overflowed. */
+  min-width: 148px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+
+.snbr-index-card .snbr-index-spark {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.snbr-index-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.snbr-index-copy strong {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.snbr-index-price {
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.snbr-index-change {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.snbr-index-change.up {
+  color: var(--green);
+}
+
+.snbr-index-change.down {
+  color: var(--red);
+}
+
+.snbr-index-change.mid {
+  color: var(--gold);
+}
+
+.snbr-index-spark {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.snbr-index-spark polyline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.snbr-index-card.up .snbr-index-spark {
+  color: var(--green);
+}
+
+.snbr-index-card.down .snbr-index-spark {
+  color: var(--red);
+}
+
+.snbr-index-card.mid .snbr-index-spark {
+  color: var(--gold);
+}
+
+/* Tape pills stay pill-height: shrink the mark instead of adding a third size prop. */
+.snbr-tape-item .snbr-asset-mark.compact {
+  width: 20px;
+  height: 20px;
+  flex-basis: 20px;
+  font-size: 8px;
+}
+
 .snbr-asset-mark {
   position: relative;
   display: inline-grid;
@@ -1103,10 +1229,8 @@ a {
   height: 100%;
   object-fit: contain;
   background: var(--surface);
-  opacity: 0;
-}
-
-.snbr-asset-mark img.loaded {
+  /* Visible by default: a server-rendered <img> is already complete when React
+     hydrates, so onLoad never fires and opacity:0 hid the logo forever. */
   opacity: 1;
 }
 
@@ -1785,11 +1909,16 @@ a {
   overflow-x: auto;
   min-width: 0;
   flex: 1 1 auto;
-  scrollbar-width: none;
+  /* Visible scrollbar: tabs overflow past "Ajuda Educacional para o Trader" and the hidden
+     scrollbar gave no hint that more tabs existed. It spans only this element,
+     so it stops before the Modo/locale controls. */
+  scrollbar-width: thin;
+  scrollbar-color: #b6c2d1 transparent;
+  padding-bottom: 6px;
 }
 
 .snbr-tab-list::-webkit-scrollbar {
-  display: none;
+  height: 8px;
 }
 
 .snbr-tab-list::-webkit-scrollbar-track {
@@ -4616,6 +4745,100 @@ a {
   object-position: left center;
   border-radius: 12px;
   border: 1px solid var(--line);
+}
+
+.snbr-image-trigger {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.snbr-image-trigger:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.snbr-image-fallback {
+  display: block;
+  padding: 18px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.snbr-lightbox {
+  width: 100vw;
+  max-width: none;
+  height: 100vh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  color: var(--text);
+  background: rgba(4, 8, 14, 0.94);
+}
+
+.snbr-lightbox::backdrop {
+  background: rgba(4, 8, 14, 0.94);
+}
+
+.snbr-lightbox-toolbar {
+  position: fixed;
+  z-index: 1;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  display: flex;
+  gap: 8px;
+}
+
+.snbr-lightbox-toolbar button {
+  min-width: 42px;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.snbr-lightbox-toolbar button:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.snbr-lightbox-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.snbr-lightbox-stage {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+}
+
+.snbr-lightbox-stage:active {
+  cursor: grabbing;
+}
+
+.snbr-lightbox-image {
+  display: block;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 96px);
+  object-fit: contain;
+  transform-origin: center;
+  user-select: none;
+  will-change: transform;
 }
 
 .snbr-published-media {

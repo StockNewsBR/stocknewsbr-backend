@@ -4,6 +4,7 @@ import tempfile
 import threading
 import time
 
+import pandas as pd
 import pytest
 from fastapi import HTTPException
 from starlette.datastructures import Headers, UploadFile
@@ -84,6 +85,76 @@ def test_warm_pool_refresh_lock_avoids_duplicate_fetch(monkeypatch):
 
     assert calls == [1]
     assert results == [{"PETR4": frame}, {"PETR4": frame}]
+
+
+def _chart_rows(symbol_offset=0.0, last_volume=100_000):
+    timestamps = pd.date_range("2026-07-17 13:00", periods=50, freq="5min", tz="UTC")
+    return [
+        {
+            "time": str(timestamp),
+            "open": 10.0 + symbol_offset,
+            "high": 10.5 + symbol_offset,
+            "low": 9.5 + symbol_offset,
+            "close": 10.2 + symbol_offset,
+            "volume": last_volume if index == 49 else 90_000,
+        }
+        for index, timestamp in enumerate(timestamps)
+    ]
+
+
+def test_warm_pool_uses_fresh_persistent_chart_cache_when_provider_is_unavailable(monkeypatch):
+    monkeypatch.setattr(warm_data_pool, "_pool", {})
+    monkeypatch.setattr(warm_data_pool, "_last_update", 0.0)
+    monkeypatch.setattr(warm_data_pool, "get_all_tickers", lambda: ["PETR4.SA"])
+    monkeypatch.setattr(warm_data_pool, "get_market_data", lambda _tickers: None)
+    monkeypatch.setattr(warm_data_pool, "get_cached_chart_data", lambda symbol, interval: _chart_rows())
+    monkeypatch.setattr(warm_data_pool.market_store, "update", lambda pool: None)
+
+    pool = warm_data_pool.update_pool(force_refresh=True)
+
+    assert list(pool) == ["PETR4.SA"]
+    assert len(pool["PETR4.SA"]) == 50
+    assert pool["PETR4.SA"].attrs["market_data_source"] == "persistent_chart_cache"
+
+
+@pytest.mark.parametrize("cached_rows", [None, []])
+def test_warm_pool_stays_empty_when_provider_and_fresh_cache_are_unavailable(monkeypatch, cached_rows):
+    monkeypatch.setattr(warm_data_pool, "_pool", {})
+    monkeypatch.setattr(warm_data_pool, "_last_update", 0.0)
+    monkeypatch.setattr(warm_data_pool, "get_all_tickers", lambda: ["PETR4.SA"])
+    monkeypatch.setattr(warm_data_pool, "get_market_data", lambda _tickers: None)
+    monkeypatch.setattr(warm_data_pool, "get_cached_chart_data", lambda symbol, interval: cached_rows)
+
+    assert warm_data_pool.update_pool(force_refresh=True) == {}
+
+
+def test_warm_pool_rejects_cached_chart_with_zero_latest_volume(monkeypatch):
+    monkeypatch.setattr(warm_data_pool, "_pool", {})
+    monkeypatch.setattr(warm_data_pool, "_last_update", 0.0)
+    monkeypatch.setattr(warm_data_pool, "get_all_tickers", lambda: ["AAPL"])
+    monkeypatch.setattr(warm_data_pool, "get_market_data", lambda _tickers: None)
+    monkeypatch.setattr(
+        warm_data_pool,
+        "get_cached_chart_data",
+        lambda symbol, interval: _chart_rows(last_volume=0),
+    )
+
+    assert warm_data_pool.update_pool(force_refresh=True) == {}
+
+
+def test_warm_pool_cached_charts_are_isolated_by_provider_symbol(monkeypatch):
+    rows = {"PETR4.SA": _chart_rows(), "VALE3.SA": _chart_rows(symbol_offset=50.0)}
+    monkeypatch.setattr(warm_data_pool, "_pool", {})
+    monkeypatch.setattr(warm_data_pool, "_last_update", 0.0)
+    monkeypatch.setattr(warm_data_pool, "get_all_tickers", lambda: list(rows))
+    monkeypatch.setattr(warm_data_pool, "get_market_data", lambda _tickers: None)
+    monkeypatch.setattr(warm_data_pool, "get_cached_chart_data", lambda symbol, interval: rows[symbol])
+    monkeypatch.setattr(warm_data_pool.market_store, "update", lambda pool: None)
+
+    pool = warm_data_pool.update_pool(force_refresh=True)
+
+    assert pool["PETR4.SA"]["Close"].iloc[-1] == 10.2
+    assert pool["VALE3.SA"]["Close"].iloc[-1] == 60.2
 
 
 def test_warm_pool_store_reader_waits_for_refresh_and_returns_copies(monkeypatch):

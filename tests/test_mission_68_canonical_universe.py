@@ -13,7 +13,7 @@ EXPECTED_CATEGORY_COUNTS = {
     "B3": 66,
     "BDR": 11,
     "Crypto": 7,
-    "USA": 26,
+    "USA": 34,
 }
 
 
@@ -24,7 +24,10 @@ class Mission68CanonicalUniverseTests(unittest.TestCase):
         self.assertEqual(len(assets), sum(EXPECTED_CATEGORY_COUNTS.values()))
         self.assertEqual(len(assets), len(set(assets)))
         self.assertTrue(
-            {"MBRF3", "BRAV3", "EMBJ3", "CPLE3", "JBSS32", "YDUQ3", "AVGO", "DOGEUSD", "AXIA3", "AXIA7"}.issubset(assets)
+            {
+                "MBRF3", "BRAV3", "EMBJ3", "CPLE3", "JBSS32", "YDUQ3", "AVGO", "DOGEUSD", "AXIA3", "AXIA7",
+                "TTWO", "RACE", "LCID", "SAP", "UBER", "BYDDY", "GME", "COIN",
+            }.issubset(assets)
         )
         self.assertTrue(
             {

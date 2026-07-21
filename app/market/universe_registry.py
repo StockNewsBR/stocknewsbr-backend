@@ -22,6 +22,7 @@ CRYPTO_PUBLIC_UNIVERSE = ("BTCUSD", "ETHUSD", "BNBUSD", "SOLUSD", "XRPUSD", "ADA
 USA_PUBLIC_UNIVERSE = (
     "F", "AAL", "BA", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "SPCX", "AMD", "INTC",
     "AVGO", "TSM", "JPM", "BAC", "GS", "XOM", "CVX", "COST", "WMT", "DIS", "CRM", "SNOW", "PLTR",
+    "TTWO", "RACE", "LCID", "SAP", "UBER", "BYDDY", "GME", "COIN",
 )
 
 PUBLIC_UNIVERSES = {
@@ -30,6 +31,20 @@ PUBLIC_UNIVERSES = {
     "Crypto": CRYPTO_PUBLIC_UNIVERSE,
     "USA": USA_PUBLIC_UNIVERSE,
 }
+
+# Market-context indices: display-only, never watchlist/tradable items, so they stay
+# out of PUBLIC_UNIVERSES (get_all_assets feeds the user watchlist universe).
+# (canonical, provider, display_name, currency)
+INDEX_UNIVERSE = (
+    ("IBOV", "^BVSP", "Ibovespa", "BRL"),
+    ("SP500", "^GSPC", "S&P 500", "USD"),
+    ("NASDAQ", "^IXIC", "Nasdaq", "USD"),
+    ("DOW", "^DJI", "Dow 30", "USD"),
+    ("RUSSELL", "^RUT", "Russell 2000", "USD"),
+    ("USDBRL", "BRL=X", "Dólar", "BRL"),
+)
+
+INDEX_PROVIDER_SYMBOLS = tuple(provider for _, provider, _, _ in INDEX_UNIVERSE)
 
 
 class UniverseRegistry:

@@ -63,7 +63,9 @@ CRYPTO_SYMBOLS = [
 
 _SYMBOL_EXCLUSIONS = {
     "ELET3.SA",
-    "CPLE6.SA",
+    # CPLE6.SA removed: CPLE6 is a live canonical B3 line (see symbol_registry.py),
+    # never present in BR_SYMBOLS, so the entry excluded nothing and only implied
+    # the identity was retired.
     "GUAR3.SA",
     "PETZ3.SA",
     "RRRP3.SA",

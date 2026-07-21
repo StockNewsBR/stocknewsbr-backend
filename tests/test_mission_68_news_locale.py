@@ -133,6 +133,159 @@ class Mission68NewsLocaleTests(unittest.TestCase):
         self.assertEqual(item["content_locale"], "pt-BR")
         self.assertEqual(cached_item, original_item)
 
+    def test_partially_translatable_text_stays_in_its_original_language(self):
+        # The replacement table only knows a few finance phrases. Swapping the words it does
+        # know ("market" -> "mercado") inside an otherwise English sentence used to ship
+        # unreadable hybrids like "Why the mercado Dipped But Petrobras Gained Today".
+        headline = "Why the market dipped but Petrobras gained today"
+
+        translated = public_news_service._translate_english_news_text(headline, "PETR4", "summary")
+
+        self.assertEqual(translated, headline)
+        self.assertNotIn("mercado", translated)
+
+    def test_public_payload_never_emits_a_half_translated_title(self):
+        headline = "Why the market dipped but Petrobras gained today"
+        cached_item = {
+            "id": "petr4-hybrid-1",
+            "ticker": "PETR4",
+            "title": headline,
+            # yfinance frequently omits the summary, and the normalizer falls back to the
+            # headline, which is how headline text reached the translator at all.
+            "summary": headline,
+            "card_summary": headline,
+            "source": "Reuters",
+            "url": "https://finance.yahoo.com/news/petr4-market-dip",
+            "published_at_source": "2026-06-20T12:00:00+00:00",
+            "direct_ticker_match": True,
+            "labels": [],
+        }
+
+        with patch.object(public_news_service, "get_cached_symbol_news", return_value=[cached_item]), patch.object(
+            public_news_service, "get_news_cached_report", return_value={"status": "ok"}
+        ), patch.object(
+            public_news_service,
+            "get_news_cache_info",
+            return_value={"status": "warm", "provider_status": "ok", "provider": "yfinance"},
+        ):
+            payload = public_news_service.build_public_news_payload("PETR4", locale="pt-BR")
+
+        item = payload["items"][0]
+        for field in ("title", "original_title", "summary", "card_summary"):
+            with self.subTest(field=field):
+                self.assertEqual(item[field], headline)
+                self.assertNotIn("mercado", item[field])
+        # The UI still learns the text is not in the requested locale.
+        self.assertEqual(item["content_locale"], "pt-BR")
+        self.assertEqual(item["language"], "en-US")
+
+    def test_public_payload_orders_items_by_publication_time_descending(self):
+        def _item(index: str, published_at: str) -> dict:
+            return {
+                "id": index,
+                "ticker": "PETR4",
+                "title": f"Petrobras divulga atualização {index} para PETR4",
+                "source": "Reuters",
+                "url": f"https://finance.yahoo.com/news/petr4-{index}",
+                "published_at_source": published_at,
+                "direct_ticker_match": True,
+                "labels": [],
+            }
+
+        # Provider order is deliberately not chronological.
+        cached_items = [
+            _item("middle", "2026-06-20T12:00:00+00:00"),
+            _item("oldest", "2026-06-18T09:30:00+00:00"),
+            _item("newest", "2026-06-21T18:45:00+00:00"),
+        ]
+
+        with patch.object(public_news_service, "get_cached_symbol_news", return_value=cached_items), patch.object(
+            public_news_service, "get_news_cached_report", return_value={"status": "ok"}
+        ), patch.object(
+            public_news_service,
+            "get_news_cache_info",
+            return_value={"status": "warm", "provider_status": "ok", "provider": "yfinance"},
+        ):
+            payload = public_news_service.build_public_news_payload("PETR4", limit=6)
+
+        published = [item["published_at_source"] for item in payload["items"]]
+        self.assertEqual(len(published), 3)
+        self.assertEqual(published, sorted(published, reverse=True))
+        self.assertEqual([item["id"] for item in payload["items"]], ["newest", "middle", "oldest"])
+
+    def test_public_payload_keeps_source_time_and_exposes_its_local_offset(self):
+        cached_item = {
+            "id": "petr4-time-1",
+            "ticker": "PETR4",
+            "title": "Petrobras divulga atualização para PETR4",
+            "source": "Reuters",
+            "url": "https://finance.yahoo.com/news/petr4-time",
+            "published_at_source": "2026-06-20T12:00:00+00:00",
+            "fetched_at": "2026-07-19T23:59:00+00:00",
+            # Frozen at ingestion; must not survive into the response.
+            "age_minutes": 3,
+            "is_today": True,
+            "direct_ticker_match": True,
+            "labels": [],
+        }
+
+        with patch.object(public_news_service, "get_cached_symbol_news", return_value=[cached_item]), patch.object(
+            public_news_service, "get_news_cached_report", return_value={"status": "ok"}
+        ), patch.object(
+            public_news_service,
+            "get_news_cache_info",
+            return_value={"status": "warm", "provider_status": "ok", "provider": "yfinance"},
+        ):
+            payload = public_news_service.build_public_news_payload("PETR4")
+
+        item = payload["items"][0]
+        self.assertEqual(item["published_at"], "2026-06-20T12:00:00+00:00")
+        self.assertEqual(item["published_at_source"], "2026-06-20T12:00:00+00:00")
+        # Ingestion time never leaks into the published fields.
+        self.assertNotEqual(item["published_at"], item["fetched_at"])
+        self.assertEqual(item["published_at_local"], "2026-06-20T09:00:00-03:00")
+        self.assertEqual(item["published_at_tz"], "America/Sao_Paulo")
+        # Recomputed from the article's own time, not read back from the cache.
+        self.assertFalse(item["is_today"])
+        self.assertTrue(item["is_stale"])
+        self.assertGreater(item["age_minutes"], 3)
+
+    def test_stale_cache_is_refreshed_even_when_it_is_full(self):
+        cached_items = [
+            {
+                "id": f"petr4-{index}",
+                "ticker": "PETR4",
+                "title": f"Petrobras divulga atualização {index} para PETR4",
+                "source": "Reuters",
+                "url": f"https://finance.yahoo.com/news/petr4-{index}",
+                "published_at_source": "2026-06-20T12:00:00+00:00",
+                "direct_ticker_match": True,
+                "labels": [],
+            }
+            for index in range(6)
+        ]
+
+        for age_seconds, should_refresh in ((10, False), (news_service.NEWS_CACHE_TTL_SECONDS + 1, True)):
+            with self.subTest(age_seconds=age_seconds):
+                with patch.object(
+                    public_news_service, "get_cached_symbol_news", return_value=cached_items
+                ), patch.object(
+                    public_news_service, "get_symbol_news", return_value=cached_items
+                ) as fetch, patch.object(
+                    public_news_service, "get_news_cached_report", return_value={"status": "ok"}
+                ), patch.object(
+                    public_news_service,
+                    "get_news_cache_info",
+                    return_value={"status": "warm", "provider_status": "ok", "provider": "yfinance", "age_seconds": age_seconds},
+                ), patch.object(
+                    public_news_service, "_request_news_warmup_safe", return_value=True
+                ) as warmup:
+                    public_news_service.build_public_news_payload("PETR4", limit=6, allow_fetch=True)
+                    public_news_service.build_public_news_payload("PETR4", limit=6, schedule_warmup=True)
+
+                self.assertEqual(fetch.called, should_refresh)
+                self.assertEqual(warmup.called, should_refresh)
+
     def test_news_routes_forward_locale_to_the_shared_contract(self):
         with patch.object(routes_news, "build_public_news_payload", return_value={"locale": "en-US"}) as private_builder:
             routes_news.symbol_news("AAPL", locale="en-US", current_user=object())

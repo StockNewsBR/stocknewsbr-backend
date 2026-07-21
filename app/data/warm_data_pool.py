@@ -4,7 +4,10 @@ import threading
 import time
 from typing import Dict
 
+import pandas as pd
+
 from app.cache.market_data_cache import get_market_data
+from app.market.market_data_loader import get_cached_chart_data
 from app.market.market_store import market_store
 from app.market.market_universe import get_all_tickers
 
@@ -53,6 +56,42 @@ def _build_pool(data, tickers):
     return pool
 
 
+def _build_persistent_chart_pool(tickers, existing_pool=None):
+    pool = {}
+    existing = set(existing_pool or {})
+
+    for ticker in tickers:
+        if ticker in existing:
+            continue
+
+        rows = get_cached_chart_data(ticker, "1D")
+        if not rows:
+            continue
+
+        try:
+            frame = pd.DataFrame(rows).rename(
+                columns={
+                    "open": "Open",
+                    "high": "High",
+                    "low": "Low",
+                    "close": "Close",
+                    "volume": "Volume",
+                }
+            )
+            frame.index = pd.to_datetime(frame.pop("time"), utc=True, errors="coerce")
+            frame = frame.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+            latest = frame.iloc[-1]
+            if len(frame) < 50 or float(latest["Close"]) <= 0 or float(latest["Volume"]) <= 0:
+                continue
+        except (KeyError, TypeError, ValueError, IndexError):
+            continue
+
+        frame.attrs["market_data_source"] = "persistent_chart_cache"
+        pool[ticker] = frame
+
+    return pool
+
+
 def update_pool(force_refresh: bool = False):
     global _pool
     global _last_update
@@ -81,10 +120,14 @@ def _update_pool_locked(force_refresh: bool = False):
     data = get_market_data(tickers)
     now = time.time()
     new_pool = _build_pool(data, tickers)
+    cached_pool = _build_persistent_chart_pool(tickers, new_pool)
+    if cached_pool:
+        logger.info("Warm data pool using fresh persistent chart cache for %d symbols", len(cached_pool))
+        new_pool.update(cached_pool)
 
     if not new_pool:
         if now - _last_empty_log >= WARM_POOL_TTL:
-            logger.warning("Warm data pool refresh returned empty dataset")
+            logger.warning("Warm data pool refresh returned empty dataset | reason=provider_and_fresh_cache_unavailable")
             _last_empty_log = now
 
         with _lock:

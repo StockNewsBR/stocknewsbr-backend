@@ -5,19 +5,23 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query
 
-from app.cache.snapshot_cache import get_snapshot_ticker
+from app.cache.snapshot_cache import get_snapshot, get_snapshot_ticker
 from app.engine.signal_engine import build_chart_signal_payload
 from app.market.market_data_loader import (
     get_display_symbol,
+    previous_session_close,
+    session_change,
 )
 from app.services.chart_overlay_service import build_chart_overlays
 from app.services.public_ai_tools_service import build_public_ai_tools_payload
 from app.services.public_market_data_service import (
+    build_public_indices_payload,
     build_public_rsi_contract,
     cached_price_payloads,
     load_public_chart_rows,
     normalize_public_chart_zones,
     public_chart_as_of,
+    schedule_quote_warmup,
 )
 from app.services.public_news_service import build_public_news_payload
 from app.services.news_service import normalize_news_locale
@@ -333,6 +337,20 @@ def _matching_quote_candidates(cached_payloads, symbol: str) -> list[dict]:
 
 def _snapshot_master_context(symbol: str) -> dict:
     row = get_snapshot_ticker(_symbol_aliases(symbol))
+    if not isinstance(row, dict) or not isinstance(row.get("strategic_panel"), dict) or not row.get("strategic_panel"):
+        canonical = canonical_symbol(symbol)
+        panels = get_snapshot().get("strategic_panels", [])
+        panel = next(
+            (
+                item
+                for item in panels
+                if isinstance(item, dict)
+                and canonical_symbol(item.get("ticker") or item.get("symbol")) == canonical
+            ),
+            None,
+        )
+        if isinstance(panel, dict):
+            row = {**(row or {}), **panel, "strategic_panel": panel}
     if not isinstance(row, dict):
         return {}
     row = attach_master_score_display_contract(dict(row))
@@ -579,6 +597,10 @@ def _resolve_cached_quote(cached_payloads, symbol: str, chart_quote_cache: dict 
         payload["quote_status"] = classify_quote_payload(payload)
         return with_quote_diagnostics(payload) or payload
 
+    # Valid, unblocked, and nothing cached: the symbol is outside the warmup universe.
+    # Enqueue it in the background so the next poll serves real data instead of
+    # reporting "sem cotação" forever. Never a provider call on the request thread.
+    schedule_quote_warmup(symbol)
     return empty_quote_payload(_response_symbol(symbol))
 
 
@@ -606,9 +628,16 @@ def _quote_from_chart_cache(symbol: str, chart_quote_cache: dict | None = None):
     latest = valid_rows[-1]
     previous = valid_rows[-2] if len(valid_rows) > 1 else valid_rows[0]
     price = _safe_float(latest.get("close"))
-    previous_close = _safe_float(previous.get("close"))
-    change = price - previous_close if previous_close > 0 else 0.0
-    change_pct = (change / previous_close * 100.0) if previous_close > 0 else 0.0
+    # Same baseline contract as the loader: previous SESSION close, not the
+    # previous 5-minute candle. Falls back to the previous row only when the
+    # cached chart holds a single session.
+    previous_close = previous_session_close(
+        [row.get("time") for row in valid_rows],
+        [_safe_float(row.get("close")) for row in valid_rows],
+    )
+    if previous_close is None:
+        previous_close = _safe_float(previous.get("close"))
+    change_contract = session_change(price, previous_close)
     volumes = [_safe_float(row.get("volume")) for row in valid_rows]
     volume = sum(value for value in volumes if value > 0)
     highs = [_safe_float(row.get("high")) for row in valid_rows]
@@ -618,8 +647,7 @@ def _quote_from_chart_cache(symbol: str, chart_quote_cache: dict | None = None):
     payload = {
         "symbol": _response_symbol(symbol),
         "price": round(price, 4),
-        "change": round(change, 4),
-        "change_pct": round(change_pct, 4),
+        **change_contract,
         "volume": round(volume, 2) if volume > 0 else None,
         "high": round(max(positive_highs), 4) if positive_highs else round(price, 4),
         "low": round(min(positive_lows), 4) if positive_lows else round(price, 4),
@@ -702,6 +730,22 @@ def _fallback_chart_end(interval: str) -> datetime:
     while session_close.weekday() >= 5:
         session_close = session_close - timedelta(days=1)
     return session_close.astimezone(timezone.utc)
+
+
+_SUPPORTED_CANDLE_INTERVALS = {"1M", "5M", "15M", "30M", "1H", "1D", "1WK"}
+# The daily card must be daily: range "1D" means one day OF 5m candles, so the only
+# honest source for a D1 read is an explicit daily-candle series.
+_DAILY_CANDLE_INTERVAL = "@1D"
+
+
+def _normalize_candle_interval(candles: str | None) -> str | None:
+    """User-selected candle size ("1m"/"30m"/"1h"/"1d") -> loader token ("@1M").
+
+    Namespaced with "@" because the range labels share spellings with candle sizes:
+    bare "1M" is one month of daily candles, "@1M" is one minute.
+    """
+    token = str(candles or "").upper().strip().lstrip("@")
+    return f"@{token}" if token in _SUPPORTED_CANDLE_INTERVALS else None
 
 
 def _normalize_chart_interval(interval: str | None = "1D", range_value: str | None = None) -> str:
@@ -813,8 +857,14 @@ def public_quotes(symbols: str = Query(default="")):
     return _json_safe_payload({"items": items, "count": len(items)})
 
 
+@router.get("/market/indices")
+def public_market_indices():
+    return _json_safe_payload(build_public_indices_payload())
+
+
 @router.get("/market/insight/{symbol}")
-def public_market_insight(symbol: str, interval: str = "1D"):
+def public_market_insight(symbol: str, interval: str = "1D", candles: str | None = None):
+    interval = _normalize_candle_interval(candles) or interval
     if is_ambiguous_crypto_symbol(symbol):
         return _invalid_insight_payload(symbol, "ambiguous_symbol", "missing_quote_asset", interval=interval)
     ticker = _normalize_public_symbol(symbol)
@@ -897,7 +947,9 @@ def public_market_chart(
     symbol: str,
     interval: str = "1D",
     range_value: str | None = Query(default=None, alias="range"),
+    candles: str | None = None,
 ):
+    candle_interval = _normalize_candle_interval(candles)
     ticker = _normalize_public_symbol(symbol)
     if is_ambiguous_crypto_symbol(symbol):
         return _empty_chart_payload(
@@ -914,7 +966,7 @@ def public_market_chart(
             status="invalid_symbol",
         )
     response_symbol = _response_symbol(ticker)
-    chart_interval = _normalize_chart_interval(interval, range_value)
+    chart_interval = candle_interval or _normalize_chart_interval(interval, range_value)
     if _is_blocked_public_symbol(ticker):
         return _empty_chart_payload(response_symbol, chart_interval, "blocked_symbol")
     ohlc = _load_chart_data_fast(ticker, chart_interval)
@@ -964,8 +1016,9 @@ def public_market_bundle(
     limit: int = 6,
     range_value: str | None = Query(default=None, alias="range"),
     locale: str = "pt-BR",
+    candles: str | None = None,
 ):
-    chart_interval = _normalize_chart_interval(interval, range_value)
+    chart_interval = _normalize_candle_interval(candles) or _normalize_chart_interval(interval, range_value)
     safe_limit = max(1, min(int(limit or 6), 20))
     if is_ambiguous_crypto_symbol(symbol):
         return _invalid_bundle_payload(symbol, chart_interval, safe_limit, "ambiguous_symbol", "missing_quote_asset", locale)
@@ -978,12 +1031,17 @@ def public_market_bundle(
     record_cache_access("quote", _has_usable_quote_payload(quote), "public_bundle")
 
     insight = public_market_insight(ticker, interval=chart_interval)
-    # Mission 68: the top-card RSI is always the daily (D1) read; only the chart's
-    # own rsi follows the selected timeframe. Score/trend stay per-timeframe.
-    if isinstance(insight, dict) and str(chart_interval).upper().strip() != "1D":
+    # The top card is labelled "RSI diário (D1)", so it must be computed on DAILY
+    # candles. Range "1D" is one day of 5m candles -- using it here is what made the
+    # card publish an intraday RSI under a daily label. Score/trend stay per-timeframe.
+    if isinstance(insight, dict) and str(chart_interval).upper().strip() != _DAILY_CANDLE_INTERVAL:
         insight = {
             **insight,
-            **build_public_rsi_contract(response_symbol, "1D", _load_chart_data_fast(ticker, "1D")),
+            **build_public_rsi_contract(
+                response_symbol,
+                _DAILY_CANDLE_INTERVAL,
+                _load_chart_data_fast(ticker, _DAILY_CANDLE_INTERVAL),
+            ),
         }
     return _json_safe_payload({
         "symbol": response_symbol,
@@ -1030,8 +1088,25 @@ def _empty_chart_payload(symbol: str, interval: str, reason: str, *, status: str
     }
 
 
+# Candle sizes an already-warmed range label serves, so asking for a candle interval
+# never turns the request path into a provider call (routes are cache-only by
+# contract -- see tests/test_http_provider_guard.py; the warmup worker fills the
+# cache). "@1M" (one minute) has no warmed range and stays null until pre-warmed.
+_CANDLE_INTERVAL_WARM_RANGE = {
+    "@5M": "1D",
+    "@30M": "1W",
+    "@1H": "1M",
+    "@1D": "3M",
+    "@1WK": "ALL",
+}
+
+
 def _load_chart_data_fast(ticker: str, interval: str):
     rows = load_public_chart_rows(_symbol_aliases(ticker), interval)
+    if not rows:
+        warm_range = _CANDLE_INTERVAL_WARM_RANGE.get(str(interval or "").upper().strip())
+        if warm_range:
+            rows = load_public_chart_rows(_symbol_aliases(ticker), warm_range)
     if rows:
         return rows
     cache_key = "chart_exact_miss_b3_future" if _is_b3_mini_future_symbol(ticker) else "chart_exact_miss"

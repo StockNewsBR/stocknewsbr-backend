@@ -27,5 +27,8 @@ def ticker(symbol: str):
         "pre_market": data.get("pre_market"),
         "volume": data.get("volume"),
         "high": data.get("high"),
-        "low": data.get("low")
+        "low": data.get("low"),
+        "previous_close": data.get("previous_close"),
+        "quote_time": data.get("quote_time"),
+        "market_state": data.get("market_state"),
     }

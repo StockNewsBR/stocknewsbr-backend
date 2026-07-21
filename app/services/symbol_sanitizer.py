@@ -25,7 +25,10 @@ _CRYPTO_PROVIDER_RE = re.compile(r"^[A-Z0-9]{2,8}-USD$")
 _US_RE = re.compile(r"^[A-Z][A-Z0-9.]{0,9}$")
 _CME_PROVIDER_RE = re.compile(r"^[A-Z]{1,4}=F$")
 
-_PROVIDER_SYMBOLS = {"^BVSP", "BRL=X"}
+# Index/FX provider symbols served on the top strip. Anything not listed here is
+# rejected before reaching the provider, which is why the US indices came back
+# empty while ^BVSP worked.
+_PROVIDER_SYMBOLS = {"^BVSP", "BRL=X", "^GSPC", "^IXIC", "^DJI", "^RUT"}
 _PERMANENT_BLOCKLIST = {
     "GOLL4",
     "GOLL4.SA",

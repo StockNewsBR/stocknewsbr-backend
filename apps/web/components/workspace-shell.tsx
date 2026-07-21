@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { TickerChart } from "@/components/ticker-chart";
+import { ImageLightbox } from "@/components/image-lightbox";
 import {
   WorkspaceEducationPanel,
   WorkspaceNewsPanel,
@@ -57,6 +58,7 @@ import {
   votePoll,
 } from "@/lib/api";
 import { formatSocialTimestamp } from "@/lib/social-time";
+import { TICKER_LOGOS } from "@/lib/ticker-logos";
 import {
   canonicalSymbol as resolveCanonicalSymbol,
   canonicalSymbolAliases as resolveCanonicalSymbolAliases,
@@ -235,13 +237,13 @@ const TAB_META: Record<string, { label: string; short: string }> = {
   liquidity: { label: "🧲 Liquidez IA", short: "Liquidez" },
   trend: { label: "📈 Tendência IA", short: "Tendência" },
   momentum: { label: "⚡ Momento IA", short: "Momento" },
-  "smart-money": { label: "💼 Dinheiro Inteligente", short: "Smart" },
+  "smart-money": { label: "💼 Dinheiro Inteligente IA", short: "Dinheiro Inteligente IA" },
   risk: { label: "⚠️ Risco IA", short: "Risco" },
   "news-ia": { label: "📰 Notícias IA", short: "Notícias IA" },
   macro: { label: "🌎 Macro IA", short: "Macro" },
   regime: { label: "📊 Regime IA", short: "Regime" },
-  referrals: { label: "🤝 Indicações", short: "Indicações" },
-  education: { label: "🎓 Ajuda ao Trader", short: "Ajuda ao Trader" },
+  referrals: { label: "🤝 Afiliate/Indicações", short: "Afiliate/Indicações" },
+  education: { label: "🎓 Ajuda Educacional para o Trader", short: "Ajuda Educacional para o Trader" },
 };
 
 const TAB_META_EN: Record<string, { label: string; short: string }> = {
@@ -258,7 +260,7 @@ const TAB_META_EN: Record<string, { label: string; short: string }> = {
   macro: { label: "🌎 Macro AI", short: "Macro" },
   regime: { label: "📊 Regime AI", short: "Regime" },
   referrals: { label: "🤝 Referrals", short: "Referrals" },
-  education: { label: "🎓 Trader Help", short: "Help" },
+  education: { label: "🎓 Trader Educational Help", short: "Educational Help" },
 };
 
 const WORKSPACE_PERSONAS: Record<
@@ -320,13 +322,13 @@ const TOP_TAB_TEXT: Record<string, string> = {
   liquidity: "Liquidez IA",
   trend: "Tendência IA",
   momentum: "Momento IA",
-  "smart-money": "Smart Money",
+  "smart-money": "Dinheiro Inteligente IA",
   risk: "Risco IA",
   "news-ia": "Notícias IA",
   macro: "Macro IA",
   regime: "Regime IA",
-  referrals: "Indicações",
-  education: "Ajuda ao Trader",
+  referrals: "Afiliate/Indicações",
+  education: "Ajuda Educacional para o Trader",
 };
 
 const TOP_TAB_TEXT_EN: Record<string, string> = {
@@ -342,7 +344,7 @@ const TOP_TAB_TEXT_EN: Record<string, string> = {
   macro: "Macro AI",
   regime: "Regime AI",
   referrals: "Referrals",
-  education: "Help",
+  education: "Educational Help",
 };
 
 const TAB_ORDER = [
@@ -395,13 +397,13 @@ const FALLBACK_TABS: WorkspaceTab[] = [
   { id: "liquidity", title: "Liquidez IA" },
   { id: "trend", title: "Tendência IA" },
   { id: "momentum", title: "Momento IA" },
-  { id: "smart-money", title: "Dinheiro Inteligente" },
+  { id: "smart-money", title: "Dinheiro Inteligente IA" },
   { id: "risk", title: "Risco IA" },
   { id: "news-ia", title: "Notícias IA" },
   { id: "macro", title: "Macro IA" },
   { id: "regime", title: "Regime IA" },
-  { id: "referrals", title: "Indicações" },
-  { id: "education", title: "Ajuda ao Trader" },
+  { id: "referrals", title: "Afiliate/Indicações" },
+  { id: "education", title: "Ajuda Educacional para o Trader" },
 ];
 
 const CATEGORY_ORDER = ["B3", "BDR", "Crypto", "USA"] as const;
@@ -539,6 +541,7 @@ const WATCHLIST_US = [
   "XOM", "CVX",
   "COST", "WMT", "DIS",
   "CRM", "SNOW", "PLTR",
+  "TTWO", "RACE", "LCID", "SAP", "UBER", "BYDDY", "GME", "COIN",
 ];
 
 const WATCHLIST_CRYPTO = [
@@ -564,442 +567,263 @@ const FIXED_TAPE_SYMBOLS = [
   "ETHUSD",
   "MSFT",
   "IVVB11",
-];
-
-const HELP_MANUAL_ITEMS = [
-  "📈 Gráfico IA → exibe sinais no gráfico: COMPRA, VENDA A DESCOBERTO ou ⚠ encerrar posição.",
-  "⭐ Score Mestre → sistema operacional da decisão: consolida as 9 IAs, auditoria, dados e risco.",
-  "🏦 Fluxo IA → lê fluxo institucional, agressão e pressão compradora ou vendedora.",
-  "🧲 Liquidez IA → consolida zonas de liquidez, varreduras, armadilhas e invalidação.",
-  "📈 Tendência IA → avalia direção predominante e estrutura de mercado.",
-  "⚡ Momento IA → consolida aceleração, rompimento e força relativa em uma leitura só.",
-  "💰 Smart Money IA → combina flow, acumulação e absorção sem duplicar confirmação.",
-  "⚠ Risco IA → responde se vale operar, por que não operar e quais bloqueios existem.",
-  "📰 Notícias IA → trata notícia como contexto, com relevância, confiança e status do provedor.",
-  "🌎 Macro IA → separa macro real de macro derivado apenas de notícia.",
-  "📊 Regime IA → classifica lateralidade, tendência e volatilidade do ambiente.",
-];
-
-const HELP_MANUAL_ITEMS_EN = [
-  "📈 AI Chart / Social Network → displays BUY LONG, CLOSE LONG, SELL SHORT or CLOSE SHORT markers.",
-  "⭐ Master Score → operating system for the decision: consolidates 9 AIs, audit, data and risk.",
-  "🏦 Flow AI → reads institutional flow, aggression and buy/sell pressure.",
-  "🧲 Liquidity AI → consolidates liquidity zones, sweeps, traps and invalidation.",
-  "📈 Trend AI → reads dominant direction and market structure.",
-  "⚡ Momentum AI → consolidates acceleration, breakout and relative strength into one read.",
-  "💰 Smart Money AI → combines flow, accumulation and absorption without duplicate confirmation.",
-  "⚠ Risk AI → answers whether to trade, why not to trade and which blocks exist.",
-  "📰 News AI → treats news as context, with relevance, confidence and provider status.",
-  "🌎 Macro AI → separates real macro from macro inferred only from news.",
-  "📊 Regime AI → classifies range, trend and volatility.",
-];
-
-const EDUCATIONAL_HELP_SECTIONS = [
-  {
-    title: "📚 Guia Rápido StockNewsBR",
-    body: [
-      "Inteligência de Mercado com IA para Traders da B3, BDRs, Ações dos EUA e Cripto.",
-      "Nosso objetivo é simples: transformar dados complexos em oportunidades claras e práticas para o day trader.",
-    ],
-  },
-  {
-    title: "🏛 Sobre a Empresa",
-    body: [
-      "StockNewsBR é a plataforma inteligente que transforma dados em oportunidades de investimento.",
-      "Com tecnologia de Inteligência Artificial, métodos de finanças quânticas e estratégias institucionais inspiradas nos terminais de Hedge Funds norte-americanos, oferecemos análises exclusivas para traders da B3, BDRs, ações dos Estados Unidos e criptoativos.",
-      "Nosso compromisso é fornecer insights rápidos, precisos e sofisticados, apoiando decisões estratégicas e fortalecendo sua atuação no mercado financeiro.",
-    ],
-  },
-  {
-    title: "🖥️ Plataforma Web Trader Desk",
-    body: [
-      "Inspirada nos terminais de Hedge Funds dos EUA.",
-      "• Suporte a múltiplos monitores. Basta clicar em \"Liberar Tela\" em cada aba.",
-      "• Velocidade e análise avançada.",
-      "• Interface simples e prática para operação diária.",
-      "Exemplo de uso: Monitor 1 → Heat Map; Monitor 2 → Radar; Monitor 3 → Breakout.",
-      "Com apenas um monitor, basta alternar entre as abas da plataforma.",
-    ],
-  },
-  {
-    title: "⚠ Importante",
-    body: [
-      "As análises são apoio inteligente, não garantias.",
-      "Gestão de risco e disciplina são essenciais.",
-      "O mercado é dinâmico: esteja preparado para agir rápido.",
-    ],
-  },
-  {
-    title: "🎯 Por que escolher StockNewsBR?",
-    body: [
-      "Clareza: transformamos informações complexas em sinais simples e objetivos.",
-      "Velocidade: análises em tempo real para aproveitar cada oportunidade.",
-      "Confiança: tecnologia de IA, cálculos de finanças quânticas e estratégias institucionais inspiradas nos Hedge Funds dos EUA.",
-      "Educação: explicações e glossários práticos que você aplica diretamente nas suas operações.",
-      "Inteligência: suporte estratégico para decisões mais seguras e rentáveis.",
-      "StockNewsBR: Inteligência de Mercado com estrutura institucional e IA's, gerando ao trader uma tomada de decisão superior. Boas Trades !!! $$$$$",
-    ],
-  },
-];
-
-const EDUCATIONAL_HELP_SECTIONS_EN = [
-  {
-    title: "📚 Quick StockNewsBR Guide",
-    body: [
-      "Market Intelligence with AI for B3, BDRs, US Stocks and Crypto traders.",
-      "The goal is simple: turn complex data into clear, practical opportunities for day traders.",
-    ],
-  },
-  {
-    title: "🏛 About the Company",
-    body: [
-      "StockNewsBR is an intelligent platform that turns data into investment opportunities.",
-      "With Artificial Intelligence, quantum finance methods and institutional strategies inspired by North American hedge fund terminals, we provide exclusive analysis for B3, BDR, United States stocks and crypto traders.",
-      "Our commitment is to deliver fast, precise and sophisticated insights, supporting strategic decisions and strengthening your performance in the financial market.",
-    ],
-  },
-  {
-    title: "🖥️ Web Trader Desk",
-    body: [
-      "Inspired by US hedge fund terminals.",
-      "• Multi-monitor support. Just click \"Detach\" in each tab.",
-      "• Speed and advanced analysis.",
-      "• Simple, practical interface for daily trading.",
-      "Example: Monitor 1 → Heat Map; Monitor 2 → Radar; Monitor 3 → Breakout.",
-      "With one monitor, just switch between the platform tabs.",
-    ],
-  },
-  {
-    title: "⚠ Important",
-    body: [
-      "The analyses are intelligent support, not guarantees.",
-      "Risk management and discipline are essential.",
-      "The market is dynamic: be ready to act quickly.",
-    ],
-  },
-  {
-    title: "🎯 Why choose StockNewsBR?",
-    body: [
-      "Clarity: we turn complex information into simple, objective signals.",
-      "Speed: real-time analysis to capture every opportunity.",
-      "Confidence: AI, quantum finance methods and institutional strategies inspired by US hedge funds.",
-      "Education: practical explanations and glossaries you can apply directly in your operations.",
-      "Intelligence: strategic support for safer and more profitable decisions.",
-      "StockNewsBR: market intelligence with institutional structure and AI, giving traders superior decision-making.",
-    ],
-  },
+  "GOOGL",
+  "AMZN",
+  "META",
+  "COIN",
+  "UBER",
+  "GME",
+  "PLTR",
+  "DIS",
+  "DOGEUSD",
+  "XRPUSD",
 ];
 
 const INSTITUTIONAL_SECTIONS = [
   {
-    id: "institucional-sobre",
+    id: "sobre-a-empresa",
     label: "1️⃣ Sobre a Empresa",
     title: "🏛 Sobre a Empresa",
     body: [
-      "StockNewsBR é a plataforma inteligente que transforma dados em oportunidades. Com tecnologia de IA e cálculos financeiros quânticos, oferece análises exclusivas para traders da B3, BDRs, ações dos EUA e criptoativos.",
-      "Nosso objetivo é entregar insights rápidos, decisões mais seguras e aumentar seu potencial de lucro com melhor tomada de decisão.",
-      "A proposta do produto é transformar leitura institucional, fluxo, estrutura e contexto do mercado em uma tela simples, rápida e prática para operação diária.",
+      "A StockNewsBR é uma plataforma inteligente que transforma dados em oportunidades de investimento.",
+      "A plataforma utiliza Inteligência Artificial, cálculos avançados aplicados às finanças e estratégias institucionais inspiradas nos terminais utilizados por hedge funds norte-americanos.",
+      "Oferece análises para traders dos mercados brasileiro e americano, com disponibilidade de ativos da B3, BDRs, ações dos Estados Unidos e criptoativos.",
+      "A StockNewsBR transforma a leitura institucional, o fluxo e o contexto do mercado em uma tela simples e prática, ajudando o trader a obter insights rápidos, tomar decisões mais seguras e identificar oportunidades em sua operação diária.",
     ],
   },
   {
-    id: "filosofia-oficial",
-    label: "FILOSOFIA OFICIAL",
-    title: "📜 FILOSOFIA OFICIAL",
+    id: "principais-modulos",
+    label: "2️⃣ Principais Módulos da Plataforma",
+    title: "🚀 Principais Módulos da Plataforma",
     body: [
-      "StockNewsBR é a plataforma inteligente que transforma dados em oportunidades. Com tecnologia de IA e cálculos financeiros quânticos, oferece análises exclusivas para traders da B3, BDRs, ações dos EUA e criptoativos.",
-      "Nosso objetivo é entregar insights rápidos, decisões mais seguras e aumentar seu potencial de lucro com melhor tomada de decisão.",
-      "A proposta do produto é transformar leitura institucional, fluxo, estrutura e contexto do mercado em uma tela simples, rápida e prática para operação diária.",
-      "As análises são apoio inteligente, não garantias.",
-      "Gestão de risco e disciplina são essenciais.",
-      "O mercado é dinâmico: esteja preparado para agir rápido.",
-      "StockNewsBR: Inteligência de Mercado com estrutura institucional e IA's, gerando ao trader uma tomada de decisão superior. Boas Trades !!! $$$$$",
+      "Gráfico IA",
+      "O Gráfico IA trabalha junto com o Painel de Análise Estratégica e pode apresentar orientações como compra, venda a descoberto, encerrar posição e aguardar confirmação.",
+      "Informações apresentadas: direção provável, trade sugerido, regime, fluxo institucional, liquidez-alvo, risco, cenário atual, direção da estratégia, confirmação, interpretação, foco agora e base da análise.",
+      "Indicadores disponíveis no gráfico: VWAP, MACD, RSI e volume.",
+      "Rede Social de Traders",
+      "A Rede Social de Traders é gratuita e aberta a traders de qualquer corretora. Ela permite trocar ideias, estratégias e análises com outros investidores.",
+      "Ao abrir uma ação ou criptoativo, o usuário pode votar na estratégia do ativo e compartilhar sua ideia.",
+      "Temas de discussão: condição geral do mercado, rumores e notícias relevantes, análise fundamentalista, possíveis catalisadores, posicionamento dos traders, preços de entrada e saída, indicadores técnicos, análise gráfica, rompimentos, suportes e resistências, alvos de preço, sinais de compra e venda e sentimento coletivo sobre o ativo.",
+      "A discussão permanece vinculada ao ativo correspondente, criando um espaço focado e colaborativo para cada ação ou criptoativo.",
+      "Inteligências Artificiais",
+      "Notícias IA — analisa a notícia como contexto de mercado, apresentando relevância, confiança e situação do provedor.",
+      "Fluxo IA — analisa fluxo institucional, agressão e pressão compradora ou vendedora.",
+      "Liquidez IA — consolida zonas de liquidez, varreduras, armadilhas e níveis de invalidação.",
+      "Tendência IA — avalia a direção predominante e a estrutura atual do mercado.",
+      "Momento IA — consolida aceleração, rompimentos e força relativa em uma única leitura.",
+      "Dinheiro Inteligente IA — combina fluxo, acumulação e absorção, evitando duplicidade de confirmações.",
+      "Programa de Afiliados",
+      "Uma indicação é validada no oitavo dia após o pagamento do usuário indicado. A cada três indicações pagas e válidas, o assinante recebe um mês grátis, sem cashback. Dez indicações pagas e válidas concedem o badge VIP; cem ou mais concedem a classificação Leaderboard King.",
     ],
   },
   {
-    id: "institucional-produto",
-    label: "2️⃣ Descrição do produto",
-    title: "📦 Descrição do produto",
-    body: [
-      "O produto principal nasce no app Google Play e libera experiência integrada entre app, website e Telegram conforme o plano do usuário.",
-      "As superfícies atuais incluem Score Mestre, Ranking de Oportunidades, Radar Institucional, Risco IA, 9 IAs especialistas oficiais, gráfico, comunidade e ajuda educacional.",
-    ],
-  },
-  {
-    id: "institucional-educacao",
-    label: "3️⃣ Educação financeira",
-    title: "🎓 Educação financeira",
-    body: [
-      "A aba Ajuda foi criada para explicar cada IA em português claro, com exemplos simples para qualquer trader entender como usar a leitura no dia a dia.",
-      "O objetivo educacional é orientar, não prometer resultado. Toda decisão continua exigindo disciplina e gestão de risco.",
-    ],
-  },
-  {
-    id: "institucional-glossario-painel",
-    label: "4️⃣ Glosário: Painel de Análise Estratégica",
-    title: "📘 Glosário: Painel de Análise Estratégica",
+    id: "glossario-painel-estrategico",
+    label: "3️⃣ Glossário: Painel de Análise Estratégica",
+    title: "📘 Glossário: Painel de Análise Estratégica",
     body: ["Resumo rápido dos blocos que formam a leitura estratégica do ativo."],
     rows: [
-      { item: "Score Mestre", explanation: "Pontuação geral do ativo; resume a força da oportunidade." },
-      { item: "Direção Provável", explanation: "Caminho mais provável do preço no curto prazo." },
-      { item: "Trade Sugerido", explanation: "Ação operacional indicada pela leitura: compra, short ou aguardar." },
-      { item: "Regime", explanation: "Contexto do mercado: alta, baixa ou lateral." },
-      { item: "Fluxo Institucional", explanation: "Leitura de entrada ou saída dos grandes players." },
-      { item: "Liquidez Alvo", explanation: "Zona de suporte ou resistência mais relevante." },
-      { item: "Risco", explanation: "Nível de perigo da operação: baixo, médio ou alto." },
-      { item: "Conclusão", explanation: "Resumo final da IA para apoiar a tomada de decisão." },
-      { item: "Base da Análise", explanation: "Números e fatores usados para sustentar a leitura." },
-      { item: "Foco Agora", explanation: "Ação prática imediata recomendada ao trader." },
+      { item: "Score Mestre", explanation: "Pontuação geral do ativo. Consolida as leituras das IAs, os dados, a auditoria e o risco para resumir a força da oportunidade." },
+      { item: "Direção provável", explanation: "Caminho mais provável do preço no curto prazo." },
+      { item: "Trade sugerido", explanation: "Ação operacional indicada pela leitura: comprar, vender a descoberto, encerrar ou aguardar." },
+      { item: "Regime", explanation: "Contexto predominante do mercado: alta, baixa ou lateralização." },
+      { item: "Fluxo institucional", explanation: "Leitura da entrada ou saída dos grandes participantes do mercado." },
+      { item: "Liquidez-alvo", explanation: "Zona de suporte ou resistência considerada mais relevante." },
+      { item: "Risco", explanation: "Nível de risco da operação: baixo, médio ou alto." },
+      { item: "Conclusão", explanation: "Resumo final da IA, incluindo cenário atual, direção da estratégia, confirmação, interpretação e foco atual." },
+      { item: "Base da análise", explanation: "Números, indicadores e fatores utilizados para sustentar a leitura." },
     ],
   },
   {
-    id: "institucional-glossario-grafico",
-    label: "5️⃣ Glosário: Gráfico do Ativo",
-    title: "📗 Glosário: Gráfico do Ativo",
-    body: ["Resumo rápido dos indicadores e elementos que aparecem no gráfico do ativo."],
+    id: "glossario-grafico-ativo",
+    label: "4️⃣ Glossário: Gráfico do Ativo",
+    title: "📗 Glossário: Gráfico do Ativo",
+    body: ["Resumo rápido dos indicadores e elementos apresentados no gráfico do ativo."],
     rows: [
-      { item: "Candlestick (vela)", explanation: "Mostra abertura, máxima, mínima e fechamento do preço em cada período." },
-      { item: "VWAP", explanation: "Preço médio ponderado pelo volume; indica referência justa do ativo." },
-      { item: "Médias Móveis", explanation: "Linhas que suavizam o preço e mostram tendência." },
-      { item: "Supertrend", explanation: "Indicador que mostra direção e possíveis pontos de compra ou venda." },
-      { item: "MACD", explanation: "Mede a força da tendência e possíveis mudanças de direção." },
-      { item: "RSI", explanation: "Mostra se o ativo está sobrecomprado ou sobrevendido." },
-      { item: "Volume", explanation: "Quantidade negociada; confirma a força do movimento." },
-      { item: "Suporte", explanation: "Preço onde compradores costumam segurar quedas." },
-      { item: "Resistência", explanation: "Preço onde vendedores costumam segurar altas." },
-      { item: "Aguardar", explanation: "Sinal para não operar ainda; esperar confirmação." },
+      { item: "Candlestick ou vela", explanation: "Mostra a abertura, a máxima, a mínima e o fechamento do preço em cada período." },
+      { item: "VWAP", explanation: "Preço médio ponderado pelo volume. É utilizado como referência de preço médio negociado." },
+      { item: "MACD", explanation: "Indicador que ajuda a avaliar a força da tendência e possíveis mudanças de direção." },
+      { item: "RSI", explanation: "Indicador que ajuda a identificar condições de sobrecompra ou sobrevenda." },
+      { item: "Volume", explanation: "Quantidade negociada, utilizada para ajudar a confirmar a força do movimento." },
+      { item: "Liberar Tela", explanation: "Abre o gráfico ou módulo selecionado em uma janela separada, permitindo o uso de vários gráficos e monitores." },
     ],
   },
   {
-    id: "institucional-glossario-modos",
-    label: "6️⃣ Glosário: Modos de Uso da Plataforma",
-    title: "⚙️ Glosário: Modos de Uso da Plataforma",
-    body: ["Resumo dos modos de acesso e do que cada um libera na experiência da plataforma."],
+    id: "glossario-modos-plataforma",
+    label: "5️⃣ Glossário: Modos de Uso da Plataforma",
+    title: "⚙️ Glossário: Modos de Uso da Plataforma",
+    body: ["Resumo dos modos de acesso e dos recursos disponíveis em cada experiência da plataforma."],
     rows: [
-      { item: "Modo Básico", explanation: "Versão simples da plataforma, com leitura essencial e menos painéis abertos." },
-      { item: "Modo Pro", explanation: "Versão completa, com acesso aos painéis avançados, análises extras e recursos profissionais." },
-      { item: "Abrir", explanation: "Expande uma seção para mostrar o conteúdo completo." },
-      { item: "Fechar", explanation: "Recolhe uma seção para deixar a tela mais limpa e rápida." },
-      { item: "Ajuda ao Trader", explanation: "Área com explicações práticas para entender a leitura da plataforma." },
+      { item: "Modo Básico", explanation: "Versão simplificada com Rede Social de Traders, gráfico do ativo, sentimento, volume relativo (RVOL) e votação da estratégia. Não inclui a leitura completa do Painel de Análise Estratégica, módulos avançados de IA, Telegram, sinais em tempo real, insights instantâneos, oportunidades ao vivo, alertas imediatos ou guidance em tempo real." },
+      { item: "Modo Pro", explanation: "Versão completa, com acesso aos painéis avançados, módulos de IA, Telegram, análises adicionais e recursos profissionais." },
+      { item: "Abrir", explanation: "Expande uma seção para apresentar o conteúdo completo." },
+      { item: "Fechar", explanation: "Recolhe uma seção para deixar a tela mais organizada." },
+      { item: "Ajuda Educacional para o Trader", explanation: "Área com explicações práticas para compreender os módulos e as leituras apresentadas pela plataforma." },
     ],
   },
   {
-    id: "institucional-aviso-legal",
-    label: "7️⃣ Aviso legal",
+    id: "guia-rapido-stocknewsbr",
+    label: "6️⃣ Guia Rápido StockNewsBR",
+    title: "📚 Guia Rápido StockNewsBR",
+    body: [
+      "A StockNewsBR oferece inteligência de mercado com IA para traders da B3, BDRs, ações dos Estados Unidos e criptoativos.",
+      "Seu objetivo é transformar dados complexos em oportunidades claras e práticas, atendendo desde investidores até traders que realizam operações de curto prazo.",
+      "Fluxo básico de uso: 1. Pesquise ou selecione um ativo. 2. Abra o gráfico. 3. Consulte o Painel de Análise Estratégica. 4. Verifique os indicadores técnicos. 5. Consulte as leituras das IAs. 6. Analise notícias e contexto de mercado. 7. Confira o sentimento e a votação da comunidade. 8. Compartilhe ou consulte ideias na Rede Social de Traders. 9. Utilize as informações como apoio à sua própria decisão e gestão de risco.",
+    ],
+  },
+  {
+    id: "plataforma-web-trader-desk",
+    label: "7️⃣ Plataforma Web Trader Desk",
+    title: "🖥️ Plataforma Web Trader Desk",
+    body: [
+      "A Plataforma Web Trader Desk foi inspirada nos terminais utilizados por hedge funds dos Estados Unidos.",
+      "Recursos: suporte ao uso de múltiplos monitores, abertura de gráficos e módulos em janelas separadas, velocidade de navegação, análises avançadas e interface simples para a operação diária.",
+      "Clique em \"Liberar Tela\" no ativo ou módulo selecionado para abrir outra janela.",
+      "Exemplo: Monitor 1: AAPL; Monitor 2: Momento IA; Monitor 3: Bitcoin. Também é possível abrir várias janelas em um único monitor.",
+    ],
+  },
+  {
+    id: "aviso-legal",
+    label: "8️⃣ Aviso legal",
     title: "⚠️ Aviso legal",
     body: [
-      "As ferramentas do StockNewsBR são apoio analítico e educacional. Elas não constituem recomendação individual de compra, venda ou manutenção de ativos.",
-      "Mercado financeiro envolve risco. O usuário deve tomar decisões por conta própria e usar gestão de risco em todas as operações.",
+      "As informações, análises, indicadores, sinais, notícias, opiniões da comunidade e leituras geradas por Inteligência Artificial são fornecidos exclusivamente como apoio educacional e informativo.",
+      "A StockNewsBR não garante resultados, rentabilidade ou acerto das análises apresentadas.",
+      "As informações da plataforma não constituem recomendação individual de investimento, oferta de compra ou venda, consultoria financeira ou promessa de retorno.",
+      "Toda decisão de investimento é de responsabilidade exclusiva do usuário. O mercado financeiro envolve riscos e pode gerar perdas parciais ou totais.",
+      "Gestão de risco, disciplina e avaliação independente são essenciais antes de qualquer operação.",
     ],
   },
   {
-    id: "institucional-termos",
-    label: "8️⃣ Termos de uso",
-    title: "📄 Termos de uso",
+    id: "por-que-stocknewsbr",
+    label: "9️⃣ Por que escolher StockNewsBR?",
+    title: "🎯 Por que escolher StockNewsBR?",
     body: [
-      "O acesso ao produto depende do plano contratado e do respeito às regras da comunidade, incluindo uso responsável do feed social, polls e ferramentas de IA.",
-      "Contas Premium usam OTP por email e política de sessão mais rígida para evitar compartilhamento indevido.",
-    ],
-  },
-  {
-    id: "institucional-privacidade",
-    label: "9️⃣ Política de privacidade",
-    title: "🔐 Política de privacidade",
-    body: [
-      "Dados básicos de conta, autenticação, perfil e preferências são usados para operar o acesso ao app, website, Telegram e recursos da comunidade.",
-      "Quando o trader publica no feed, o nome, a foto e o email configurados no profile são usados para identificar o post dentro do ticker.",
-    ],
-  },
-  {
-    id: "institucional-cookies",
-    label: "🔟 Política de cookies",
-    title: "🍪 Política de cookies",
-    body: [
-      "A versão web utiliza cookies e armazenamento local para manter sessão, preferências de layout, ticker selecionado e continuidade da experiência do trader.",
-      "Esses recursos ajudam a salvar workspace, autenticação e contexto entre visitas.",
-    ],
-  },
-  {
-    id: "institucional-contato",
-    label: "1️⃣1️⃣ Contato / empresa",
-    title: "📬 Contato / empresa",
-    body: [
-      "Canal institucional principal: https://www.stocknewsbr.com",
-      "As comunicações oficiais da empresa devem ser publicadas nos canais institucionais da própria StockNewsBR.",
-    ],
-  },
-  {
-    id: "institucional-redes",
-    label: "1️⃣2️⃣ Redes sociais",
-    title: "🌐 Redes sociais",
-    body: [
-      "As redes sociais oficiais e o Telegram da StockNewsBR servem para distribuição de alertas, novidades do produto e comunicação institucional.",
-      "Sempre confirme se o canal está vinculado aos endereços oficiais da empresa antes de confiar em qualquer mensagem.",
-    ],
-  },
-  {
-    id: "institucional-ajuda-trader",
-    label: "1️⃣3️⃣ Ajuda Educacional para o Trader",
-    title: "🎓 Ajuda Educacional para o Trader",
-    body: [
-      "Esta seção reúne o manual rápido, explicações de cada IA e a forma correta de ler os sinais no app, web e Trader Desk.",
-      "Sempre que clicar neste item, a plataforma abre a aba Ajuda e leva o trader direto para o conteúdo educacional oficial do StockNewsBR.",
+      "Clareza — transforma informações complexas em leituras simples e objetivas.",
+      "Velocidade — apresenta análises e contexto de mercado para ajudar o trader a identificar oportunidades.",
+      "Tecnologia — utiliza Inteligência Artificial, cálculos avançados e estratégias institucionais.",
+      "Educação — oferece explicações e glossários aplicáveis ao uso diário da plataforma.",
+      "Inteligência — fornece suporte estratégico para decisões mais informadas.",
+      "StockNewsBR: inteligência de mercado com estrutura institucional e Inteligência Artificial para apoiar a tomada de decisão do trader.",
     ],
   },
 ];
 
 const INSTITUTIONAL_SECTIONS_EN = [
   {
-    id: "institucional-sobre",
-    label: "1️⃣ About the company",
-    title: "🏛 About the company",
+    id: "sobre-a-empresa",
+    label: "1️⃣ About the Company",
+    title: "🏛 About the Company",
     body: [
-      "StockNewsBR is an intelligent platform that turns data into opportunities. With AI technology and quantum financial calculations, it provides exclusive analysis for B3, BDR, US stock and crypto traders.",
-      "The goal is to deliver fast insights, safer decisions and better decision-making potential.",
-      "The product turns institutional reading, flow, structure and market context into a fast daily trading workspace.",
+      "StockNewsBR is an intelligent platform that turns data into investment opportunities.",
+      "It uses Artificial Intelligence, advanced financial calculations and institutional strategies inspired by North American hedge fund terminals.",
+      "It provides analysis for Brazilian and US market traders, including B3 assets, BDRs, US stocks and cryptoassets.",
+      "StockNewsBR turns institutional reading, flow and market context into a simple, practical screen to help traders gain fast insights, make safer decisions and identify daily opportunities.",
     ],
   },
   {
-    id: "filosofia-oficial",
-    label: "OFFICIAL PHILOSOPHY",
-    title: "📜 OFFICIAL PHILOSOPHY",
+    id: "principais-modulos",
+    label: "2️⃣ Main Platform Modules",
+    title: "🚀 Main Platform Modules",
     body: [
-      "StockNewsBR is an intelligent platform that turns data into opportunities. With AI technology and quantum financial calculations, it provides exclusive analysis for B3, BDR, US stock and crypto traders.",
-      "The goal is to deliver fast insights, safer decisions and better decision-making potential.",
-      "The product turns institutional reading, flow, structure and market context into a fast daily trading workspace.",
-      "The analyses are intelligent support, not guarantees.",
-      "Risk management and discipline are essential.",
-      "The market is dynamic: be ready to act quickly.",
-      "StockNewsBR: market intelligence with institutional structure and AI, giving traders superior decision-making.",
+      "AI Chart",
+      "The AI Chart works with the Strategic Analysis Panel and may present buy, sell short, close position and wait for confirmation guidance, plus likely direction, suggested trade, regime, institutional flow, liquidity target, risk, current scenario, strategy direction, confirmation, interpretation, focus now and analysis basis.",
+      "Available chart indicators: VWAP, MACD, RSI and volume.",
+      "Trader Social Network",
+      "The Trader Social Network is free and open to traders from any broker. Users can vote on an asset strategy and share ideas for each stock or cryptoasset. Discussions cover market conditions, news, fundamentals, catalysts, positioning, entry and exit prices, technical indicators, chart analysis, breakouts, support, resistance, price targets, signals and market sentiment.",
+      "Artificial Intelligence",
+      "News AI analyzes news as market context. Flow AI analyzes institutional flow and buying or selling pressure. Liquidity AI consolidates liquidity zones, sweeps, traps and invalidation levels. Trend AI evaluates market direction and structure. Momentum AI consolidates acceleration, breakouts and relative strength. Smart Money AI combines flow, accumulation and absorption without duplicated confirmations.",
+      "Affiliate Program",
+      "A referral is validated on the eighth day after the referred user's payment. Every three paid and valid referrals grant one free month, with no cashback. Ten paid and valid referrals grant the VIP badge; one hundred or more grant the Leaderboard King classification.",
     ],
   },
   {
-    id: "institucional-produto",
-    label: "2️⃣ Product description",
-    title: "📦 Product description",
-    body: [
-      "The main product starts with the Google Play app and unlocks an integrated experience across app, website and Telegram according to the user's plan.",
-      "Current surfaces include Master Score, Opportunity Ranking, Institutional Radar, Risk AI, 9 official specialist AIs, chart, community and educational help.",
-    ],
-  },
-  {
-    id: "institucional-educacao",
-    label: "3️⃣ Financial education",
-    title: "🎓 Financial education",
-    body: [
-      "The Help tab explains each AI module in plain English, with simple examples for daily trading use.",
-      "The educational goal is guidance, not promised results. Every decision still requires discipline and risk management.",
-    ],
-  },
-  {
-    id: "institucional-glossario-painel",
-    label: "4️⃣ Glossary: Strategic Analysis Panel",
+    id: "glossario-painel-estrategico",
+    label: "3️⃣ Glossary: Strategic Analysis Panel",
     title: "📘 Glossary: Strategic Analysis Panel",
-    body: ["Quick overview of the blocks that make up the asset's strategic read."],
+    body: ["Quick overview of the blocks that form the asset's strategic reading."],
     rows: [
-      { item: "Master Score", explanation: "Overall asset score; summarizes how strong the opportunity is." },
-      { item: "Likely Direction", explanation: "Most likely short-term price path." },
-      { item: "Suggested Trade", explanation: "Operational action indicated by the read: buy, short or wait." },
-      { item: "Regime", explanation: "Market context: uptrend, downtrend or range." },
-      { item: "Institutional Flow", explanation: "Read of large-player inflow or outflow." },
-      { item: "Liquidity Target", explanation: "Most relevant support or resistance zone." },
-      { item: "Risk", explanation: "Trade danger level: low, medium or high." },
-      { item: "Conclusion", explanation: "Final AI summary to support the decision." },
-      { item: "Analysis Basis", explanation: "Numbers and factors used to support the read." },
-      { item: "Focus Now", explanation: "Immediate practical action for the trader." },
+      { item: "Master Score", explanation: "Overall asset score. It consolidates AI readings, data, audit and risk to summarize the opportunity's strength." },
+      { item: "Likely direction", explanation: "Most likely short-term price path." },
+      { item: "Suggested trade", explanation: "Action indicated by the reading: buy, sell short, close or wait." },
+      { item: "Regime", explanation: "Predominant market context: uptrend, downtrend or range." },
+      { item: "Institutional flow", explanation: "Reading of large market participants entering or leaving." },
+      { item: "Liquidity target", explanation: "The most relevant support or resistance zone." },
+      { item: "Risk", explanation: "Trade risk level: low, medium or high." },
+      { item: "Conclusion", explanation: "Final AI summary, including current scenario, strategy direction, confirmation, interpretation and current focus." },
+      { item: "Analysis basis", explanation: "Numbers, indicators and factors used to support the reading." },
     ],
   },
   {
-    id: "institucional-glossario-grafico",
-    label: "5️⃣ Glossary: Asset Chart",
+    id: "glossario-grafico-ativo",
+    label: "4️⃣ Glossary: Asset Chart",
     title: "📗 Glossary: Asset Chart",
     body: ["Quick overview of the indicators and elements shown on the asset chart."],
     rows: [
-      { item: "Candlestick (candle)", explanation: "Shows open, high, low and close for each period." },
-      { item: "VWAP", explanation: "Volume-weighted average price; a fair-value reference for the asset." },
-      { item: "Moving Averages", explanation: "Lines that smooth price and show trend." },
-      { item: "Supertrend", explanation: "Indicator that shows direction and possible buy or sell points." },
-      { item: "MACD", explanation: "Measures trend strength and possible direction changes." },
-      { item: "RSI", explanation: "Shows whether the asset is overbought or oversold." },
-      { item: "Volume", explanation: "Traded quantity; confirms move strength." },
-      { item: "Support", explanation: "Price where buyers usually hold drops." },
-      { item: "Resistance", explanation: "Price where sellers usually hold rallies." },
-      { item: "Wait", explanation: "Signal to avoid trading yet; wait for confirmation." },
+      { item: "Candlestick or candle", explanation: "Shows the opening, high, low and closing price for each period." },
+      { item: "VWAP", explanation: "Volume-weighted average price, used as a reference for the average traded price." },
+      { item: "MACD", explanation: "Helps evaluate trend strength and possible changes in direction." },
+      { item: "RSI", explanation: "Helps identify overbought or oversold conditions." },
+      { item: "Volume", explanation: "Traded quantity, used to help confirm movement strength." },
+      { item: "Detach", explanation: "Opens the selected chart or module in a separate window, allowing multiple charts and monitors." },
     ],
   },
   {
-    id: "institucional-glossario-modos",
-    label: "6️⃣ Platform Usage Modes Glossary",
-    title: "⚙️ Platform Usage Modes Glossary",
-    body: ["Quick summary of the access modes and what each one unlocks in the platform experience."],
+    id: "glossario-modos-plataforma",
+    label: "5️⃣ Glossary: Platform Usage Modes",
+    title: "⚙️ Glossary: Platform Usage Modes",
+    body: ["Summary of the access modes and resources available in each platform experience."],
     rows: [
-      { item: "Basic Mode", explanation: "Simplified platform version with essential reading and fewer panels open." },
-      { item: "Pro Mode", explanation: "Full version with advanced panels, extra analysis and professional features." },
-      { item: "Open", explanation: "Expands a section to show the full content." },
-      { item: "Close", explanation: "Collapses a section to keep the screen cleaner and faster." },
-      { item: "Trader Help", explanation: "Area with practical explanations to understand the platform read." },
+      { item: "Basic Mode", explanation: "Simplified version with the Trader Social Network, asset chart, sentiment, relative volume (RVOL) and strategy voting. It does not include the full Strategic Analysis Panel, advanced AI modules, Telegram, real-time signals, instant insights, live opportunities, immediate alerts or real-time guidance." },
+      { item: "Pro Mode", explanation: "Full version with advanced panels, AI modules, Telegram, additional analysis and professional features." },
+      { item: "Open", explanation: "Expands a section to show its full content." },
+      { item: "Close", explanation: "Collapses a section to keep the screen organized." },
+      { item: "Trader Educational Help", explanation: "Practical explanations to understand the platform's modules and readings." },
     ],
   },
   {
-    id: "institucional-aviso-legal",
-    label: "7️⃣ Legal notice",
-    title: "⚠️ Legal notice",
+    id: "guia-rapido-stocknewsbr",
+    label: "6️⃣ Quick StockNewsBR Guide",
+    title: "📚 Quick StockNewsBR Guide",
     body: [
-      "StockNewsBR tools are analytical and educational support. They are not individualized recommendations to buy, sell, hold or short any asset.",
-      "Financial markets involve risk. Users make their own decisions and must manage risk on every trade.",
+      "StockNewsBR provides AI market intelligence for B3, BDR, US stock and cryptoasset traders.",
+      "Its goal is to turn complex data into clear, practical opportunities for investors and short-term traders.",
+      "Basic flow: 1. Search for or select an asset. 2. Open the chart. 3. Consult the Strategic Analysis Panel. 4. Check technical indicators. 5. Consult the AI readings. 6. Analyze news and market context. 7. Check community sentiment and voting. 8. Share or consult ideas in the Trader Social Network. 9. Use the information as support for your own decisions and risk management.",
     ],
   },
   {
-    id: "institucional-termos",
-    label: "8️⃣ Terms of use",
-    title: "📄 Terms of use",
+    id: "plataforma-web-trader-desk",
+    label: "7️⃣ Web Trader Desk Platform",
+    title: "🖥️ Web Trader Desk Platform",
     body: [
-      "Product access depends on the contracted plan and compliance with community rules, including responsible use of social feed, polls and AI tools.",
-      "Premium accounts use email OTP and stricter session policy to reduce account sharing.",
+      "The Web Trader Desk Platform was inspired by terminals used by US hedge funds.",
+      "Features include multi-monitor support, charts and modules in separate windows, navigation speed, advanced analysis and a simple daily-trading interface.",
+      "Click \"Detach\" on the selected asset or module to open another window.",
+      "Example: Monitor 1: AAPL; Monitor 2: Momentum AI; Monitor 3: Bitcoin. Multiple windows can also be opened on one monitor.",
     ],
   },
   {
-    id: "institucional-privacidade",
-    label: "9️⃣ Privacy policy",
-    title: "🔐 Privacy policy",
+    id: "aviso-legal",
+    label: "8️⃣ Legal Notice",
+    title: "⚠️ Legal Notice",
     body: [
-      "Basic account, authentication, profile and preference data are used to operate app, website, Telegram and community access.",
-      "When a trader posts in the feed, the configured display name, image and email identify the post inside that ticker room.",
+      "Information, analysis, indicators, signals, news, community opinions and Artificial Intelligence readings are provided exclusively as educational and informational support.",
+      "StockNewsBR does not guarantee results, profitability or accuracy of its analysis.",
+      "Platform information is not individualized investment advice, an offer to buy or sell, financial advice or a promise of return.",
+      "Every investment decision is the user's sole responsibility. Financial markets involve risk and can result in partial or total losses.",
+      "Risk management, discipline and independent evaluation are essential before any trade.",
     ],
   },
   {
-    id: "institucional-cookies",
-    label: "🔟 Cookie policy",
-    title: "🍪 Cookie policy",
+    id: "por-que-stocknewsbr",
+    label: "9️⃣ Why choose StockNewsBR?",
+    title: "🎯 Why choose StockNewsBR?",
     body: [
-      "The web version uses cookies and local storage to keep session, layout preferences, selected ticker and workspace continuity.",
-      "These resources preserve authentication, workspace state and context between visits.",
-    ],
-  },
-  {
-    id: "institucional-contato",
-    label: "1️⃣1️⃣ Contact / company",
-    title: "📬 Contact / company",
-    body: [
-      "Main institutional channel: https://www.stocknewsbr.com",
-      "Official company communications should be published through StockNewsBR institutional channels.",
-    ],
-  },
-  {
-    id: "institucional-redes",
-    label: "1️⃣2️⃣ Social channels",
-    title: "🌐 Social channels",
-    body: [
-      "Official social channels and Telegram distribute alerts, product news and institutional communication.",
-      "Always confirm that a channel is linked to the company's official addresses before trusting any message.",
-    ],
-  },
-  {
-    id: "institucional-ajuda-trader",
-    label: "1️⃣3️⃣ Trader Educational Help",
-    title: "🎓 Trader Educational Help",
-    body: [
-      "This section gathers the quick manual, explanations for each AI and the right way to read signals across app, web and Trader Desk.",
-      "When this item is clicked, the platform opens Help and takes the trader to the official StockNewsBR educational content.",
+      "Clarity — turns complex information into simple, objective readings.",
+      "Speed — provides market analysis and context to help traders identify opportunities.",
+      "Technology — uses Artificial Intelligence, advanced calculations and institutional strategies.",
+      "Education — provides explanations and glossaries applicable to everyday platform use.",
+      "Intelligence — provides strategic support for more informed decisions.",
+      "StockNewsBR: market intelligence with institutional structure and Artificial Intelligence to support trader decision-making.",
     ],
   },
 ];
@@ -1044,6 +868,14 @@ const COMPANY_HINTS: Record<string, string> = {
   NVDC34: "NVIDIA BDR",
   TSLA34: "Tesla BDR",
   META34: "Meta BDR",
+  TTWO: "Take-Two",
+  RACE: "Ferrari",
+  LCID: "Lucid",
+  SAP: "SAP SE",
+  UBER: "Uber",
+  BYDDY: "BYD",
+  GME: "GameStop",
+  COIN: "Coinbase",
   NFLX34: "Netflix BDR",
   INTC34: "Intel BDR",
   AMD34: "AMD BDR",
@@ -1106,9 +938,9 @@ const TOOL_COPY: Record<string, { title: string; description: string; explanatio
     explanation: "Momento IA mostra força e exaustão, mas continua não acionável quando a decisão operacional não está pronta.",
   },
   "smart-money": {
-    title: "💼 Smart Money IA",
-    description: "Lê atuação institucional combinando flow, acumulação e absorção.",
-    explanation: "Evita mostrar Flow, Smart Money e Accumulation como três confirmações independentes.",
+    title: "💼 Dinheiro Inteligente IA",
+    description: "Lê atuação institucional combinando fluxo, acumulação e absorção.",
+    explanation: "Evita mostrar fluxo, dinheiro inteligente e acumulação como três confirmações independentes.",
   },
   risk: {
     title: "⚠️ Risco IA",
@@ -1179,18 +1011,6 @@ const TOOL_COPY_EN: Record<string, { title: string; description: string; explana
     explanation: "Regime guides the scenario but does not replace Risk AI or operational decision.",
   },
 };
-
-const HELP_GUIDES = [
-  {
-    title: "Ajuda Educacional para o Trader",
-    description:
-      "Nossa plataforma usa modelos quantitativos avançados, IA e ferramentas de mesa institucional para transformar leitura complexa em uma tela simples para o trader.",
-  },
-  ...Object.values(TOOL_COPY).map((item) => ({
-    title: item.title,
-    description: `${item.description} ${item.explanation}`,
-  })),
-];
 
 const COMPOSER_EMOJI_CATEGORIES: Array<{ key: string; labelPt: string; labelEn: string; emojis: string[] }> = [
   { key: "faces", labelPt: "Carinhas", labelEn: "Faces", emojis: ["🙂", "😄", "😉", "😎", "🤔", "🙁", "😢", "😡", "🤯", "😱", "🥳", "😴"] },
@@ -2215,35 +2035,97 @@ function formatSignedPrice(value: unknown, locale: AppLocale) {
 }
 
 function safeAssetLogoUrl(...values: Array<unknown>) {
-  for (const value of values) {
-    const url = String(value || "").trim();
-    if (url.startsWith("/") && !url.startsWith("//")) return url;
-    if (/^https:\/\//i.test(url)) return url;
-  }
-  return null;
+  return safeAssetLogoUrls(...values)[0] ?? null;
 }
 
+function safeAssetLogoUrls(...values: Array<unknown>) {
+  const urls: string[] = [];
+  for (const value of values) {
+    const url = String(value || "").trim();
+    const ok = (url.startsWith("/") && !url.startsWith("//")) || /^https:\/\//i.test(url);
+    if (ok && !urls.includes(url)) urls.push(url);
+  }
+  return urls;
+}
+
+const ASSET_MARK_TONES = ["#1bc47d", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#14b8a6"];
+
+function assetMarkTone(symbol: string) {
+  let hash = 0;
+  for (let index = 0; index < symbol.length; index += 1) hash = (hash * 31 + symbol.charCodeAt(index)) >>> 0;
+  return ASSET_MARK_TONES[hash % ASSET_MARK_TONES.length];
+}
+
+// The initials circle is always rendered; the logo (when it exists and loads)
+// paints over it. Nothing here can end up blank.
 function AssetMark({ symbol, name, logoUrl, compact = false }: { symbol: string; name?: string | null; logoUrl?: string | null; compact?: boolean }) {
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  // Ordered candidates: a broken backend logoUrl must fall back to the local
+  // /logos map instead of dropping straight to initials (that was the header bug).
+  const candidates = safeAssetLogoUrls(logoUrl, TICKER_LOGOS[normalizeSymbol(symbol)]);
+  const src = candidates[attempt] ?? null;
+  const size = compact ? 32 : 52;
 
   useEffect(() => {
-    setFailed(false);
-    setLoaded(false);
-  }, [logoUrl]);
-
-  if (!logoUrl || failed) return null;
+    setAttempt(0);
+  }, [candidates.join("|")]);
 
   return (
-    <span className={cx("snbr-asset-mark", compact && "compact")} aria-label={name || symbol}>
-      <img
-        className={loaded ? "loaded" : ""}
-        src={logoUrl}
-        alt=""
-        onLoad={() => setLoaded(true)}
-        onError={() => setFailed(true)}
-      />
+    <span
+      className={cx("snbr-asset-mark", compact && "compact")}
+      style={{ background: assetMarkTone(symbol), color: "#08150f" }}
+      aria-label={name || symbol}
+      title={name || symbol}
+    >
+      {initialsFromName(symbol)}
+      {src ? (
+        <img
+          src={src}
+          alt={name || symbol}
+          width={size}
+          height={size}
+          loading="lazy"
+          onError={() => setAttempt((current) => current + 1)}
+        />
+      ) : null}
     </span>
+  );
+}
+
+type IndexStripItem = {
+  symbol: string;
+  display_name?: string | null;
+  price?: number | null;
+  change?: number | null;
+  change_pct?: number | null;
+  spark?: number[] | null;
+  currency?: string | null;
+  status?: string | null;
+};
+
+const INDEX_SPARK_W = 90;
+const INDEX_SPARK_H = 28;
+
+// Same min/max -> polyline mapping the Suporte/Resistência pane uses, without the
+// level overlays. No chart library.
+function IndexSparkline({ closes }: { closes: number[] }) {
+  if (closes.length < 2) return null;
+
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const span = (max - min) || Math.max(Math.abs(max) * 0.01, 1e-6);
+  const points = closes
+    .map((value, index) => {
+      const x = (index / (closes.length - 1)) * INDEX_SPARK_W;
+      const y = 2 + (1 - (value - min) / span) * (INDEX_SPARK_H - 4);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+
+  return (
+    <svg aria-hidden="true" className="snbr-index-spark" height={INDEX_SPARK_H} viewBox={`0 0 ${INDEX_SPARK_W} ${INDEX_SPARK_H}`} width={INDEX_SPARK_W}>
+      <polyline points={points} />
+    </svg>
   );
 }
 
@@ -2504,10 +2386,13 @@ function derivePublicScore(input: {
   return clampNumber(Number(score.toFixed(1)), 1, 10);
 }
 
-function deriveRelativeVolume(volume?: number | null) {
-  const numeric = Number(volume);
-  if (!Number.isFinite(numeric) || numeric <= 0) return 1;
-  return clampNumber(Number((numeric / 1_000_000).toFixed(2)), 0.1, 9.9);
+// RVOL is current volume / average volume. This used to return volume/1_000_000,
+// so a stock trading 3.5M shares displayed "RVOL 3.50" — read by a trader as 3.5x
+// normal activity while being nothing but share count. Without an average volume
+// there is no ratio to show: return null and let the caller render "sem leitura".
+// A fabricated ratio is worse than a blank one.
+function deriveRelativeVolume(volume?: number | null, averageVolume?: number | null) {
+  return calculateRelativeVolume(volume, averageVolume);
 }
 
 function calculateRelativeVolume(volume?: number | null, averageVolume?: number | null) {
@@ -2561,15 +2446,32 @@ function firstFiniteNumber(...values: Array<unknown>) {
 function firstValidRsiNumber(...values: Array<unknown>) {
   for (const value of values) {
     const numeric = Number(value);
-    if (Number.isFinite(numeric) && numeric >= 0 && numeric <= 100) return numeric;
+    // A real RSI is never exactly 0 — providers send 0 when the indicator is
+    // missing, which used to render as "0.0 — sobrevenda". Treat it as absent.
+    if (Number.isFinite(numeric) && numeric > 0 && numeric <= 100) return numeric;
   }
   return null;
 }
 
-function describeRsiValue(value: number | null, locale: AppLocale = "pt-BR") {
-  if (value == null || !Number.isFinite(value)) {
+// Candle size the backend actually used -> the tag shown next to the RSI.
+// Intraday sizes stay verbatim ("1m"/"5m"/"30m"/"1h"); daily/weekly get the desk
+// spelling. Never falls back to the chart range button: that is the lie we removed.
+function rsiTimeframeTag(metadata?: { timeframe?: string | null; candle_interval?: string | null } | null) {
+  const raw = String(metadata?.candle_interval || metadata?.timeframe || "").trim().toLowerCase();
+  if (!raw) return "";
+  if (raw === "1d") return "D1";
+  if (raw === "1wk" || raw === "1w") return "W1";
+  return raw;
+}
+
+// Hidden from the page by owner decision; the RSI keeps feeding the strategic
+// panel and AI scoring. Flip to true to show the card again.
+const RSI_CARD_VISIBLE = true;
+
+function describeRsiValue(value: number | null, locale: AppLocale = "pt-BR", candleTag = "D1") {
+  if (value == null || !Number.isFinite(value) || value <= 0 || value > 100) {
     return {
-      label: "n/a",
+      label: "—",
       hint: locale === "en-US" ? "RSI missing from the current payload." : "RSI ausente no payload atual.",
       tone: "neutral" as const,
       basis: locale === "en-US" ? "RSI: no read." : "RSI: sem leitura.",
@@ -2579,42 +2481,49 @@ function describeRsiValue(value: number | null, locale: AppLocale = "pt-BR") {
   // Canonical RSI copy thresholds (same on every surface): <30 sobrevenda,
   // 30-45 pressão vendedora, 45-55 neutro, 55-70 pressão compradora, >70 sobrecompra.
   const formatted = value.toFixed(1);
-  const timeframeTag = locale === "en-US" ? "Daily RSI (D1)" : "RSI diário (D1)";
+  // "RSI diário (D1)" only when the value really is daily; otherwise name the
+  // candle size it was computed on, so the copy can never overstate the timeframe.
+  const tag = (candleTag || "D1").trim() || "D1";
+  const timeframeTag =
+    tag === "D1"
+      ? (locale === "en-US" ? "Daily RSI (D1)" : "RSI diário (D1)")
+      : `RSI ${tag}`;
   if (value > 70) {
     return {
-      label: formatted,
-      hint: locale === "en-US" ? `${timeframeTag} at ${formatted}: overbought; avoid chasing late entries.` : `${timeframeTag} em ${formatted}: sobrecompra; evite perseguir preço atrasado.`,
+      label: locale === "en-US" ? "Overbought" : "Sobrecompra",
+      // The band phrase is already the card value; the hint only adds what to do.
+      hint: locale === "en-US" ? `${timeframeTag}: avoid chasing late entries.` : `${timeframeTag}: evite perseguir preço atrasado.`,
       tone: "up" as const,
       basis: locale === "en-US" ? `RSI: overbought at ${formatted}.` : `RSI: sobrecompra nos ${formatted}.`,
     };
   }
   if (value >= 55) {
     return {
-      label: formatted,
-      hint: locale === "en-US" ? `${timeframeTag} at ${formatted}: buying pressure; buyers dominate.` : `${timeframeTag} em ${formatted}: pressão compradora; compradores dominam.`,
+      label: locale === "en-US" ? "Buying pressure" : "Pressão compradora",
+      hint: locale === "en-US" ? `${timeframeTag}: buyers dominate.` : `${timeframeTag}: compradores dominam.`,
       tone: "up" as const,
       basis: locale === "en-US" ? `RSI: buying pressure at ${formatted}.` : `RSI: pressão compradora nos ${formatted}.`,
     };
   }
   if (value >= 45) {
     return {
-      label: formatted,
-      hint: locale === "en-US" ? `${timeframeTag} at ${formatted}: neutral; wait for price/volume confirmation.` : `${timeframeTag} em ${formatted}: neutro; aguarde confirmação de preço/volume.`,
+      label: locale === "en-US" ? "Neutral" : "Neutro",
+      hint: locale === "en-US" ? `${timeframeTag}: wait for price/volume confirmation.` : `${timeframeTag}: aguarde confirmação de preço/volume.`,
       tone: "watch" as const,
       basis: locale === "en-US" ? `RSI: neutral at ${formatted}.` : `RSI: neutro nos ${formatted}.`,
     };
   }
   if (value >= 30) {
     return {
-      label: formatted,
-      hint: locale === "en-US" ? `${timeframeTag} at ${formatted}: selling pressure; buyers need confirmation.` : `${timeframeTag} em ${formatted}: pressão vendedora; compradores precisam confirmar reação.`,
+      label: locale === "en-US" ? "Selling pressure" : "Pressão vendedora",
+      hint: locale === "en-US" ? `${timeframeTag}: buyers need confirmation.` : `${timeframeTag}: compradores precisam confirmar reação.`,
       tone: "down" as const,
       basis: locale === "en-US" ? `RSI: selling pressure at ${formatted}.` : `RSI: pressão vendedora nos ${formatted}.`,
     };
   }
   return {
-    label: formatted,
-    hint: locale === "en-US" ? `${timeframeTag} at ${formatted}: oversold; watch for a technical bounce before selling late.` : `${timeframeTag} em ${formatted}: sobrevenda; observe repique antes de vender atrasado.`,
+    label: locale === "en-US" ? "Oversold" : "Sobrevenda",
+    hint: locale === "en-US" ? `${timeframeTag}: watch for a technical bounce before selling late.` : `${timeframeTag}: observe repique antes de vender atrasado.`,
     tone: "down" as const,
     basis: locale === "en-US" ? `RSI: oversold at ${formatted}.` : `RSI: sobrevenda nos ${formatted}.`,
   };
@@ -2692,12 +2601,12 @@ function reconcileStatsWithDecision<T extends { label: string; value: string; hi
       let hint = item.hint;
       const normalizedValue = normalizeUiText(item.value);
       if (waiting && (normalizedValue.includes("alta forte") || normalizedValue.includes("strong uptrend"))) {
-        value = isEnglish ? "Buyer bias (awaiting confirmation)" : "Viés comprador (aguardando confirmação)";
+        value = isEnglish ? "Buyer bias" : "Viés comprador";
         hint = isEnglish
           ? "The panel decision is WAIT: buyer bias only counts after price/volume confirmation."
           : "O painel está em AGUARDAR: o viés comprador só vale após confirmação de preço/volume.";
       } else if (waiting && (normalizedValue.includes("baixa forte") || normalizedValue.includes("strong downtrend"))) {
-        value = isEnglish ? "Seller bias (awaiting confirmation)" : "Viés vendedor (aguardando confirmação)";
+        value = isEnglish ? "Seller bias" : "Viés vendedor";
         hint = isEnglish
           ? "The panel decision is WAIT: seller bias only counts after price/volume confirmation."
           : "O painel está em AGUARDAR: o viés vendedor só vale após confirmação de preço/volume.";
@@ -3793,8 +3702,12 @@ function strategicPanelTone(panel?: StrategicPanel | null): DecisionTone {
 
 function strategicPanelDecisionCards(panel: StrategicPanel, locale: AppLocale): EssentialDecisionCard[] {
   const isEnglish = locale === "en-US";
+  // Read the backend's explicit 0..10 value. Guessing the scale from the number's
+  // magnitude turned a real 8/100 into "8.0 / 10" while 100/100 became "10.0" —
+  // that is why the same score showed as two different numbers on one screen.
   const score = firstFiniteNumber((panel.master_score_block as any)?.score);
-  const displayScore = normalizeMasterScoreForDisplay(score);
+  const displayScore = firstFiniteNumber((panel.master_score_block as any)?.score_0_10)
+    ?? normalizeMasterScoreForDisplay(score);
   const canonicalAnalysis = panel.canonical_analysis;
   const direction = canonicalAnalysis?.direction === "BULLISH"
     ? (isEnglish ? "Up" : "Alta")
@@ -3808,12 +3721,17 @@ function strategicPanelDecisionCards(panel: StrategicPanel, locale: AppLocale): 
   const confidence = strategicPanelText((panel.master_score_block as any)?.confidence_visual || (panel.master_score_block as any)?.confidence, isEnglish ? "Low confidence" : "Confiança baixa");
   const tone = strategicPanelTone(panel);
   const riskTone: DecisionTone = /alto|high/i.test(risk) ? "bearish" : /baixo|low/i.test(risk) ? "bullish" : "watch";
+  const flowItem = panel.why?.find((item) => item.tool === "flow");
+  const flowValue = strategicPanelText(flowItem?.label).replace(/^[✅⚠•]\s*/, "") || (isEnglish ? "No read" : "Sem leitura");
+  const flowTone = decisionToneFromText(flowValue, flowItem?.reason);
+  const regime = humanizeMachineLabel(canonicalAnalysis?.regime || "", locale) || (isEnglish ? "No read" : "Sem leitura");
+  const liquidity = firstPositiveFiniteNumber(panel.liquidez_alvo);
   return [
     {
       label: isEnglish ? "Master Score" : "Score Mestre",
       value: displayScore != null ? `${displayScore.toFixed(1)} / 10` : (isEnglish ? "No confirmed score" : "Sem score confirmado"),
       tone: displayScore != null && displayScore >= 8 ? "bullish" : displayScore != null && displayScore < 6 ? "watch" : tone,
-      meta: `${conviction} | ${confidence}`,
+      meta: confidence,
       meter: displayScore != null ? clampNumber(displayScore * 10, 0, 100) : null,
     },
     {
@@ -3827,21 +3745,26 @@ function strategicPanelDecisionCards(panel: StrategicPanel, locale: AppLocale): 
       tone: action.includes("NÃO OPERAR") || action.includes("NAO OPERAR") ? "bearish" : action.includes("AGUARDAR") ? "watch" : tone,
     },
     {
-      label: isEnglish ? "Institutional Auditor" : "Auditor Institucional",
-      value: audit,
-      tone: audit.includes("BLOQUEADO") ? "bearish" : audit.includes("ATENÇÃO") ? "watch" : "bullish",
-      meta: strategicPanelText(panel.auditor_block?.summary),
+      label: isEnglish ? "Regime" : "Regime",
+      value: regime,
+      tone,
+    },
+    {
+      label: isEnglish ? "Institutional Flow" : "Fluxo Institucional",
+      value: flowValue,
+      tone: flowTone === "exit" ? "neutral" : flowTone,
+      meta: strategicPanelText(flowItem?.reason),
+    },
+    {
+      label: isEnglish ? "Liquidity Target" : "Liquidez alvo",
+      value: liquidity != null ? formatLocalePrice(liquidity, locale) : (isEnglish ? "No reading" : "Sem leitura"),
+      tone,
     },
     {
       label: isEnglish ? "Risk" : "Risco",
       value: risk,
       tone: riskTone,
-    },
-    {
-      label: isEnglish ? "Conviction" : "Convicção",
-      value: conviction,
-      tone,
-      meta: confidence,
+      meta: undefined,
     },
   ];
 }
@@ -3898,14 +3821,23 @@ function operationalDecisionFromPanel(panel: StrategicPanel, locale: AppLocale):
   return {
     action,
     tone,
-    confidence: score != null ? clampNumber(score, 0, 100) : null,
+    // The percentage MUST come from the same quantity the word is derived from.
+    // This printed the Master Score with a "%" sign next to a label computed from
+    // master_confidence_pct — two unrelated numbers, so "8%" could read "Alta".
+    confidence: firstFiniteNumber(
+      (panel as any)?.master_confidence_pct,
+      (panel.master_score_block as any)?.confidence_pct,
+    ),
     confidenceLabel: confidence,
     bias: canonicalAnalysis?.bias === "BULLISH" ? (isEnglish ? "Bullish" : "Comprador") : canonicalAnalysis?.bias === "BEARISH" ? (isEnglish ? "Bearish" : "Vendedor") : (isEnglish ? "Neutral" : "Neutro"),
     risk: strategicPanelText(panel.risk_block?.visual_level || panel.risk_block?.level, isEnglish ? "Moderate" : "Moderado"),
     reasons: reasons.length ? reasons : [strategicPanelText(panel.strategic_panel_summary, isEnglish ? "Strategic panel still has limited context." : "Painel estratégico ainda com contexto limitado.")],
-    levels: conditions.length
-      ? conditions.map((condition, index) => ({ label: index === 0 ? (isEnglish ? "Opinion changes if" : "Muda opinião se") : `${index + 1}`, value: condition }))
-      : [{ label: isEnglish ? "Invalidation" : "Invalidação", value: isEnglish ? "Wait for a clearer snapshot." : "Aguardar snapshot mais claro." }],
+    // Prefer the backend's PRICED levels (build_operational_levels). The old
+    // phrase list was unreadable: four loose sentences with no numbers.
+    levels: pricedOperationalLevels(panel, locale)
+      ?? (conditions.length
+        ? conditions.map((condition, index) => ({ label: index === 0 ? (isEnglish ? "1: Opinion changes if" : "1: Muda opinião se") : `${index + 1}`, value: condition }))
+        : [{ label: isEnglish ? "Invalidation" : "Invalidação", value: isEnglish ? "Wait for a clearer snapshot." : "Aguardar snapshot mais claro." }]),
   };
 }
 
@@ -3913,6 +3845,27 @@ type OperationalDecisionLevel = {
   label: string;
   value: string;
 };
+
+// Reads the backend's priced NÍVEIS OPERACIONAIS (strategic_panel.build_operational_levels).
+// A level with no price is dropped entirely — a label with no number is the
+// unreadable "frase jogada" this replaced. Returns null when nothing is priced,
+// so the caller can fall back to the legacy phrase list.
+function pricedOperationalLevels(panel: StrategicPanel, locale: AppLocale): OperationalDecisionLevel[] | null {
+  const block = (panel as any)?.operational_levels_block?.levels ?? (panel as any)?.operational_levels;
+  if (!block || typeof block !== "object") return null;
+  const rows: OperationalDecisionLevel[] = [];
+  for (const entry of Object.values(block as Record<string, any>)) {
+    const price = firstPositiveFiniteNumber(entry?.price);
+    if (price == null) continue;
+    const label = strategicPanelText(entry?.label);
+    const reason = strategicPanelText(entry?.reason);
+    rows.push({
+      label: label || (locale === "en-US" ? "Level" : "Nível"),
+      value: reason ? `${formatLocalePrice(price, locale)} — ${reason}` : formatLocalePrice(price, locale),
+    });
+  }
+  return rows.length ? rows : null;
+}
 
 type OperationalDecision = {
   action: string;
@@ -4041,9 +3994,11 @@ function resolveOperationalZones(chart: ChartPayload | null, fallbackLevel: numb
   const canonicalZones = resolveCanonicalChartLevelZones(chart);
   const support = canonicalZones.find((zone) => zone.kind === "support")?.price;
   const resistance = canonicalZones.find((zone) => zone.kind === "resistance")?.price;
+  // A price level of 0 (or negative) means "not computed", not "zero reais".
+  // Keeping firstFiniteNumber here is what put "Resistência: 0,00" on screen.
   return {
-    support: firstFiniteNumber(support, fallbackLevel),
-    resistance: firstFiniteNumber(resistance, fallbackLevel),
+    support: firstPositiveFiniteNumber(support, fallbackLevel),
+    resistance: firstPositiveFiniteNumber(resistance, fallbackLevel),
   };
 }
 
@@ -4215,8 +4170,9 @@ function buildOperationalDecision(input: {
     };
   }
 
-  const supportText = zones.support != null ? formatLocalePrice(zones.support, input.locale) : (isEnglish ? "No level" : "Sem nível");
-  const resistanceText = zones.resistance != null ? formatLocalePrice(zones.resistance, input.locale) : (isEnglish ? "No level" : "Sem nível");
+  const supportText = zones.support != null ? formatLocalePrice(zones.support, input.locale) : (isEnglish ? "No reading" : "Sem leitura");
+  const resistanceText = zones.resistance != null ? formatLocalePrice(zones.resistance, input.locale) : (isEnglish ? "No reading" : "Sem leitura");
+  const hasAnyLevel = zones.support != null || zones.resistance != null;
   const invalidation = tone === "exit"
     ? (zones.support != null ? `${isEnglish ? "Below protection level" : "Abaixo do nível de proteção"} ${supportText}` : (isEnglish ? "After confirmed protection-level failure" : "Após perda confirmada do nível de proteção"))
     : tone === "bullish"
@@ -4243,8 +4199,13 @@ function buildOperationalDecision(input: {
     levels: [
       { label: isEnglish ? "Resistance" : "Resistência", value: resistanceText },
       { label: isEnglish ? "Support" : "Suporte", value: supportText },
-      { label: isEnglish ? "Invalidation" : "Invalidação", value: invalidation },
-      { label: isEnglish ? "Trade Zone" : "Zona operacional", value: tradeZone },
+      // Without a real level, "Invalidação: Acima de 0,00" is worse than silence.
+      ...(hasAnyLevel
+        ? [
+          { label: isEnglish ? "Invalidation" : "Invalidação", value: invalidation },
+          { label: isEnglish ? "Trade Zone" : "Zona operacional", value: tradeZone },
+        ]
+        : []),
     ],
   };
 }
@@ -4275,7 +4236,8 @@ function resolveFlowCard(rows: AiToolRow[], locale: AppLocale): EssentialDecisio
 }
 
 function resolveLiquidityTarget(chart: ChartPayload | null, price: number | null | undefined, tone: DecisionTone, locale: AppLocale) {
-  const zones = Array.isArray(chart?.zones) ? chart?.zones || [] : [];
+  const zones = (Array.isArray(chart?.zones) ? chart?.zones || [] : [])
+    .filter((zone: any) => firstPositiveFiniteNumber(zone?.price) != null);
   const priceNumber = firstFiniteNumber(price);
   const preferred = zones
     .filter((zone: any) => {
@@ -4290,7 +4252,7 @@ function resolveLiquidityTarget(chart: ChartPayload | null, price: number | null
       return { zone, distance };
     })
     .sort((a, b) => a.distance - b.distance)[0]?.zone || zones[0];
-  if (!preferred) return locale === "en-US" ? "No level" : "Sem nível";
+  if (!preferred) return locale === "en-US" ? "No reading" : "Sem leitura";
   const rawLabel = String(preferred.label || "");
   const label = locale === "en-US"
     ? localizeUiText(rawLabel.replace("RESISTENCIA", "RESISTANCE").replace("SUPORTE", "SUPPORT"), locale)
@@ -5702,7 +5664,7 @@ function scoreToolCandidateForTab(
   const score = Number(item.score || 0);
   const volume = Math.max(0, Number(item.volume || 0));
   const volumeScore = volume > 0 ? clampNumber(Math.log10(volume + 1) - 4, 0, 5) : 0;
-  const rvol = Number(item.rvol ?? deriveRelativeVolume(volume));
+  const rvol = Number(item.rvol ?? deriveRelativeVolume(volume, (item as any)?.average_volume ?? (item as any)?.avg_volume));
   const rsi = Number(item.rsi || 50);
   const adx = Number(item.adx || deriveAdx(change, rsi, item.trend));
   const atr = Number(item.atr_pct || deriveAtrPct(change, rsi, volume));
@@ -5766,7 +5728,7 @@ function buildToolLensMetrics(input: {
 }): AiToolMetrics {
   const change = Number(input.changePct || 0);
   const absChange = Math.abs(change);
-  const rvol = Number(input.rvol ?? deriveRelativeVolume(input.volume));
+  const rvol = Number(input.rvol ?? deriveRelativeVolume(input.volume, (input as any)?.average_volume ?? (input as any)?.avg_volume));
   const rsi = Number(input.rsi ?? 50);
   const adx = Number(input.adx ?? deriveAdx(change, rsi, input.trend));
   const atrPct = Number(input.atr_pct ?? deriveAtrPct(change, rsi, input.volume));
@@ -5882,7 +5844,7 @@ function buildPublicToolNarrative(input: {
   const priceText = input.price != null ? formatPrice(input.price, locale) : "preço pendente";
   const volumeText = input.volume != null ? formatCompact(input.volume, locale) : "volume pendente";
   const rsiText = input.rsi != null ? input.rsi.toFixed(1) : "RSI pendente";
-  const rvolValue = Number(input.rvol ?? deriveRelativeVolume(input.volume));
+  const rvolValue = Number(input.rvol ?? deriveRelativeVolume(input.volume, (input as any)?.average_volume ?? (input as any)?.avg_volume));
   const adxValue = Number(input.adx ?? deriveAdx(input.changePct, input.rsi, input.trend));
   const atrValue = Number(input.atrPct ?? deriveAtrPct(input.changePct, input.rsi, input.volume));
   const rvolText = Number.isFinite(rvolValue) ? rvolValue.toFixed(2) : "sem leitura";
@@ -6137,6 +6099,85 @@ function humanizeMachineLabel(value?: string | null, locale: AppLocale = "pt-BR"
     "strong setup": "Setup Bom",
     "excellent setup": "Setup Ótimo",
     "great setup": "Setup Ótimo",
+    // Engine states that were reaching the PT UI untranslated (Fluxo/Liquidez IA).
+    "institutional buying": "Compra institucional",
+    "institutional selling": "Venda institucional",
+    "liquidity monitoring": "Monitorando liquidez",
+    "liquidity sweep": "Varredura de liquidez",
+    "accumulation": "Acumulação",
+    "distribution": "Distribuição",
+    "breakout": "Rompimento",
+    "breakdown": "Perda de suporte",
+    "trend continuation": "Continuação de tendência",
+    "trend reversal": "Reversão de tendência",
+    "momentum expansion": "Expansão de momento",
+    "momentum fading": "Momento perdendo força",
+    "volatility expansion": "Expansão de volatilidade",
+    "volatility compression": "Compressão de volatilidade",
+    "no trade": "Sem operação",
+    "watching": "Monitorando",
+    "neutral": "Neutro",
+    "sweep risk": "Risco de varredura",
+    // Full canonical engine-state set emitted by the backend (snake_case keys are
+    // normalised to spaces above). Without these the fallback only capitalises the
+    // raw key, which is how English states like "Downtrend Structure" reached PT.
+    "already expanded": "Já expandido",
+    "bear trend": "Tendência de baixa",
+    "bearish momentum": "Momento vendedor",
+    "building pressure": "Pressão em formação",
+    "bull trend": "Tendência de alta",
+    compression: "Compressão",
+    "critical risk": "Risco crítico",
+    "distribution or weak": "Distribuição ou fraqueza",
+    "distribution risk": "Risco de distribuição",
+    "downtrend structure": "Estrutura de baixa",
+    "early accumulation": "Acumulação inicial",
+    "early radar": "Radar inicial",
+    "fast move": "Movimento rápido",
+    "high risk": "Risco alto",
+    "high volatility": "Volatilidade alta",
+    "institutional accumulation": "Acumulação institucional",
+    "institutional defense": "Defesa institucional",
+    "institutional distribution": "Distribuição institucional",
+    "institutional interest": "Interesse institucional",
+    "liquidity hotspot": "Ponto quente de liquidez",
+    "liquidity sweep detected": "Varredura de liquidez detectada",
+    "liquidity trap": "Armadilha de liquidez",
+    "liquidity zone": "Zona de liquidez",
+    "low risk": "Risco baixo",
+    "macro context available": "Contexto macro disponível",
+    "macro news only": "Macro apenas por notícia",
+    "macro unavailable": "Macro indisponível",
+    "medium risk": "Risco médio",
+    mixed: "Misto",
+    "momentum ignition": "Ignição de momento",
+    "momentum quiet": "Momento parado",
+    "momentum watch": "Momento em observação",
+    "news available": "Notícias disponíveis",
+    "news empty": "Sem notícias",
+    "news not linked": "Notícias não vinculadas",
+    "news provider failed": "Falha no provedor de notícias",
+    "no sweep": "Sem varredura",
+    "not ready": "Não pronto",
+    "possible manipulation": "Possível manipulação",
+    quiet: "Parado",
+    range: "Lateral",
+    "ready to break": "Pronto para romper",
+    "retail noise": "Ruído de varejo",
+    "reversal down": "Reversão para baixa",
+    "reversal up": "Reversão para alta",
+    "smart money active": "Dinheiro inteligente ativo",
+    "smart money interest": "Interesse do dinheiro inteligente",
+    "smart money neutral": "Dinheiro inteligente neutro",
+    "squeeze ready": "Squeeze armado",
+    "strong buying": "Compra forte",
+    "strong selling": "Venda forte",
+    "structure mixed": "Estrutura mista",
+    "sweep watch": "Varredura em observação",
+    "thin liquidity": "Liquidez fina",
+    "trend pending": "Tendência indefinida",
+    unknown: "Sem leitura",
+    "uptrend structure": "Estrutura de alta",
   };
   const labelsEn: Record<string, string> = {
     monitoring: "Watching",
@@ -6215,6 +6256,88 @@ function humanizeMachineLabel(value?: string | null, locale: AppLocale = "pt-BR"
     confirmacoes: "Confirmations",
     classificacao: "Classification",
     divergencia: "Divergence",
+    // Mirrors of the engine states added to the PT map, so both locales resolve
+    // through the dictionary instead of falling back to raw capitalisation.
+    "institutional buying": "Institutional buying",
+    "institutional selling": "Institutional selling",
+    "liquidity monitoring": "Liquidity monitoring",
+    "liquidity sweep": "Liquidity sweep",
+    "compra institucional": "Institutional buying",
+    "venda institucional": "Institutional selling",
+    "monitorando liquidez": "Liquidity monitoring",
+    "varredura de liquidez": "Liquidity sweep",
+    accumulation: "Accumulation",
+    distribution: "Distribution",
+    breakout: "Breakout",
+    breakdown: "Breakdown",
+    "trend continuation": "Trend continuation",
+    "trend reversal": "Trend reversal",
+    "momentum expansion": "Momentum expansion",
+    "momentum fading": "Momentum fading",
+    "volatility expansion": "Volatility expansion",
+    "volatility compression": "Volatility compression",
+    "no trade": "No trade",
+    watching: "Watching",
+    neutral: "Neutral",
+    // EN mirror of the canonical engine-state set, so both locales resolve through
+    // the dictionary instead of raw capitalisation.
+    "already expanded": "Already expanded",
+    "bear trend": "Bear trend",
+    "bearish momentum": "Bearish momentum",
+    "building pressure": "Building pressure",
+    "bull trend": "Bull trend",
+    compression: "Compression",
+    "critical risk": "Critical risk",
+    "distribution or weak": "Distribution or weak",
+    "distribution risk": "Distribution risk",
+    "downtrend structure": "Downtrend structure",
+    "early accumulation": "Early accumulation",
+    "early radar": "Early radar",
+    "fast move": "Fast move",
+    "high risk": "High risk",
+    "high volatility": "High volatility",
+    "institutional accumulation": "Institutional accumulation",
+    "institutional defense": "Institutional defense",
+    "institutional distribution": "Institutional distribution",
+    "institutional interest": "Institutional interest",
+    "liquidity hotspot": "Liquidity hotspot",
+    "liquidity sweep detected": "Liquidity sweep detected",
+    "liquidity trap": "Liquidity trap",
+    "liquidity zone": "Liquidity zone",
+    "low risk": "Low risk",
+    "macro context available": "Macro context available",
+    "macro news only": "Macro from news only",
+    "macro unavailable": "Macro unavailable",
+    "medium risk": "Medium risk",
+    mixed: "Mixed",
+    "momentum ignition": "Momentum ignition",
+    "momentum quiet": "Momentum quiet",
+    "momentum watch": "Momentum watch",
+    "news available": "News available",
+    "news empty": "No news",
+    "news not linked": "News not linked",
+    "news provider failed": "News provider failed",
+    "no sweep": "No sweep",
+    "not ready": "Not ready",
+    "possible manipulation": "Possible manipulation",
+    quiet: "Quiet",
+    range: "Range",
+    "ready to break": "Ready to break",
+    "retail noise": "Retail noise",
+    "reversal down": "Reversal down",
+    "reversal up": "Reversal up",
+    "smart money active": "Smart money active",
+    "smart money interest": "Smart money interest",
+    "smart money neutral": "Smart money neutral",
+    "squeeze ready": "Squeeze ready",
+    "strong buying": "Strong buying",
+    "strong selling": "Strong selling",
+    "structure mixed": "Structure mixed",
+    "sweep watch": "Sweep watch",
+    "thin liquidity": "Thin liquidity",
+    "trend pending": "Trend pending",
+    unknown: "No read",
+    "uptrend structure": "Uptrend structure",
   };
 
   const localized = locale === "en-US" ? labelsEn[key] : labels[key];
@@ -6674,6 +6797,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [error, setError] = useState("");
 
   const [bootstrap, setBootstrap] = useState<PublicBootstrap | null>(null);
+  const [indexStrip, setIndexStrip] = useState<IndexStripItem[]>([]);
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
   const [publicAiTools, setPublicAiTools] = useState<PublicAiToolsPayload | null>(null);
   const [publicAiCatalog, setPublicAiCatalog] = useState<PublicAiToolsPayload | null>(null);
@@ -6838,7 +6962,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const priorityPublicWatchKey = priorityPublicWatchSymbols.join("|");
   const visiblePublicWatchKey = visiblePublicWatchSymbols.join("|");
   const [tickerTapePaused, setTickerTapePaused] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
+  // Dark is the product default; the trader can switch to light and that choice
+  // is restored from storage below.
+  const [darkMode, setDarkMode] = useState(true);
   const [aiToolSoundSettings, setAiToolSoundSettings] = useState<Record<string, boolean>>(defaultAiToolSoundSettings);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("preferencias");
   const [accountPanel, setAccountPanel] = useState<AccountPanel>("perfil");
@@ -7080,7 +7206,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
   useEffect(() => {
     const storedDark = readStorageValue("stocknewsbr.dark_mode");
+    // Honour BOTH stored values: "0" must restore light. Only-checking "1" left a
+    // returning light-mode user stuck on the dark default.
     if (storedDark === "1") setDarkMode(true);
+    else if (storedDark === "0") setDarkMode(false);
     setAiToolSoundSettings(parseAiToolSoundSettings(readStorageValue(AI_TOOL_SOUND_STORAGE_KEY)));
 
     const storedBlocked = readStorageValue("stocknewsbr.blocked_users");
@@ -7281,14 +7410,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, [appLocale, deferredTicker]);
 
   useEffect(() => {
-    // Anonymous AI tab badges: the bundle/ai-tools calls are symbol-filtered and
-    // return empty tool arrays whenever the selected ticker has no qualified
-    // finding, which zeroed every badge. Fetch the unfiltered public catalog
-    // once so badges can show the real per-tool counts from the endpoint.
-    if (token) {
-      setPublicAiCatalog(null);
-      return undefined;
-    }
+    // AI tab badges: the bundle/ai-tools calls are symbol-filtered and return
+    // empty tool arrays whenever the selected ticker has no qualified finding,
+    // which zeroed every badge. Fetch the unfiltered public catalog so badges
+    // show the real per-tool counts. This ran for anonymous users only, so a
+    // logged-in user whose workspace.ai_tools is empty saw 0 on every tab —
+    // the endpoint is public, so fetch it regardless of token.
     let cancelled = false;
     const controller = new AbortController();
     fetch(`${resolveApiBase()}/public/market/ai-tools`, { signal: controller.signal })
@@ -7303,7 +7430,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       cancelled = true;
       controller.abort();
     };
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     if (!token) {
@@ -7652,7 +7779,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     if (token || !publicWatchSymbols.length) return;
 
     let cancelled = false;
-    let cursor = 0;
     const orderedSymbols = Array.from(new Set([...publicTickerTapeSymbols, ...publicWatchSymbols]));
 
     const loadNextChunk = () => {
@@ -7668,11 +7794,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         ));
       if (!missing.length) return;
 
-      const chunk = missing.slice(cursor, cursor + 12);
-      cursor = cursor + 12 >= missing.length ? 0 : cursor + 12;
-      if (!chunk.length) return;
-
-        getPublicQuotesRobust(chunk, 32, 0)
+      // Ask for every symbol still without a quote. The old numeric cursor walked
+      // a list that got shorter on each tick, so whole blocks of the watchlist
+      // were skipped and stayed on "sem snapshot". getPublicQuotesRobust already
+      // splits this into 24-symbol requests.
+      getPublicQuotesRobust(missing, 24, 0)
         .then((nextQuotes) => {
           if (cancelled) return;
           const quoteMap = Object.fromEntries((nextQuotes?.items || []).map((item) => [item.symbol, item]));
@@ -7719,6 +7845,45 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       window.clearInterval(timer);
     };
   }, [priorityPublicWatchKey, publicTickerTapeKey, selectedTicker]);
+
+  // Index strip, same 15s cadence as the tape. Inline fetch on purpose: lib/api.ts
+  // is owned by another agent this cycle. Anything not status="valid" is dropped so
+  // a 404 or a half-filled payload hides the strip instead of rendering zero cards.
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadIndices = () => {
+      fetch(`${resolveApiBase()}/public/market/indices`)
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload) => {
+          if (cancelled) return;
+          const items: IndexStripItem[] = Array.isArray(payload?.items) ? payload.items : [];
+          setIndexStrip(
+            items.filter(
+              (item) =>
+                item?.status === "valid" &&
+                // typeof, not Number(): Number(null) is 0, which would pass a
+                // finite check and render a zero card.
+                typeof item?.price === "number" &&
+                Number.isFinite(item.price) &&
+                item.price !== 0 &&
+                Array.isArray(item?.spark) &&
+                item.spark.length > 1,
+            ),
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setIndexStrip([]);
+        });
+    };
+
+    loadIndices();
+    const timer = window.setInterval(loadIndices, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -8878,6 +9043,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, [currentRanking, currentTopSignal, workspaceSymbolSnapshot]);
   const currentStrategicPanel = useMemo<StrategicPanel | null>(() => {
     const candidates = [
+      publicInsight?.strategic_panel,
       currentSnapshotRow?.strategic_panel,
       currentRanking?.strategic_panel,
       currentTopSignal?.strategic_panel,
@@ -8890,7 +9056,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       if (panelSymbol && panelSymbol === selectedTicker) return panel;
     }
     return null;
-  }, [currentRanking?.strategic_panel, currentSnapshotRow?.strategic_panel, currentTopSignal?.strategic_panel, selectedTicker, workspace?.strategic_panel]);
+  }, [currentRanking?.strategic_panel, currentSnapshotRow?.strategic_panel, currentTopSignal?.strategic_panel, publicInsight?.strategic_panel, selectedTicker, workspace?.strategic_panel]);
   const canonicalAnalysis = currentStrategicPanel?.canonical_analysis || null;
   const snapshotQuote = useMemo(
     () => snapshotQuoteFromRow(selectedTicker, currentSnapshotRow),
@@ -9038,9 +9204,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     support: chartCanonicalLevelZones.find((zone) => zone.kind === "support")?.price ?? null,
     zones: chartCanonicalLevelZones,
   }), [chartCanonicalLevelZones]);
+  // The top "Score Mestre" card must show the SAME number as the panel below it.
+  // The panel's master_score_block.score_0_10 is the single source of truth; the
+  // client-side heuristic below is only a fallback when no panel is loaded.
   const effectiveAiScore = useMemo(
-    () => displayQuoteHasCoreData ? usableScore(derivedPublicInsight?.score, currentRanking?.score, currentDerivedScore) : null,
-    [derivedPublicInsight?.score, currentRanking?.score, currentDerivedScore, displayQuoteHasCoreData],
+    () => {
+      if (!displayQuoteHasCoreData) return null;
+      const panelScore = firstFiniteNumber((currentStrategicPanel?.master_score_block as any)?.score_0_10);
+      if (panelScore != null) return panelScore;
+      return usableScore(derivedPublicInsight?.score, currentRanking?.score, currentDerivedScore);
+    },
+    [currentStrategicPanel, derivedPublicInsight?.score, currentRanking?.score, currentDerivedScore, displayQuoteHasCoreData],
   );
   // ONE RSI for every surface (top card, chart chip, bottom panel): the daily
   // RSI-14 served by /public/market/bundle (insight.rsi, canonical_indicator_engine).
@@ -9067,7 +9241,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }
     return currentPublicInsight?.rsi_metadata || derivedPublicInsight?.rsi_metadata || null;
   }, [activeChart, currentPublicInsight?.rsi_metadata, derivedPublicInsight?.rsi_metadata]);
-  const rsiTimeframeLabel = chartInterval === "1D" ? "D1" : chartInterval;
+  // The label must state the candles the RSI was actually computed on, which the
+  // backend reports in rsi_metadata. The range button ("1D" = one day of 5m candles)
+  // is NOT the candle size, so it must never be used as the tag.
+  const rsiTimeframeLabel = rsiTimeframeTag(chartRsiMetadata);
+  const cardRsiTimeframeLabel = rsiTimeframeTag(
+    currentPublicInsight?.rsi_metadata || derivedPublicInsight?.rsi_metadata || null,
+  );
   const priceMovementValue = firstFiniteNumber(displayQuote?.change) ?? null;
   const priceMovementPercent = firstFiniteNumber(displayQuote?.change_pct) ?? null;
   const headerVolume = firstPositiveFiniteNumber(displayQuote?.volume);
@@ -9276,7 +9456,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const stats = useMemo(() => {
     const emptyChangeText = isUsLocale ? "no confirmed change" : "sem variação confirmada";
     const emptyScoreText = isUsLocale ? "no confirmed score" : "sem Score confirmado";
-    const emptyRsiText = isUsLocale ? "no valid RSI" : "sem RSI válido";
     const emptyBiasText = isUsLocale ? "no confirmed bias" : "sem Bias confirmado";
     const changeValue = displayQuoteHasCoreData ? formatSignedPercent(displayQuote?.change_pct) : emptyChangeText;
     const aiScoreValue = effectiveAiScore != null ? Number(effectiveAiScore).toFixed(1) : emptyScoreText;
@@ -9285,9 +9464,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const changeNumber = Number.isFinite(rawChangeNumber) ? rawChangeNumber : null;
     const rawBias = displayQuoteHasCoreData ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || currentRanking?.trend || "" : "";
     const biasValue = displayQuoteHasCoreData ? biasStrengthLabel(rawBias, scoreNumber, changeNumber ?? 0, appLocale) : emptyBiasText;
-    const rsiDescriptor = describeRsiValue(panelRsiValue, appLocale);
+    const rsiDescriptor = describeRsiValue(panelRsiValue, appLocale, cardRsiTimeframeLabel);
     const rsiValue = rsiDescriptor.label;
-    const rsiScoreValue = rsiValue === "n/a" ? emptyRsiText : `RSI SCORE: ${rsiValue}`;
+    // describeRsiValue already returns "—" when there is no usable RSI, so no
+    // oversold/overbought copy can reach the screen from a 0/null payload.
+    const rsiScoreValue = rsiValue;
     const changeDirection = changeNumber == null
       ? (isUsLocale ? "no confirmed change" : "sem variação real")
       : changeNumber < 0
@@ -9354,12 +9535,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         hint: scoreHint,
         tone: Number.isFinite(scoreNumber) && scoreNumber >= 7 ? "up" : Number.isFinite(scoreNumber) && scoreNumber <= 5.5 ? "down" : "neutral",
       },
-      {
-        label: "RSI SCORE",
-        value: rsiScoreValue,
-        hint: rsiHint,
-        tone: rsiDescriptor.tone,
-      },
+      // Owner decision: the RSI card is hidden from the page. The value is still
+      // computed and feeds the strategic panel / AI scoring; only the card is gone.
+      // Flip RSI_CARD_VISIBLE to true to bring it back.
+      ...(RSI_CARD_VISIBLE
+        ? [{
+            label: (isUsLocale ? "RSI VIEW" : "RSI VISÃO"),
+            value: rsiScoreValue,
+            hint: rsiHint,
+            tone: rsiDescriptor.tone,
+          }]
+        : []),
       {
         label: "Bias",
         value: biasValue,
@@ -9388,6 +9574,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     displayQuote,
     displayQuoteHasCoreData,
     panelRsiValue,
+    cardRsiTimeframeLabel,
   ]);
   const displayStats = useMemo(
     () => {
@@ -9530,7 +9717,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             volume: resolvedVolume,
           }),
         ) ?? 5;
-        const rvol = row.rel_volume ?? (row as any).rvol ?? deriveRelativeVolume(resolvedVolume);
+        const rvol = row.rel_volume ?? (row as any).rvol ?? deriveRelativeVolume(resolvedVolume, (row as any)?.average_volume ?? (row as any)?.avg_volume);
         const adx = row.adx ?? deriveAdx(changePct, rsi, trend);
         const atrPct = row.atr_pct ?? deriveAtrPct(changePct, rsi, resolvedVolume);
         const rowScore = usableScore(
@@ -9620,7 +9807,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         const trend = item.trend || (normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal : null) || "monitorando";
         const rsi = firstValidRsiNumber(item.rsi, normalizedItemSymbol === selectedTicker ? derivedPublicInsight?.rsi : null);
         const resolvedVolume = firstPositiveFiniteNumber(quote?.volume, item.volume, watchItem?.volume);
-        const rvol = deriveRelativeVolume(resolvedVolume);
+        const rvol = deriveRelativeVolume(
+          resolvedVolume,
+          (quote as any)?.average_volume ?? (quote as any)?.avg_volume ?? (item as any)?.average_volume,
+        );
         const adx = deriveAdx(changePct, rsi, trend);
         const atrPct = deriveAtrPct(changePct, rsi, resolvedVolume);
         const score =
@@ -9855,13 +10045,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     () => visibleAiRows.map((row) => withAlertTimestamp(row)),
     [visibleAiRows],
   );
-  // Anonymous AI tabs are a market-wide ranked list, not a per-symbol read: the
+  // AI tabs are a market-wide ranked list, not a per-symbol read: the
   // per-selected-ticker pipeline above collapses each tab to 0-1 rows even though
-  // the badge counts the full catalog. For logged-out users render the whole
-  // unfiltered catalog (already backend-ranked and shaped) so lists match badges;
-  // a row click switches the ticker.
-  const anonymousCatalogRows = useMemo<AiToolRow[]>(() => {
-    if (token || !currentAiKey) return [];
+  // the badge counts the full catalog. Render the whole unfiltered catalog
+  // (already backend-ranked and shaped) whenever the per-ticker pipeline has
+  // nothing, so lists always match badges; a row click switches the ticker.
+  const aiCatalogFallbackRows = useMemo<AiToolRow[]>(() => {
+    if (!currentAiKey) return [];
     const rows = publicAiCatalog?.tools?.[currentAiKey as keyof WorkspaceData["ai_tools"]];
     if (!Array.isArray(rows) || !rows.length) return [];
     return rows.map((row) =>
@@ -9871,18 +10061,24 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         ticker: normalizeSymbol(String((row as any).ticker || (row as any).symbol || "")),
       }),
     );
-  }, [token, currentAiKey, publicAiCatalog?.tools]);
+  }, [currentAiKey, publicAiCatalog?.tools]);
   const currentTabHistory =
     aiAlertHistory[currentTab]?.resetKey === aiAlertResetKey &&
     aiAlertHistory[currentTab]?.source === "real" &&
     aiAlertHistory[currentTab]?.rows.length
       ? aiAlertHistory[currentTab].rows
       : null;
-  const currentTabAlertRows = anonymousCatalogRows.length
-    ? anonymousCatalogRows
-    : (currentTabHistory?.length ? currentTabHistory : visibleAiRowsWithTimestamps)
-        .filter((row) => isFreshAiFindingForReset(row))
-        .filter(isAiDealFinding);
+  const currentTabOwnRows = (currentTabHistory?.length ? currentTabHistory : visibleAiRowsWithTimestamps)
+    .filter((row) => isFreshAiFindingForReset(row))
+    .filter(isAiDealFinding);
+  // Same precedence as aiToolFindingCounts below (own rows, else catalog), so the
+  // badge number and the rendered list can never disagree.
+  // Most recent finding first. The history bucket sorts by alert timestamp and the
+  // catalog fallback arrives score-ranked, so sort here on the same timestamp the
+  // card prints as "Detectado" — that is the only ordering the owner can verify.
+  const currentTabAlertRows = [...(currentTabOwnRows.length ? currentTabOwnRows : aiCatalogFallbackRows)].sort(
+    (a, b) => (Date.parse(resolveAiFindingTimestamp(b) || "") || 0) - (Date.parse(resolveAiFindingTimestamp(a) || "") || 0),
+  );
   const currentAiStaleRows = useMemo(
     () => currentAiRows
       .map((row) => ({
@@ -9904,6 +10100,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const currentAiPayloadAvailable = Boolean(
     currentAiKey &&
     (
+      aiCatalogFallbackRows.length > 0 ||
       (workspace?.ai_tools && Object.prototype.hasOwnProperty.call(workspace.ai_tools, currentAiKey)) ||
       (publicAiTools?.tools && Object.prototype.hasOwnProperty.call(publicAiTools.tools, currentAiKey))
     ),
@@ -10065,7 +10262,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       : null;
   const rawVolumeScore = volumeActivity > 0 ? clampNumber(volumeActivity, 0, 100) : publicVolumeScore;
   const volumeMeterTitle = volumeActivity > 0
-    ? (isUsLocale ? "Message volume" : "Volume de mensagens")
+    ? (isUsLocale ? "Volume" : "Volume")
     : (isUsLocale ? "Asset volume (RVOL)" : "Volume do ativo (RVOL)");
   const volumeLabel =
     rawVolumeScore == null
@@ -10122,7 +10319,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         }))
         .filter((row) => isFreshAiFindingForReset(row))
         .filter(sameTicker);
-    const flowCard = resolveFlowCard(toolRows(["flow", "smart_money"]), appLocale);
+    const flowCard = currentStrategicPanel
+      ? strategicPanelDecisionCards(currentStrategicPanel, appLocale)[4]
+      : resolveFlowCard(toolRows(["flow", "smart_money"]), appLocale);
     const flowTone = flowCard.tone;
     const baseTone = trendTone !== "neutral"
       ? trendTone
@@ -10934,7 +11133,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               </span>
             </div>
             <p className="snbr-rich-text">{renderCashtagText(localizeUiText(post.text, appLocale, post.ticker || selectedTicker), `post-${post.id}`)}</p>
-            {post.image_url ? <div className="snbr-published-media"><img className="snbr-image" src={resolveMediaUrl(post.image_url)} alt={isUsLocale ? "post media" : "mídia do post"} /></div> : null}
+            {post.image_url ? <div className="snbr-published-media"><ImageLightbox src={resolveMediaUrl(post.image_url)} alt={isUsLocale ? "post media" : "mídia do post"} locale={appLocale} /></div> : null}
             <div className="snbr-post-actions snbr-post-actions-bar">
               <button
                 className="snbr-post-action snbr-feed-action"
@@ -10987,7 +11186,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       </div>
                     </div>
                   <p className="snbr-rich-text">{renderCashtagText(localizeUiText(comment.text, appLocale, post.ticker || selectedTicker), `comment-${comment.id}`)}</p>
-                  {comment.image_url ? <div className="snbr-published-media"><img className="snbr-image" src={resolveMediaUrl(comment.image_url)} alt={isUsLocale ? "comment image" : "imagem do comentário"} /></div> : null}
+                  {comment.image_url ? <div className="snbr-published-media"><ImageLightbox src={resolveMediaUrl(comment.image_url)} alt={isUsLocale ? "comment image" : "imagem do comentário"} locale={appLocale} /></div> : null}
                 </article>
               ))}
 
@@ -11185,7 +11384,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 const resolvedPrice = firstFiniteNumber(item.price, watchItem?.price, quote?.price);
                 const resolvedVolume = firstPositiveFiniteNumber(item.volume, watchItem?.volume, quote?.volume);
                 const resolvedRsi = firstValidRsiNumber(item.rsi);
-                const resolvedRvol = item.rel_volume ?? deriveRelativeVolume(resolvedVolume);
+                const resolvedRvol = item.rel_volume ?? deriveRelativeVolume(resolvedVolume, (item as any)?.average_volume ?? (item as any)?.avg_volume);
                 const resolvedAdx = item.adx ?? deriveAdx(resolvedChangePct, resolvedRsi, item.state || item.signal || watchItem?.trend || null);
                 const resolvedAtrPct = item.atr_pct ?? deriveAtrPct(resolvedChangePct, resolvedRsi, resolvedVolume);
                 const metricEntries = Object.entries(item.metrics || {})
@@ -11220,7 +11419,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                         <div className="snbr-news-chip-row snbr-temporal-chip-row">
                           <span className="snbr-chip">{isUsLocale ? "Detected" : "Detectado"}: {formatAiUpdatedAt(detectedAt, appLocale)}</span>
                           {publishedAt ? <span className="snbr-chip">{isUsLocale ? "Published at" : "Publicado às"}: {formatAiUpdatedAt(publishedAt, appLocale)}</span> : null}
-                          <span className="snbr-chip">{isUsLocale ? "Viewed" : "Visualizado"}: {formatAiUpdatedAt(viewedAtIso, appLocale)}</span>
                           <span className={cx("snbr-chip", freshness.tone)}>{freshness.label}</span>
                         </div>
                       </div>
@@ -11373,7 +11571,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   const resolvedPrice = firstFiniteNumber(item.price, watchItem?.price, quote?.price);
                   const resolvedVolume = firstPositiveFiniteNumber(item.volume, watchItem?.volume, quote?.volume);
                   const resolvedRsi = firstValidRsiNumber(item.rsi);
-                  const resolvedRvol = deriveRelativeVolume(resolvedVolume);
+                  const resolvedRvol = deriveRelativeVolume(resolvedVolume, (item as any)?.average_volume ?? (item as any)?.avg_volume);
                   const resolvedAdx = deriveAdx(resolvedChangePct, resolvedRsi, item.trend || watchItem?.trend || null);
                   const resolvedAtrPct = deriveAtrPct(resolvedChangePct, resolvedRsi, resolvedVolume);
                   return (
@@ -11386,7 +11584,6 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                     </div>
                     <div className="snbr-news-chip-row snbr-temporal-chip-row">
                       <span className="snbr-chip">{isUsLocale ? "Detected" : "Detectado"}: {formatAiUpdatedAt(detectedAt, appLocale)}</span>
-                      <span className="snbr-chip">{isUsLocale ? "Viewed" : "Visualizado"}: {formatAiUpdatedAt(viewedAtIso, appLocale)}</span>
                       <span className={cx("snbr-chip", freshness.tone)}>{freshness.label}</span>
                     </div>
                   </div>
@@ -11482,7 +11679,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }
 
   function renderGrafico() {
-    const chartNews = newsRows.find((item) => !item.isIncomplete);
+    // Prefer a complete row, but never claim "sem notícia" while the badge shows
+    // a count: an item missing only a source_url is still worth reading.
+    const chartNews = newsRows.find((item) => !item.isIncomplete) || newsRows[0];
     const chartNewsTime = chartNews?.publishedTime || "";
     const chartNewsTitle = chartNews
       ? chartNews.headline
@@ -11554,7 +11753,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           <div className="snbr-chart-now-strip">
             <div>
               <span>
-                {isUsLocale ? "News now" : "Notícia agora"} · {selectedTicker}
+                {isUsLocale ? "Latest news" : "Última notícia"} · {selectedTicker}
+                {chartNews?.source ? ` · ${chartNews.source}` : ""}
                 {chartNewsTime ? ` · ${chartNewsTime}` : ""}
               </span>
               <strong>{chartNewsTitle}</strong>
@@ -11700,9 +11900,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     return (
       <WorkspaceEducationPanel
         locale={appLocale}
-        helpManualItems={isUsLocale ? HELP_MANUAL_ITEMS_EN : HELP_MANUAL_ITEMS}
         institutionalSections={isUsLocale ? INSTITUTIONAL_SECTIONS_EN : INSTITUTIONAL_SECTIONS}
-        educationalSections={isUsLocale ? EDUCATIONAL_HELP_SECTIONS_EN : EDUCATIONAL_HELP_SECTIONS}
         guides={workspace?.help_center.guides || []}
         activeInstitutionalSectionId={selectedInstitutionalSectionId}
       />
@@ -11813,7 +12011,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       <section className="snbr-tool-shell">
         <div className="snbr-tool-head">
           <div>
-            <h2>{isUsLocale ? "Referrals" : "Indicações"}</h2>
+            <h2>{isUsLocale ? "Referrals" : "Afiliate Programa"}</h2>
             <p>{ruleText}</p>
           </div>
           <span className="snbr-chip">{isUsLocale ? "7-day refund window" : "Janela de 7 dias"}</span>
@@ -12458,7 +12656,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           {settingsTab === "preferencias" ? (
             <div className="snbr-settings-stack">
               <div className="snbr-settings-section">
-                <strong>Display</strong>
+                <strong>{isUsLocale ? "Display" : "Exibição"}</strong>
                 <div className="snbr-settings-toggle-row">
                   <span>{isUsLocale ? "Dark mode" : "Modo escuro"}</span>
                   <button className={cx("snbr-switch", darkMode && "active")} onClick={() => setDarkMode((value) => !value)} type="button" aria-pressed={darkMode}>
@@ -12640,6 +12838,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           watchlistContent={renderWatchlist()}
           institutionalSections={isUsLocale ? INSTITUTIONAL_SECTIONS_EN : INSTITUTIONAL_SECTIONS}
           onOpenInstitutionalSection={openInstitutionalSection}
+          activeInstitutionalSectionId={selectedInstitutionalSectionId}
         />
 
       <main className="snbr-symbol-page" id="snbr-main-content">
@@ -12752,6 +12951,29 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           </button>
         </nav>
 
+        {indexStrip.length ? (
+          <section className="snbr-index-strip" aria-label={isUsLocale ? "Market indices" : "Índices de mercado"}>
+            {indexStrip.map((item) => {
+              // Not movementClass(): indices carry no score, and its score fallback
+              // paints a flat (0%) index red.
+              const pct = Number(item.change_pct);
+              const tone = !Number.isFinite(pct) || pct === 0 ? "mid" : pct > 0 ? "up" : "down";
+              return (
+                <div key={item.symbol} className={cx("snbr-index-card", tone)}>
+                  <div className="snbr-index-copy">
+                    <strong>{item.display_name || item.symbol}</strong>
+                    <span className="snbr-index-price">{formatLocalePrice(item.price, appLocale)}</span>
+                    <span className={cx("snbr-index-change", tone)}>
+                      {formatSignedPrice(item.change, appLocale)} ({formatSignedPercent(item.change_pct)})
+                    </span>
+                  </div>
+                  <IndexSparkline closes={(item.spark || []).map(Number).filter((value) => Number.isFinite(value))} />
+                </div>
+              );
+            })}
+          </section>
+        ) : null}
+
         <section className="snbr-ticker-tape">
           <button className="snbr-tape-toggle" onClick={() => setTickerTapePaused((value) => !value)} type="button">
             {tickerTapePaused ? "▶" : "⏸"}
@@ -12765,6 +12987,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   onClick={() => selectTicker(item.symbol)}
                   type="button"
                 >
+                  <AssetMark
+                    symbol={item.symbol}
+                    name={item.label}
+                    logoUrl={(item as { logoUrl?: string | null }).logoUrl}
+                    compact
+                  />
                   <strong>{item.symbol}</strong>
                   <span className={cx("snbr-tape-value", movementClass(item.changePct, item.trend, item.score))}>
                     {movementArrow(movementClass(item.changePct, item.trend, item.score))}{" "}
@@ -12782,7 +13010,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             <div className="snbr-symbol-main">
               <div className="snbr-breadcrumb">Home / Symbol / {selectedTicker}</div>
               <div className="snbr-symbol-title-row">
-                {symbolLogoUrl ? <AssetMark symbol={selectedTicker} name={symbolLabel} logoUrl={symbolLogoUrl} /> : null}
+                <AssetMark symbol={selectedTicker} name={symbolLabel} logoUrl={symbolLogoUrl} />
                 <div>
                   <h2>{selectedTicker}</h2>
                   {symbolLabel ? <p>{symbolLabel}</p> : null}

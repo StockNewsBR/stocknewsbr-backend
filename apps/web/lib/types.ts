@@ -43,6 +43,7 @@ export type StrategicPanel = {
     reasons?: string[];
   };
   recommended_action?: string;
+  liquidez_alvo?: number | null;
   strategic_panel_summary?: string;
   why?: StrategicPanelWhyItem[];
   opinion_change_conditions?: string[];

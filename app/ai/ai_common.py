@@ -212,6 +212,109 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+TONE_BULLISH = "bullish"
+TONE_BEARISH = "bearish"
+TONE_NEUTRAL = "neutral"
+TONE_RISK = "risk"
+
+# Machine state key -> (human label pt-BR, tone).
+#
+# `tone` is the ONLY directional field. `score` is a 0-100 magnitude (how strong
+# the reading is), never a direction: several engines feed it abs(momentum) or
+# raw intensity, so a bearish state can legitimately score 100. Colour the UI by
+# `tone`, never by `score`.
+AI_STATE_CATALOG: Dict[str, tuple[str, str]] = {
+    # trend / regime
+    "uptrend_structure": ("Estrutura de alta", TONE_BULLISH),
+    "downtrend_structure": ("Estrutura de baixa", TONE_BEARISH),
+    "structure_mixed": ("Estrutura indefinida", TONE_NEUTRAL),
+    "trend_pending": ("Tendência pendente", TONE_NEUTRAL),
+    "bull_trend": ("Tendência de alta", TONE_BULLISH),
+    "bear_trend": ("Tendência de baixa", TONE_BEARISH),
+    "range": ("Lateralizado", TONE_NEUTRAL),
+    "high_volatility": ("Volatilidade alta", TONE_RISK),
+    "reversal_up": ("Reversão para cima", TONE_BULLISH),
+    "reversal_down": ("Reversão para baixo", TONE_BEARISH),
+    # momentum / radar (radar score is direction-agnostic: velocity + RVOL + ATR)
+    "momentum_expansion": ("Momentum em expansão", TONE_BULLISH),
+    "bearish_momentum": ("Momentum vendedor", TONE_BEARISH),
+    "momentum_watch": ("Momentum em formação", TONE_NEUTRAL),
+    "momentum_quiet": ("Momentum fraco", TONE_NEUTRAL),
+    "momentum_ignition": ("Ignição de movimento", TONE_NEUTRAL),
+    "fast_move": ("Movimento acelerado", TONE_NEUTRAL),
+    "early_radar": ("Ignição inicial", TONE_NEUTRAL),
+    "quiet": ("Sem movimento relevante", TONE_NEUTRAL),
+    # breakout / volatility squeeze
+    "ready_to_break": ("Pronto para romper", TONE_BULLISH),
+    "building_pressure": ("Pressão de rompimento", TONE_BULLISH),
+    "not_ready": ("Sem gatilho de rompimento", TONE_NEUTRAL),
+    "squeeze_ready": ("Compressão pronta", TONE_NEUTRAL),
+    "compression": ("Em compressão", TONE_NEUTRAL),
+    "already_expanded": ("Já expandido", TONE_NEUTRAL),
+    # heat map / relative strength
+    "strong_buying": ("Compra forte", TONE_BULLISH),
+    "strong_selling": ("Venda forte", TONE_BEARISH),
+    "mixed": ("Misto", TONE_NEUTRAL),
+    # institutional flow / smart money / accumulation
+    "institutional_buying": ("Compra institucional", TONE_BULLISH),
+    "institutional_interest": ("Interesse institucional", TONE_BULLISH),
+    "institutional_accumulation": ("Acumulação institucional", TONE_BULLISH),
+    "institutional_distribution": ("Distribuição institucional", TONE_BEARISH),
+    "institutional_defense": ("Defesa institucional", TONE_BULLISH),
+    "distribution_risk": ("Risco de distribuição", TONE_BEARISH),
+    "distribution_or_weak": ("Distribuição ou fraqueza", TONE_BEARISH),
+    "accumulation": ("Acumulação", TONE_BULLISH),
+    "early_accumulation": ("Acumulação inicial", TONE_BULLISH),
+    "smart_money_active": ("Smart money ativo", TONE_BULLISH),
+    "smart_money_interest": ("Interesse de smart money", TONE_BULLISH),
+    "smart_money_neutral": ("Smart money neutro", TONE_NEUTRAL),
+    "retail_noise": ("Ruído de varejo", TONE_NEUTRAL),
+    "possible_manipulation": ("Possível manipulação", TONE_RISK),
+    "monitoring": ("Em monitoramento", TONE_NEUTRAL),
+    # liquidity
+    "liquidity_hotspot": ("Concentração de liquidez", TONE_NEUTRAL),
+    "liquidity_zone": ("Zona de liquidez", TONE_NEUTRAL),
+    "liquidity_monitoring": ("Monitorando liquidez", TONE_NEUTRAL),
+    "thin_liquidity": ("Liquidez fraca", TONE_RISK),
+    "liquidity_trap": ("Armadilha de liquidez", TONE_RISK),
+    "liquidity_sweep_detected": ("Varredura de liquidez detectada", TONE_RISK),
+    "sweep_watch": ("Possível varredura", TONE_NEUTRAL),
+    "no_sweep": ("Sem varredura", TONE_NEUTRAL),
+    # risk
+    "low_risk": ("Risco baixo", TONE_NEUTRAL),
+    "medium_risk": ("Risco médio", TONE_NEUTRAL),
+    "high_risk": ("Risco alto", TONE_RISK),
+    "critical_risk": ("Risco crítico", TONE_RISK),
+    # news
+    "news_available": ("Notícias acopladas", TONE_NEUTRAL),
+    "news_empty": ("Sem notícia relevante", TONE_NEUTRAL),
+    "news_not_linked": ("Notícia não vinculada", TONE_NEUTRAL),
+    "news_provider_failed": ("Falha no provedor de notícias", TONE_RISK),
+    # macro
+    "macro_context_available": ("Contexto macro disponível", TONE_NEUTRAL),
+    "macro_news_only": ("Macro apenas por notícias", TONE_NEUTRAL),
+    "macro_unavailable": ("Sem contexto macro", TONE_NEUTRAL),
+    # master score
+    "bullish_strong": ("Alta forte", TONE_BULLISH),
+    "bullish_caution": ("Alta com cautela", TONE_BULLISH),
+    "bearish_strong": ("Baixa forte", TONE_BEARISH),
+    "bearish_caution": ("Baixa com cautela", TONE_BEARISH),
+    "neutral_context": ("Contexto neutro", TONE_NEUTRAL),
+    "blocked_context": ("Contexto bloqueado", TONE_RISK),
+}
+
+
+def describe_state(state: Any) -> tuple[str, str]:
+    """Return (human label, tone) for a machine state key.
+
+    An unknown key degrades to a neutral tone so a newly added engine state can
+    never render as bullish by accident.
+    """
+    key = str(state or "").strip().lower()
+    label, tone = AI_STATE_CATALOG.get(key, ("", TONE_NEUTRAL))
+    return label or key.replace("_", " ").strip() or "Indefinido", tone
+
+
 def signal_from_score(score: float) -> str:
     if score >= 75:
         return "WATCH"
@@ -310,6 +413,7 @@ def build_payload(
     reason_text = reason or _reason_from_metrics(tool, state, score, metric_payload)
     signal = signal_from_score(score)
     decision_state = "WATCH" if signal == "WATCH" else "WAIT"
+    state_label, tone = describe_state(state)
     payload = {
         "ticker": get_symbol(row),
         "symbol": get_symbol(row),
@@ -324,6 +428,11 @@ def build_payload(
         "operational_message": "⚠️ NÃO OPERAR AGORA",
         "no_trade_reasons": ["contexto técnico insuficiente"],
         "state": state,
+        "state_key": state,
+        "state_label": state_label,
+        "tone": tone,
+        # `score` is magnitude, not direction. Never colour by it; use `tone`.
+        "score_meaning": "risk_level" if tool == "risk" else "signal_strength",
         "confidence": confidence_from_inputs(row),
         "price": round(price, 4),
         "change_pct": round(safe_float(row.get("change_pct")), 2),

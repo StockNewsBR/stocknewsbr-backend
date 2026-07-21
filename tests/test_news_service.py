@@ -20,13 +20,21 @@ from app.services.news_service import (
 
 class NewsServiceTests(unittest.TestCase):
     def setUp(self):
+        # get_symbol_news() persists through _persist_news_cache(), so without this the
+        # suite writes its fixtures into the real runtime/cache/news_cache.json and the
+        # running app serves them as live news.
+        cache_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(cache_dir.cleanup)
+        cache_file_patch = patch.object(
+            news_service, "_NEWS_CACHE_FILE", Path(cache_dir.name) / "news_cache.json"
+        )
+        cache_file_patch.start()
+        self.addCleanup(cache_file_patch.stop)
+
         news_service._NEWS_CACHE.clear()
         news_service._NEWS_PROVIDER_STATUS.clear()
         news_service._NEWS_CACHE_LOADED = True
-        try:
-            news_service._NEWS_CACHE_FILE_MTIME = news_service._NEWS_CACHE_FILE.stat().st_mtime
-        except FileNotFoundError:
-            news_service._NEWS_CACHE_FILE_MTIME = None
+        news_service._NEWS_CACHE_FILE_MTIME = None
 
     def test_build_symbol_news_dedupes_and_labels_useful_items(self):
         raw_items = [
@@ -58,8 +66,10 @@ class NewsServiceTests(unittest.TestCase):
         items = build_symbol_news("PETR4", raw_items, limit=6)
 
         self.assertEqual(len(items), 2)
-        result_item = items[0]
-        macro_item = items[1]
+        # Positional lookup would pin the old relevance-first order; the feed is now
+        # chronological, so select by label instead.
+        result_item = next(item for item in items if "resultado" in item["labels"])
+        macro_item = next(item for item in items if "macro" in item["labels"])
 
         self.assertIn("resultado", result_item["labels"])
         self.assertIn("guidance", result_item["labels"])
@@ -70,6 +80,81 @@ class NewsServiceTests(unittest.TestCase):
         self.assertTrue(result_item["editorial"])
         self.assertIn("macro", macro_item["labels"])
         self.assertIn(macro_item["impact"], {"bearish", "neutral"})
+
+    def test_build_symbol_news_orders_by_publication_time_descending(self):
+        # Deliberately provider-ordered oldest-first, and the oldest item is the one the
+        # editorial ranking prefers, so only a real chronological sort can pass this.
+        raw_items = [
+            {
+                "title": "PETR4 reports strong quarterly results and raises guidance",
+                "summary": "Quarterly earnings beat estimates and the company raised full-year guidance.",
+                "publisher": "Reuters",
+                "link": "https://example.com/oldest-but-most-relevant",
+                "providerPublishTime": 1_743_000_000,
+                "relatedTickers": ["PETR4"],
+            },
+            {
+                "title": "Petrobras signs a new offshore logistics contract",
+                "summary": "The company disclosed a fresh operational agreement.",
+                "publisher": "Bloomberg",
+                "link": "https://example.com/middle",
+                "providerPublishTime": 1_743_500_000,
+                "relatedTickers": ["PETR4"],
+            },
+            {
+                "title": "Petrobras updates its fuel price policy for distributors",
+                "summary": "A pricing policy revision was published for the distribution channel.",
+                "publisher": "Estadao",
+                "link": "https://example.com/newest",
+                "providerPublishTime": 1_743_900_000,
+                "relatedTickers": ["PETR4"],
+            },
+        ]
+
+        items = build_symbol_news("PETR4", raw_items, limit=6)
+
+        published = [item["published_at"] for item in items]
+        self.assertEqual(len(published), 3)
+        self.assertEqual(published, sorted(published, reverse=True))
+        self.assertEqual(items[0]["url"], "https://example.com/newest")
+        self.assertEqual(items[-1]["url"], "https://example.com/oldest-but-most-relevant")
+
+    def test_build_symbol_news_never_replaces_publication_time_with_now(self):
+        raw_items = [
+            {
+                "title": "AAPL raises guidance after strong iPhone demand",
+                "summary": "The company improved the outlook after stronger demand.",
+                "publisher": "Reuters",
+                "link": "https://example.com/aapl-published-at",
+                "providerPublishTime": 1_743_210_000,
+                "relatedTickers": ["AAPL"],
+            },
+            {
+                "title": "Apple opens a new retail flagship",
+                "summary": "A store opening was announced without a provider timestamp.",
+                "publisher": "Bloomberg",
+                "link": "https://example.com/aapl-no-time",
+                "relatedTickers": ["AAPL"],
+            },
+        ]
+
+        with patch("app.services.news_service._now_ts", return_value=1_800_000_000.0):
+            items = build_symbol_news("AAPL", raw_items, limit=6)
+
+        now_iso = "2027-01-15T08:00:00+00:00"
+        timed = next(item for item in items if item["url"] == "https://example.com/aapl-published-at")
+        untimed = next(item for item in items if item["url"] == "https://example.com/aapl-no-time")
+
+        self.assertEqual(timed["published_at"], "2025-03-29T01:00:00+00:00")
+        self.assertEqual(timed["published_at_source"], "2025-03-29T01:00:00+00:00")
+        # Ingestion time is recorded, but only ever under fetched_at/detected_at.
+        self.assertEqual(timed["fetched_at"], now_iso)
+        self.assertNotEqual(timed["published_at"], timed["fetched_at"])
+        # A missing provider timestamp stays missing instead of being back-filled with now().
+        self.assertIsNone(untimed["published_at"])
+        self.assertIsNone(untimed["published_at_source"])
+        self.assertFalse(untimed["source_published_at"])
+        self.assertEqual(untimed["fetched_at"], now_iso)
 
     def test_build_symbol_news_marks_macro_items_and_rankings(self):
         raw_items = [

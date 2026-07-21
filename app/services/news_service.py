@@ -28,6 +28,9 @@ _CACHE_LOCK = threading.Lock()
 _PERSIST_LOCK = threading.Lock()
 _REQUEST_LOCKS_LOCK = threading.Lock()
 _CACHE_TTL_SECONDS = 300
+# Public alias: callers outside this module need the same freshness threshold to decide
+# when a cached entry must be refreshed instead of served as-is.
+NEWS_CACHE_TTL_SECONDS = _CACHE_TTL_SECONDS
 _NEWS_MAX_INPUT_ITEMS = 80
 _NEWS_MAX_CLUSTER_CANDIDATES = 12
 _NEWS_CACHE: dict[str, dict[str, Any]] = {}
@@ -41,13 +44,31 @@ _TICKER_NEWS_ALIASES = {
     "TSLA": ("tesla", "tesla inc"),
     "MSFT": ("microsoft", "microsoft corp", "microsoft corporation"),
     "AMD": ("advanced micro devices",),
+    "AMZN": ("amazon", "amazon.com", "amazon com", "amazon.com inc"),
+    "META": ("meta", "meta platforms", "facebook"),
+    "NFLX": ("netflix",),
+    "GOOGL": ("google", "alphabet", "alphabet inc"),
+    "INTC": ("intel", "intel corp", "intel corporation"),
+    "AVGO": ("broadcom", "broadcom inc"),
+    "BA": ("boeing", "boeing co", "boeing company"),
+    "BAC": ("bank of america", "bofa", "merrill lynch"),
+    "BNY": ("bank of new york mellon", "bny mellon"),
+    "JPM": ("jpmorgan", "jp morgan", "jpmorgan chase"),
+    "COST": ("costco", "costco wholesale"),
+    "CRM": ("salesforce", "salesforce inc"),
+    "CVX": ("chevron", "chevron corp", "chevron corporation"),
+    "DIS": ("disney", "walt disney"),
+    "AAL": ("american airlines",),
     "BULL": ("webull", "webull corp", "webull corporation"),
     "BYDDY": ("byd", "byd co", "byd company", "byd co ltd", "byd company limited"),
     "PETR4": ("petrobras", "petróleo brasileiro"),
     "PETR3": ("petrobras", "petróleo brasileiro"),
     "VALE3": ("vale", "vale s.a", "vale sa"),
     "ITUB4": ("itau", "itaú", "itau unibanco", "itaú unibanco"),
+    "BBDC4": ("bradesco", "banco bradesco"),
     "BBAS3": ("banco do brasil",),
+    "SANB11": ("santander brasil", "banco santander"),
+    "BPAC11": ("btg pactual",),
     "BTCUSD": ("bitcoin", "btc"),
     "ETHUSD": ("ethereum", "ether", "eth"),
 }
@@ -2007,6 +2028,18 @@ def build_symbol_news_with_report(
         output.append(item)
         if len(output) >= limit:
             break
+
+    # _priority_key decides WHICH stories make the cut (editorial value); the feed itself
+    # must be chronological, newest first, and must not inherit the provider's order.
+    # published_at is always _to_iso() UTC, so the string sort is the chronological sort;
+    # items without a source publication time sort last instead of masquerading as new.
+    output.sort(
+        key=lambda item: (
+            item.get("published_at") or "",
+            float(item.get("ranking_score", 0.0) or 0.0),
+        ),
+        reverse=True,
+    )
 
     report_status = "ok" if output else "empty"
     reason = None if output else (reason_counts.most_common(1)[0][0] if reason_counts else "filtered_by_quality")

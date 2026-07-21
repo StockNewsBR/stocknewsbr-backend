@@ -23,6 +23,7 @@ from app.cache.market_data_cache import get_market_data
 from app.cache.snapshot_cache import get_snapshot_info, get_snapshot_signals
 from app.config import SYMBOLS
 from app.dependencies import require_active_plan
+from app.engine.indicators.vector_indicator_engine import compute_latest_rsi
 from app.services.score_display import attach_master_score_display_contract, normalize_master_score_display
 from app.services.snapshot_contract import build_decision_envelope, coerce_data_quality, data_quality_label, data_quality_score, is_actionable_snapshot_row
 from app.services.symbol_registry import canonical_symbol
@@ -334,21 +335,6 @@ def _is_actionable_snapshot_row(row: dict) -> bool:
     return True
 
 
-def calculate_rsi(series: pd.Series, period: int = 14):
-    delta = series.diff()
-
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-
-    avg_gain = gain.rolling(period).mean()
-    avg_loss = loss.rolling(period).mean()
-
-    rs = avg_gain / avg_loss.replace(0, 1e-9)
-    rsi = 100 - (100 / (1 + rs))
-
-    return rsi
-
-
 def calculate_ema(series: pd.Series, period: int):
     return series.ewm(span=period, adjust=False).mean()
 
@@ -370,12 +356,13 @@ def calculate_score(symbol: str, df: pd.DataFrame):
 
         close = df["Close"]
 
-        rsi_series = calculate_rsi(close)
+        # Single source of truth: the canonical Wilder/RMA RSI (TradingView
+        # parity). ranking used to carry its own Cutler copy that drifted up to
+        # ~15 RSI points from the engine on the same candles.
+        rsi = compute_latest_rsi(close)
 
-        if rsi_series.dropna().empty:
+        if rsi is None:
             return None
-
-        rsi = float(rsi_series.dropna().iloc[-1])
 
         macd, macd_signal = calculate_macd(close)
 

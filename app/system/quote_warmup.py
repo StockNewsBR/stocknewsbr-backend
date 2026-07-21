@@ -5,11 +5,12 @@ import os
 import re
 import threading
 import time
+from collections import deque
 from typing import Iterable
 
 from app.market.market_data_loader import get_chart_data, get_price_snapshots
 from app.market.universe_engine_v3 import B3_UNIVERSE, BDR_UNIVERSE, CRYPTO_UNIVERSE, ETF_UNIVERSE, US_UNIVERSE
-from app.market.universe_registry import universe_registry
+from app.market.universe_registry import INDEX_PROVIDER_SYMBOLS, universe_registry
 from app.services.symbol_sanitizer import (
     is_symbol_on_cooldown,
     mark_symbol_cooldown,
@@ -117,7 +118,11 @@ _PUBLIC_CHART_PRIORITY = [
 
 
 def _clean_symbol(symbol: str) -> str:
-    sanitized = sanitize_market_symbol(symbol)
+    # The loader accepts provider symbols (^BVSP, BRL=X, NQ=F) everywhere, so warmup
+    # must not be stricter than the thing it feeds: rejecting them here marked them
+    # "invalid_symbol" and guaranteed their cache stayed cold forever. Plain form is
+    # still preferred, so nothing that already resolved changes shape.
+    sanitized = sanitize_market_symbol(symbol) or sanitize_market_symbol(symbol, allow_provider_symbols=True)
     if not sanitized and symbol:
         mark_symbol_cooldown(symbol, "invalid_symbol")
     return sanitized or ""
@@ -185,12 +190,14 @@ def _mark_chart_cooldown(symbol: str, interval: str, seconds: int = DEFAULT_CHAR
 
 
 def public_quote_symbols(limit: int | None = None) -> list[str]:
+    # Priority + watchlist (canonical public universes) are website-visible, so the
+    # warmup limit must never be able to cut them: a cut symbol renders "sem
+    # snapshot" forever because nothing else ever populates its quote cache.
+    # Ordering alone is not enough — it only holds while the total fits the limit.
+    guaranteed = _dedupe([*INDEX_PROVIDER_SYMBOLS, *_PUBLIC_QUOTE_PRIORITY, *universe_registry.get_all_assets()])
     symbols = _dedupe(
         [
-            *_PUBLIC_QUOTE_PRIORITY,
-            # Watchlist (canonical public universes) right after priority so the
-            # warmup limit can never cut website-visible symbols (e.g. AVGO).
-            *universe_registry.get_all_assets(),
+            *guaranteed,
             *B3_UNIVERSE,
             *BDR_UNIVERSE,
             *US_UNIVERSE,
@@ -200,7 +207,7 @@ def public_quote_symbols(limit: int | None = None) -> list[str]:
     )
     if limit is None:
         return symbols
-    return symbols[: max(0, int(limit))]
+    return symbols[: max(len(guaranteed), int(limit))]
 
 
 def _chart_symbol_candidates(symbol: str) -> list[str]:
@@ -222,10 +229,13 @@ def _chart_symbol_candidates(symbol: str) -> list[str]:
 
 def warm_charts_once(symbols: Iterable[str] | None = None, *, limit: int | None = DEFAULT_CHART_WARMUP_LIMIT) -> dict:
     start = time.perf_counter()
-    target_symbols = _dedupe(symbols or _PUBLIC_CHART_PRIORITY)
+    # Index sparklines are served cache-only, so the indices must survive the limit
+    # the same way the quote universe does — a cut index renders an empty sparkline.
+    guaranteed = [] if symbols else _dedupe(INDEX_PROVIDER_SYMBOLS)
+    target_symbols = _dedupe([*guaranteed, *(symbols or _PUBLIC_CHART_PRIORITY)])
     target_intervals = DEFAULT_CHART_WARMUP_INTERVALS or ["1D"]
     if limit is not None:
-        target_symbols = target_symbols[: max(0, int(limit))]
+        target_symbols = target_symbols[: max(len(guaranteed), int(limit))]
 
     resolved = 0
     failed = 0
@@ -318,6 +328,41 @@ def request_quote_warmup(
         name=f"stocknewsbr-quote-request-{target_symbols[0]}",
         daemon=True,
     ).start()
+
+
+# On-demand enqueues are driven by whatever a user types, so they need a ceiling the
+# scheduled warmup does not: per-symbol spacing plus a global window cap. Symbols the
+# provider does not know get a cooldown by warm_quotes_once, so they are tried once.
+_ONDEMAND_SYMBOL_INTERVAL_SECONDS = max(15, int(os.getenv("QUOTE_ONDEMAND_SYMBOL_INTERVAL_SECONDS", "30")))
+_ONDEMAND_WINDOW_SECONDS = 60.0
+_ONDEMAND_WINDOW_MAX = max(1, int(os.getenv("QUOTE_ONDEMAND_WINDOW_MAX", "10")))
+_ondemand_last_at: dict[str, float] = {}
+_ondemand_recent: deque[float] = deque()
+
+
+def request_on_demand_quote_warmup(symbol: str) -> bool:
+    """Cache miss for a valid symbol outside the warmup universe -> background fetch.
+
+    Public routes are cache-only, so a symbol nothing warms (ADP, any search hit)
+    reports "sem cotação" forever. Returns True when an enqueue actually happened.
+    """
+    ticker = _clean_symbol(symbol)
+    if not ticker or _is_quote_on_cooldown(ticker):
+        return False
+
+    now = time.time()
+    with _lock:
+        if now - float(_ondemand_last_at.get(ticker) or 0.0) < _ONDEMAND_SYMBOL_INTERVAL_SECONDS:
+            return False
+        while _ondemand_recent and now - _ondemand_recent[0] > _ONDEMAND_WINDOW_SECONDS:
+            _ondemand_recent.popleft()
+        if len(_ondemand_recent) >= _ONDEMAND_WINDOW_MAX:
+            return False
+        _ondemand_last_at[ticker] = now
+        _ondemand_recent.append(now)
+
+    request_quote_warmup(ticker)
+    return True
 
 
 def _warm_requested_quotes(symbols: list[str], key: str, chunk_size: int) -> None:

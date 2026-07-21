@@ -8,6 +8,7 @@ from app.api.routes_public_market_live import (
 )
 from app.dependencies import require_channel_access
 from app.services.public_ai_tools_service import build_public_ai_tools_payload
+from app.services.public_market_data_service import schedule_quote_warmup
 from app.services.public_news_service import build_public_news_payload
 from app.services.quote_service import (
     empty_quote_payload,
@@ -131,6 +132,8 @@ def public_quote(symbol: str, refresh: str | None = None):
         normalized_payload = {**payload, "symbol": response_symbol}
         if _has_quote_value(payload):
             return with_quote_diagnostics(normalized_payload) or normalized_payload
+    # Cache miss on a valid symbol: enqueue a background warmup (see _resolve_cached_quote).
+    schedule_quote_warmup(query_symbol)
     return empty_quote_payload(response_symbol)
 
 

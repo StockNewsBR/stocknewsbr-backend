@@ -191,8 +191,10 @@ def _payload_from_row(display_symbol: str, row: dict[str, Any], source: str) -> 
 
     status = classify_quote_payload(row)
     timestamp = (
-        row.get("market_data_updated_at")
-        or row.get("quote_time")
+        # The producer's own quote timestamp outranks cache bookkeeping: it is what
+        # renders "As of 3:13:47 PM GMT-3".
+        row.get("quote_time")
+        or row.get("market_data_updated_at")
         or row.get("provider_timestamp")
         or row.get("timestamp")
         or row.get("updated_at")
@@ -212,6 +214,10 @@ def _payload_from_row(display_symbol: str, row: dict[str, Any], source: str) -> 
         "rel_volume": row.get("rel_volume") or row.get("rvol"),
         "high": row.get("high"),
         "low": row.get("low"),
+        # Baseline + market state; null when the producer had no provider field
+        # for it (never inferred).
+        "previous_close": row.get("previous_close"),
+        "market_state": row.get("market_state"),
         "source": source,
         "quote_status": status,
         "reference_symbol": row.get("reference_symbol"),
@@ -317,6 +323,9 @@ def empty_quote_payload(symbol: str, *, quote_status: str = "empty", reason: str
         "volume": None,
         "high": None,
         "low": None,
+        "previous_close": None,
+        "quote_time": None,
+        "market_state": None,
         "source": source,
         "quote_status": status,
         "provider_status": reason or status,

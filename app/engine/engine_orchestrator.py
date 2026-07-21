@@ -241,6 +241,8 @@ def _enrich_row_with_market_data(row, frame):
     rel_volume = (volume / avg_volume) if avg_volume and avg_volume > 0 else 0.0
     change_pct = ((price - prev_close) / prev_close * 100.0) if prev_close else 0.0
 
+    frame_attrs = getattr(data, "attrs", {})
+    market_source = frame_attrs.get("market_data_source", MARKET_POOL_SOURCE)
     market_fields = {
         "price": round(price, 6),
         "close": round(price, 6),
@@ -250,8 +252,8 @@ def _enrich_row_with_market_data(row, frame):
         "rel_volume": round(rel_volume, 4),
         "change_pct": round(change_pct, 4),
         "data_quality": "priced",
-        "price_source": MARKET_POOL_SOURCE,
-        "volume_source": MARKET_POOL_SOURCE,
+        "price_source": market_source,
+        "volume_source": market_source,
         "market_data_points": int(len(data)),
         "market_data_updated_at": _market_stamp(getattr(latest, "name", None)),
     }

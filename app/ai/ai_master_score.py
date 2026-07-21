@@ -4,6 +4,7 @@ from typing import Any, Dict, Iterable, List
 
 from app.ai.ai_common import build_payload, clamp, safe_float, top_n
 from app.ai.institutional_auditor import AUDIT_APPROVED, AUDIT_BLOCKED, AUDIT_CAUTION
+from app.services.symbol_registry import canonical_symbol
 from app.services.snapshot_contract import (
     BULLISH_ACTIONS,
     BEARISH_ACTIONS,
@@ -20,6 +21,10 @@ MASTER_BEARISH = "BEARISH"
 MASTER_NEUTRAL = "NEUTRAL"
 MASTER_DIRECTIONS = {MASTER_BULLISH, MASTER_BEARISH, MASTER_NEUTRAL}
 MASTER_STATUSES = {AUDIT_APPROVED, AUDIT_CAUTION, AUDIT_BLOCKED}
+
+# Mission 68 T2: confidence bands. One number, one word, no independent producer.
+CONFIDENCE_HIGH_PCT = 65.0
+CONFIDENCE_LOW_PCT = 35.0
 
 OFFICIAL_AI_TOOLS = (
     "flow",
@@ -69,6 +74,7 @@ MASTER_CONTRACT_FIELDS = (
     "master_direction",
     "master_conviction",
     "master_confidence",
+    "master_confidence_pct",
     "master_summary",
     "master_reasoning",
     "master_risk",
@@ -82,7 +88,8 @@ MASTER_CONTRACT_FIELDS = (
 
 
 def _ticker(row: Dict[str, Any]) -> str:
-    return str(row.get("ticker") or row.get("symbol") or "").upper().strip()
+    value = row.get("ticker") or row.get("symbol") or ""
+    return canonical_symbol(value) or str(value).upper().strip()
 
 
 def _state(value: Any) -> str:
@@ -378,9 +385,10 @@ def _conviction(status: str, direction: str, consensus: Dict[str, Any]) -> str:
     return "Baixa"
 
 
-def _confidence(status: str, row: Dict[str, Any], consensus: Dict[str, Any]) -> str:
+def confidence_pct(status: str, row: Dict[str, Any], consensus: Dict[str, Any]) -> float:
+    """The confidence NUMBER (0..100). The only place it is computed."""
     if status == AUDIT_BLOCKED:
-        return "Baixa"
+        return 0.0
     quality = data_quality_score(coerce_data_quality(row))
     audit = _audit_score(row)
     ratio = float(consensus.get("ratio", 0.0) or 0.0) * 100.0
@@ -388,9 +396,18 @@ def _confidence(status: str, row: Dict[str, Any], consensus: Dict[str, Any]) -> 
     value = quality * 0.38 + audit * 0.27 + ratio * 0.25 + max(0.0, 100.0 - conflict_penalty) * 0.10
     if status == AUDIT_CAUTION:
         value = min(value, 74.0)
-    if value >= 78:
+    return round(clamp(value), 1)
+
+
+def confidence_label(value: Any) -> str:
+    """Mission 68 T2: the word ALWAYS derives from the number the user sees.
+
+    Bands: < 35 Baixa | 35..65 Média | > 65 Alta.
+    """
+    pct = safe_float(value, 0.0)
+    if pct > CONFIDENCE_HIGH_PCT:
         return "Alta"
-    if value >= 55:
+    if pct >= CONFIDENCE_LOW_PCT:
         return "Média"
     return "Baixa"
 
@@ -570,7 +587,8 @@ def _score_row(
     direction = MASTER_NEUTRAL if status == AUDIT_BLOCKED else _choose_direction(directions, tool_rows)
     consensus = _consensus(directions, direction)
     conviction = _conviction(status, direction, consensus)
-    confidence = _confidence(status, row, consensus)
+    confidence_value = confidence_pct(status, row, consensus)
+    confidence = confidence_label(confidence_value)
     score = _master_score_value(
         status=status,
         direction=direction,
@@ -607,6 +625,7 @@ def _score_row(
         "master_status": status,
         "master_conviction": conviction,
         "master_confidence": confidence,
+        "master_confidence_pct": confidence_value,
         "master_risk": risk,
         "consensus": consensus,
         "component_directions": directions,
@@ -646,6 +665,7 @@ def _score_row(
             "master_direction": direction,
             "master_conviction": conviction,
             "master_confidence": confidence,
+            "master_confidence_pct": confidence_value,
             "master_summary": summary,
             "master_reasoning": reasoning,
             "master_risk": risk,

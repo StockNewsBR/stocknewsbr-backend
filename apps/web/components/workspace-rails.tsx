@@ -70,6 +70,7 @@ type LeftRailProps = {
   watchlistContent: ReactNode;
   institutionalSections: WorkspaceHelpSection[];
   onOpenInstitutionalSection: (id: string) => void;
+  activeInstitutionalSectionId?: string | null;
 };
 
 export function WorkspaceLeftRail({
@@ -94,6 +95,7 @@ export function WorkspaceLeftRail({
   watchlistContent,
   institutionalSections,
   onOpenInstitutionalSection,
+  activeInstitutionalSectionId,
 }: LeftRailProps) {
   const isEnglish = locale === "en-US";
   const categoryLabels: Record<WatchCategory, string> = {
@@ -181,7 +183,7 @@ export function WorkspaceLeftRail({
           <div className="snbr-watch-toolbar snbr-watch-toolbar-inline">
             <div>
               <strong>{isEnglish ? "My Active List" : "Minha Lista Ativa"}</strong>
-              <p>{isEnglish ? "Preloaded assets by category + any asset added from search." : "Ativos preloaded por categoria + qualquer ativo adicionado pela busca."}</p>
+              <p>{isEnglish ? "Preloaded assets by category + any asset added from search." : "Ativos pré-carregados por categoria + qualquer ativo adicionado pela busca."}</p>
             </div>
             <span className="snbr-chip">{activeCountLabel}</span>
           </div>
@@ -203,9 +205,14 @@ export function WorkspaceLeftRail({
         </div>
 
         <div className="snbr-left-footer">
-          <strong>{isEnglish ? "Trader Help" : "Ajuda ao Trader"}</strong>
-          {institutionalSections.slice(0, 8).map((section) => (
-            <button key={section.id} onClick={() => section.id && onOpenInstitutionalSection(section.id)} type="button">
+          <strong>{isEnglish ? "Trader Educational Help" : "Ajuda Educacional para o Trader"}</strong>
+          {institutionalSections.map((section) => (
+            <button
+              key={section.id}
+              className={section.id === activeInstitutionalSectionId ? "active" : undefined}
+              onClick={() => section.id && onOpenInstitutionalSection(section.id)}
+              type="button"
+            >
               {section.label || section.title}
             </button>
           ))}

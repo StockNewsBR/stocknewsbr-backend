@@ -436,6 +436,43 @@ class RankingServiceTests(unittest.TestCase):
         fetch_market_data.assert_not_called()
         self.assertEqual(results, [])
 
+    def test_ranking_rsi_is_the_canonical_wilder_rsi(self):
+        """ranking must not grow a second RSI implementation again.
+
+        It carried a private Cutler copy (rolling mean) that drifted up to
+        ~15 RSI points from the engine on the same candles. Pin ranking's
+        published rsi to compute_rsi for a fixed series so any re-divergence
+        fails here instead of silently re-splitting the score bands.
+        """
+        import pandas as pd
+
+        from app.engine.indicators.vector_indicator_engine import compute_rsi
+
+        closes = [
+            44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.10, 45.42,
+            45.84, 46.08, 45.89, 46.03, 45.61, 46.28, 46.28, 46.00,
+            46.03, 46.41, 46.22, 45.64, 46.21, 46.25, 45.71, 46.45,
+            45.78, 45.35, 44.03, 44.18, 44.22, 44.57,
+        ]
+        frame = pd.DataFrame({"Close": closes, "Volume": [100] * len(closes)})
+
+        result = ranking.calculate_score("TST", frame)
+        expected = compute_rsi(pd.Series(closes, dtype="float64"))
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["rsi"], round(float(expected.iloc[-1]), 2))
+        # Pins the direction of the drift: the deleted Cutler copy read 40.9 here.
+        self.assertNotAlmostEqual(result["rsi"], 40.90, places=1)
+
+    def test_flat_series_yields_no_score_instead_of_scoring_as_oversold(self):
+        """A frozen window has no RSI. It must not publish 0 (= oversold, +25)."""
+        import pandas as pd
+
+        frame = pd.DataFrame({"Close": [10.0] * 30, "Volume": [100] * 30})
+
+        self.assertIsNone(ranking.calculate_score("FLAT", frame))
+
+
 
 if __name__ == "__main__":
     unittest.main()

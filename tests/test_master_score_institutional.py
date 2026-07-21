@@ -186,6 +186,36 @@ class InstitutionalMasterScoreTests(unittest.TestCase):
         self.assertEqual(master["master_risk"], "Alto")
         self.assertLess(master["master_score"], 80)
 
+    def test_provider_suffix_matches_canonical_flow_row(self):
+        row = _row("PETR4")
+        row["ticker"] = "PETR4.SA"
+        master = run_master_score(
+            [row],
+            ai_tools={"flow": [_tool("PETR4", "flow", 88, "institutional_buying", "fluxo comprador bull")]},
+        )[0]
+
+        self.assertEqual(master["ticker"], "PETR4")
+        self.assertEqual(master["master_components"]["flow"], 88)
+        self.assertIn("institutional_buying", master["master_reasoning"]["flow_reason"])
+
+    def test_zero_flow_score_is_a_valid_symbol_scoped_reading(self):
+        rows = [_row("PETR4"), _row("AAPL")]
+        rows[0]["ticker"] = "PETR4.SA"
+        tools = {
+            "flow": [
+                _tool("PETR4", "flow", 0, "distribution_risk", "distribuição confirmada"),
+                _tool("AAPL", "flow", 72, "institutional_interest", "buyer interest"),
+            ]
+        }
+
+        by_ticker = {row["ticker"]: row for row in run_master_score(rows, ai_tools=tools)}
+        petr4, aapl = by_ticker["PETR4"], by_ticker["AAPL"]
+
+        self.assertEqual(petr4["master_components"]["flow"], 0)
+        self.assertIn("distribution_risk", petr4["master_reasoning"]["flow_reason"])
+        self.assertEqual(aapl["master_components"]["flow"], 72)
+        self.assertNotIn("distribution_risk", aapl["master_reasoning"]["flow_reason"])
+
     def test_apply_master_score_blocks_unconfirmed_actionable_signal(self):
         neutral = run_master_score([_row()], ai_tools={"news": [_tool("PETR4", "news", 95, "news_available", "positive bull")]})[0]
         applied = apply_master_scores_by_ticker([_row()], [neutral])[0]

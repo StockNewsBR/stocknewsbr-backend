@@ -13,6 +13,17 @@ const aiTabs = [
   { id: "momentum", name: /Momento IA|Momentum AI/i },
   { id: "smart-money", name: /Smart|Dinheiro/i },
 ];
+const helpSections = [
+  { label: "1️⃣ Sobre a Empresa", id: "sobre-a-empresa", title: "Sobre a Empresa" },
+  { label: "2️⃣ Principais Módulos da Plataforma", id: "principais-modulos", title: "Principais Módulos da Plataforma" },
+  { label: "3️⃣ Glossário: Painel de Análise Estratégica", id: "glossario-painel-estrategico", title: "Glossário: Painel de Análise Estratégica" },
+  { label: "4️⃣ Glossário: Gráfico do Ativo", id: "glossario-grafico-ativo", title: "Glossário: Gráfico do Ativo" },
+  { label: "5️⃣ Glossário: Modos de Uso da Plataforma", id: "glossario-modos-plataforma", title: "Glossário: Modos de Uso da Plataforma" },
+  { label: "6️⃣ Guia Rápido StockNewsBR", id: "guia-rapido-stocknewsbr", title: "Guia Rápido StockNewsBR" },
+  { label: "7️⃣ Plataforma Web Trader Desk", id: "plataforma-web-trader-desk", title: "Plataforma Web Trader Desk" },
+  { label: "8️⃣ Aviso legal", id: "aviso-legal", title: "Aviso legal" },
+  { label: "9️⃣ Por que escolher StockNewsBR?", id: "por-que-stocknewsbr", title: "Por que escolher StockNewsBR?" },
+];
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -146,7 +157,7 @@ try {
   await page.getByRole("tab", { name: /Help/i }).click();
   await page.waitForTimeout(700);
   text = await pageText(page);
-  assert(text.includes("Trader Help") && text.includes("About the company"), "USA deve traduzir Ajuda institucional");
+  assert(text.includes("Trader Educational Help") && text.includes("About the Company"), "USA deve traduzir Ajuda institucional");
   assert(!text.includes("Sobre a empresa") && !text.includes("Descrição do produto"), "USA nao deve manter Ajuda institucional em PT");
 
   await page.getByRole("tab", { name: /AI Chart \/ Social/i }).click();
@@ -176,6 +187,17 @@ try {
 
   await page.goto(`${baseUrl}/panel/F`, { waitUntil: "domcontentloaded", timeout: 45_000 });
   await waitForPanel(page);
+  const helpMenu = page.locator(".snbr-left-footer");
+  assert(await helpMenu.getByText("Ajuda Educacional para o Trader", { exact: true }).count(), "rail must show the educational help title");
+  assert(
+    JSON.stringify(await helpMenu.locator("button").allTextContents()) === JSON.stringify(helpSections.map((section) => section.label)),
+    "rail must show the nine help sections in order",
+  );
+  for (const section of helpSections) {
+    await helpMenu.getByRole("button", { name: section.label, exact: true }).click();
+    await page.locator(`#${section.id}`).waitFor({ state: "visible", timeout: 10_000 });
+    assert(await page.locator(`#${section.id} h4`).getByText(section.title, { exact: false }).count(), `${section.label} must open its matching section`);
+  }
   const petrButton = page.getByRole("button", { name: /PETR4/ }).first();
   await petrButton.click();
   await page.waitForTimeout(900);

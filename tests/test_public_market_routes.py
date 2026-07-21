@@ -3,7 +3,10 @@ from unittest.mock import patch
 
 from app.api import routes_public_market
 from app.api import routes_public_market_live
+from app.market import market_data_loader
+from app.services import public_market_data_service
 from app.services import quote_service
+from app.system import quote_warmup
 from app.services.quote_service import classify_quote_payload, empty_quote_payload, is_usable_quote_payload
 
 
@@ -385,6 +388,62 @@ class PublicMarketRouteTests(unittest.TestCase):
         self.assertEqual(payload["status"], "empty")
         self.assertEqual(payload["ohlc"], [])
         self.assertEqual(payload["summary"]["provider_status"], "empty_chart")
+
+    def test_public_indices_returns_six_indices_in_contract_shape(self):
+        closes = [{"close": float(i), "time": f"2026-07-{i:02d}T00:00:00"} for i in range(1, 71)]
+        with patch.object(
+            public_market_data_service,
+            "cached_price_payloads",
+            return_value={"^BVSP": {"symbol": "^BVSP", "price": 173714.08, "change": -111.19, "change_pct": -0.06}},
+        ), patch.object(
+            public_market_data_service, "load_public_chart_rows", return_value=closes
+        ):
+            payload = routes_public_market_live.public_market_indices()
+
+        self.assertEqual(
+            [item["symbol"] for item in payload["items"]],
+            ["IBOV", "SP500", "NASDAQ", "DOW", "RUSSELL", "USDBRL"],
+        )
+        ibov = payload["items"][0]
+        self.assertEqual(ibov["display_name"], "Ibovespa")
+        self.assertEqual(ibov["price"], 173714.08)
+        self.assertEqual(ibov["change"], -111.19)
+        self.assertEqual(ibov["change_pct"], -0.06)
+        self.assertEqual(ibov["currency"], "BRL")
+        self.assertEqual(ibov["status"], "valid")
+        # <= 60 recent closes, oldest first
+        self.assertEqual(len(ibov["spark"]), 60)
+        self.assertEqual(ibov["spark"][0], 11.0)
+        self.assertEqual(ibov["spark"][-1], 70.0)
+        # USDBRL is last; Russell 2000 sits at index 4 and is a USD index.
+        self.assertEqual(payload["items"][4]["currency"], "USD")
+        self.assertEqual(payload["items"][-1]["currency"], "BRL")
+
+    def test_public_quote_cache_miss_enqueues_warmup_without_inline_provider_call(self):
+        with quote_warmup._lock:
+            quote_warmup._ondemand_last_at.clear()
+            quote_warmup._ondemand_recent.clear()
+
+        with patch.object(quote_warmup, "_is_quote_on_cooldown", return_value=False), patch.object(
+            quote_warmup, "request_quote_warmup"
+        ) as enqueue, patch.object(
+            market_data_loader, "get_price_snapshots"
+        ) as provider, patch.object(
+            routes_public_market_live, "cached_price_payloads", return_value={}
+        ), patch.object(
+            routes_public_market_live, "get_cached_quote_payload", return_value=None
+        ):
+            payload = routes_public_market_live.public_quotes(symbols="ADP")
+
+            enqueue.assert_called_once_with("ADP")
+            provider.assert_not_called()
+
+            # A typing user must not hammer the provider: the repeat is suppressed.
+            routes_public_market_live.public_quotes(symbols="ADP")
+            self.assertEqual(enqueue.call_count, 1)
+
+        self.assertEqual(payload["items"][0]["symbol"], "ADP")
+        self.assertIsNone(payload["items"][0]["price"])
 
     def test_public_insight_empty_is_explicit_not_silent_summary(self):
         with patch.object(routes_public_market_live, "_load_chart_data_fast", return_value=[]):

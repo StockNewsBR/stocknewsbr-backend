@@ -101,8 +101,43 @@ assertIncludes(workspaceSections, "Neutra", "news neutral sentiment exists");
 assertIncludes(workspaceSections, "Baixa", "news bearish sentiment is localized in PT-BR");
 assertIncludes(types, "sentiment?: string | null", "news sentiment is typed");
 
-assertIncludes(workspaceShell, "FILOSOFIA OFICIAL", "official philosophy section is available in Trader Help");
-assertIncludes(workspaceShell, "filosofia-oficial", "official philosophy has a navigable section id");
+const helpMenuLabels = [
+  "1️⃣ Sobre a Empresa",
+  "2️⃣ Principais Módulos da Plataforma",
+  "3️⃣ Glossário: Painel de Análise Estratégica",
+  "4️⃣ Glossário: Gráfico do Ativo",
+  "5️⃣ Glossário: Modos de Uso da Plataforma",
+  "6️⃣ Guia Rápido StockNewsBR",
+  "7️⃣ Plataforma Web Trader Desk",
+  "8️⃣ Aviso legal",
+  "9️⃣ Por que escolher StockNewsBR?",
+];
+const helpSectionIds = [
+  "sobre-a-empresa",
+  "principais-modulos",
+  "glossario-painel-estrategico",
+  "glossario-grafico-ativo",
+  "glossario-modos-plataforma",
+  "guia-rapido-stocknewsbr",
+  "plataforma-web-trader-desk",
+  "aviso-legal",
+  "por-que-stocknewsbr",
+];
+let previousHelpLabelIndex = -1;
+for (const label of helpMenuLabels) {
+  const index = workspaceShell.indexOf(label);
+  if (index <= previousHelpLabelIndex) throw new Error(`Mission 28B help menu order regression: ${label}`);
+  previousHelpLabelIndex = index;
+}
+for (const id of helpSectionIds) assertIncludes(workspaceShell, `id: "${id}"`, `help section id ${id}`);
+assertIncludes(workspaceShell, "Ajuda Educacional para o Trader", "help panel uses its educational title");
+assertIncludes(workspaceRails, "institutionalSections.map", "left rail shows every help menu item");
+assertNotIncludes(workspaceRails, "slice(0, 8)", "left rail is no longer limited to eight help items");
+assertIncludes(workspaceSections, "<article id={section.id}", "selected help section keeps its anchor");
+assertIncludes(workspaceShell, "openInstitutionalSection(sectionId: string)", "help buttons retain their shared open handler");
+for (const obsolete of ["filosofia-oficial", "institucional-produto", "institucional-educacao", "FILOSOFIA OFICIAL", "Descrição do produto", "Educação financeira", "Ajuda ao Trader"]) {
+  assertNotIncludes(workspaceShell, obsolete, `obsolete help reference ${obsolete}`);
+}
 
 assertIncludes(scoreDisplay, "numeric > 10", "score display normalizes raw values above 10");
 assertIncludes(scoreDisplay, "master_score_raw", "score display preserves raw score separately");

@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from app.ai.ai_common import describe_state
 from app.cache.snapshot_cache import get_last_good_snapshot, get_snapshot
 from app.services.ai_alert_history_service import (
     AI_ALERT_MAX_ROWS_PER_TOOL,
@@ -89,6 +90,21 @@ def _is_displayable_row(row: dict[str, Any]) -> bool:
     )
 
 
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _detected_at(row: dict[str, Any]) -> datetime:
+    """Time the AI detected the finding, used to order rows most-recent-first."""
+    raw = str(row.get("detected_at") or row.get("found_at") or row.get("first_seen_at") or "").strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return _EPOCH
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def _snapshot_is_stale(snapshot: dict[str, Any], *, using_fallback: bool) -> bool:
     data_status = snapshot.get("data_status") if isinstance(snapshot.get("data_status"), dict) else {}
     source = str(snapshot.get("source") or snapshot.get("snapshot_source") or "").lower().strip()
@@ -130,6 +146,11 @@ def _scoped_tools(
             row = dict(raw_row)
             if row_symbol:
                 row.update({"ticker": row_symbol, "symbol": row_symbol, "canonical_symbol": row_symbol})
+            # Contract boundary: every row leaves with a machine key + human label
+            # + tone, recomputed from the catalog so snapshots built before this
+            # contract (or by any other engine) can never ship a raw English state.
+            row["state_key"] = row.get("state_key") or row.get("state")
+            row["state_label"], row["tone"] = describe_state(row["state_key"])
             actionable = bool(
                 not force_non_actionable
                 and row_symbol
@@ -146,6 +167,9 @@ def _scoped_tools(
             output[key].append(row)
             if len(output[key]) >= AI_ALERT_MAX_ROWS_PER_TOOL:
                 break
+        # Rows are selected by relevance (score) above, then presented
+        # most-recent-first. Stable sort keeps score order within equal times.
+        output[key].sort(key=_detected_at, reverse=True)
     return output, actionable_count
 
 

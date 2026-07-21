@@ -51,8 +51,14 @@ expect(
   "wait decision caps strong bias copy (coherence invariant)",
   /function reconcileStatsWithDecision/.test(shell)
     && /AGUARDAR\|WAIT/.test(shell)
-    && /Viés comprador \(aguardando confirmação\)/.test(shell)
-    && /Viés vendedor \(aguardando confirmação\)/.test(shell)
+    // The invariant is that a WAIT decision must DEMOTE "Alta/Baixa forte" to a
+    // plain directional bias — not that it must carry a specific suffix. The
+    // "(aguardando confirmação)" wording was dropped at the owner's request; the
+    // capping itself still has to be there.
+    && /Viés comprador/.test(shell)
+    && /Viés vendedor/.test(shell)
+    && !/Viés comprador forte/.test(shell)
+    && !/Viés vendedor forte/.test(shell)
     && /Preço abaixo do VWAP — força limitada\./.test(shell)
     && /favorece compra APÓS confirmação\./.test(shell)
     && /stats=\{coherentDisplayStats\}/.test(shell)
@@ -66,7 +72,17 @@ expect(
     && /RSI diário \(D1\)/.test(shell)
     && /institutionalRsiValue=\{chartTimeframeRsi\}/.test(shell)
     && /rsiTimeframeLabel=\{rsiTimeframeLabel\}/.test(shell)
-    && /RSI \$\{rsiTimeframeTag\}/.test(chart),
+    && /\$\{rsiTitle\}/.test(chart),
+);
+expect(
+  "RSI timeframe label is driven by rsi_metadata, never by the chart range button",
+  // The range button ("1D" = one day of 5m candles) is not a candle size. If the
+  // label is ever derived from chartInterval again, an intraday RSI ships as "D1".
+  /function rsiTimeframeTag\(/.test(shell)
+    && /candle_interval\s*\|\|\s*metadata\?\.timeframe/.test(shell)
+    && /rsiTimeframeLabel = rsiTimeframeTag\(chartRsiMetadata\)/.test(shell)
+    && !/rsiTimeframeLabel = chartInterval/.test(shell)
+    && /describeRsiValue\(panelRsiValue, appLocale, cardRsiTimeframeLabel\)/.test(shell),
 );
 
 const failed = checks.filter((check) => !check.ok);

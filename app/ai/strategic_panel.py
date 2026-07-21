@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import math
+import re
 import unicodedata
 from typing import Any, Dict, Iterable, List
 
+from app.ai.ai_master_score import confidence_label
 from app.ai.institutional_auditor import AUDIT_APPROVED, AUDIT_BLOCKED, AUDIT_CAUTION
 from app.services.snapshot_contract import (
     ACTIONABLE_SIGNALS,
@@ -47,6 +49,13 @@ CONCLUSION_CONFLICT = "CONFLICT"
 VALIDATION_VALID = "VALID"
 VALIDATION_NORMALIZED = "NORMALIZED"
 VALIDATION_REJECTED = "REJECTED"
+
+# Mission 68 T4: the single resolved state every user-facing field derives from.
+STATE_BUY = "COMPRA"
+STATE_SELL = "VENDA_SHORT"
+STATE_WAIT = "NEUTRO_AGUARDAR"
+RESOLVED_STATES = frozenset({STATE_BUY, STATE_SELL, STATE_WAIT})
+_STATE_DIRECTION = {STATE_BUY: "BULLISH", STATE_SELL: "BEARISH", STATE_WAIT: "NEUTRAL"}
 
 CANONICAL_ANALYSIS_DIRECTIONS = frozenset({"BULLISH", "BEARISH", "NEUTRAL"})
 CANONICAL_ANALYSIS_DECISIONS = frozenset(CANONICAL_DECISION_STATUSES)
@@ -366,16 +375,24 @@ def _has_other_confirmations(master_row: Dict[str, Any]) -> bool:
 
 def resolve_trade_geometry(master_row: Dict[str, Any], suggested_trade: str) -> Dict[str, Any]:
     """Fail-closed entry/target/invalidation geometry for actionable trades."""
+    side = "BUY" if suggested_trade in BULLISH_ACTIONS else "SELL" if suggested_trade in BEARISH_ACTIONS else None
     entry = _first_positive(master_row.get("price"), master_row.get("last_price"), master_row.get("close"))
+    # Without a side, support/resistance have no target/invalidation role — emit null, not the mirrored level.
+    structural_target = (
+        master_row.get("resistance") if side == "BUY" else master_row.get("support") if side == "SELL" else None
+    )
+    structural_invalidation = (
+        master_row.get("support") if side == "BUY" else master_row.get("resistance") if side == "SELL" else None
+    )
     target = _first_positive(
         master_row.get("target"), master_row.get("alvo"), master_row.get("target_price"),
-        master_row.get("resistance") if suggested_trade in BULLISH_ACTIONS else master_row.get("support"),
+        structural_target,
         master_row.get("liquidity_target"),
     )
     invalidation = _first_positive(
         master_row.get("invalidation_price"), master_row.get("invalidacao"),
         master_row.get("stop"), master_row.get("stop_loss"),
-        master_row.get("support") if suggested_trade in BULLISH_ACTIONS else master_row.get("resistance"),
+        structural_invalidation,
     )
     geometry: Dict[str, Any] = {
         "entrada_referencia": round(entry, 2) if entry is not None else None,
@@ -389,7 +406,6 @@ def resolve_trade_geometry(master_row: Dict[str, Any], suggested_trade: str) -> 
         "blocked": False,
         "block_reasons": [],
     }
-    side = "BUY" if suggested_trade in BULLISH_ACTIONS else "SELL" if suggested_trade in BEARISH_ACTIONS else None
     if side is None or entry is None or target is None:
         return geometry
 
@@ -423,14 +439,151 @@ def resolve_trade_geometry(master_row: Dict[str, Any], suggested_trade: str) -> 
     return geometry
 
 
+# Mission 68 T3: NÍVEIS OPERACIONAIS carries PRICES, not loose phrases.
+# Render order is exactly this tuple; every key is always present.
+OPERATIONAL_LEVEL_KEYS = ("entrada_referencia", "alvo", "invalidacao", "suporte", "resistencia")
+_OPERATIONAL_LEVEL_LABELS = {
+    "entrada_referencia": "Entrada de referência",
+    "alvo": "Alvo",
+    "invalidacao": "Invalidação",
+    "suporte": "Suporte",
+    "resistencia": "Resistência",
+}
+
+
+def _sentence(value: Any) -> str:
+    """'perda da VWAP' -> 'Perda da VWAP.' so a phrase reads as a reason, not a bullet."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text[0].upper() + text[1:]
+    return text if text[-1] in ".!?;" else text + "."
+
+
+def build_operational_levels(
+    master_row: Dict[str, Any],
+    geometry: Dict[str, Any],
+    invalidation_reason: str = "",
+) -> Dict[str, Dict[str, Any]]:
+    """Price levels with a short plain-language reason. Unknown => price AND reason null.
+
+    A level the panel cannot price says nothing at all: emitting the bare phrase is
+    exactly the "frases jogadas" the owner could not read.
+    """
+    entry = geometry.get("entrada_referencia")
+    target = geometry.get("alvo")
+    invalidation = geometry.get("invalidacao")
+    support = _first_positive(master_row.get("support"), master_row.get("suporte"))
+    resistance = _first_positive(master_row.get("resistance"), master_row.get("resistencia"))
+
+    potential = geometry.get("potencial_pct")
+    risk_pct = geometry.get("risco_pct")
+    reasons = {
+        "entrada_referencia": "Preço de referência para montar a posição.",
+        "alvo": (
+            f"Onde realizar: {potential:+.2f}% a partir da entrada.".replace(".", ",", 1)
+            if isinstance(potential, (int, float))
+            else "Onde realizar a posição."
+        ),
+        "invalidacao": (
+            _sentence(invalidation_reason) or "Nível que derruba a tese; sair se perdido."
+        ) + (f" Risco de {risk_pct:.2f}%.".replace(".", ",", 1) if isinstance(risk_pct, (int, float)) else ""),
+        "suporte": "Piso da estrutura defendida pelos compradores.",
+        "resistencia": "Teto da estrutura defendida pelos vendedores.",
+    }
+    prices = {
+        "entrada_referencia": entry,
+        "alvo": target,
+        "invalidacao": invalidation,
+        "suporte": round(support, 2) if support is not None else None,
+        "resistencia": round(resistance, 2) if resistance is not None else None,
+    }
+    return {
+        key: {
+            "label": _OPERATIONAL_LEVEL_LABELS[key],
+            "price": prices[key],
+            "reason": reasons[key] if prices[key] is not None else None,
+        }
+        for key in OPERATIONAL_LEVEL_KEYS
+    }
+
+
 def _format_brl(value: float) -> str:
     return f"R${value:,.2f}".replace(",", "@").replace(".", ",").replace("@", ".")
 
 
-def _analysis_token(value: Any) -> str:
+def _deaccent(value: Any) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
-    text = "".join(char for char in text if not unicodedata.combining(char))
-    return "_".join(text.upper().strip().replace("-", " ").split())
+    return "".join(char for char in text if not unicodedata.combining(char))
+
+
+def _analysis_token(value: Any) -> str:
+    return "_".join(_deaccent(value).upper().strip().replace("-", " ").split())
+
+
+# Mission 68 T2/T1: copy that must disappear when the number behind it is unknown.
+_RSI_COPY_RE = re.compile(r"\b(rsi|sobrevend\w*|sobrecompr\w*|oversold|overbought)\b", re.IGNORECASE)
+_LEVEL_COPY_RE = re.compile(
+    r"\b(invalidac\w*|suporte\w*|resistenc\w*|alvo\w*|target\w*|stop\w*|entrada\w*|rompimento\w*)\b",
+    re.IGNORECASE,
+)
+_NUMBER_RE = re.compile(r"\d[\d.,]*")
+# T4: an active directional thesis needs a stance, a side and an "it is on" word.
+_THESIS_RE = re.compile(r"\b(tese|vies|leitura|postura|posicao|cenario|setup)\b", re.IGNORECASE)
+_DIRECTIONAL_RE = re.compile(r"\b(vendedor\w*|comprador\w*|baixista|altista|bearish|bullish)\b", re.IGNORECASE)
+_ACTIVE_RE = re.compile(r"\b(ativ\w*|confirmad\w*|vigente|dominante|em curso|valid\w*)\b", re.IGNORECASE)
+
+
+def _has_zero_number(text: str) -> bool:
+    """True when the text quotes a zero level (0, 0,00, R$0.00) — not 105.00 or 0.5."""
+    for match in _NUMBER_RE.finditer(text):
+        digits = match.group(0).replace(".", "").replace(",", "")
+        if digits and set(digits) == {"0"}:
+            return True
+    return False
+
+
+def _asserts_active_thesis(plain: str) -> bool:
+    return bool(_THESIS_RE.search(plain) and _DIRECTIONAL_RE.search(plain) and _ACTIVE_RE.search(plain))
+
+
+def _resolved_rsi(master_row: Dict[str, Any]) -> float | None:
+    """RSI only when it is real. 0.0 is the fabricated 'missing' value, never a reading."""
+    metrics = master_row.get("metrics") if isinstance(master_row.get("metrics"), dict) else {}
+    for source in (master_row, metrics):
+        for key in ("rsi", "rsi_d1", "rsi_value"):
+            value = _safe_float(source.get(key), default=math.nan)
+            if math.isfinite(value) and 0.0 < value <= 100.0:
+                return round(value, 2)
+    return None
+
+
+def _scrub_text(value: Any, *, drop_levels: bool, drop_rsi: bool, drop_active_thesis: bool = False) -> str:
+    """Drop clauses the resolved state cannot back: unknown RSI, unknown/zero level, stale thesis."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    kept: List[str] = []
+    for part in re.split(r"(?<=[.;!?])\s+", text):
+        plain = _deaccent(part)
+        if drop_rsi and _RSI_COPY_RE.search(plain):
+            continue
+        if _LEVEL_COPY_RE.search(plain) and (drop_levels or _has_zero_number(plain)):
+            continue
+        if drop_active_thesis and _asserts_active_thesis(plain):
+            continue
+        kept.append(part)
+    return " ".join(kept).strip()
+
+
+def _resolve_state(suggested_trade: str, action: str) -> str:
+    if action in {ACTION_NO_TRADE, ACTION_WAIT} or suggested_trade not in ACTIONABLE_SIGNALS:
+        return STATE_WAIT
+    if suggested_trade in BULLISH_ACTIONS:
+        return STATE_BUY
+    if suggested_trade in BEARISH_ACTIONS:
+        return STATE_SELL
+    return STATE_WAIT
 
 
 def _analysis_value(value: Any, aliases: Dict[str, str], fallback: str) -> str:
@@ -519,7 +672,12 @@ def build_strategic_panel(master_row: Dict[str, Any], risk_row: Dict[str, Any] |
     master_status = _normalize_status(master_row.get("master_status"))
     audit_status = _normalize_status(master_row.get("audit_status") or master_row.get("auditor_status"), fallback=master_status)
     conviction = str(master_row.get("master_conviction") or "Baixa").strip() or "Baixa"
-    confidence = str(master_row.get("master_confidence") or "Baixa").strip() or "Baixa"
+    # T2: the panel never inherits a confidence WORD. It resolves the number and
+    # derives the word from it, so 8% can never read "Alta".
+    raw_confidence_pct = _safe_float(master_row.get("master_confidence_pct"), default=math.nan)
+    if not math.isfinite(raw_confidence_pct):
+        raw_confidence_pct = max(0.0, min(score, 100.0))
+    confidence = confidence_label(raw_confidence_pct)
     audit_summary = str(master_row.get("audit_summary") or master_row.get("auditor_summary") or master_row.get("master_summary") or "").strip()
     risk = _risk_from_risk_ia(master_row, risk_row)
     risk_level = str(risk.get("level") or "Moderado")
@@ -580,16 +738,58 @@ def build_strategic_panel(master_row: Dict[str, Any], risk_row: Dict[str, Any] |
     capped_confidence = geometry_blocks or flow_without_reading or (
         geometry["evaluated"] and (geometry["reward_risk"] is None or geometry["reward_risk"] < _MIN_REWARD_RISK)
     )
-    confidence_pct = max(0.0, min(score, 100.0))
+    confidence_pct = round(max(0.0, min(raw_confidence_pct, 100.0)), 1)
     if capped_confidence:
         confidence_pct = min(confidence_pct, _GEOMETRY_CONFIDENCE_CAP)
-        if confidence == "Alta":
-            confidence = "Média"
+    # T2: re-derive the word from the FINAL number. No independent demotion rule.
+    confidence = confidence_label(confidence_pct)
 
     no_trade_now = action == ACTION_NO_TRADE
-    why = _why_items(master_row, direction, risk_level)
-    summary = _summary_from_items(master_row, why, audit_status, risk_level)
+
+    # Mission 68 T4: one resolved state feeds bias, direção, conclusão and every narrative below.
+    resolved_state = _resolve_state(canonical_analysis["suggested_trade"], action)
+    resolved_direction = _STATE_DIRECTION[resolved_state]
+    canonical_analysis["resolved_state"] = resolved_state
+    canonical_analysis["bias"] = resolved_direction
+
+    # Mission 68 T1/T2: unknown level or RSI => the copy that quotes it never ships.
+    rsi = _resolved_rsi(master_row)
+    drop_levels = all(
+        geometry[key] is None for key in ("entrada_referencia", "alvo", "invalidacao", "liquidez_alvo")
+    )
+    drop_rsi = rsi is None
+
+    def _scrub(value: Any) -> str:
+        return _scrub_text(
+            value,
+            drop_levels=drop_levels,
+            drop_rsi=drop_rsi,
+            drop_active_thesis=resolved_state == STATE_WAIT,
+        )
+
+    why = []
+    for item in _why_items(master_row, resolved_direction, risk_level):
+        reason = _scrub(item.get("reason"))
+        if reason:
+            why.append({**item, "reason": reason})
+    summary = _scrub(_summary_from_items(master_row, why, audit_status, risk_level))
+    if not summary:
+        summary = f"Leitura estratégica sem contexto suficiente. Risco {risk_level.lower()}."
+    audit_summary = _scrub(audit_summary)
     no_trade_reasons = _no_trade_reasons(master_row) if no_trade_now else []
+
+    # T3: the invalidation phrases stop being standalone bullets and become the
+    # REASON attached to the numeric invalidation level.
+    opinion_change_conditions = [
+        condition
+        for condition in (_scrub(item) for item in _listify(master_row.get("opinion_change_conditions")))
+        if condition
+    ]
+    operational_levels = build_operational_levels(
+        master_row,
+        geometry,
+        invalidation_reason=opinion_change_conditions[0] if opinion_change_conditions else "",
+    )
 
     panel = {
         "ticker": ticker,
@@ -598,13 +798,22 @@ def build_strategic_panel(master_row: Dict[str, Any], risk_row: Dict[str, Any] |
         "canonical_analysis": canonical_analysis,
         "master_score_block": {
             "title": "🎯 Score Mestre",
+            # T1: score_raw + score_source_scale make the 0..100 origin explicit, so the
+            # display contract never has to guess the scale from the magnitude.
+            # Without it a real 8/100 was published as "8.0 / 10".
             "score": score,
-            "direction": direction,
-            "direction_label": _direction_label(direction),
-            "direction_visual": _direction_visual(direction),
+            "score_raw": score,
+            "score_source_scale": "0_100",
+            "score_0_10": round(score / 10.0, 1),
+            # T4: the top card reads the RESOLVED state, never the stale raw direction.
+            "direction": resolved_direction,
+            "direction_label": _direction_label(resolved_direction),
+            "direction_visual": _direction_visual(resolved_direction),
+            "resolved_state": resolved_state,
             "conviction": conviction,
             "conviction_visual": _conviction_visual(conviction),
             "confidence": confidence,
+            "confidence_pct": round(confidence_pct, 1),
             "confidence_visual": _confidence_visual(confidence),
         },
         "auditor_block": {
@@ -621,9 +830,10 @@ def build_strategic_panel(master_row: Dict[str, Any], risk_row: Dict[str, Any] |
         },
         "probable_direction_block": {
             "title": "📈 Direção Provável",
-            "direction": direction,
-            "label": _direction_label(direction) + (" (aguardando confirmação)" if action_detail else ""),
-            "visual_label": _direction_visual(direction),
+            "direction": resolved_direction,
+            "label": _direction_label(resolved_direction) + (" (aguardando confirmação)" if action_detail else ""),
+            "visual_label": _direction_visual(resolved_direction),
+            "resolved_state": resolved_state,
         },
         "recommended_action_block": {
             "title": "🚨 Ação Recomendada",
@@ -634,6 +844,9 @@ def build_strategic_panel(master_row: Dict[str, Any], risk_row: Dict[str, Any] |
         },
         "recommended_action": action,
         "recommended_action_detail": action_detail,
+        "resolved_state": resolved_state,
+        "bias": resolved_direction,
+        "rsi": rsi,
         "entrada_referencia": geometry["entrada_referencia"],
         "alvo": geometry["alvo"],
         "invalidacao": geometry["invalidacao"],
@@ -642,9 +855,16 @@ def build_strategic_panel(master_row: Dict[str, Any], risk_row: Dict[str, Any] |
         "reward_risk": geometry["reward_risk"],
         "liquidez_alvo": geometry["liquidez_alvo"],
         "confidence_pct": round(confidence_pct, 1),
+        "confidence_label": confidence,
+        "operational_levels": operational_levels,
+        "operational_levels_block": {
+            "title": "🎯 Níveis Operacionais",
+            "order": list(OPERATIONAL_LEVEL_KEYS),
+            "levels": operational_levels,
+        },
         "strategic_panel_summary": summary,
         "why": why,
-        "opinion_change_conditions": _listify(master_row.get("opinion_change_conditions")),
+        "opinion_change_conditions": opinion_change_conditions,
         "no_trade_now": no_trade_now,
         "no_trade_reasons": no_trade_reasons,
         "source_contracts": ["master_score", "institutional_auditor", "risk_ia"],

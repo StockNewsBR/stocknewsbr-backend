@@ -257,6 +257,27 @@ class Mission31DRootApiFinancialIntegrityTests(unittest.TestCase):
         self.assertIsNone(payload["strategic_panel"]["risk"])
         self.assertEqual(payload["strategic_panel"]["support"], 36.5)
 
+    def test_snapshot_master_context_falls_back_to_full_strategic_panel_index(self):
+        panel = {
+            "ticker": "PETR4",
+            "master_score": 78.0,
+            "why": [{"tool": "flow", "label": "Comprador"}],
+        }
+
+        with patch.object(
+            routes_public_market_live,
+            "get_snapshot_ticker",
+            return_value={"ticker": "PETR4", "strategic_panel": {}},
+        ), patch.object(
+            routes_public_market_live,
+            "get_snapshot",
+            return_value={"strategic_panels": [panel]},
+        ):
+            payload = routes_public_market_live._snapshot_master_context("PETR4.SA")
+
+        self.assertEqual(payload["master_score"], 7.8)
+        self.assertEqual(payload["strategic_panel"]["why"][0]["tool"], "flow")
+
     def test_public_insight_chart_and_bundle_sanitize_non_finite_numbers(self):
         chart_rows = [
             {

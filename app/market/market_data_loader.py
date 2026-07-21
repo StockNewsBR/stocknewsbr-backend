@@ -9,10 +9,12 @@ import json
 import math
 import os
 import re
+from datetime import datetime, timezone as dt_timezone
 from pathlib import Path
 from threading import RLock, get_ident
 import time
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 from app.system.system_metrics import (
     current_provider_call_source,
@@ -1017,6 +1019,7 @@ def batch_download(
     tickers: List[str],
     period: str = "1d",
     interval: str = "5m",
+    auto_adjust: bool = True,
 ) -> Optional[pd.DataFrame]:
     normalized = []
     start = time.perf_counter()
@@ -1053,7 +1056,7 @@ def batch_download(
             interval=interval,
             group_by="ticker",
             threads=False,
-            auto_adjust=True,
+            auto_adjust=auto_adjust,
             progress=False,
             prepost=True,
             timeout=8,
@@ -1118,6 +1121,7 @@ def get_ticker_frame(
     symbol: str,
     period: str = "1d",
     interval: str = "5m",
+    auto_adjust: bool = True,
 ) -> Optional[pd.DataFrame]:
     if not sanitize_market_symbol(symbol, allow_provider_symbols=True):
         _mark_symbol_failure(symbol, error="invalid_symbol")
@@ -1127,7 +1131,10 @@ def get_ticker_frame(
         return None
 
     normalized_symbol = _normalize_symbol(symbol)
-    data = batch_download([normalized_symbol], period=period, interval=interval)
+    # Forward auto_adjust only when it departs from the provider default, so every
+    # pre-existing caller keeps a byte-identical call into batch_download.
+    overrides = {} if auto_adjust else {"auto_adjust": False}
+    data = batch_download([normalized_symbol], period=period, interval=interval, **overrides)
     return _extract_single_ticker_frame(data, normalized_symbol)
 
 
@@ -1146,7 +1153,9 @@ def get_chart_data(symbol: str, interval: str = "1D"):
         "1Y": 60,
         "ALL": 60,
     }
-    min_rows = min_rows_map.get(normalized_interval, 12)
+    # "@<candle>" asks for a real candle size (RSI must follow the interval the user
+    # sees), not a range label. RSI-14 needs period+1 closes, so demand a bit more.
+    min_rows = 20 if normalized_interval.startswith("@") else min_rows_map.get(normalized_interval, 12)
 
     cached = get_cached_chart_data(symbol, interval)
     if cached and len(cached) >= min_rows:
@@ -1161,17 +1170,32 @@ def get_chart_data(symbol: str, interval: str = "1D"):
     interval_map = {
         "1D": [("1d", "5m"), ("5d", "30m")],
         "1W": [("5d", "30m"), ("1mo", "1d")],
-        "1M": [("1mo", "1d"), ("3mo", "1d")],
+        # TIMEFRAME_TO_TRADING_VIEW draws the 1M range with 60m candles, so the RSI
+        # must use 60m too -- daily candles here made the chip disagree with the chart.
+        "1M": [("1mo", "1h"), ("1mo", "1d"), ("3mo", "1d")],
         "3M": [("3mo", "1d"), ("6mo", "1d")],
         "6M": [("6mo", "1d"), ("1y", "1d")],
         "YTD": [("ytd", "1d"), ("1y", "1d")],
         "1Y": [("1y", "1d"), ("2y", "1wk")],
         "ALL": [("5y", "1wk"), ("2y", "1d"), ("1y", "1d")],
+        # Explicit candle sizes ("@" namespace so "@1M" = one minute never collides
+        # with the "1M" = one month range label). Periods respect yfinance limits.
+        "@1M": [("5d", "1m")],
+        "@5M": [("5d", "5m")],
+        "@15M": [("1mo", "15m")],
+        "@30M": [("1mo", "30m")],
+        "@1H": [("3mo", "1h")],
+        "@1D": [("1y", "1d")],
+        "@1WK": [("5y", "1wk")],
     }
 
     frame = None
     for period, yf_interval in interval_map.get(normalized_interval, [("1d", "5m"), ("5d", "30m")]):
-        frame = get_ticker_frame(symbol, period=period, interval=yf_interval)
+        # TradingView shows equities unadjusted for dividends by default; adjusted
+        # closes shift the deltas whenever an ex-dividend date lands in the window,
+        # so the indicator series must not be auto-adjusted. Quotes/snapshots keep
+        # the adjusted default (batch_download / get_ticker_frame are shared).
+        frame = get_ticker_frame(symbol, period=period, interval=yf_interval, auto_adjust=False)
         if frame is not None and not frame.empty:
             try:
                 candidate_rows = frame.dropna(subset=["Close"]) if hasattr(frame, "dropna") else frame
@@ -1216,6 +1240,120 @@ def get_chart_data(symbol: str, interval: str = "1D"):
     return _cache_chart_data(symbol, interval, rows)
 
 
+def _session_day(stamp, timezone_name: str | None = None):
+    """Exchange-local calendar day of one observation.
+
+    ``batch_download`` normalizes every frame index to UTC, so a US post-market
+    print lands on the *next* UTC day; the session day must be read in the
+    exchange timezone or the baseline picks the wrong session.
+    """
+    converted = stamp
+    if timezone_name and hasattr(stamp, "astimezone"):
+        try:
+            converted = stamp.astimezone(ZoneInfo(timezone_name))
+        except Exception:
+            converted = stamp
+    day = getattr(converted, "date", None)
+    if callable(day):
+        try:
+            return day().isoformat()
+        except Exception:
+            pass
+    # Chart-cache rows carry ISO strings ("2026-07-17 00:00:00+00:00"); slicing
+    # keeps the day the provider stamped instead of shifting it by an offset.
+    return str(converted)[:10] or None
+
+
+def previous_session_close(stamps, closes, timezone_name: str | None = None) -> Optional[float]:
+    """Yahoo's baseline: the last close of the PREVIOUS session.
+
+    The single source of truth for every quote producer. Comparing against the
+    previous *candle* is what made PETR4 report "+0,03 (+0,07%)" while Yahoo
+    showed "+0,52 (+1,27%)" off the same 41,42 price.
+
+    Pure-python on purpose: this module never imports pandas, so the earlier
+    ``pd.to_datetime`` attempt raised NameError into a bare ``except`` and the
+    previous-candle value survived untouched.
+    """
+    stamps = list(stamps or [])
+    closes = list(closes or [])
+    if len(stamps) < 2 or len(stamps) != len(closes):
+        return None
+    current_day = _session_day(stamps[-1], timezone_name)
+    if current_day is None:
+        return None
+    for position in range(len(stamps) - 2, -1, -1):
+        if _session_day(stamps[position], timezone_name) == current_day:
+            continue
+        return _positive_number_or_none(closes[position])
+    return None
+
+
+def _previous_daily_close(symbol: str, current_day, timezone_name: str | None = None) -> Optional[float]:
+    """Official prior-session close, taken from the cached DAILY series.
+
+    Closing auctions print outside the intraday series -- PETR4 settled at 40.90
+    while its last 30m candle read 40.94 -- so only the daily bar reproduces
+    Yahoo's baseline. Cache-only (never a provider call) and ignored unless the
+    daily series already covers the session the quote belongs to, otherwise a
+    stale chart would hand back the wrong session entirely.
+    """
+    if not current_day:
+        return None
+    _load_chart_cache_once()
+    with _PRICE_SNAPSHOT_CACHE_LOCK:
+        entries = [_CHART_DATA_CACHE.get(_chart_cache_key(symbol, interval) or "") for interval in ("3M", "6M", "1Y")]
+    for entry in entries:
+        rows = (entry or {}).get("rows")
+        if not isinstance(rows, list) or len(rows) < 2:
+            continue
+        stamps = [row.get("time") for row in rows if isinstance(row, dict)]
+        closes = [row.get("close") for row in rows if isinstance(row, dict)]
+        if _session_day(stamps[-1], timezone_name) != current_day:
+            continue
+        close = previous_session_close(stamps, closes, timezone_name)
+        if close is not None:
+            return close
+    return None
+
+
+def _isoformat_or_none(stamp, timezone_name: str | None = None) -> Optional[str]:
+    """Quote timestamp in the exchange timezone, for Yahoo's "As of 3:13:47 PM GMT-3"."""
+    if stamp is None:
+        return None
+    if timezone_name and hasattr(stamp, "astimezone"):
+        try:
+            stamp = stamp.astimezone(ZoneInfo(timezone_name))
+        except Exception:
+            pass
+    try:
+        return stamp.isoformat()
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _epoch_to_isoformat(epoch, timezone_name: str | None = None) -> Optional[str]:
+    try:
+        stamp = datetime.fromtimestamp(float(epoch), dt_timezone.utc)
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+    return _isoformat_or_none(stamp, timezone_name)
+
+
+def session_change(price, baseline) -> dict:
+    """Headline delta contract shared by every producer: price - previous session close."""
+    last = _positive_number_or_none(price)
+    previous = _positive_number_or_none(baseline)
+    if last is None or previous is None:
+        return {"change": None, "change_pct": None, "previous_close": None}
+    delta = last - previous
+    return {
+        "change": round(delta, 4),
+        "change_pct": round(delta / previous * 100, 4),
+        "previous_close": round(previous, 4),
+    }
+
+
 def _price_payload_from_frame(symbol: str, frame: Optional[pd.DataFrame]):
     if frame is None or frame.empty:
         return None
@@ -1228,11 +1366,21 @@ def _price_payload_from_frame(symbol: str, frame: Optional[pd.DataFrame]):
         last = frame.iloc[-1]
         previous = frame.iloc[-2] if len(frame) > 1 else last
         last_close = float(last.get("Close", 0) or 0)
-        previous_close = float(previous.get("Close", last_close) or last_close)
-        if not math.isfinite(last_close) or not math.isfinite(previous_close):
+        if not math.isfinite(last_close):
             return None
-        change = last_close - previous_close
-        change_pct = 0.0 if previous_close == 0 else (change / previous_close) * 100
+        exchange_timezone = _identity_contract_for_symbol(symbol).get("timezone")
+        stamps = list(frame.index)
+        current_day = _session_day(stamps[-1], exchange_timezone)
+        baseline = _previous_daily_close(symbol, current_day, exchange_timezone)
+        if baseline is None:
+            baseline = previous_session_close(stamps, list(frame["Close"]), exchange_timezone)
+        if baseline is None:
+            # Single-session frame: no previous session exists, so the previous
+            # candle is the best available baseline (published as previous_close).
+            baseline = float(previous.get("Close", last_close) or last_close)
+        if not math.isfinite(baseline) or baseline <= 0:
+            return None
+        change_contract = session_change(last_close, baseline)
         last_volume = _positive_number_or_none(last.get("Volume"))
         volume_series = frame.get("Volume")
         average_volume = None
@@ -1258,8 +1406,7 @@ def _price_payload_from_frame(symbol: str, frame: Optional[pd.DataFrame]):
             "provider_symbol": _normalize_symbol(symbol),
             "display_symbol": _normalize_ticker_display(symbol, _normalize_symbol(symbol)),
             "price": round(last_close, 4),
-            "change": round(change, 4),
-            "change_pct": round(change_pct, 4),
+            **change_contract,
             "after_hours": None,
             "pre_market": None,
             "volume": last_volume,
@@ -1268,6 +1415,9 @@ def _price_payload_from_frame(symbol: str, frame: Optional[pd.DataFrame]):
             "rel_volume": _relative_volume_or_none(last_volume, average_volume),
             "high": float(last.get("High", 0) or 0),
             "low": float(last.get("Low", 0) or 0),
+            "quote_time": _isoformat_or_none(stamps[-1], exchange_timezone),
+            # No market-state field exists on an OHLC frame; never inferred.
+            "market_state": None,
         }
         return _attach_identity_contract(symbol, payload)
     except Exception as exc:
@@ -1343,19 +1493,28 @@ def _price_payload_from_fast_info(symbol: str):
         yf = _get_yfinance()
         ticker = yf.Ticker(normalized_symbol)
         fast_info = getattr(ticker, "fast_info", None) or {}
+        # The headline price/change MUST be the regular session, like Yahoo shows
+        # ("40.90 +1.01 (+2.53%) At close"). Preferring last_price here mixed the
+        # post-market print with the regular previous close and produced a change
+        # that matched neither session.
         last_price = _fast_info_get(
             fast_info,
-            "last_price",
-            "lastPrice",
             "regular_market_price",
             "regularMarketPrice",
+            "last_price",
+            "lastPrice",
         )
+        extended_price = _fast_info_get(fast_info, "last_price", "lastPrice")
+        # regularMarketPreviousClose FIRST: yfinance's `previousClose` is the last
+        # close of the *history* series (pre/post prints included), while Yahoo's
+        # header delta is measured against the previous REGULAR session close --
+        # 40.90 vs 40.94 for PETR4, which is most of the reported error.
         previous_close = _fast_info_get(
             fast_info,
-            "previous_close",
-            "previousClose",
             "regular_market_previous_close",
             "regularMarketPreviousClose",
+            "previous_close",
+            "previousClose",
         )
         info = {}
         if last_price is None:
@@ -1377,8 +1536,21 @@ def _price_payload_from_fast_info(symbol: str):
             record_external_provider_call("yfinance", "fast_info", duration_seconds=duration, success=False, symbol=normalized_symbol, error="invalid_price")
             return None
 
-        change = last_price - previous_close
-        change_pct = 0.0 if previous_close == 0 else (change / previous_close) * 100
+        change_contract = session_change(last_price, previous_close)
+        # Post/pre-market move, reported separately instead of contaminating the
+        # session change. None when the provider gives no distinct extended print.
+        after_hours = None
+        try:
+            extended = float(extended_price) if extended_price is not None else None
+        except (TypeError, ValueError):
+            extended = None
+        if extended is not None and extended > 0 and abs(extended - last_price) > 1e-9:
+            extended_change = extended - last_price
+            after_hours = {
+                "price": round(extended, 4),
+                "change": round(extended_change, 4),
+                "change_pct": round(0.0 if last_price == 0 else (extended_change / last_price) * 100, 4),
+            }
         volume = _fast_info_get(fast_info, "last_volume", "lastVolume", "regular_market_volume", "regularMarketVolume")
         if volume is None:
             info = info or getattr(ticker, "info", None) or {}
@@ -1403,15 +1575,23 @@ def _price_payload_from_fast_info(symbol: str):
         low = _fast_info_get(fast_info, "day_low", "dayLow", "regular_market_day_low", "regularMarketDayLow")
         positive_volume = _positive_number_or_none(volume)
         positive_average_volume = _positive_number_or_none(average_volume)
+        # Yahoo's "As of ... Market Open" header. `marketState`/`regularMarketTime`
+        # live only on `info`, and `fast_info` never carries them -- so this is the
+        # one path that can report them. Absent stays null; never inferred from the
+        # clock. yfinance memoizes `info` per Ticker, so this reuses the fetch above
+        # whenever an earlier branch already needed it.
+        exchange_timezone = _identity_contract_for_symbol(symbol).get("timezone")
+        info = info or getattr(ticker, "info", None) or {}
+        market_state = _fast_info_get(info, "marketState")
+        quote_time = _epoch_to_isoformat(_fast_info_get(info, "regularMarketTime"), exchange_timezone)
 
         payload = {
             "symbol": _normalize_ticker_display(symbol, normalized_symbol),
             "provider_symbol": normalized_symbol,
             "display_symbol": _normalize_ticker_display(symbol, normalized_symbol),
             "price": round(last_price, 4),
-            "change": round(change, 4),
-            "change_pct": round(change_pct, 4),
-            "after_hours": None,
+            **change_contract,
+            "after_hours": after_hours,
             "pre_market": None,
             "volume": positive_volume,
             "average_volume": positive_average_volume,
@@ -1419,6 +1599,8 @@ def _price_payload_from_fast_info(symbol: str):
             "rel_volume": _relative_volume_or_none(positive_volume, positive_average_volume),
             "high": float(high or last_price),
             "low": float(low or last_price),
+            "quote_time": quote_time,
+            "market_state": str(market_state).upper() if market_state else None,
         }
         duration = time.perf_counter() - start
         payload = _attach_identity_contract(symbol, payload)
