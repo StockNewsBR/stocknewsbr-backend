@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -91,6 +92,8 @@ def _is_displayable_row(row: dict[str, Any]) -> bool:
 
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_MAX_SNAPSHOT_AGE_SECONDS = max(60, int(os.getenv("AI_SNAPSHOT_MAX_AGE_SECONDS", "300")))
+_MAX_AS_OF_AGE_SECONDS = max(60, int(os.getenv("AI_AS_OF_MAX_AGE_SECONDS", "900")))
 
 
 def _detected_at(row: dict[str, Any]) -> datetime:
@@ -105,15 +108,42 @@ def _detected_at(row: dict[str, Any]) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def _confirmed_at(row: dict[str, Any]) -> datetime:
+    raw = str(row.get("last_confirmed_at") or row.get("updated_at") or row.get("as_of") or "").strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return _EPOCH
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _snapshot_timestamp(snapshot: dict[str, Any]) -> datetime:
+    return _confirmed_at({"updated_at": snapshot.get("updated_at") or snapshot.get("generated_at") or snapshot.get("last_good_timestamp")})
+
+
+def _row_is_stale(row: dict[str, Any]) -> bool:
+    as_of = _confirmed_at({"updated_at": row.get("as_of")})
+    return bool(
+        coerce_data_quality(row) == QUALITY_STALE
+        or row.get("stale") is True
+        or row.get("is_stale") is True
+        or (as_of != _EPOCH and (datetime.now(timezone.utc) - as_of).total_seconds() > _MAX_AS_OF_AGE_SECONDS)
+    )
+
+
 def _snapshot_is_stale(snapshot: dict[str, Any], *, using_fallback: bool) -> bool:
     data_status = snapshot.get("data_status") if isinstance(snapshot.get("data_status"), dict) else {}
     source = str(snapshot.get("source") or snapshot.get("snapshot_source") or "").lower().strip()
+    timestamp = _snapshot_timestamp(snapshot)
     return bool(
         using_fallback
         or snapshot.get("stale") is True
         or snapshot.get("is_stale") is True
         or data_status.get("stale") is True
         or source in {"last_good", "snapshot_fallback", "exception_fallback", "last_good_snapshot"}
+        or (timestamp != _EPOCH and (datetime.now(timezone.utc) - timestamp).total_seconds() > _MAX_SNAPSHOT_AGE_SECONDS)
     )
 
 
@@ -169,7 +199,7 @@ def _scoped_tools(
                 break
         # Rows are selected by relevance (score) above, then presented
         # most-recent-first. Stable sort keeps score order within equal times.
-        output[key].sort(key=_detected_at, reverse=True)
+        output[key].sort(key=_confirmed_at, reverse=True)
     return output, actionable_count
 
 
@@ -183,6 +213,7 @@ def _build_payload(
     tools: dict[str, list[dict[str, Any]]],
     actionable_count: int,
     context: dict[str, Any],
+    historical_tools: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     source_snapshot = snapshot if isinstance(snapshot, dict) else {}
     go_live = build_go_live_status(source_snapshot)
@@ -200,6 +231,7 @@ def _build_payload(
         "institutional_consistency_score": go_live.get("institutional_consistency_score"),
         "contract_coverage": go_live.get("contract_coverage", {}),
         "tools": tools,
+        "historical_tools": historical_tools or _empty_tools(),
         "status": status,
         "reason": reason,
         "analyzed_at": context["analyzed_at"],
@@ -244,13 +276,25 @@ def _payload_from_snapshot(
         timeframe=context["timeframe"],
         force_non_actionable=stale,
     )
+    historical_tools = _empty_tools()
+    active_tools = _empty_tools()
+    for key, rows in tools.items():
+        for row in rows:
+            if stale or _row_is_stale(row):
+                row["freshness_status"] = "HISTORICAL"
+                row["actionable"] = False
+                row["can_trade"] = False
+                row["decision_ready"] = False
+                historical_tools[key].append(row)
+            else:
+                row["freshness_status"] = "READY"
+                row.setdefault("last_confirmed_at", row.get("updated_at"))
+                row.setdefault("snapshot_generated_at", snapshot.get("generated_at") or snapshot.get("updated_at"))
+                active_tools[key].append(row)
+    tools = active_tools
     displayable_count = sum(len(rows) for rows in tools.values())
-    displayed_rows = [row for rows in tools.values() for row in rows]
-    stale = stale or bool(displayed_rows) and all(
-        coerce_data_quality(row) == QUALITY_STALE or row.get("stale") is True or row.get("is_stale") is True
-        for row in displayed_rows
-    )
-    status = "STALE_DATA" if stale else "READY" if displayable_count else "NO_QUALIFIED_FINDING"
+    actionable_count = sum(1 for rows in tools.values() for row in rows if row.get("actionable") is True)
+    status = "READY" if displayable_count else "HISTORICAL" if any(historical_tools.values()) else "STALE" if stale else "EMPTY"
     reason = (
         "last_good_snapshot_fallback"
         if using_fallback
@@ -269,6 +313,7 @@ def _payload_from_snapshot(
         tools=tools,
         actionable_count=actionable_count,
         context=context,
+        historical_tools=historical_tools,
     )
 
 
@@ -303,6 +348,45 @@ def build_public_ai_tools_payload(
             context, status="KILL_SWITCHED", reason="kill_switch=DISABLE_AI_DECISIONS", source="kill_switch",
         )
 
+    # A searched symbol is not necessarily part of the global top-N snapshot.
+    # Prefer its short-lived worker result; the route only queues this work and
+    # never calls a market provider itself.
+    if selected_symbol:
+        try:
+            from app.system.symbol_hydration import get_symbol_analysis, request_symbol_hydration
+
+            request_symbol_hydration(selected_symbol, timeframe=selected_timeframe or "1D")
+            on_demand = get_symbol_analysis(selected_symbol, selected_timeframe or "1D")
+            on_demand_status = str(on_demand.get("status") or "")
+            if on_demand_status == "READY":
+                tools, actionable_count = _scoped_tools(
+                    on_demand.get("ai_tools") if isinstance(on_demand.get("ai_tools"), dict) else {},
+                    symbols=context["symbols"],
+                    tool=selected_tool,
+                    timeframe=selected_timeframe,
+                    force_non_actionable=False,
+                )
+                return _build_payload(
+                    status="READY",
+                    reason="on_demand_analysis",
+                    snapshot=on_demand,
+                    source="on_demand",
+                    using_fallback=False,
+                    tools=tools,
+                    actionable_count=actionable_count,
+                    context=context,
+                )
+            if on_demand_status in {"PENDING", "INSUFFICIENT_DATA", "PROVIDER_ERROR"}:
+                return _empty_payload(
+                    context,
+                    status=on_demand_status,
+                    reason=str(on_demand.get("reason") or "on_demand_hydration"),
+                    source="on_demand",
+                    snapshot=on_demand,
+                )
+        except Exception:
+            logger.exception("On-demand AI hydration enqueue failed for %s", selected_symbol)
+
     snapshot_error: Exception | None = None
     try:
         snapshot = get_snapshot()
@@ -333,7 +417,7 @@ def build_public_ai_tools_payload(
             context=context,
             using_fallback=True,
         )
-        if fallback_payload["displayable_count"]:
+        if fallback_payload["displayable_count"] or any(fallback_payload["historical_tools"].values()):
             return fallback_payload
 
     status = "ERROR" if snapshot_error is not None else "SNAPSHOT_UNAVAILABLE"

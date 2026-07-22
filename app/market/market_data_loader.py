@@ -40,7 +40,7 @@ from app.services.symbol_registry import (
 
 logger = logging.getLogger("stocknewsbr.market_data_loader")
 _YFINANCE = None
-_PRICE_CACHE_TTL_SECONDS = max(60, int(os.getenv("PRICE_CACHE_TTL_SECONDS", "300")))
+_PRICE_CACHE_TTL_SECONDS = max(30, int(os.getenv("PRICE_CACHE_TTL_SECONDS", "30")))
 _CHART_CACHE_TTL_SECONDS = int(os.getenv("CHART_CACHE_TTL_SECONDS", "1800"))
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -159,6 +159,12 @@ def _identity_contract_for_symbol(symbol: str, provider_symbol: str | None = Non
         "market": market,
         "currency": currency,
         "timezone": timezone,
+        "asset_class": "crypto" if asset_type == "CRYPTO" else None,
+        "market_schedule": "24x7" if asset_type == "CRYPTO" else None,
+        "session_timezone": "UTC" if asset_type == "CRYPTO" else timezone,
+        # Crypto has no exchange close/weekend gate. This describes the
+        # schedule only; individual quote/chart components still own readiness.
+        "market_status": "OPEN" if asset_type == "CRYPTO" else None,
         "identity_preserved": True,
         "freshness_semantics": "provider_observation_or_cache_ttl",
     }
@@ -1155,7 +1161,13 @@ def get_chart_data(symbol: str, interval: str = "1D"):
     }
     # "@<candle>" asks for a real candle size (RSI must follow the interval the user
     # sees), not a range label. RSI-14 needs period+1 closes, so demand a bit more.
-    min_rows = 20 if normalized_interval.startswith("@") else min_rows_map.get(normalized_interval, 12)
+    min_rows = (
+        8 * 24 * 12
+        if normalized_interval == "@5M" and crypto_provider_symbol(symbol)
+        else 20
+        if normalized_interval.startswith("@")
+        else min_rows_map.get(normalized_interval, 12)
+    )
 
     cached = get_cached_chart_data(symbol, interval)
     if cached and len(cached) >= min_rows:
@@ -1181,7 +1193,10 @@ def get_chart_data(symbol: str, interval: str = "1D"):
         # Explicit candle sizes ("@" namespace so "@1M" = one minute never collides
         # with the "1M" = one month range label). Periods respect yfinance limits.
         "@1M": [("5d", "1m")],
-        "@5M": [("5d", "5m")],
+        # One month provides enough 24x7 history to compare the current UTC
+        # five-minute bucket with previous days. The route remains cache-only;
+        # only chart workers call this provider path.
+        "@5M": [("1mo", "5m")],
         "@15M": [("1mo", "15m")],
         "@30M": [("1mo", "30m")],
         "@1H": [("3mo", "1h")],
@@ -1221,7 +1236,8 @@ def get_chart_data(symbol: str, interval: str = "1D"):
 
     rows = []
 
-    for index, row in frame.tail(240).iterrows():
+    row_limit = 9000 if normalized_interval == "@5M" else 240
+    for index, row in frame.tail(row_limit).iterrows():
         close = float(row.get("Close", 0) or 0)
         if close <= 0:
             continue

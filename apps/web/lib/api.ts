@@ -333,10 +333,12 @@ export function getPublicMarketBundle(
   interval = "1D",
   locale: "pt-BR" | "en-US" = "pt-BR",
   signal?: AbortSignal,
+  force = false,
 ) {
+  const refresh = force ? `&refresh=${Date.now()}` : "";
   return request<PublicMarketBundlePayload>(
-    `/public/market/bundle/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}&limit=6&locale=${encodeURIComponent(locale)}`,
-    { signal, cacheTtlMs: 10000 },
+    `/public/market/bundle/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}&limit=6&locale=${encodeURIComponent(locale)}${refresh}`,
+    { signal, cacheTtlMs: force ? 0 : 10000 },
   );
 }
 

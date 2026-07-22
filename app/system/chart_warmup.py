@@ -6,7 +6,7 @@ import os
 import re
 import time
 from pathlib import Path
-from threading import RLock
+from threading import RLock, Thread
 from typing import Iterable
 
 from app.market.market_data_loader import get_cached_chart_data, get_chart_data
@@ -46,6 +46,7 @@ DEFAULT_CHART_COOLDOWN_SECONDS = max(120, int(os.getenv("CHART_WARMUP_COOLDOWN_S
 _REQUEST_LOCK = RLock()
 _B3_MINI_FUTURE_RE = re.compile(r"^(WIN|WDO)[FGHJKMNQUVXZ]\d{2}$")
 _pair_cooldowns: dict[str, float] = {}
+_async_running: set[str] = set()
 
 
 def _normalize_symbol(value: object) -> str:
@@ -137,6 +138,47 @@ def request_chart_warmup(symbol: str, interval: str = "1D") -> None:
         )
         requests[key] = current
         _write_requests(requests)
+
+
+def request_on_demand_chart_warmup(symbol: str, intervals: Iterable[str] = ("1D", "3M")) -> bool:
+    """Persist and immediately process cache misses without using the HTTP thread."""
+    ticker = _normalize_symbol(symbol)
+    pairs = [(ticker, _normalize_interval(interval)) for interval in intervals] if ticker else []
+    pairs = [(item_symbol, interval) for item_symbol, interval in pairs if not _is_blocked_chart_symbol(item_symbol)]
+    queued = False
+    for item_symbol, interval in pairs:
+        request_chart_warmup(item_symbol, interval)
+        key = _pair_key(item_symbol, interval)
+        with _REQUEST_LOCK:
+            if key in _async_running or _is_on_cooldown(item_symbol, interval):
+                continue
+            _async_running.add(key)
+            queued = True
+        Thread(target=_warm_single_request, args=(item_symbol, interval, key), name=f"chart-warmup-{item_symbol}-{interval}", daemon=True).start()
+    return queued
+
+
+def _warm_single_request(symbol: str, interval: str, key: str) -> None:
+    start = time.perf_counter()
+    success = False
+    try:
+        # get_chart_data owns the interval-specific minimum. In particular, a
+        # legacy 240-row crypto @5M cache is not enough for same-UTC-bucket
+        # RVOL and must not short-circuit the longer background refresh.
+        with provider_call_context("chart_request_warmup"):
+            rows = get_chart_data(symbol, interval)
+        success = bool(rows)
+        if rows:
+            _drop_warmed_requests([(symbol, interval)])
+        else:
+            _mark_cooldown(symbol, interval)
+    except Exception:
+        _mark_cooldown(symbol, interval)
+        logger.exception("Async chart warmup failed | symbol=%s | interval=%s", symbol, interval)
+    finally:
+        with _REQUEST_LOCK:
+            _async_running.discard(key)
+        record_worker_stage_duration("chart_request_warmup", time.perf_counter() - start, success=success)
 
 
 def _default_symbols(limit: int) -> list[str]:

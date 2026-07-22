@@ -15,12 +15,15 @@ from app.market.market_data_loader import (
 from app.services.chart_overlay_service import build_chart_overlays
 from app.services.public_ai_tools_service import build_public_ai_tools_payload
 from app.services.public_market_data_service import (
+    build_crypto_intraday_rvol_contract,
     build_public_indices_payload,
     build_public_rsi_contract,
     cached_price_payloads,
     load_public_chart_rows,
     normalize_public_chart_zones,
     public_chart_as_of,
+    public_daily_age_sessions,
+    public_daily_freshness_status,
     schedule_quote_warmup,
 )
 from app.services.public_news_service import build_public_news_payload
@@ -40,9 +43,12 @@ from app.services.symbol_registry import (
     is_ambiguous_crypto_symbol,
     is_bdr_proxy_payload,
     is_bdr_symbol,
+    provider_symbol,
+    symbol_category,
 )
 from app.services.symbol_sanitizer import mark_symbol_cooldown, sanitize_market_symbol
 from app.system.system_metrics import record_cache_access
+from app.system.symbol_hydration import get_symbol_analysis, hydration_status, request_symbol_hydration, resolve_symbol_context
 
 
 router = APIRouter(prefix="/public", tags=["Public Market Live"])
@@ -432,6 +438,384 @@ def _numeric_close_values(ohlc):
         if close > 0:
             closes.append(close)
     return closes
+
+
+def _optional_float(value) -> float | None:
+    parsed = _safe_float(value, default=float("nan"))
+    return parsed if math.isfinite(parsed) else None
+
+
+def _ai_metric_component(ai_tools: dict, tool: str, symbol: str) -> dict:
+    status = str(ai_tools.get("status") or "PENDING").upper()
+    tools = ai_tools.get("tools") if isinstance(ai_tools, dict) else None
+    rows = (tools.get(tool) or []) if isinstance(tools, dict) else []
+    canonical = canonical_symbol(symbol)
+    row = next(
+        (
+            item for item in rows
+            if isinstance(item, dict)
+            and canonical_symbol(item.get("canonical_symbol") or item.get("ticker") or item.get("symbol")) == canonical
+        ),
+        None,
+    )
+    if row is None:
+        component_status = "PENDING" if status in {"PENDING", "REFRESHING"} else "INSUFFICIENT_DATA"
+        return {"symbol": canonical, "status": component_status, "value": None, "label": None, "timeframe": "5m", "as_of": None, "source": None}
+    freshness = str(row.get("freshness_status") or "READY").upper()
+    component_status = "READY" if status == "READY" and freshness == "READY" else "STALE" if freshness in {"STALE", "HISTORICAL"} else status
+    score = _optional_float(row.get("score"))
+    timeframe = str(row.get("candle_timeframe") or "5m")
+    as_of = row.get("as_of") or row.get("market_data_updated_at") or row.get("last_bar_at")
+    updated_at = row.get("last_confirmed_at") or row.get("updated_at")
+    source = row.get("source") or "on_demand_ai"
+    if tool == "liquidity":
+        liquidity_metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+        low = _optional_float(liquidity_metrics.get("lower_liquidity"))
+        high = _optional_float(liquidity_metrics.get("upper_liquidity"))
+        price = _optional_float(row.get("price"))
+        valid_range = low is not None and high is not None and price is not None and price > 0 and low < high
+        side = "SELL_SIDE" if valid_range and low > price else "BUY_SIDE" if valid_range and high < price else None
+        geometry_ready = valid_range and side is not None and bool(as_of) and bool(source)
+        if component_status != "READY" or not geometry_ready:
+            return {
+                "symbol": canonical, "status": component_status if component_status != "READY" else "INSUFFICIENT_DATA",
+                "value": None, "score": score, "label": "Liquidez indisponível — dados insuficientes",
+                "side": None, "low": None, "high": None, "midpoint": None,
+                "distance_from_price_pct": None, "timeframe": timeframe, "as_of": as_of,
+                "updated_at": updated_at, "source": source,
+                "reason": "missing_liquidity_geometry",
+            }
+        midpoint = round((low + high) / 2, 6)
+        return {
+            "symbol": canonical, "status": "READY", "value": None, "score": score,
+            "label": "Liquidez vendedora acima do preço" if side == "SELL_SIDE" else "Liquidez compradora abaixo do preço",
+            "side": side, "low": low, "high": high, "midpoint": midpoint,
+            "distance_from_price_pct": round(((midpoint - price) / price) * 100, 4),
+            "timeframe": timeframe, "as_of": as_of, "updated_at": updated_at,
+            "source": source, "reason": "validated_liquidity_range",
+        }
+    if tool == "flow" and score is not None:
+        label = "Comprador" if score >= 60 else "Vendedor" if score < 40 else "Neutro"
+    else:
+        label = row.get("state_label") or row.get("label") or row.get("state")
+    return {
+        "symbol": canonical, "status": component_status, "value": score, "label": label,
+        "thresholds": {"seller_max": 39.999, "neutral_max": 59.999, "buyer_min": 60} if tool == "flow" else None,
+        "timeframe": timeframe, "as_of": as_of, "updated_at": updated_at, "source": source,
+    }
+
+
+def _unsupported_crypto_market_component(symbol: str, component: str) -> dict:
+    canonical = canonical_symbol(symbol)
+    label = (
+        "Fluxo não disponível para este ativo"
+        if component == "flow"
+        else "Liquidez não disponível para este ativo"
+    )
+    return {
+        "symbol": canonical,
+        "status": "UNSUPPORTED",
+        "value": None,
+        "score": None,
+        "label": label,
+        "timeframe": "5m",
+        "as_of": None,
+        "updated_at": None,
+        "source": None,
+        "reason": "provider_has_no_crypto_orderflow",
+    }
+
+
+def build_symbol_operational_view(
+    symbol: str,
+    timeframe: str,
+    insight: dict,
+    metrics: dict,
+    *,
+    chart: dict | None = None,
+    daily_rows: list[dict] | None = None,
+    ai_tools: dict | None = None,
+) -> dict:
+    """Canonical selected-symbol context consumed by the page without recomputation."""
+    canonical = canonical_symbol(symbol)
+    chart = chart or {}
+    daily_rows = daily_rows or []
+    daily_closes = _numeric_close_values(daily_rows)
+    daily_as_of = public_chart_as_of(daily_rows)
+    daily_status = public_daily_freshness_status(daily_rows, metrics.get("session_date"), required_count=15)
+    daily_trend = _fallback_bias(daily_closes) if len(daily_closes) >= 15 else None
+    intraday_summary = chart.get("summary") or {}
+    intraday_trend = intraday_summary.get("trend_bias")
+    is_crypto = symbol_category(canonical) == "Crypto"
+    daily_age_sessions = public_daily_age_sessions(
+        daily_rows,
+        metrics.get("session_date"),
+        continuous_market=is_crypto,
+    )
+    flow = (
+        _unsupported_crypto_market_component(canonical, "flow")
+        if is_crypto
+        else _ai_metric_component(ai_tools or {}, "flow", canonical)
+    )
+    liquidity = (
+        _unsupported_crypto_market_component(canonical, "liquidity")
+        if is_crypto
+        else _ai_metric_component(ai_tools or {}, "liquidity", canonical)
+    )
+    levels = metrics.get("levels") or {}
+    intraday_rvol = metrics.get("intraday_rvol") or metrics.get("rvol") or {}
+    daily_volume_ratio = metrics.get("volume_vs_daily_average") or {}
+    sentiment = metrics.get("sentiment") or {}
+    panel = insight.get("strategic_panel") if isinstance(insight.get("strategic_panel"), dict) else {}
+    master_score = _optional_float(insight.get("master_score") if insight.get("master_score") is not None else insight.get("score"))
+    confidence_raw = panel.get("master_confidence_pct")
+    if confidence_raw is None:
+        confidence_raw = (panel.get("master_score_block") or {}).get("confidence_pct")
+    confidence = _optional_float(confidence_raw)
+    rsi_metadata = insight.get("rsi_metadata") or {}
+    trend_component = {
+        "symbol": canonical, "value": daily_trend, "label": daily_trend,
+        "status": daily_status, "timeframe": "1d", "as_of": daily_as_of,
+        "data_as_of": daily_as_of, "session_date": metrics.get("session_date"),
+        "freshness_status": daily_status, "age_sessions": daily_age_sessions,
+        "source": "daily_candles",
+        "reason": "daily_candles_older_than_session" if daily_status == "STALE" else None,
+    }
+    rsi_status = (
+        daily_status
+        if rsi_metadata.get("status") == "AVAILABLE" and daily_status != "READY"
+        else "READY"
+        if rsi_metadata.get("status") == "AVAILABLE"
+        else rsi_metadata.get("status", "PENDING")
+    )
+    rsi_component = {
+        "symbol": canonical, "value": insight.get("rsi"), "label": None,
+        "status": rsi_status, "timeframe": "1d", "as_of": rsi_metadata.get("as_of"),
+        "data_as_of": rsi_metadata.get("as_of") or daily_as_of,
+        "session_date": metrics.get("session_date"),
+        "freshness_status": rsi_status, "age_sessions": daily_age_sessions,
+        "source": rsi_metadata.get("source"),
+        "reason": "daily_candles_older_than_session" if rsi_status == "STALE" else rsi_metadata.get("reason"),
+    }
+    intraday_component = {"symbol": canonical, "value": intraday_trend, "label": intraday_trend, "status": "READY" if intraday_trend else "PENDING", "timeframe": (chart.get("rsi_metadata") or {}).get("timeframe") or "5m", "as_of": intraday_summary.get("as_of"), "source": "intraday_chart"}
+
+    direction_votes = [
+        str(daily_trend or "").lower() if trend_component["status"] == "READY" else "",
+        str(intraday_trend or "").lower() if intraday_component["status"] == "READY" else "",
+        str(flow.get("label") or "").lower() if flow.get("status") == "READY" else "",
+    ]
+    bullish_votes = sum(value in {"alta", "bullish", "comprador"} for value in direction_votes)
+    bearish_votes = sum(value in {"baixa", "bearish", "vendedor"} for value in direction_votes)
+    technical_bias = "BULLISH" if bullish_votes >= 2 and bullish_votes > bearish_votes else "BEARISH" if bearish_votes >= 2 and bearish_votes > bullish_votes else "MIXED"
+    technical_bias_component = {
+        "symbol": canonical, "value": technical_bias,
+        "label": "Comprador" if technical_bias == "BULLISH" else "Vendedor" if technical_bias == "BEARISH" else "Misto",
+        "status": "READY" if trend_component["status"] == "READY" and intraday_component["status"] == "READY" else "PARTIAL",
+        "timeframe": "D1+5m", "as_of": intraday_summary.get("as_of") or daily_as_of,
+        "source": "selected_symbol_components",
+    }
+
+    score_components = {
+        "trend_d1": trend_component,
+        "rsi_d1": rsi_component,
+        "intraday_direction": intraday_component,
+        "flow": flow,
+        "sentiment": sentiment,
+        "intraday_rvol": intraday_rvol,
+        "levels": levels,
+    }
+    if is_crypto:
+        # Book/order-flow liquidity is an explicit unsupported input for the
+        # crypto operational score, not a missing value or an implicit zero.
+        score_components["liquidity"] = liquidity
+    used_components = [name for name, payload in score_components.items() if str(payload.get("status") or "").upper() == "READY"]
+    unsupported_components = [
+        name for name, payload in score_components.items()
+        if str(payload.get("status") or "").upper() == "UNSUPPORTED"
+    ]
+    missing_components = [
+        name for name in score_components
+        if name not in used_components and name not in unsupported_components
+    ]
+    eligible_count = len(score_components) - len(unsupported_components)
+    completeness = round(len(used_components) / eligible_count, 4) if eligible_count else 0.0
+    score_status = (
+        "READY"
+        if master_score is not None and not missing_components and not unsupported_components
+        else "PARTIAL"
+        if master_score is not None
+        else "PENDING"
+    )
+    master_score_component = {
+        "symbol": canonical, "value": master_score, "status": score_status,
+        "label": "Score Mestre" if score_status == "READY" else "Score técnico parcial" if score_status == "PARTIAL" else "Score indisponível",
+        "used_components": used_components, "missing_components": missing_components,
+        "unsupported_components": unsupported_components,
+        "data_completeness": completeness, "timeframe": "D1+5m",
+        "as_of": flow.get("as_of") or intraday_summary.get("as_of"), "source": "on_demand_ai",
+    }
+
+    components = {
+        "trend_d1": trend_component,
+        "rsi_d1": rsi_component,
+        "intraday_rvol": intraday_rvol,
+        "sentiment": sentiment,
+        "flow": flow,
+        "liquidity": liquidity,
+        "levels": levels,
+    }
+    pending = [
+        {"component": component, "status": payload.get("status") or "PENDING", "reason": payload.get("reason") or "not_confirmed"}
+        for component, payload in components.items()
+        if str(payload.get("status") or "PENDING").upper() != "READY"
+    ]
+    required_for_execution = {"trend_d1", "rsi_d1", "intraday_rvol", "flow", "liquidity", "levels"}
+    operational_blocks = [item for item in pending if item["component"] in required_for_execution]
+    decision = "WAIT" if operational_blocks else str(insight.get("final_decision") or panel.get("recommended_action") or "WAIT").upper()
+    return {
+        "symbol": canonical,
+        "canonical_symbol": canonical,
+        "timeframe": str(timeframe or "1D").upper(),
+        "session_date": metrics.get("session_date"),
+        "as_of": intraday_summary.get("as_of") or metrics.get("as_of"),
+        "updated_at": metrics.get("updated_at"),
+        "source": "selected_symbol_bundle",
+        "timeframes": {"chart_data": intraday_component["timeframe"], "operational": "5m", "structural": "1d"},
+        "technical_context": {
+            "technical_bias": technical_bias_component, "trend_d1": trend_component,
+            "rsi_d1": rsi_component, "intraday_direction_5m": intraday_component,
+            "institutional_flow": flow,
+        },
+        "operational_context": {
+            "volume_vs_daily_average": daily_volume_ratio,
+            "intraday_rvol": intraday_rvol, "rvol": intraday_rvol,
+            "sentiment": sentiment, "liquidity": liquidity,
+            "levels": levels, "master_score": master_score_component,
+        },
+        "pending_components": pending,
+        "operational_blocks": operational_blocks,
+        "decision": decision,
+        "decision_reason": "operational_blocks" if operational_blocks else panel.get("final_decision_reason"),
+        "confidence": None if operational_blocks else confidence,
+        "confidence_status": "NOT_CONFIRMED" if operational_blocks or confidence is None else "READY",
+        "conviction": None if operational_blocks else _optional_float(insight.get("conviction_score")),
+        "conviction_status": "NOT_CALCULATED" if operational_blocks or insight.get("conviction_score") is None else "READY",
+        "risk": insight.get("master_risk") or (panel.get("risk_block") or {}).get("level"),
+        "levels": [] if str(levels.get("status")) != "READY" else levels.get("items") or [],
+    }
+
+
+def _market_metrics_contract(
+    symbol: str,
+    timeframe: str,
+    quote: dict,
+    chart: dict,
+    news: dict | None = None,
+    insight: dict | None = None,
+    *,
+    daily_rows: list[dict] | None = None,
+    intraday_5m_rows: list[dict] | None = None,
+    ai_tools: dict | None = None,
+) -> dict:
+    """Cache-only metrics; absence is explicit instead of a UI baseline."""
+    canonical = canonical_symbol(symbol)
+    is_crypto = symbol_category(canonical) == "Crypto"
+    volume = _safe_float(quote.get("volume"), 0.0)
+    average = _safe_float(quote.get("average_volume") or quote.get("avg_volume"), 0.0)
+    daily_ratio_ready = volume > 0 and average > 0 and _payload_matches_requested_symbol(quote, canonical, require_identity=False)
+    daily_ratio = round(volume / average, 4) if daily_ratio_ready else None
+    as_of = quote.get("quote_time") or (chart.get("summary") or {}).get("as_of")
+    zones = [zone for zone in chart.get("zones", []) if isinstance(zone, dict)]
+    level_status = next((str(zone.get("status")) for zone in zones if zone.get("status") not in (None, "READY")), "READY" if zones else "PENDING")
+    micro_support = next((_optional_float(zone.get("price")) for zone in zones if zone.get("kind") == "support" and zone.get("status") == "INSUFFICIENT_SEPARATION"), None)
+    micro_resistance = next((_optional_float(zone.get("price")) for zone in zones if zone.get("kind") == "resistance" and zone.get("status") == "INSUFFICIENT_SEPARATION"), None)
+    micro_range = None
+    if micro_support is not None and micro_resistance is not None and micro_support < micro_resistance:
+        micro_zone = next((zone for zone in zones if zone.get("status") == "INSUFFICIENT_SEPARATION"), {})
+        micro_range = {
+            "low": micro_support, "high": micro_resistance,
+            "timeframe": micro_zone.get("micro_timeframe") or micro_zone.get("timeframe"),
+            "status": "NON_OPERATIONAL", "reason": "insufficient_separation",
+            "as_of": micro_zone.get("as_of") or (chart.get("summary") or {}).get("as_of"),
+        }
+    items = (news or {}).get("items") or []
+    historical_at = next((item.get("published_at") or item.get("published") or item.get("date") for item in items if isinstance(item, dict)), None)
+    volume_vs_daily_average = {
+        "symbol": canonical, "current_volume": volume if volume > 0 else None,
+        "daily_average_volume": average if average > 0 else None,
+        "ratio": daily_ratio, "percent": round(daily_ratio * 100, 1) if daily_ratio is not None else None,
+        "label": "Volume atual / média diária", "status": "READY" if daily_ratio_ready else "INSUFFICIENT_DATA",
+        "method": "provider_full_day_average", "informational_only": True,
+        "reason": None if daily_ratio_ready else "daily_average_unavailable", "as_of": quote.get("quote_time"),
+        "source": quote.get("source") or "quote_cache",
+    }
+    intraday_rvol = (
+        build_crypto_intraday_rvol_contract(canonical, intraday_5m_rows)
+        if is_crypto
+        else {
+            "symbol": canonical, "current_volume": volume if volume > 0 else None,
+            "average_volume_comparable": None, "rvol_ratio": None, "rvol_percent": None,
+            "label": "RVOL intraday indisponível", "status": "INSUFFICIENT_DATA",
+            "method": "same_time_of_day_required", "operational_ready": False,
+            "reason": "same_time_average_unavailable", "as_of": quote.get("quote_time"),
+            "source": quote.get("source") or "quote_cache",
+        }
+    )
+    news_status = str((news or {}).get("data_status") or "").upper()
+    sentiment_status = (
+        "UNSUPPORTED"
+        if is_crypto and news_status in {"UNSUPPORTED", "HISTORICAL", "STALE", "EMPTY"}
+        else "INSUFFICIENT_DATA"
+    )
+    sentiment_reason = "no_current_crypto_news_sentiment" if sentiment_status == "UNSUPPORTED" else "no_fresh_sentiment_source"
+    metrics = {
+        "symbol": _response_symbol(canonical), "canonical_symbol": canonical,
+        "provider_symbol": quote.get("provider_symbol") or provider_symbol(canonical), "timeframe": str(timeframe or "1D").upper(),
+        "asset_class": "crypto" if is_crypto else quote.get("asset_class"),
+        "market_schedule": "24x7" if is_crypto else quote.get("market_schedule"),
+        "session_timezone": "UTC" if is_crypto else quote.get("session_timezone") or quote.get("timezone"),
+        "market_status": "OPEN" if is_crypto else quote.get("market_status") or quote.get("market_state"),
+        "session_date": str(as_of)[:10] if as_of else None, "as_of": as_of,
+        "updated_at": quote.get("updated_at") or quote.get("quote_time"),
+        "source": quote.get("source") or "quote_cache", "status": "PARTIAL",
+        "data_quality": "VALID" if daily_ratio_ready else "PARTIAL",
+        "volume_vs_daily_average": volume_vs_daily_average,
+        "intraday_rvol": intraday_rvol,
+        # Backwards-compatible key with corrected semantics: this is now the
+        # operational intraday contract, never the daily informational ratio.
+        "rvol": intraday_rvol,
+        # No composite is emitted until same-symbol technical/news/flow inputs
+        # exist. A neutral-looking default must never become a trade input.
+        "sentiment": {"symbol": canonical, "value": None, "label": "Sentimento atual indisponível", "status": sentiment_status, "reason": sentiment_reason, "last_historical_source_at": historical_at, "source": None, "timeframe": str(timeframe or "1D").upper(), "as_of": None, "components": {}},
+        "levels": {"status": level_status, "items": zones, "micro_range": micro_range, "as_of": (chart.get("summary") or {}).get("as_of")},
+        "liquidity": (
+            _unsupported_crypto_market_component(canonical, "liquidity")
+            if is_crypto
+            else {"status": "PENDING", "value": None, "label": "Calculando liquidez…", "as_of": None}
+        ),
+    }
+    metrics["operational_view"] = build_symbol_operational_view(
+        canonical, timeframe, insight or {}, metrics, chart=chart, daily_rows=daily_rows, ai_tools=ai_tools,
+    )
+    metrics["liquidity"] = metrics["operational_view"]["operational_context"]["liquidity"]
+    return metrics
+
+
+def _gate_pending_operational_levels(insight: dict, metrics: dict) -> dict:
+    """Do not let an incomplete/micro range leak an entry into the panel."""
+    if not isinstance(insight, dict) or str((metrics.get("levels") or {}).get("status")) == "READY":
+        return insight
+    panel = insight.get("strategic_panel")
+    if not isinstance(panel, dict):
+        return insight
+    blocked = {**panel}
+    for key in ("entry_reference", "stop", "target", "support", "resistance", "operational_zone"):
+        blocked[key] = None
+    blocked["operational_levels"] = {}
+    blocked["operational_levels_block"] = {"status": (metrics.get("levels") or {}).get("status"), "levels": {}}
+    blocked["recommended_action"] = "AGUARDAR"
+    blocked["operational_blocks"] = (metrics.get("operational_view") or {}).get("operational_blocks") or []
+    return {**insight, "strategic_panel": blocked}
 
 
 def _safe_float(value, default: float = 0.0) -> float:
@@ -871,7 +1255,14 @@ def public_market_insight(symbol: str, interval: str = "1D", candles: str | None
     if not ticker:
         return _invalid_insight_payload(symbol, "invalid_symbol", "invalid_symbol", interval=interval)
     response_symbol = _response_symbol(ticker)
-    master_context = _snapshot_master_context(ticker)
+    # The bundle queues selected-symbol hydration. This endpoint stays a
+    # cache-only reader so legacy consumers can still receive a snapshot when
+    # no selected-symbol request exists yet.
+    selected_context = resolve_symbol_context(ticker, interval)
+    on_demand = selected_context.get("analysis") if isinstance(selected_context.get("analysis"), dict) else {}
+    on_demand_ready = selected_context.get("status") == "READY" and canonical_symbol(on_demand.get("symbol")) == canonical_symbol(ticker)
+    analysis_known = bool(on_demand)
+    master_context = dict(on_demand.get("insight") or {}) if on_demand_ready else ({} if analysis_known else _snapshot_master_context(ticker))
     if _is_blocked_public_symbol(ticker):
         rsi_contract = build_public_rsi_contract(
             response_symbol,
@@ -919,7 +1310,15 @@ def public_market_insight(symbol: str, interval: str = "1D", candles: str | None
         }
 
     is_quote_fallback = _is_quote_fallback_chart(ohlc)
-    insight = {} if is_quote_fallback else (build_chart_signal_payload(ticker, ohlc, interval=interval) or {})
+    # While selected-symbol work is pending, expose only chart-derived fields;
+    # never ask the global snapshot engine to fill a decision-shaped gap.
+    insight = (
+        dict(master_context)
+        if on_demand_ready
+        else {}
+        if analysis_known or is_quote_fallback
+        else (build_chart_signal_payload(ticker, ohlc, interval=interval) or {})
+    )
     summary = dict(insight.get("summary") or {})
     if is_quote_fallback:
         summary.update({"source": "quote_cache_fallback", "fallback": True, "confidence": "derived"})
@@ -933,9 +1332,11 @@ def public_market_insight(symbol: str, interval: str = "1D", candles: str | None
 
     return _json_safe_payload({
         "symbol": response_symbol,
-        "score": score,
+        "score": master_context.get("score", score),
         **master_context,
         **rsi_contract,
+        # Candles are the current same-symbol source for direction. A global
+        # snapshot may supply score/history, never overwrite this live read.
         "trend_bias": trend_bias,
         "signal": insight.get("signal") or trend_bias,
         "summary": summary,
@@ -988,15 +1389,17 @@ def public_market_chart(
     summary["ticker"] = response_symbol
     summary["interval"] = chart_interval
     summary["as_of"] = as_of
+    # Compute candle metadata before levels: the range label "1D" contains 5m
+    # candles and must not be published as the level timeframe.
+    rsi_contract = build_public_rsi_contract(response_symbol, chart_interval, ohlc)
     zones = normalize_public_chart_zones(
         overlays.get("zones"),
         symbol=response_symbol,
-        timeframe=chart_interval,
+        timeframe=(rsi_contract.get("rsi_metadata") or {}).get("timeframe") or chart_interval,
         rows=ohlc,
     )
     # Mission 68: per-timeframe RSI from the exact candle series shown, so the
     # chart chip / RSI panel follow the selected timeframe (insight.rsi stays D1).
-    rsi_contract = build_public_rsi_contract(response_symbol, chart_interval, ohlc)
     return _json_safe_payload({
         "ticker": response_symbol,
         "interval": chart_interval,
@@ -1026,6 +1429,9 @@ def public_market_bundle(
     if not ticker:
         return _invalid_bundle_payload(symbol, chart_interval, safe_limit, "invalid_symbol", "invalid_symbol", locale)
     response_symbol = _response_symbol(ticker)
+    # The endpoint remains cache-only: this starts workers and returns the best
+    # cached view immediately. The client polls this one selected symbol.
+    request_symbol_hydration(ticker, timeframe=chart_interval, locale=locale, news_limit=safe_limit)
     cached_payloads = cached_price_payloads(_symbol_aliases(ticker), allow_stale=True)
     quote = _resolve_cached_quote(cached_payloads, ticker)
     record_cache_access("quote", _has_usable_quote_payload(quote), "public_bundle")
@@ -1043,20 +1449,62 @@ def public_market_bundle(
                 _load_chart_data_fast(ticker, _DAILY_CANDLE_INTERVAL),
             ),
         }
+    on_demand = get_symbol_analysis(ticker, chart_interval)
+    if on_demand.get("status") == "READY" and isinstance(on_demand.get("insight"), dict):
+        insight = {**insight, **on_demand["insight"], "strategic_panel": on_demand.get("strategic_panel") or {}}
+    statuses = hydration_status(ticker, timeframe=chart_interval, locale=locale)
+    news = build_public_news_payload(
+        response_symbol, limit=safe_limit, source="public_bundle", allow_fetch=False,
+        schedule_warmup=True, locale=locale,
+    )
+    ai_tools = build_public_ai_tools_payload([ticker, response_symbol], timeframe=chart_interval)
+    ai_status = str(ai_tools.get("status") or "PENDING")
+    ai_status_map = {
+        "READY": "READY", "PENDING": "PENDING", "REFRESHING": "REFRESHING",
+        "HISTORICAL": "HISTORICAL", "STALE": "STALE", "STALE_DATA": "STALE",
+        "EMPTY": "EMPTY", "NO_QUALIFIED_FINDING": "EMPTY", "INSUFFICIENT_DATA": "INSUFFICIENT_DATA",
+        "PROVIDER_ERROR": "ERROR", "ERROR": "ERROR",
+    }
+    statuses["news"] = str(news.get("data_status") or statuses.get("news") or "PENDING")
+    statuses["ai"] = ai_status_map.get(ai_status, ai_status)
+    chart = public_market_chart(ticker, interval=chart_interval, range_value=None)
+    daily_rows = _load_chart_data_fast(ticker, _DAILY_CANDLE_INTERVAL)
+    intraday_5m_rows = (
+        load_public_chart_rows(_symbol_aliases(ticker), "@5M", scope="public_bundle_crypto_rvol")
+        if symbol_category(ticker) == "Crypto"
+        else []
+    )
+    daily_closes = _numeric_close_values(daily_rows)
+    if len(daily_closes) >= 15:
+        insight = {**insight, "trend_bias": _fallback_bias(daily_closes)}
+    market_metrics = _market_metrics_contract(
+        ticker, chart_interval, quote, chart, news, insight,
+        daily_rows=daily_rows, intraday_5m_rows=intraday_5m_rows, ai_tools=ai_tools,
+    )
+    insight = _gate_pending_operational_levels(insight, market_metrics)
     return _json_safe_payload({
         "symbol": response_symbol,
         "quote": quote,
         "insight": insight,
-        "chart": public_market_chart(ticker, interval=chart_interval, range_value=None),
-        "news": build_public_news_payload(
-            response_symbol,
-            limit=safe_limit,
-            source="public_bundle",
-            allow_fetch=False,
-            schedule_warmup=True,
-            locale=locale,
-        ),
-        "ai_tools": build_public_ai_tools_payload([ticker, response_symbol]),
+        "chart": chart,
+        "news": news,
+        "ai_tools": ai_tools,
+        "market_metrics": market_metrics,
+        "asset_class": market_metrics.get("asset_class"),
+        "market_schedule": market_metrics.get("market_schedule"),
+        "session_timezone": market_metrics.get("session_timezone"),
+        "market_status": market_metrics.get("market_status"),
+        "data_status": statuses,
+        "hydration": {
+            "status": on_demand.get("status") or "PENDING",
+            "reason": on_demand.get("reason"),
+            "started_at": on_demand.get("started_at"),
+            "deadline_at": on_demand.get("deadline_at"),
+            "retry_count": on_demand.get("retry_count") or 0,
+            "missing_components": on_demand.get("missing_components") or [],
+            "updated_at": on_demand.get("updated_at"),
+        },
+        "retry_after_seconds": 3 if any(value == "PENDING" or value == "REFRESHING" for value in statuses.values()) else None,
         "source": "cache_snapshot_bundle",
     })
 
@@ -1111,4 +1559,13 @@ def _load_chart_data_fast(ticker: str, interval: str):
         return rows
     cache_key = "chart_exact_miss_b3_future" if _is_b3_mini_future_symbol(ticker) else "chart_exact_miss"
     record_cache_access(cache_key, False, "public_market_live")
+    if not _is_b3_mini_future_symbol(ticker):
+        try:
+            from app.system.chart_warmup import request_on_demand_chart_warmup
+
+            requested = str(interval or "1D").upper().strip()
+            warm_range = _CANDLE_INTERVAL_WARM_RANGE.get(requested)
+            request_on_demand_chart_warmup(ticker, tuple(value for value in (requested, warm_range) if value))
+        except Exception:
+            pass
     return []

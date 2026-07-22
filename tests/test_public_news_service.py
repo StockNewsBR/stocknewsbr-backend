@@ -285,6 +285,9 @@ class PublicNewsServiceTests(unittest.TestCase):
             payload = public_news_service.build_public_news_payload("PETR4", limit=6, allow_fetch=True)
 
         item = payload["items"][0]
+        self.assertEqual(payload["status"], "historical")
+        self.assertEqual(payload["data_status"], "HISTORICAL")
+        self.assertEqual(payload["state"]["reason"], "no_fresh_news")
         self.assertEqual(item["freshness_bucket"], "older_7_days")
         self.assertEqual(item["freshness_label"], "Notícia antiga / 7+ dias")
         self.assertNotIn("Ontem", item["freshness_label"])

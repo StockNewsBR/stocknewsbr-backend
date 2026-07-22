@@ -1,5 +1,6 @@
 import re
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,7 +24,9 @@ def _row(
     audit_status="APPROVED",
     state="low_risk",
     detected_at=None,
+    last_confirmed_at=None,
 ):
+    confirmed_at = last_confirmed_at or datetime.now(timezone.utc).isoformat()
     return {
         **({"detected_at": detected_at} if detected_at else {}),
         "state": state,
@@ -46,7 +49,10 @@ def _row(
         "price": 37.5,
         "volume": 1_000_000,
         "data_quality": "real_time",
-        "market_data_updated_at": "2026-07-14T12:00:00+00:00",
+        "market_data_updated_at": confirmed_at,
+        "as_of": confirmed_at,
+        "updated_at": confirmed_at,
+        "last_confirmed_at": confirmed_at,
         "decision_envelope": {
             "decision_status": "READY" if decision_ready else "BLOCKED",
             "decision_ready": decision_ready,
@@ -65,7 +71,7 @@ def _snapshot(tools, *, stale=False):
     return {
         "ai_tools": tools,
         "symbol_snapshots": symbol_rows,
-        "generated_at": "2026-07-14T12:00:00+00:00",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": "engine",
         "stale": stale,
     }
@@ -81,7 +87,9 @@ class Mission68PublicAiToolsTests(unittest.TestCase):
         ]
         tools["flow"] = [_row("PETR4", tool="flow", timeframe="1D", decision_ready=False, can_trade=False)]
 
-        with patch.object(public_ai_tools_service, "get_snapshot", return_value=_snapshot(tools)):
+        with patch("app.system.symbol_hydration.request_symbol_hydration"), patch(
+            "app.system.symbol_hydration.get_symbol_analysis", return_value={}
+        ), patch.object(public_ai_tools_service, "get_snapshot", return_value=_snapshot(tools)):
             payload = public_ai_tools_service.build_public_ai_tools_payload(
                 symbol="PETR4.SA",
                 tool="risk",
@@ -108,7 +116,7 @@ class Mission68PublicAiToolsTests(unittest.TestCase):
         ):
             payload = public_ai_tools_service.build_public_ai_tools_payload(tool="risk")
 
-        self.assertEqual(payload["status"], "NO_QUALIFIED_FINDING")
+        self.assertEqual(payload["status"], "EMPTY")
         self.assertEqual(payload["reason"], "no_qualified_finding")
         self.assertEqual(payload["source"], "snapshot")
         self.assertFalse(payload["using_fallback"])
@@ -121,10 +129,12 @@ class Mission68PublicAiToolsTests(unittest.TestCase):
         row = _row()
         row.pop("timeframe")
         tools["risk"] = [row]
-        with patch.object(public_ai_tools_service, "get_snapshot", return_value=_snapshot(tools)):
+        with patch("app.system.symbol_hydration.request_symbol_hydration"), patch(
+            "app.system.symbol_hydration.get_symbol_analysis", return_value={}
+        ), patch.object(public_ai_tools_service, "get_snapshot", return_value=_snapshot(tools)):
             payload = public_ai_tools_service.build_public_ai_tools_payload(symbol="PETR4", tool="risk", timeframe="1D")
 
-        self.assertEqual(payload["status"], "NO_QUALIFIED_FINDING")
+        self.assertEqual(payload["status"], "EMPTY")
         self.assertEqual(payload["displayable_count"], 0)
         self.assertFalse(payload["tools"]["risk"])
 
@@ -150,12 +160,14 @@ class Mission68PublicAiToolsTests(unittest.TestCase):
         ):
             payload = public_ai_tools_service.build_public_ai_tools_payload(tool="risk")
 
-        row = payload["tools"]["risk"][0]
-        self.assertEqual(payload["status"], "STALE_DATA")
+        self.assertFalse(payload["tools"]["risk"])
+        row = payload["historical_tools"]["risk"][0]
+        self.assertEqual(payload["status"], "HISTORICAL")
         self.assertEqual(payload["reason"], "last_good_snapshot_fallback")
         self.assertEqual(payload["source"], "last_good_snapshot")
         self.assertTrue(payload["using_fallback"])
-        self.assertEqual(payload["displayable_count"], 1)
+        self.assertEqual(payload["displayable_count"], 0)
+        self.assertEqual(len(payload["historical_tools"]["risk"]), 1)
         self.assertEqual(payload["actionable_count"], 0)
         self.assertFalse(row["actionable"])
         self.assertFalse(row["decision_ready"])
@@ -217,17 +229,18 @@ class Mission68FindingContractTests(unittest.TestCase):
             payload = public_ai_tools_service.build_public_ai_tools_payload(tool="risk")
         return payload["tools"]["risk"]
 
-    def test_rows_are_sorted_descending_by_detected_at(self):
+    def test_rows_are_sorted_descending_by_last_confirmation(self):
+        now = datetime.now(timezone.utc)
         tools = _tools()
         tools["risk"] = [
-            _row("PETR4", detected_at="2026-07-14T11:00:00+00:00"),
-            _row("VALE3", detected_at="2026-07-14T13:30:00+00:00"),
-            _row("ITUB4", detected_at="2026-07-14T12:15:00+00:00"),
+            _row("PETR4", last_confirmed_at=(now - timedelta(minutes=3)).isoformat()),
+            _row("VALE3", last_confirmed_at=(now - timedelta(minutes=1)).isoformat()),
+            _row("ITUB4", last_confirmed_at=(now - timedelta(minutes=2)).isoformat()),
         ]
         rows = self._rows(tools)
 
         self.assertEqual([row["ticker"] for row in rows], ["VALE3", "ITUB4", "PETR4"])
-        stamps = [row["detected_at"] for row in rows]
+        stamps = [row["last_confirmed_at"] for row in rows]
         self.assertEqual(stamps, sorted(stamps, reverse=True))
 
     def test_every_row_carries_machine_key_and_human_label(self):

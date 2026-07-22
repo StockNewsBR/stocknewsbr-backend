@@ -1,6 +1,9 @@
 import unittest
 from unittest.mock import patch
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app.api import routes_public_market
 from app.api import routes_public_market_live
 from app.market import market_data_loader
@@ -11,6 +14,64 @@ from app.services.quote_service import classify_quote_payload, empty_quote_paylo
 
 
 class PublicMarketRouteTests(unittest.TestCase):
+    def test_bundle_http_publishes_top_level_metrics_without_erasing_insight(self):
+        app = FastAPI()
+        app.include_router(routes_public_market_live.router)
+        for symbol in ("AAPL", "AAL", "PETR4", "ITUB4", "ASAI3"):
+            quote = {"symbol": symbol, "provider_symbol": f"{symbol}.SA", "price": 42.4, "volume": 704, "average_volume": 930, "quote_time": "2026-07-21T12:00:00Z"}
+            insight = {"symbol": symbol, "rsi": 61.0, "trend_bias": "alta", "master_score": 7.1, "strategic_panel": {"symbol": symbol}}
+            chart = {"ticker": symbol, "ohlc": [], "zones": [], "summary": {"as_of": "2026-07-21T12:00:00Z"}}
+            with patch.object(routes_public_market_live, "request_symbol_hydration"), patch.object(
+                routes_public_market_live, "cached_price_payloads", return_value={symbol: quote}
+            ), patch.object(routes_public_market_live, "_resolve_cached_quote", return_value=quote), patch.object(
+                routes_public_market_live, "public_market_insight", return_value=insight
+            ), patch.object(routes_public_market_live, "public_market_chart", return_value=chart), patch.object(
+                routes_public_market_live, "build_public_news_payload", return_value={"items": [], "data_status": "READY"}
+            ), patch.object(routes_public_market_live, "build_public_ai_tools_payload", return_value={"tools": {}, "status": "PENDING"}), patch.object(
+                routes_public_market_live, "get_symbol_analysis", return_value={}
+            ), patch.object(
+                routes_public_market_live, "_load_chart_data_fast",
+                return_value=[{"time": f"2026-07-{index + 1:02d}T12:00:00Z", "close": 30 + index} for index in range(15)],
+            ), patch.object(routes_public_market_live, "hydration_status", return_value={}):
+                payload = TestClient(app).get(f"/public/market/bundle/{symbol}?interval=1D&limit=6&locale=pt-BR").json()
+
+            self.assertEqual(payload["market_metrics"]["canonical_symbol"], symbol)
+            self.assertEqual(payload["market_metrics"]["timeframe"], "1D")
+            self.assertIn("operational_view", payload["market_metrics"])
+            self.assertEqual(payload["market_metrics"]["sentiment"]["status"], "INSUFFICIENT_DATA")
+            self.assertEqual(payload["market_metrics"]["volume_vs_daily_average"]["status"], "READY")
+            self.assertEqual(payload["market_metrics"]["intraday_rvol"]["status"], "INSUFFICIENT_DATA")
+            self.assertIsNone(payload["market_metrics"]["intraday_rvol"]["rvol_ratio"])
+            self.assertEqual(payload["market_metrics"]["operational_view"]["operational_context"]["master_score"]["status"], "PARTIAL")
+            self.assertIn("rsi", payload["insight"])
+            self.assertEqual(payload["insight"]["trend_bias"], "alta")
+            self.assertIn("strategic_panel", payload["insight"])
+
+    def test_bundle_keeps_daily_trend_distinct_from_intraday_direction(self):
+        app = FastAPI()
+        app.include_router(routes_public_market_live.router)
+        quote = {"symbol": "PETR4", "price": 42.4, "volume": 704, "average_volume": 930, "quote_time": "2026-07-21T12:00:00Z"}
+        daily = [{"time": f"2026-07-{index + 1:02d}T12:00:00Z", "close": 30 + index} for index in range(15)]
+        insight = {"symbol": "PETR4", "rsi": 61.0, "rsi_metadata": {"status": "AVAILABLE", "as_of": daily[-1]["time"], "source": "canonical_indicator_engine"}}
+        chart = {"ticker": "PETR4", "ohlc": [], "zones": [], "rsi_metadata": {"timeframe": "5m"}, "summary": {"trend_bias": "baixa", "as_of": "2026-07-21T12:00:00Z"}}
+        with patch.object(routes_public_market_live, "request_symbol_hydration"), patch.object(
+            routes_public_market_live, "cached_price_payloads", return_value={"PETR4": quote}
+        ), patch.object(routes_public_market_live, "_resolve_cached_quote", return_value=quote), patch.object(
+            routes_public_market_live, "public_market_insight", return_value=insight
+        ), patch.object(routes_public_market_live, "public_market_chart", return_value=chart), patch.object(
+            routes_public_market_live, "_load_chart_data_fast", return_value=daily
+        ), patch.object(routes_public_market_live, "build_public_news_payload", return_value={"items": [], "data_status": "READY"}), patch.object(
+            routes_public_market_live, "build_public_ai_tools_payload", return_value={"tools": {}, "status": "PENDING"}
+        ), patch.object(routes_public_market_live, "get_symbol_analysis", return_value={}), patch.object(
+            routes_public_market_live, "hydration_status", return_value={}):
+            payload = TestClient(app).get("/public/market/bundle/PETR4?interval=1D&limit=6&locale=pt-BR").json()
+
+        context = payload["market_metrics"]["operational_view"]["technical_context"]
+        self.assertEqual(context["trend_d1"]["value"], "alta")
+        self.assertEqual(context["trend_d1"]["timeframe"], "1d")
+        self.assertEqual(context["intraday_direction_5m"]["value"], "baixa")
+        self.assertEqual(context["intraday_direction_5m"]["timeframe"], "5m")
+
     def test_public_aliases_include_futures_provider_symbols(self):
         self.assertIn("NQ=F", routes_public_market_live._symbol_aliases("NQ"))
         self.assertIn("MNQ=F", routes_public_market_live._symbol_aliases("MNO"))
@@ -131,7 +192,11 @@ class PublicMarketRouteTests(unittest.TestCase):
         self.assertEqual(payload["tools"]["flow"][0]["ticker"], "F")
 
     def test_public_bundle_uses_cached_snapshot_payloads(self):
-        with patch.object(
+        with patch.object(routes_public_market_live, "request_symbol_hydration"), patch.object(
+            routes_public_market_live, "get_symbol_analysis", return_value={}
+        ), patch.object(
+            routes_public_market_live, "hydration_status", return_value={}
+        ), patch.object(
             routes_public_market_live,
             "cached_price_payloads",
             return_value={"F": {"symbol": "F", "price": 14.9, "volume": 1_000_000, "source": "snapshot"}},

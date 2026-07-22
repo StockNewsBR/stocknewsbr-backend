@@ -499,6 +499,29 @@ def build_snapshot_payload(signals, source: str = "engine", stale: bool = False)
         logger.exception("Snapshot AI payload build failed")
         ai_tools = {}
 
+    # Freshness is a confirmation timestamp, never the first detection time.
+    # The UI can therefore retain a pattern as history without presenting an
+    # old snapshot as a current signal.
+    for tool_rows in ai_tools.values() if isinstance(ai_tools, dict) else []:
+        for row in tool_rows if isinstance(tool_rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            is_row_stale = bool(
+                stale
+                or row.get("stale") is True
+                or row.get("is_stale") is True
+                or str(row.get("data_quality") or "").lower().strip() == "stale"
+                or str(row.get("freshness_status") or "").upper().strip() in ("STALE", "HISTORICAL")
+            )
+            row["snapshot_generated_at"] = generated_at
+            row.setdefault("as_of", row.get("market_data_updated_at") or row.get("last_bar_at"))
+            if is_row_stale:
+                row["freshness_status"] = "STALE"
+            else:
+                row["updated_at"] = generated_at
+                row["last_confirmed_at"] = generated_at
+                row["freshness_status"] = "READY"
+
     pre_audit_pulse = build_market_pulse(normalized)
     snapshot_context = {
         "schema_version": SNAPSHOT_SCHEMA_VERSION,

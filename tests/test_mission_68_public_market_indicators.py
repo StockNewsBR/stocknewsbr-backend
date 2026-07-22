@@ -283,7 +283,9 @@ class Mission68CanonicalChartLevelTests(unittest.TestCase):
         self.assertEqual(len(payload["zones"]), 1)
         self.assertEqual(payload["zones"][0]["kind"], "support")
         self.assertEqual(payload["zones"][0]["symbol"], "PETR4")
-        self.assertEqual(payload["zones"][0]["timeframe"], "1W")
+        # 1W is the requested range; its actual candles (and therefore the
+        # derived level) are daily.
+        self.assertEqual(payload["zones"][0]["timeframe"], "1D")
         self.assertEqual(payload["zones"][0]["as_of"], rows[-1]["time"])
         self.assertNotIn("resistance", {zone.get("kind") for zone in payload["zones"]})
 

@@ -247,6 +247,46 @@ class MarketSnapshotAiToolsTests(unittest.TestCase):
         self.assertEqual(payload["decision"]["trade_action"], "NO_DECISION")
         self.assertFalse(payload["decision"]["decision_ready"])
 
+    def test_snapshot_payload_freshness_status_for_stale_and_fresh_rows(self):
+        old_updated = "2026-04-01T10:00:00+00:00"
+        old_confirmed = "2026-04-01T10:00:00+00:00"
+        stale_signals = [
+            {
+                "ticker": "PETR4",
+                "score": 88.0,
+                "signal": "buy",
+                "state": "accumulation",
+                "updated_at": old_updated,
+                "last_confirmed_at": old_confirmed,
+                "stale": True,
+            }
+        ]
+        with patch.object(market_snapshot_engine, "get_market_pool", return_value={}):
+            stale_payload = build_snapshot_payload(stale_signals, source="engine", stale=True)
+
+        flow_stale = stale_payload["ai_tools"]["flow"][0]
+        self.assertEqual(flow_stale["freshness_status"], "STALE")
+        self.assertEqual(flow_stale.get("updated_at"), old_updated)
+        self.assertEqual(flow_stale.get("last_confirmed_at"), old_confirmed)
+        self.assertIn("snapshot_generated_at", flow_stale)
+
+        fresh_signals = [
+            {
+                "ticker": "PETR4",
+                "score": 88.0,
+                "signal": "buy",
+                "state": "accumulation",
+            }
+        ]
+        with patch.object(market_snapshot_engine, "get_market_pool", return_value={}):
+            fresh_payload = build_snapshot_payload(fresh_signals, source="engine", stale=False)
+
+        flow_fresh = fresh_payload["ai_tools"]["flow"][0]
+        self.assertEqual(flow_fresh["freshness_status"], "READY")
+        self.assertEqual(flow_fresh["updated_at"], fresh_payload["generated_at"])
+        self.assertEqual(flow_fresh["last_confirmed_at"], fresh_payload["generated_at"])
+        self.assertEqual(flow_fresh["snapshot_generated_at"], fresh_payload["generated_at"])
+
 
 if __name__ == "__main__":
     unittest.main()

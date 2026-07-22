@@ -16,6 +16,7 @@ export type StrategicPanelWhyItem = {
   tool?: string;
   label?: string;
   source?: string;
+  symbol?: string | null;
   reason?: string;
 };
 
@@ -431,6 +432,7 @@ export type WorkspaceAiTools = {
 };
 
 export type PublicAiToolsPayload = {
+  symbol?: string | null;
   reset_key: string;
   updated_at?: string | null;
   max_rows_per_tool: number;
@@ -438,10 +440,11 @@ export type PublicAiToolsPayload = {
   timezone: string;
   source?: string;
   tools: Partial<WorkspaceAiTools>;
+  historical_tools?: Partial<WorkspaceAiTools>;
   selected_symbol?: string | null;
   selected_tool?: keyof WorkspaceAiTools | null;
   timeframe?: string | null;
-  status?: "READY" | "NO_QUALIFIED_FINDING" | "SNAPSHOT_UNAVAILABLE" | "STALE_DATA" | "ERROR" | "KILL_SWITCHED" | string;
+  status?: "READY" | "PENDING" | "PENDING_EXPIRED" | "REFRESHING" | "INSUFFICIENT_DATA" | "UNSUPPORTED" | "PROVIDER_ERROR" | "HISTORICAL" | "STALE" | "EMPTY" | "NO_QUALIFIED_FINDING" | "SNAPSHOT_UNAVAILABLE" | "STALE_DATA" | "ERROR" | "KILL_SWITCHED" | string;
   reason?: string | null;
   analyzed_at?: string | null;
   displayable_count?: number;
@@ -708,6 +711,15 @@ export type ChartZone = {
   source?: string | null;
   algorithm_version?: string | null;
   stale?: boolean;
+  status?: "READY" | "INSUFFICIENT_SEPARATION" | string;
+  operational?: boolean;
+  micro_timeframe?: string | null;
+  distance_pct?: number | null;
+  atr14?: number | null;
+  distance_atr?: number | null;
+  strength_score?: number | null;
+  touches?: number | null;
+  rejections?: number | null;
 };
 
 export type ChartPayload = {
@@ -972,6 +984,83 @@ export type QuotePayload = {
   provider_timestamp?: string | number | null;
 };
 
+export type SymbolMetricComponent = {
+  symbol?: string | null;
+  value?: number | string | null;
+  score?: number | null;
+  label?: string | null;
+  status: string;
+  timeframe?: string | null;
+  as_of?: string | null;
+  data_as_of?: string | null;
+  session_date?: string | null;
+  freshness_status?: string | null;
+  age_sessions?: number | null;
+  updated_at?: string | null;
+  source?: string | null;
+  reason?: string | null;
+  thresholds?: Record<string, number> | null;
+  side?: "BUY_SIDE" | "SELL_SIDE" | null;
+  low?: number | null;
+  high?: number | null;
+  midpoint?: number | null;
+  distance_from_price_pct?: number | null;
+};
+
+export type SymbolOperationalView = {
+  symbol: string;
+  canonical_symbol: string;
+  timeframe: string;
+  session_date?: string | null;
+  as_of?: string | null;
+  updated_at?: string | null;
+  source?: string | null;
+  timeframes?: { chart_data?: string | null; operational?: string | null; structural?: string | null };
+  technical_context: {
+    technical_bias?: SymbolMetricComponent;
+    trend_d1: SymbolMetricComponent;
+    rsi_d1: SymbolMetricComponent;
+    intraday_direction_5m: SymbolMetricComponent;
+    institutional_flow: SymbolMetricComponent;
+  };
+  operational_context: {
+    volume_vs_daily_average?: SymbolMetricComponent & { ratio?: number | null; percent?: number | null; informational_only?: boolean };
+    intraday_rvol?: SymbolMetricComponent & { rvol_ratio?: number | null; rvol_percent?: number | null; operational_ready?: boolean };
+    rvol?: SymbolMetricComponent & { rvol_ratio?: number | null; rvol_percent?: number | null; operational_ready?: boolean };
+    sentiment?: SymbolMetricComponent;
+    liquidity?: SymbolMetricComponent;
+    levels?: { status: string; items?: Array<Record<string, unknown>>; micro_range?: Record<string, unknown> | null; as_of?: string | null };
+    master_score?: SymbolMetricComponent & { used_components?: string[]; missing_components?: string[]; data_completeness?: number | null };
+  };
+  pending_components: Array<{ component: string; status: string; reason?: string | null }>;
+  operational_blocks: Array<{ component: string; status: string; reason?: string | null }>;
+  decision: string;
+  decision_reason?: string | null;
+  confidence?: number | null;
+  confidence_status?: string;
+  conviction?: number | null;
+  conviction_status?: string;
+  risk?: string | null;
+  levels?: Array<Record<string, unknown>>;
+};
+
+export type PublicMarketMetrics = {
+  symbol: string;
+  canonical_symbol: string;
+  timeframe: string;
+  session_date?: string | null;
+  as_of?: string | null;
+  status: string;
+  data_quality: string;
+  volume_vs_daily_average?: SymbolMetricComponent & { current_volume?: number | null; daily_average_volume?: number | null; ratio?: number | null; percent?: number | null; method?: string | null; informational_only?: boolean };
+  intraday_rvol?: SymbolMetricComponent & { current_volume?: number | null; average_volume_comparable?: number | null; rvol_ratio?: number | null; rvol_percent?: number | null; method?: string | null; operational_ready?: boolean };
+  rvol: SymbolMetricComponent & { current_volume?: number | null; average_volume_comparable?: number | null; rvol_ratio?: number | null; rvol_percent?: number | null; method?: string | null; operational_ready?: boolean };
+  sentiment: SymbolMetricComponent & { components?: Record<string, number>; last_historical_source_at?: string | null };
+  levels?: { status: string; items?: Array<Record<string, unknown>>; micro_range?: Record<string, unknown> | null; as_of?: string | null } | null;
+  liquidity?: SymbolMetricComponent | null;
+  operational_view?: SymbolOperationalView | null;
+};
+
 export type PublicInsightPayload = {
   symbol: string;
   score?: number | null;
@@ -1032,6 +1121,7 @@ export type PublicInsightPayload = {
   rel_volume?: number | null;
   trend_bias?: string | null;
   signal?: string | null;
+  market_metrics?: PublicMarketMetrics | null;
   summary?: Record<string, unknown>;
 };
 
@@ -1042,6 +1132,9 @@ export type PublicMarketBundlePayload = {
   chart?: ChartPayload | null;
   news?: NewsPayload | null;
   ai_tools?: PublicAiToolsPayload | null;
+  market_metrics?: PublicMarketMetrics | null;
+  data_status?: Record<string, string>;
+  retry_after_seconds?: number | null;
   source?: string;
 };
 

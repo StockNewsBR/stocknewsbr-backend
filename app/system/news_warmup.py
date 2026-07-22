@@ -7,7 +7,13 @@ from pathlib import Path
 from threading import RLock, Thread
 from typing import Iterable
 
-from app.services.news_service import get_cached_symbol_news, get_symbol_news
+from app.services.news_service import (
+    NEWS_CACHE_TTL_SECONDS,
+    get_cached_symbol_news,
+    get_news_cache_info,
+    get_symbol_news,
+    normalize_news_locale,
+)
 from app.services.symbol_sanitizer import (
     is_symbol_on_cooldown,
     mark_symbol_cooldown,
@@ -130,13 +136,14 @@ def _write_requests(requests: dict[str, dict]) -> None:
         logger.exception("Failed to write news warmup requests")
 
 
-def request_news_warmup(symbol: str, limit: int = 6) -> None:
+def request_news_warmup(symbol: str, limit: int = 6, locale: str = "pt-BR") -> None:
     ticker = _clean_symbol(symbol)
     if not ticker:
         return
 
     item_limit = max(1, min(int(limit or 6), 20))
-    key = f"{ticker}:{item_limit}"
+    content_locale = normalize_news_locale(locale)
+    key = f"{ticker}:{item_limit}:{content_locale}"
     now = time.time()
     should_start_async = False
     with _lock:
@@ -146,6 +153,7 @@ def request_news_warmup(symbol: str, limit: int = 6) -> None:
             {
                 "symbol": ticker,
                 "limit": item_limit,
+                "locale": content_locale,
                 "requested_at": now,
                 "count": int(current.get("count") or 0) + 1,
             }
@@ -161,23 +169,25 @@ def request_news_warmup(symbol: str, limit: int = 6) -> None:
     if should_start_async:
         Thread(
             target=_warm_single_request,
-            args=(ticker, item_limit, key),
+            args=(ticker, item_limit, content_locale, key),
             name=f"news-warmup-{ticker}",
             daemon=True,
         ).start()
 
 
-def _warm_single_request(symbol: str, limit: int, key: str) -> None:
+def _warm_single_request(symbol: str, limit: int, locale: str, key: str) -> None:
     start = time.perf_counter()
     success = False
     try:
-        if get_cached_symbol_news(symbol, limit=limit):
+        cache_info = get_news_cache_info(symbol, locale=locale)
+        cache_age = cache_info.get("age_seconds")
+        if get_cached_symbol_news(symbol, limit=limit, locale=locale) and cache_age is not None and cache_age < NEWS_CACHE_TTL_SECONDS:
             success = True
             _drop_warmed_requests([symbol])
             return
 
         with provider_call_context("news_request_warmup"):
-            items = get_symbol_news(symbol, limit=limit)
+            items = get_symbol_news(symbol, limit=limit, locale=locale)
         success = bool(items)
         if items:
             _drop_warmed_requests([symbol])
@@ -192,18 +202,18 @@ def _warm_single_request(symbol: str, limit: int, key: str) -> None:
         record_worker_stage_duration("news_request_warmup", time.perf_counter() - start, success=success)
 
 
-def _requested_symbols() -> list[tuple[str, int]]:
+def _requested_symbols() -> list[tuple[str, int, str]]:
     with _lock:
         requests = _read_requests()
-    rows: list[tuple[float, int, str, int]] = []
+    rows: list[tuple[float, int, str, int, str]] = []
     for item in requests.values():
         symbol = _clean_symbol(item.get("symbol"))
         if not symbol:
             continue
         limit = max(1, min(int(item.get("limit") or 6), 20))
-        rows.append((float(item.get("requested_at") or 0.0), int(item.get("count") or 0), symbol, limit))
+        rows.append((float(item.get("requested_at") or 0.0), int(item.get("count") or 0), symbol, limit, normalize_news_locale(item.get("locale"))))
     rows.sort(key=lambda row: (row[0], row[1]), reverse=True)
-    return [(symbol, limit) for _, _, symbol, limit in rows]
+    return [(symbol, limit, locale) for _, _, symbol, limit, locale in rows]
 
 
 def _drop_warmed_requests(symbols: Iterable[str]) -> None:
@@ -230,7 +240,7 @@ def warm_news_once(limit: int = DEFAULT_NEWS_WARMUP_LIMIT, max_calls: int = DEFA
 
     target_pairs = _requested_symbols()
     for symbol in _dedupe(_NEWS_PRIORITY)[: max(0, int(limit))]:
-        pair = (symbol, 6)
+        pair = (symbol, 6, "pt-BR")
         if pair not in target_pairs:
             target_pairs.append(pair)
 
@@ -244,18 +254,22 @@ def warm_news_once(limit: int = DEFAULT_NEWS_WARMUP_LIMIT, max_calls: int = DEFA
     start = time.perf_counter()
 
     with provider_call_context("news_warmup"):
-        for symbol, item_limit in target_pairs:
+        for target in target_pairs:
+            symbol, item_limit, *requested_locale = target
+            locale = normalize_news_locale(requested_locale[0] if requested_locale else "pt-BR")
             if attempted >= max_calls:
                 break
             if _is_on_cooldown(symbol, now):
                 continue
-            if get_cached_symbol_news(symbol, limit=item_limit):
+            cache_info = get_news_cache_info(symbol, locale=locale)
+            cache_age = cache_info.get("age_seconds")
+            if get_cached_symbol_news(symbol, limit=item_limit, locale=locale) and cache_age is not None and cache_age < NEWS_CACHE_TTL_SECONDS:
                 cached += 1
                 warmed.append(symbol)
                 continue
             attempted += 1
             try:
-                items = get_symbol_news(symbol, limit=item_limit)
+                items = get_symbol_news(symbol, limit=item_limit, locale=locale)
                 if items:
                     warmed.append(symbol)
                 else:

@@ -72,6 +72,7 @@ function buildStudies(showVwap: boolean, showMacd: boolean, showRsi: boolean) {
 
 function firstFiniteNumber(...values: Array<unknown>) {
   for (const value of values) {
+    if (value == null || value === "") continue;
     const numeric = Number(value);
     if (Number.isFinite(numeric)) return numeric;
   }

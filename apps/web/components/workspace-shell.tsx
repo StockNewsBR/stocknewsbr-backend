@@ -78,6 +78,9 @@ import type {
   PublicAiToolsPayload,
   PublicBootstrap,
   PublicInsightPayload,
+  PublicMarketMetrics,
+  SymbolMetricComponent,
+  SymbolOperationalView,
   QuotePayload,
   RankingRow,
   SignalRow,
@@ -228,6 +231,8 @@ const AI_TOOL_TAB_MAP = {
   macro: "macro",
   regime: "regime",
 } as const;
+
+const GLOBAL_AI_ALERT_TAB_IDS = new Set(["flow", "liquidity", "trend", "momentum"]);
 
 const TAB_META: Record<string, { label: string; short: string }> = {
   grafico: { label: "📈 Gráfico IA / Rede Social", short: "Gráfico/Rede Social" },
@@ -1763,6 +1768,9 @@ function resolveAiAlertTimestamp(row: AiToolRow, fallbackIso?: unknown) {
 
 function resolveAiFindingTimestamp(row: AiToolRow) {
   return (
+    normalizeAlertTimestamp((row as any).last_confirmed_at) ||
+    normalizeAlertTimestamp((row as any).updated_at) ||
+    normalizeAlertTimestamp((row as any).as_of) ||
     normalizeAlertTimestamp((row as any).found_at) ||
     normalizeAlertTimestamp((row as any).first_seen_at) ||
     normalizeAlertTimestamp(row.detected_at) ||
@@ -1952,24 +1960,6 @@ function selectDiverseByLens<T>(
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
-}
-
-function calibrateSentimentMeterValue(value: number | null, label: string) {
-  if (value == null) return null;
-  const normalized = clampNumber(value, 0, 100);
-  if (label === "Urso") return clampNumber(normalized <= 5 ? 32 : normalized, 18, 45);
-  if (label === "Touro") return clampNumber(normalized < 55 ? 64 : normalized, 55, 92);
-  if (label === "Neutro") return clampNumber(normalized, 46, 54);
-  return normalized;
-}
-
-function calibrateVolumeMeterValue(value: number | null, label: string) {
-  if (value == null) return null;
-  const normalized = clampNumber(value, 0, 100);
-  if (label === "Baixo") return clampNumber(normalized <= 5 ? 22 : normalized, 12, 34);
-  if (label === "Normal") return clampNumber(normalized, 35, 64);
-  if (label === "Alto") return clampNumber(normalized < 65 ? 72 : normalized, 65, 100);
-  return normalized;
 }
 
 function buildCategoryUniverse(symbols: string[], category: string) {
@@ -2437,6 +2427,7 @@ function deriveAtrPct(changePct?: number | null, rsi?: number | null, volume?: n
 
 function firstFiniteNumber(...values: Array<unknown>) {
   for (const value of values) {
+    if (value == null || value === "") continue;
     const numeric = Number(value);
     if (Number.isFinite(numeric)) return numeric;
   }
@@ -2468,13 +2459,13 @@ function rsiTimeframeTag(metadata?: { timeframe?: string | null; candle_interval
 // panel and AI scoring. Flip to true to show the card again.
 const RSI_CARD_VISIBLE = true;
 
-function describeRsiValue(value: number | null, locale: AppLocale = "pt-BR", candleTag = "D1") {
+function describeRsiValue(value: number | null, locale: AppLocale = "pt-BR", candleTag = "D1", pending = false) {
   if (value == null || !Number.isFinite(value) || value <= 0 || value > 100) {
     return {
       label: "—",
-      hint: locale === "en-US" ? "RSI missing from the current payload." : "RSI ausente no payload atual.",
+      hint: pending ? (locale === "en-US" ? "Calculating daily RSI…" : "Calculando RSI diário…") : (locale === "en-US" ? "Daily RSI unavailable — insufficient provider data." : "RSI indisponível — dados insuficientes do provedor."),
       tone: "neutral" as const,
-      basis: locale === "en-US" ? "RSI: no read." : "RSI: sem leitura.",
+      basis: pending ? (locale === "en-US" ? "RSI: calculating." : "RSI: calculando.") : (locale === "en-US" ? "RSI: unavailable." : "RSI: indisponível."),
     };
   }
 
@@ -2617,6 +2608,7 @@ function reconcileStatsWithDecision<T extends { label: string; value: string; hi
       return value === item.value && hint === item.hint ? item : { ...item, value, hint };
     }
     if (label.includes("score")) {
+      if (label.includes("parcial") || label.includes("partial")) return item;
       const numeric = Number(item.value);
       if (!Number.isFinite(numeric)) return item;
       const strength = numeric < 4
@@ -3700,7 +3692,7 @@ function strategicPanelTone(panel?: StrategicPanel | null): DecisionTone {
   return "watch";
 }
 
-function strategicPanelDecisionCards(panel: StrategicPanel, locale: AppLocale): EssentialDecisionCard[] {
+function strategicPanelDecisionCards(panel: StrategicPanel, locale: AppLocale, trendOverride?: string | null): EssentialDecisionCard[] {
   const isEnglish = locale === "en-US";
   // Read the backend's explicit 0..10 value. Guessing the scale from the number's
   // magnitude turned a real 8/100 into "8.0 / 10" while 100/100 became "10.0" —
@@ -3709,7 +3701,12 @@ function strategicPanelDecisionCards(panel: StrategicPanel, locale: AppLocale): 
   const displayScore = firstFiniteNumber((panel.master_score_block as any)?.score_0_10)
     ?? normalizeMasterScoreForDisplay(score);
   const canonicalAnalysis = panel.canonical_analysis;
-  const direction = canonicalAnalysis?.direction === "BULLISH"
+  const override = normalizeUiText(trendOverride || "");
+  const direction = override.includes("alta") || override.includes("bull")
+    ? (isEnglish ? "Up" : "Alta")
+    : override.includes("baixa") || override.includes("bear")
+      ? (isEnglish ? "Down" : "Baixa")
+      : canonicalAnalysis?.direction === "BULLISH"
     ? (isEnglish ? "Up" : "Alta")
     : canonicalAnalysis?.direction === "BEARISH"
       ? (isEnglish ? "Down" : "Baixa")
@@ -3719,12 +3716,12 @@ function strategicPanelDecisionCards(panel: StrategicPanel, locale: AppLocale): 
   const risk = strategicPanelText(panel.risk_block?.visual_level || panel.risk_block?.level, isEnglish ? "Moderate" : "Moderado");
   const conviction = strategicPanelText((panel.master_score_block as any)?.conviction_visual || (panel.master_score_block as any)?.conviction, isEnglish ? "Low conviction" : "Convicção baixa");
   const confidence = strategicPanelText((panel.master_score_block as any)?.confidence_visual || (panel.master_score_block as any)?.confidence, isEnglish ? "Low confidence" : "Confiança baixa");
-  const tone = strategicPanelTone(panel);
+  const tone = override ? decisionToneFromText(direction, trendOverride) : strategicPanelTone(panel);
   const riskTone: DecisionTone = /alto|high/i.test(risk) ? "bearish" : /baixo|low/i.test(risk) ? "bullish" : "watch";
   const flowItem = panel.why?.find((item) => item.tool === "flow");
   const flowValue = strategicPanelText(flowItem?.label).replace(/^[✅⚠•]\s*/, "") || (isEnglish ? "No read" : "Sem leitura");
   const flowTone = decisionToneFromText(flowValue, flowItem?.reason);
-  const regime = humanizeMachineLabel(canonicalAnalysis?.regime || "", locale) || (isEnglish ? "No read" : "Sem leitura");
+  const regime = override ? direction : (humanizeMachineLabel(canonicalAnalysis?.regime || "", locale) || (isEnglish ? "No read" : "Sem leitura"));
   const liquidity = firstPositiveFiniteNumber(panel.liquidez_alvo);
   return [
     {
@@ -3841,6 +3838,131 @@ function operationalDecisionFromPanel(panel: StrategicPanel, locale: AppLocale):
   };
 }
 
+function contextDirectionLabel(value: unknown, locale: AppLocale) {
+  const tone = decisionToneFromText(value);
+  if (tone === "bullish") return locale === "en-US" ? "Up" : "Alta";
+  if (tone === "bearish") return locale === "en-US" ? "Down" : "Baixa";
+  return locale === "en-US" ? "Neutral" : "Neutra";
+}
+
+function currentTechnicalBias(component?: SymbolMetricComponent | null) {
+  const status = String(component?.status || "").toUpperCase();
+  if (status !== "READY" && status !== "PARTIAL") return null;
+  return component?.value ?? component?.label ?? null;
+}
+
+function formatMarketSessionTime(value: unknown, locale: AppLocale) {
+  if (!value) return null;
+  const raw = String(value);
+  const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly;
+    return locale === "en-US" ? `${month}/${day}/${year}` : `${day}/${month}/${year}`;
+  }
+  const formatted = formatNewsClock(raw, locale);
+  return formatted === (locale === "en-US" ? "no source time" : "sem horário da fonte") ? null : formatted;
+}
+
+function dailyFreshnessMeta(component: SymbolMetricComponent | undefined, sessionDate: string | null | undefined, locale: AppLocale) {
+  if (!component) return undefined;
+  const isEnglish = locale === "en-US";
+  const freshness = String(component.freshness_status || component.status || "").toUpperCase();
+  const dataAsOf = component.data_as_of || component.as_of;
+  const formattedDataAsOf = formatMarketSessionTime(dataAsOf, locale);
+  const componentSessionDate = component.session_date || sessionDate;
+  const formattedSessionDate = formatMarketSessionTime(componentSessionDate, locale);
+  const parts: string[] = [];
+  if (freshness === "STALE") parts.push(isEnglish ? "Outdated" : "Desatualizada");
+  else if (freshness === "PARTIAL") parts.push(isEnglish ? "Partial" : "Parcial");
+  if (formattedDataAsOf) parts.push(`${freshness === "STALE" ? (isEnglish ? "Last available session" : "Última sessão disponível") : (isEnglish ? "Data through" : "Dados até")}: ${formattedDataAsOf}`);
+  if (formattedSessionDate && String(componentSessionDate).slice(0, 10) !== String(dataAsOf || "").slice(0, 10)) {
+    parts.push(`${isEnglish ? "Displayed session" : "Sessão exibida"}: ${formattedSessionDate}`);
+  }
+  if (component.age_sessions != null) parts.push(`${component.age_sessions} ${isEnglish ? "session(s) old" : "sessão(ões) de defasagem"}`);
+  return parts.length ? parts.join(" · ") : undefined;
+}
+
+function symbolContextDecisionCards(view: SymbolOperationalView, locale: AppLocale): EssentialDecisionCard[] {
+  const isEnglish = locale === "en-US";
+  const technical = view.technical_context;
+  const operational = view.operational_context;
+  const score = firstFiniteNumber(operational.master_score?.value);
+  const scoreStatus = String(operational.master_score?.status || "PENDING").toUpperCase();
+  const usedScoreComponents = operational.master_score?.used_components?.length || 0;
+  const totalScoreComponents = usedScoreComponents + (operational.master_score?.missing_components?.length || 0);
+  const trendStatus = String(technical.trend_d1?.freshness_status || technical.trend_d1?.status || "").toUpperCase();
+  const trendReading = contextDirectionLabel(technical.trend_d1?.value, locale);
+  const trendReadingDate = formatMarketSessionTime(String(technical.trend_d1?.data_as_of || technical.trend_d1?.as_of || "").slice(0, 10), locale);
+  const trend = trendStatus === "STALE"
+    ? (isEnglish ? "Outdated" : "Desatualizada")
+    : technical.trend_d1?.value != null && ["READY", "PARTIAL"].includes(trendStatus)
+      ? trendReading
+    : (trendStatus === "PENDING" ? (isEnglish ? "Calculating…" : "Calculando…") : (isEnglish ? "Unavailable" : "Indisponível"));
+  const trendMeta = trendStatus === "STALE"
+    ? `${isEnglish ? "Last reading" : "Última leitura"}: ${trendReading}${trendReadingDate ? ` — ${trendReadingDate}` : ""}`
+    : dailyFreshnessMeta(technical.trend_d1, view.session_date, locale);
+  const intraday = technical.intraday_direction_5m?.status === "READY"
+    ? contextDirectionLabel(technical.intraday_direction_5m?.value, locale)
+    : (technical.intraday_direction_5m?.status === "PENDING" ? (isEnglish ? "Calculating…" : "Calculando…") : (isEnglish ? "Unavailable" : "Indisponível"));
+  const flowValue = technical.institutional_flow?.status === "READY"
+    ? `${technical.institutional_flow.label || (isEnglish ? "Current" : "Atual")}${technical.institutional_flow.value != null ? ` ${Number(technical.institutional_flow.value).toFixed(1)}` : ""}`
+    : technical.institutional_flow?.status === "PENDING"
+      ? (isEnglish ? "Calculating reading…" : "Calculando leitura…")
+      : (isEnglish ? "Flow unavailable" : "Fluxo indisponível");
+  const liquidity = operational.liquidity;
+  const liquidityReady = liquidity?.status === "READY" && liquidity.side && firstFiniteNumber(liquidity.low) != null && firstFiniteNumber(liquidity.high) != null && firstFiniteNumber(liquidity.distance_from_price_pct) != null;
+  const liquidityDistance = firstFiniteNumber(liquidity?.distance_from_price_pct);
+  const liquidityValue = liquidityReady
+    ? `${liquidity?.label} · ${formatLocalePrice(liquidity?.low, locale)}–${formatLocalePrice(liquidity?.high, locale)} · ${liquidityDistance != null && liquidityDistance > 0 ? "+" : ""}${liquidityDistance?.toFixed(2)}%`
+    : liquidity?.status === "PENDING"
+      ? (isEnglish ? "Calculating liquidity…" : "Calculando liquidez…")
+      : (isEnglish ? "Unavailable" : "Indisponível");
+  const liquidityMeta = liquidityReady
+    ? `${liquidity?.timeframe || "5m"} · ${liquidity?.source || "—"} · ${formatNewsClock(liquidity?.as_of || undefined, locale)}`
+    : liquidity?.status === "PENDING" ? undefined : (isEnglish ? "Insufficient data" : "Dados insuficientes");
+  const decision = view.decision === "WAIT" || view.decision === "AGUARDAR" ? (isEnglish ? "Wait" : "Aguardar") : view.decision;
+  return [
+    { label: scoreStatus === "PARTIAL" ? (isEnglish ? "Partial technical score" : "Score técnico parcial") : (isEnglish ? "Master Score" : "Score Mestre"), value: score != null ? `${score.toFixed(1)} / 10` : (isEnglish ? "No confirmed score" : "Sem score confirmado"), tone: scoreStatus === "READY" && score != null && score >= 6 ? "bullish" : "watch", meta: scoreStatus === "PARTIAL" && totalScoreComponents ? (isEnglish ? `Calculated with ${usedScoreComponents} of ${totalScoreComponents} components` : `Calculado com ${usedScoreComponents} de ${totalScoreComponents} componentes`) : scoreStatus, meter: score != null ? clampNumber(score * 10, 0, 100) : null },
+    { label: isEnglish ? "D1 Trend" : "Tendência D1", value: trend, tone: trendStatus === "READY" || trendStatus === "PARTIAL" ? decisionToneFromText(technical.trend_d1?.value) : "neutral", meta: trendMeta },
+    { label: isEnglish ? "Operational Decision" : "Decisão operacional", value: decision, tone: decision === "Wait" || decision === "Aguardar" ? "watch" : decisionToneFromText(decision) },
+    { label: isEnglish ? "Intraday Direction 5m" : "Direção intraday 5m", value: intraday, tone: decisionToneFromText(technical.intraday_direction_5m?.value) },
+    { label: isEnglish ? "Institutional Flow 5m" : "Fluxo institucional 5m", value: flowValue, tone: decisionToneFromText(technical.institutional_flow?.label) },
+    { label: isEnglish ? "Liquidity 5m" : "Liquidez 5m", value: liquidityValue, tone: liquidityReady ? decisionToneFromText(liquidity?.label) : "neutral", meta: liquidityMeta },
+    { label: isEnglish ? "Risk" : "Risco", value: view.risk || (isEnglish ? "Not confirmed" : "Não confirmado"), tone: "watch" },
+  ];
+}
+
+function operationalDecisionFromSymbolContext(view: SymbolOperationalView, locale: AppLocale): OperationalDecision {
+  const isEnglish = locale === "en-US";
+  const componentLabels: Record<string, string> = {
+    rvol: isEnglish ? "comparable intraday RVOL" : "RVOL intraday comparável",
+    intraday_rvol: isEnglish ? "comparable intraday RVOL" : "RVOL intraday comparável",
+    sentiment: isEnglish ? "sentiment" : "sentimento", flow: isEnglish ? "flow" : "fluxo",
+    liquidity: isEnglish ? "liquidity" : "liquidez", levels: isEnglish ? "operational levels" : "níveis operacionais",
+  };
+  const blocks = (view.operational_blocks || []).map((item) => componentLabels[item.component] || item.component);
+  const listed = blocks.length < 2 ? blocks[0] : `${blocks.slice(0, -1).join(", ")} ${isEnglish ? "and" : "e"} ${blocks[blocks.length - 1]}`;
+  const trend = contextDirectionLabel(view.technical_context.trend_d1?.value, locale);
+  const technicalBias = currentTechnicalBias(view.technical_context.technical_bias);
+  const bias = technicalBias != null
+    ? contextDirectionLabel(technicalBias, locale)
+    : trend;
+  const levels = (view.levels || []).flatMap((item: any) => {
+    const price = firstPositiveFiniteNumber(item?.price);
+    return price == null ? [] : [{ label: String(item?.label || (isEnglish ? "Level" : "Nível")), value: formatLocalePrice(price, locale) }];
+  });
+  return {
+    action: view.decision === "WAIT" || view.decision === "AGUARDAR" ? (isEnglish ? "WAIT" : "AGUARDAR") : view.decision,
+    tone: view.decision === "WAIT" || view.decision === "AGUARDAR" ? "watch" : decisionToneFromText(view.decision),
+    confidence: firstFiniteNumber(view.confidence),
+    confidenceLabel: view.confidence_status === "READY" ? (isEnglish ? "Confirmed" : "Confirmada") : (isEnglish ? "Not confirmed" : "Não confirmada"),
+    bias,
+    risk: view.risk || (isEnglish ? "Not confirmed" : "Não confirmado"),
+    reasons: blocks.length ? [isEnglish ? "Technical context remains visible." : "Contexto técnico permanece visível.", `${isEnglish ? "Execution blocked" : "Execução bloqueada"}: ${listed}.`] : [isEnglish ? "Operational components confirmed." : "Componentes operacionais confirmados."],
+    levels,
+  };
+}
+
 type OperationalDecisionLevel = {
   label: string;
   value: string;
@@ -3936,8 +4058,8 @@ function decisionToneFromText(...values: Array<unknown>): DecisionTone {
     .join(" ");
   if (!normalized) return "neutral";
   if (/\b(encerrar|cover|close short|close long|saida|sair|exit)\b/.test(normalized)) return "exit";
-  if (/\b(short|sell short|venda descoberta|vender|venda|bear|baixa|queda|vendedor|distribuicao|negativo)\b/.test(normalized)) return "bearish";
-  if (/\b(long|buy long|comprar|compra|bull|alta|comprador|acumulacao|positivo|forca)\b/.test(normalized)) return "bullish";
+  if (/\b(short|sell short|venda descoberta|vender|venda|bear|bearish|baixa|queda|vendedor|distribuicao|negativo)\b/.test(normalized)) return "bearish";
+  if (/\b(long|buy long|comprar|compra|bull|bullish|alta|comprador|acumulacao|positivo|forca)\b/.test(normalized)) return "bullish";
   return "neutral";
 }
 
@@ -3985,20 +4107,15 @@ function numericScoreFromDecisionCard(card?: EssentialDecisionCard | null) {
   return Number.isFinite(score) ? score : null;
 }
 
-function extractLevelFromLiquidityText(value?: string | null) {
-  const match = String(value || "").match(/(-?\d+(?:[.,]\d+)?)/);
-  return match ? parsePriceNumber(match[1]) : null;
-}
-
-function resolveOperationalZones(chart: ChartPayload | null, fallbackLevel: number | null) {
+function resolveOperationalZones(chart: ChartPayload | null) {
   const canonicalZones = resolveCanonicalChartLevelZones(chart);
   const support = canonicalZones.find((zone) => zone.kind === "support")?.price;
   const resistance = canonicalZones.find((zone) => zone.kind === "resistance")?.price;
   // A price level of 0 (or negative) means "not computed", not "zero reais".
   // Keeping firstFiniteNumber here is what put "Resistência: 0,00" on screen.
   return {
-    support: firstPositiveFiniteNumber(support, fallbackLevel),
-    resistance: firstPositiveFiniteNumber(resistance, fallbackLevel),
+    support: firstPositiveFiniteNumber(support),
+    resistance: firstPositiveFiniteNumber(resistance),
   };
 }
 
@@ -4025,7 +4142,7 @@ function resolveCanonicalChartLevelZones(chart: ChartPayload | null): CanonicalC
         : /resistencia|resistance/.test(label)
           ? "resistance"
           : null;
-      return kind ? { kind, label: String(zone?.label || kind), price } : null;
+      return kind && zone?.operational !== false && zone?.status !== "INSUFFICIENT_SEPARATION" ? { kind, label: String(zone?.label || kind), price } : null;
     })
     .filter((zone): zone is CanonicalChartLevelZone => zone != null);
 
@@ -4060,8 +4177,7 @@ function buildOperationalDecision(input: {
   const biasTone = decisionToneFromText(regimeCard?.value, directionCard?.value);
   const flowTone = decisionToneFromText(flowCard?.value);
   const riskLevel = strategicRiskLevelFromText(riskCard?.value);
-  const fallbackLiquidity = extractLevelFromLiquidityText(liquidityCard?.value);
-  const zones = resolveOperationalZones(input.chart, fallbackLiquidity);
+  const zones = resolveOperationalZones(input.chart);
   const confidenceBase = score == null ? null : clampNumber(Math.round(score * 10), 0, 100);
   const confidence = confidenceBase == null
     ? null
@@ -4233,31 +4349,6 @@ function resolveFlowCard(rows: AiToolRow[], locale: AppLocale): EssentialDecisio
     value: `${side}${suffix}`,
     tone: tone === "exit" ? "neutral" : tone,
   };
-}
-
-function resolveLiquidityTarget(chart: ChartPayload | null, price: number | null | undefined, tone: DecisionTone, locale: AppLocale) {
-  const zones = (Array.isArray(chart?.zones) ? chart?.zones || [] : [])
-    .filter((zone: any) => firstPositiveFiniteNumber(zone?.price) != null);
-  const priceNumber = firstFiniteNumber(price);
-  const preferred = zones
-    .filter((zone: any) => {
-      const label = normalizeUiText(zone?.label);
-      if (tone === "bearish") return label.includes("suporte") || label.includes("support");
-      if (tone === "bullish") return label.includes("resistencia") || label.includes("resistance");
-      return true;
-    })
-    .map((zone: any) => {
-      const zonePrice = firstFiniteNumber(zone?.price);
-      const distance = priceNumber != null && zonePrice != null ? Math.abs(zonePrice - priceNumber) : Number.MAX_SAFE_INTEGER;
-      return { zone, distance };
-    })
-    .sort((a, b) => a.distance - b.distance)[0]?.zone || zones[0];
-  if (!preferred) return locale === "en-US" ? "No reading" : "Sem leitura";
-  const rawLabel = String(preferred.label || "");
-  const label = locale === "en-US"
-    ? localizeUiText(rawLabel.replace("RESISTENCIA", "RESISTANCE").replace("SUPORTE", "SUPPORT"), locale)
-    : rawLabel;
-  return `${label || (locale === "en-US" ? "Level" : "Nível")}: ${formatLocalePrice(preferred.price, locale)}`;
 }
 
 function resolveRiskCard(
@@ -5497,6 +5588,96 @@ function strategicDecisionSections(
   ];
 }
 
+function symbolContextStrategicSections(
+  view: SymbolOperationalView,
+  locale: AppLocale,
+  symbol: string,
+): NonNullable<StrategicConclusion["sections"]> {
+  const isEnglish = locale === "en-US";
+  const technical = view.technical_context;
+  const operational = view.operational_context;
+  const asset = normalizeSymbol(symbol) || (isEnglish ? "the asset" : "o ativo");
+  const biasValue = String(currentTechnicalBias(technical.technical_bias) || "MIXED").toUpperCase();
+  const bias = biasValue === "BULLISH" ? (isEnglish ? "bullish" : "comprador") : biasValue === "BEARISH" ? (isEnglish ? "bearish" : "vendedor") : (isEnglish ? "mixed" : "misto");
+  const trendStatus = String(technical.trend_d1?.freshness_status || technical.trend_d1?.status || "").toUpperCase();
+  const trendReading = technical.trend_d1?.value != null ? contextDirectionLabel(technical.trend_d1.value, locale) : (isEnglish ? "unavailable" : "indisponível");
+  const trendReadingDate = formatMarketSessionTime(String(technical.trend_d1?.data_as_of || technical.trend_d1?.as_of || "").slice(0, 10), locale);
+  const trend = trendStatus === "STALE" ? (isEnglish ? "Outdated" : "Desatualizada") : trendReading;
+  const trendFreshness = trendStatus === "STALE"
+    ? `${isEnglish ? "Last reading" : "Última leitura"}: ${trendReading}${trendReadingDate ? ` — ${trendReadingDate}` : ""}`
+    : dailyFreshnessMeta(technical.trend_d1, view.session_date, locale);
+  const intraday = technical.intraday_direction_5m?.status === "READY" ? contextDirectionLabel(technical.intraday_direction_5m.value, locale) : (isEnglish ? "unavailable" : "indisponível");
+  const flow = technical.institutional_flow?.status === "READY"
+    ? `${technical.institutional_flow.label || "—"}${technical.institutional_flow.value != null ? ` ${Number(technical.institutional_flow.value).toFixed(1)}` : ""}`
+    : (isEnglish ? "unavailable" : "indisponível");
+  const labels: Record<string, string> = {
+    intraday_rvol: isEnglish ? "comparable intraday RVOL" : "RVOL intraday comparável",
+    rvol: isEnglish ? "comparable intraday RVOL" : "RVOL intraday comparável",
+    flow: isEnglish ? "institutional flow" : "fluxo institucional",
+    liquidity: isEnglish ? "validated liquidity" : "liquidez validada",
+    levels: isEnglish ? "valid operational levels" : "níveis operacionais válidos",
+  };
+  const blocks = (view.operational_blocks || []).map((item) => labels[item.component] || item.component);
+  const joinedBlocks = blocks.length < 2 ? blocks[0] : `${blocks.slice(0, -1).join(", ")} ${isEnglish ? "and" : "e"} ${blocks[blocks.length - 1]}`;
+  const sentimentUnavailable = operational.sentiment?.status !== "READY";
+  const scenario = trendStatus === "STALE"
+    ? (isEnglish ? `${asset}: ${bias} intraday context; D1 trend awaiting update.` : `${asset}: contexto intraday ${bias}; tendência D1 aguardando atualização.`)
+    : (isEnglish
+      ? `${asset}: ${bias} technical context. D1 trend, 5m direction and institutional flow remain separate from trade authorization.`
+      : `${asset}: contexto técnico ${bias}. Tendência D1, direção intraday 5m e fluxo institucional permanecem separados da autorização operacional.`);
+  const blockSentence = blocks.length
+    ? (isEnglish ? `Execution remains blocked because ${joinedBlocks} ${blocks.length === 1 ? "is" : "are"} unavailable.` : `A execução permanece bloqueada porque ${joinedBlocks} ${blocks.length === 1 ? "está indisponível" : "estão indisponíveis"}.`)
+    : (isEnglish ? "The required operational components are confirmed." : "Os componentes operacionais obrigatórios estão confirmados.");
+  const sentimentSentence = sentimentUnavailable
+    ? (isEnglish ? "Current sentiment also has insufficient data and is not used as a directional signal." : "O sentimento atual também não possui dados suficientes e não é usado como sinal direcional.")
+    : (isEnglish ? "Current sentiment is confirmed." : "O sentimento atual está confirmado.");
+  return [
+    { title: isEnglish ? "Current Scenario" : "Cenário Atual", body: scenario },
+    { title: isEnglish ? "Strategic Direction" : "Direção da Estratégia", items: [
+      `${isEnglish ? "Structural trend D1" : "Tendência estrutural D1"}: ${trend}${trendFreshness ? ` · ${trendFreshness}` : ""}`,
+      `${isEnglish ? "Operational direction 5m" : "Direção operacional 5m"}: ${intraday}`,
+      `${isEnglish ? "Institutional flow 5m" : "Fluxo institucional 5m"}: ${flow}`,
+    ] },
+    { title: isEnglish ? "Wait for confirmation" : "Aguardar confirmação", items: [blockSentence, sentimentSentence] },
+    { title: isEnglish ? "Interpretation" : "Interpretação", body: isEnglish
+      ? `The technical read is ${bias}; WAIT is an authorization state, not a neutral trend classification.`
+      : `A leitura técnica é ${bias}; AGUARDAR é um estado de autorização, não uma classificação de tendência neutra.` },
+    { title: isEnglish ? "Focus now" : "Foco Agora", body: blocks.length
+      ? (isEnglish ? `Preserve the ${bias} context and wait only for ${joinedBlocks}.` : `Preservar o contexto ${bias} e aguardar somente ${joinedBlocks}.`)
+      : (isEnglish ? "Use the confirmed context with objective risk limits." : "Usar o contexto confirmado com limites objetivos de risco.") },
+  ];
+}
+
+function symbolContextStrategicBasis(view: SymbolOperationalView, locale: AppLocale) {
+  const isEnglish = locale === "en-US";
+  const technical = view.technical_context;
+  const operational = view.operational_context;
+  const score = operational.master_score;
+  const scoreStatus = String(score?.status || "").toUpperCase();
+  const dailyRatio = firstFiniteNumber(operational.volume_vs_daily_average?.ratio);
+  const scoreValue = firstFiniteNumber(score?.value);
+  const used = score?.used_components?.length || 0;
+  const total = used + (score?.missing_components?.length || 0);
+  const trendStatus = String(technical.trend_d1?.freshness_status || technical.trend_d1?.status || "").toUpperCase();
+  const trendReading = technical.trend_d1?.value != null ? contextDirectionLabel(technical.trend_d1.value, locale) : (isEnglish ? "unavailable" : "indisponível");
+  const trendReadingDate = formatMarketSessionTime(String(technical.trend_d1?.data_as_of || technical.trend_d1?.as_of || "").slice(0, 10), locale);
+  const trend = trendStatus === "STALE"
+    ? `${isEnglish ? "Outdated" : "Desatualizada"} — ${isEnglish ? "last reading" : "última leitura"}: ${trendReading}${trendReadingDate ? ` — ${trendReadingDate}` : ""}`
+    : trendReading;
+  const directionStatus = String(technical.intraday_direction_5m?.status || "").toUpperCase();
+  const flowStatus = String(technical.institutional_flow?.status || "").toUpperCase();
+  const isPending = (status: string) => ["PENDING", "REFRESHING", "QUEUED", "RUNNING"].includes(status);
+  const formatBasisNumber = (value: number, digits: number) => value.toLocaleString(isEnglish ? "en-US" : "pt-BR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return [
+    `${isEnglish ? "Technical bias" : "Viés técnico"}: ${technical.technical_bias?.label || technical.technical_bias?.value || "—"}`,
+    `${isEnglish ? "D1 trend" : "Tendência D1"}: ${trend}`,
+    `${isEnglish ? "Direction 5m" : "Direção 5m"}: ${directionStatus === "READY" ? contextDirectionLabel(technical.intraday_direction_5m?.value, locale) : isPending(directionStatus) ? (isEnglish ? "calculating" : "calculando") : (isEnglish ? "unavailable" : "indisponível")}`,
+    `${isEnglish ? "Flow 5m" : "Fluxo 5m"}: ${flowStatus === "READY" ? `${technical.institutional_flow?.label} ${formatBasisNumber(Number(technical.institutional_flow?.value), 1)}` : isPending(flowStatus) ? (isEnglish ? "calculating" : "calculando") : (isEnglish ? "unavailable" : "indisponível")}`,
+    `${scoreStatus === "PARTIAL" ? (isEnglish ? "Partial technical score" : "Score técnico parcial") : (score?.label || "Score")}: ${scoreValue != null ? `${formatBasisNumber(scoreValue, 1)}/10` : "—"}${scoreStatus === "PARTIAL" && total ? ` — ${isEnglish ? `${used} of ${total} components` : `${used} de ${total} componentes`}` : ""}`,
+    `${isEnglish ? "Current volume / daily average" : "Volume atual / média diária"}: ${dailyRatio != null ? `${formatBasisNumber(dailyRatio, 2)}×` : (isEnglish ? "unavailable" : "indisponível")} · ${isEnglish ? "informational" : "informativo"}`,
+  ];
+}
+
 function strategicDecisionBasis(contract: Pick<StrategicDecisionContract, "bias" | "risk" | "tradeSuggested" | "decisionNow">, locale: AppLocale) {
   if (locale === "en-US") {
     return [
@@ -5520,13 +5701,30 @@ function buildStrategicDecisionContract(input: {
   cards: EssentialDecisionCard[];
   operationalDecision: OperationalDecision;
   hasCoreData: boolean;
+  executionReady?: boolean;
+  pendingComponents?: string[];
+  symbolContext?: SymbolOperationalView | null;
 }): StrategicDecisionContract {
-  const side = input.hasCoreData
+  const side = input.executionReady === false
+    ? "wait"
+    : input.hasCoreData
     ? decisionSideFromCards(input.cards, input.operationalDecision.action)
     : "no_data";
   const labels = strategicDecisionLabels(side, input.locale);
+  const contextTechnicalBias = currentTechnicalBias(input.symbolContext?.technical_context.technical_bias);
+  const contextBias = contextTechnicalBias != null
+    ? contextDirectionLabel(contextTechnicalBias, input.locale)
+    : input.cards.find((card) => /tendencia d1|d1 trend/.test(normalizeUiText(card.label)))?.value;
   const risk = input.operationalDecision.risk || (input.locale === "en-US" ? "No read" : "Sem leitura");
   const reasons = (() => {
+    if (input.symbolContext) return input.operationalDecision.reasons;
+    if (input.executionReady === false) {
+      const pending = input.pendingComponents || [];
+      const listed = pending.length < 2 ? pending[0] : `${pending.slice(0, -1).join(", ")} e ${pending[pending.length - 1]}`;
+      return input.locale === "en-US"
+        ? ["Technical context remains visible", `Execution blocked: ${listed || "required components"} not confirmed`]
+        : ["Contexto técnico permanece visível", `Execução bloqueada: ${listed || "componentes obrigatórios"} ainda não confirmados.`];
+    }
     if (side === "no_data") {
       return input.locale === "en-US"
         ? ["Price, volume or Master Score are not complete", "Operational trade remains blocked", "Wait for the next confirmed snapshot"]
@@ -5552,7 +5750,8 @@ function buildStrategicDecisionContract(input: {
       : ["Nenhum lado tem confirmação suficiente", "Preço, volume e fluxo precisam alinhar", "Aguardar é a decisão profissional agora"];
   })();
 
-  const levels = input.operationalDecision.levels.map((level) => ({
+  const levelsPending = (input.pendingComponents || []).some((component) => /níveis operacionais|operational levels/i.test(component));
+  const levels = levelsPending ? [] : input.operationalDecision.levels.map((level) => ({
     ...level,
     value: alignTextWithTradeSide(level.value, side === "no_data" ? "wait" : side, input.locale),
   }));
@@ -5561,20 +5760,24 @@ function buildStrategicDecisionContract(input: {
     tone: labels.tone,
     decisionNow: labels.decisionNow,
     tradeSuggested: labels.tradeSuggested,
-    direction: labels.direction,
-    regime: labels.regime,
-    bias: labels.bias,
+    direction: input.symbolContext ? (contextBias || labels.direction) : input.executionReady === false ? (input.cards.find((card) => /direcao provavel|likely direction|tendencia d1|d1 trend/.test(normalizeUiText(card.label)))?.value || labels.direction) : labels.direction,
+    regime: input.symbolContext ? (contextBias || labels.regime) : input.executionReady === false ? (input.cards.find((card) => /regime/.test(normalizeUiText(card.label)))?.value || labels.regime) : labels.regime,
+    bias: input.symbolContext ? (contextBias || labels.bias) : input.executionReady === false ? (input.cards.find((card) => /direcao provavel|likely direction|tendencia d1|d1 trend/.test(normalizeUiText(card.label)))?.value || labels.bias) : labels.bias,
     risk,
-    confidence: input.operationalDecision.confidence,
-    confidenceLabel: input.operationalDecision.confidenceLabel,
+    confidence: input.executionReady === false ? null : input.operationalDecision.confidence,
+    confidenceLabel: input.executionReady === false ? (input.locale === "en-US" ? "Not confirmed" : "Não confirmada") : input.operationalDecision.confidenceLabel,
     reasons,
     levels,
-    sections: strategicDecisionSections(side, input.locale, input.symbol),
+    sections: input.symbolContext
+      ? symbolContextStrategicSections(input.symbolContext, input.locale, input.symbol)
+      : strategicDecisionSections(side, input.locale, input.symbol),
     basis: [] as string[],
   };
   return {
     ...contract,
-    basis: strategicDecisionBasis(contract, input.locale),
+    basis: input.symbolContext
+      ? symbolContextStrategicBasis(input.symbolContext, input.locale)
+      : strategicDecisionBasis(contract, input.locale),
   };
 }
 
@@ -6815,6 +7018,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [publicQuotes, setPublicQuotes] = useState<Record<string, QuotePayload>>({});
   const [tickerTapeQuotes, setTickerTapeQuotes] = useState<Record<string, QuotePayload>>({});
   const [publicInsight, setPublicInsight] = useState<PublicInsightPayload | null>(null);
+  const [publicMarketMetrics, setPublicMarketMetrics] = useState<PublicMarketMetrics | null>(null);
   const [, setPushStatus] = useState<Record<string, unknown> | null>(null);
   const [mediaStatus, setMediaStatus] = useState<Record<string, unknown> | null>(null);
   const [telegramLink, setTelegramLink] = useState<TelegramLinkSessionResponse | null>(null);
@@ -6831,6 +7035,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [selectedTicker, setSelectedTicker] = useState(queryTicker);
   const deferredTicker = useDeferredValue(selectedTicker);
   const [chartInterval, setChartInterval] = useState("1D");
+
+  // A ticker change is a hard identity boundary: never leave the previous
+  // asset's derived widgets visible while the deferred request is in flight.
+  useEffect(() => {
+    setPublicInsight(null);
+    setPublicMarketMetrics(null);
+    setPublicChart(null);
+    setPublicAiTools(null);
+    setPublicDataStatus({});
+    setQuote(null);
+  }, [selectedTicker]);
 
   const [watchlistQuery, setWatchlistQuery] = useState("");
   const [watchCategory, setWatchCategory] = useState<"Todos" | (typeof CATEGORY_ORDER)[number]>("Todos");
@@ -7017,6 +7232,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [pollReason, setPollReason] = useState("");
   const [aiRequestNonce, setAiRequestNonce] = useState(0);
   const [aiRequestState, setAiRequestState] = useState<{ key: string; status: string; reason: string }>({ key: "", status: "IDLE", reason: "" });
+  const [publicDataStatus, setPublicDataStatus] = useState<Record<string, string>>({});
+  const publicDataStatusKey = JSON.stringify(publicDataStatus);
+  const publicHydrationPending = [
+    ...Object.values(publicDataStatus),
+    publicMarketMetrics?.sentiment?.status,
+    publicMarketMetrics?.intraday_rvol?.status,
+    publicMarketMetrics?.levels?.status,
+    publicMarketMetrics?.operational_view?.technical_context?.institutional_flow?.status,
+    publicMarketMetrics?.operational_view?.operational_context?.liquidity?.status,
+  ].some((status) => status === "PENDING" || status === "REFRESHING");
   const [predictionOpen, setPredictionOpen] = useState(false);
   const [predictionSymbol, setPredictionSymbol] = useState(queryTicker);
   const [predictionTargetPrice, setPredictionTargetPrice] = useState("");
@@ -7446,6 +7671,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       setRoom(null);
       setPushStatus(null);
       setMediaStatus(null);
+      setPublicDataStatus({});
 
       getPublicMarketBundle(deferredTicker, chartInterval, appLocale, controller.signal)
         .then((bundle) => {
@@ -7456,6 +7682,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           const nextChart = bundle?.chart || null;
           const nextNews = !bundle?.news?.locale || bundle.news.locale === appLocale ? bundle.news : null;
           const nextPublicAiTools = bundle?.ai_tools || null;
+          setPublicDataStatus(bundle?.data_status || {});
+          setPublicMarketMetrics(
+            bundle?.market_metrics && sameSymbol(bundle.market_metrics.canonical_symbol, deferredTicker)
+              ? bundle.market_metrics
+              : null,
+          );
 
           if (nextQuote?.symbol) {
             const normalizedQuoteSymbol = normalizeSymbol(nextQuote.symbol);
@@ -7463,7 +7695,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             setPublicQuotes((current) => mergeQuoteState(current, { [normalizedQuoteSymbol]: normalizedQuote }));
             setTickerTapeQuotes((current) => mergeQuoteState(current, { [normalizedQuoteSymbol]: normalizedQuote }));
           }
-          setPublicInsight(sameSymbol(nextInsight?.symbol, deferredTicker) ? { ...nextInsight, symbol: deferredTicker } : null);
+          setPublicInsight(sameSymbol(nextInsight?.symbol, deferredTicker) ? { ...nextInsight, market_metrics: bundle?.market_metrics || null, symbol: deferredTicker } : null);
           setPublicChart(sameChartRequest(nextChart, deferredTicker, chartInterval) ? { ...nextChart, ticker: deferredTicker } : null);
           setQuote(nextQuote);
           setNews((current) => {
@@ -7522,7 +7754,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }
     setPublicQuotes({});
     setPublicInsight(null);
+    setPublicMarketMetrics(null);
     setPublicAiTools(null);
+    setPublicDataStatus({});
 
     let cancelled = false;
     const controller = new AbortController();
@@ -7533,8 +7767,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       getAccess(token),
       getWorkspace(token),
       getWorkspaceTickerBundle(token, deferredTicker, chartInterval, appLocale, controller.signal),
+      getPublicMarketBundle(deferredTicker, chartInterval, appLocale, controller.signal),
     ])
-      .then(([nextAccess, nextWorkspace, nextTickerBundle]) => {
+      .then(([nextAccess, nextWorkspace, nextTickerBundle, publicBundle]) => {
         if (cancelled) return;
 
         startTransition(() => {
@@ -7542,12 +7777,20 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           setAccess(nextAccess);
           setWorkspace(nextWorkspace);
           setChart(nextTickerBundle.chart || null);
+          const publicBundleInsight = publicBundle?.insight || null;
           setPublicInsight(
-            sameSymbol(nextTickerBundle.insight?.symbol, deferredTicker)
-              ? { ...nextTickerBundle.insight, symbol: deferredTicker }
+            sameSymbol(publicBundleInsight?.symbol, deferredTicker)
+              ? { ...publicBundleInsight, market_metrics: publicBundle?.market_metrics || null, symbol: deferredTicker }
               : null,
           );
-          setPublicChart(null);
+          setPublicMarketMetrics(
+            publicBundle?.market_metrics && sameSymbol(publicBundle.market_metrics.canonical_symbol, deferredTicker)
+              ? publicBundle.market_metrics
+              : null,
+          );
+          setPublicChart(sameChartRequest(publicBundle?.chart, deferredTicker, chartInterval) ? { ...publicBundle.chart, ticker: deferredTicker } : null);
+          setPublicDataStatus(publicBundle?.data_status || {});
+          setPublicAiTools(publicBundle?.ai_tools || null);
           setFeed(nextTickerBundle.feed || null);
           setNews((current) => {
             const nextNews = nextTickerBundle.news || null;
@@ -7585,21 +7828,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, [token, deferredTicker, chartInterval, appLocale, focusedTab, priorityPublicWatchKey, publicTickerTapeKey, publicWatchKey]);
 
   useEffect(() => {
-    if (token) return;
-    const chartReady =
-      sameChartRequest(publicChart, deferredTicker, chartInterval) &&
-      Boolean(publicChart?.ohlc?.length || publicChart?.series?.length);
-    const insightReady = sameSymbol(publicInsight?.symbol, deferredTicker) && Boolean(publicInsight?.score != null || publicInsight?.rsi != null || publicInsight?.trend_bias || publicInsight?.signal);
-    const newsTabOpen = (focusedTab || activeTab) === "news";
-    const newsReady = sameSymbol(news?.symbol, deferredTicker) && Number(news?.count ?? news?.items?.length ?? 0) > 0;
-    if (chartReady && insightReady && (!newsTabOpen || newsReady)) return;
+    if (!publicHydrationPending) return;
 
     let cancelled = false;
     const controller = new AbortController();
-    const retries = [1800, 5200, 9500];
+    const retries = [3000, 5000, 10000];
     const timers = retries.map((delay) =>
       window.setTimeout(() => {
-        getPublicMarketBundle(deferredTicker, chartInterval, appLocale, controller.signal)
+        getPublicMarketBundle(deferredTicker, chartInterval, appLocale, controller.signal, true)
           .then((bundle) => {
             if (cancelled) return;
             const nextQuote = bundle?.quote || null;
@@ -7607,6 +7843,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             const nextChart = bundle?.chart || null;
             const nextNews = !bundle?.news?.locale || bundle.news.locale === appLocale ? bundle.news : null;
             const nextPublicAiTools = bundle?.ai_tools || null;
+            setPublicDataStatus(bundle?.data_status || {});
+            if (bundle?.market_metrics && sameSymbol(bundle.market_metrics.canonical_symbol, deferredTicker)) {
+              setPublicMarketMetrics(bundle.market_metrics);
+            }
             if (nextQuote?.symbol) {
               const normalizedQuoteSymbol = normalizeSymbol(nextQuote.symbol);
               const normalizedQuote = { ...nextQuote, symbol: normalizedQuoteSymbol };
@@ -7619,13 +7859,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             }
             if (sameSymbol(nextInsight?.symbol, deferredTicker)) {
               setPublicInsight((current) => {
-                if (
-                  sameSymbol(current?.symbol, deferredTicker) &&
-                  (current?.score != null || current?.rsi != null || current?.trend_bias || current?.signal)
-                ) {
-                  return current;
+                if (!sameSymbol(current?.symbol, deferredTicker)) {
+                  return { ...nextInsight, market_metrics: bundle?.market_metrics || null, symbol: deferredTicker };
                 }
-                return { ...nextInsight, symbol: deferredTicker };
+                return { ...current, ...nextInsight, market_metrics: bundle?.market_metrics || null, symbol: deferredTicker };
               });
             }
             if (nextNews) {
@@ -7648,23 +7885,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       timers.forEach((timer) => window.clearTimeout(timer));
     };
   }, [
-    token,
     deferredTicker,
     chartInterval,
-    publicChart?.ticker,
-    publicChart?.ohlc?.length,
-    publicChart?.series?.length,
-    publicInsight?.symbol,
-    publicInsight?.score,
-    publicInsight?.rsi,
-    publicInsight?.trend_bias,
-    publicInsight?.signal,
-    news?.symbol,
-    news?.count,
-    news?.items?.length,
-    activeTab,
-    focusedTab,
-    strategicAnalysisMinute,
+    publicHydrationPending,
+    publicDataStatusKey,
     appLocale,
   ]);
 
@@ -8877,7 +9101,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     () => {
       const liveChart = sameChartRequest(chart, selectedTicker, chartInterval) ? chart : null;
       const guestChart = sameChartRequest(publicChart, selectedTicker, chartInterval) ? publicChart : null;
-      return liveChart || guestChart;
+      return guestChart || liveChart;
     },
     [chart, chartInterval, publicChart, selectedTicker],
   );
@@ -9042,28 +9266,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     return candidates.find(snapshotHasCoreData) || candidates.find(Boolean) || null;
   }, [currentRanking, currentTopSignal, workspaceSymbolSnapshot]);
   const currentStrategicPanel = useMemo<StrategicPanel | null>(() => {
-    const candidates = [
-      publicInsight?.strategic_panel,
-      currentSnapshotRow?.strategic_panel,
-      currentRanking?.strategic_panel,
-      currentTopSignal?.strategic_panel,
-      workspace?.strategic_panel,
-    ];
-    for (const candidate of candidates) {
-      if (!candidate || typeof candidate !== "object") continue;
-      const panel = candidate as StrategicPanel;
-      const panelSymbol = normalizeSymbol(String(panel.symbol || panel.ticker || ""));
-      if (panelSymbol && panelSymbol === selectedTicker) return panel;
-    }
+    const currentPublicPanel = sameSymbol(publicInsight?.symbol, selectedTicker) ? publicInsight?.strategic_panel : null;
+    if (currentPublicPanel && typeof currentPublicPanel === "object") return currentPublicPanel as StrategicPanel;
     return null;
-  }, [currentRanking?.strategic_panel, currentSnapshotRow?.strategic_panel, currentTopSignal?.strategic_panel, publicInsight?.strategic_panel, selectedTicker, workspace?.strategic_panel]);
+  }, [publicInsight, selectedTicker]);
   const canonicalAnalysis = currentStrategicPanel?.canonical_analysis || null;
   const snapshotQuote = useMemo(
     () => snapshotQuoteFromRow(selectedTicker, currentSnapshotRow),
-    [currentSnapshotRow, selectedTicker],
-  );
-  const snapshotInsight = useMemo(
-    () => snapshotInsightFromRow(selectedTicker, currentSnapshotRow),
     [currentSnapshotRow, selectedTicker],
   );
   const currentWatchItem = useMemo(() => watchUniverse.find((item) => item.symbol === selectedTicker), [watchUniverse, selectedTicker]);
@@ -9105,84 +9314,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       timers.forEach((timer) => window.clearTimeout(timer));
     };
   }, [token, deferredTicker, currentPublicQuote?.price, currentPublicQuote?.change, currentPublicQuote?.change_pct, currentPublicQuote?.volume]);
-  const currentDerivedScore = useMemo(
-    () => {
-      if (!displayQuoteHasCoreData) return null;
-      if (snapshotInsight?.score != null) return normalizeMasterScoreForDisplay(snapshotInsight.score);
-      return derivePublicScore({
-        changePct: displayQuote?.change_pct ?? null,
-        rsi: snapshotInsight?.rsi ?? currentPublicInsight?.rsi ?? (currentRanking?.rsi != null ? Number(currentRanking.rsi) : null),
-        trend: snapshotInsight?.trend_bias || snapshotInsight?.signal || currentPublicInsight?.trend_bias || currentPublicInsight?.signal || currentRanking?.trend || null,
-        volume: displayQuote?.volume ?? null,
-      });
-    },
-    [
-      currentPublicInsight?.rsi,
-      currentPublicInsight?.signal,
-      currentPublicInsight?.trend_bias,
-      currentRanking?.rsi,
-      currentRanking?.trend,
-      snapshotInsight?.rsi,
-      snapshotInsight?.score,
-      snapshotInsight?.signal,
-      snapshotInsight?.trend_bias,
-      displayQuoteHasCoreData,
-      displayQuote?.change_pct,
-      displayQuote?.volume,
-    ],
-  );
   const derivedPublicInsight = useMemo<PublicInsightPayload | null>(() => {
     if (!displayQuoteHasCoreData) return null;
-    if (snapshotInsight) return snapshotInsight;
-    if (currentPublicInsight) return currentPublicInsight;
-
-    const derivedTrend =
-      currentRanking?.trend ||
-      (displayQuote?.change_pct != null
-        ? displayQuote.change_pct > 0
-          ? "alta"
-          : displayQuote.change_pct < 0
-            ? "baixa"
-            : "lateral"
-        : null);
-    const derivedScore = usableScore(
-      currentRanking?.score,
-      currentDerivedScore,
-      derivePublicScore({
-        changePct: displayQuote?.change_pct ?? currentPublicQuote?.change_pct ?? null,
-        rsi: currentRanking?.rsi != null ? Number(currentRanking.rsi) : null,
-        trend: derivedTrend,
-        volume: displayQuote?.volume ?? null,
-      }),
-    );
-
-    if (!quoteHasMarketValue(displayQuote) && derivedScore == null && !derivedTrend) return null;
-
-    return {
-      symbol: selectedTicker,
-      score: derivedScore ?? currentDerivedScore ?? null,
-      rsi: currentRanking?.rsi != null ? Number(currentRanking.rsi) : null,
-      rel_volume: currentRanking?.rel_volume != null ? Number(currentRanking.rel_volume) : null,
-      trend_bias: derivedTrend || null,
-      signal:
-        derivedTrend && /alta|bull|compra/i.test(String(derivedTrend))
-          ? "BUY"
-          : derivedTrend && /baixa|bear|venda/i.test(String(derivedTrend))
-            ? "SELL"
-            : "HOLD",
-    };
-  }, [
-    currentDerivedScore,
-    currentPublicInsight,
-    currentRanking?.rsi,
-    currentRanking?.rel_volume,
-    currentRanking?.score,
-    currentRanking?.trend,
-    displayQuoteHasCoreData,
-    displayQuote,
-    selectedTicker,
-    snapshotInsight,
-  ]);
+    return currentPublicInsight;
+  }, [currentPublicInsight, displayQuoteHasCoreData]);
   const chartForDisplay = useMemo(() => {
     const hasLiveSeries = Boolean(activeChart?.ohlc?.length || activeChart?.series?.length);
     return hasLiveSeries && activeChart && sameChartRequest(activeChart, selectedTicker, chartInterval) ? activeChart : null;
@@ -9191,6 +9326,18 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     chartInterval,
     selectedTicker,
   ]);
+  const assetMetrics = publicMarketMetrics && sameSymbol(publicMarketMetrics.canonical_symbol, selectedTicker)
+    ? publicMarketMetrics
+    : null;
+  const symbolOperationalView = assetMetrics?.operational_view || null;
+  const operationalBlockComponents = (symbolOperationalView?.operational_blocks || []).map((item) => ({
+    rvol: isUsLocale ? "comparable intraday RVOL" : "RVOL intraday comparável",
+    intraday_rvol: isUsLocale ? "comparable intraday RVOL" : "RVOL intraday comparável",
+    flow: isUsLocale ? "flow" : "fluxo",
+    liquidity: isUsLocale ? "validated liquidity" : "liquidez validada",
+    levels: isUsLocale ? "valid operational levels" : "níveis operacionais válidos",
+  }[item.component] || item.component));
+  const executionMetricsReady = operationalBlockComponents.length === 0;
   const chartCanonicalLevelZones = useMemo(
     () => resolveCanonicalChartLevelZones(chartForDisplay),
     [chartForDisplay],
@@ -9200,21 +9347,24 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     [chartForDisplay, chartCanonicalLevelZones],
   );
   const chartSupportResistanceLevels = useMemo(() => ({
-    resistance: chartCanonicalLevelZones.find((zone) => zone.kind === "resistance")?.price ?? null,
-    support: chartCanonicalLevelZones.find((zone) => zone.kind === "support")?.price ?? null,
+    resistance: chartCanonicalLevelZones.find((zone: any) => zone.kind === "resistance")?.price ?? null,
+    support: chartCanonicalLevelZones.find((zone: any) => zone.kind === "support")?.price ?? null,
     zones: chartCanonicalLevelZones,
   }), [chartCanonicalLevelZones]);
-  // The top "Score Mestre" card must show the SAME number as the panel below it.
-  // The panel's master_score_block.score_0_10 is the single source of truth; the
-  // client-side heuristic below is only a fallback when no panel is loaded.
+  const chartMicroRange = useMemo(() => {
+    const zones = (chartForDisplay?.zones || []).filter((zone: any) => zone?.status === "INSUFFICIENT_SEPARATION");
+    const support = zones.find((zone: any) => zone.kind === "support")?.price;
+    const resistance = zones.find((zone: any) => zone.kind === "resistance")?.price;
+    return support != null && resistance != null ? { support, resistance, timeframe: zones[0]?.micro_timeframe || chartInterval } : null;
+  }, [chartForDisplay?.zones, chartInterval]);
+  const operationalLevelsStatus = String(assetMetrics?.levels?.status || "PENDING").toUpperCase();
+  // The selected-symbol bundle is the only source for Score Mestre.
   const effectiveAiScore = useMemo(
     () => {
       if (!displayQuoteHasCoreData) return null;
-      const panelScore = firstFiniteNumber((currentStrategicPanel?.master_score_block as any)?.score_0_10);
-      if (panelScore != null) return panelScore;
-      return usableScore(derivedPublicInsight?.score, currentRanking?.score, currentDerivedScore);
+      return firstFiniteNumber(symbolOperationalView?.operational_context.master_score?.value);
     },
-    [currentStrategicPanel, derivedPublicInsight?.score, currentRanking?.score, currentDerivedScore, displayQuoteHasCoreData],
+    [displayQuoteHasCoreData, symbolOperationalView],
   );
   // ONE RSI for every surface (top card, chart chip, bottom panel): the daily
   // RSI-14 served by /public/market/bundle (insight.rsi, canonical_indicator_engine).
@@ -9222,9 +9372,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const panelRsiValue = useMemo(
     () =>
       displayQuoteHasCoreData
-        ? firstValidRsiNumber(currentPublicInsight?.rsi, derivedPublicInsight?.rsi, currentRanking?.rsi, (displayQuote as any)?.rsi)
+        ? firstValidRsiNumber(symbolOperationalView?.technical_context.rsi_d1?.value)
         : null,
-    [displayQuoteHasCoreData, currentPublicInsight?.rsi, derivedPublicInsight?.rsi, currentRanking?.rsi, displayQuote],
+    [displayQuoteHasCoreData, symbolOperationalView],
   );
   // Mission 68: the chart chip + RSI panel follow the SELECTED timeframe, computed on
   // the exact chart candle series (activeChart is gated on ticker+interval, so it clears
@@ -9264,8 +9414,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const selectedTickerMarketLabel = currentWatchItem?.category || guessCategory(selectedTicker);
   const currentAiKey = AI_TOOL_TAB_MAP[currentTab as keyof typeof AI_TOOL_TAB_MAP];
   const currentAiRows: AiToolRow[] = useMemo(
-    () => (currentAiKey ? workspace?.ai_tools?.[currentAiKey] || publicAiTools?.tools?.[currentAiKey] : undefined) || [],
-    [currentAiKey, workspace?.ai_tools, publicAiTools?.tools],
+    () => {
+      if (!currentAiKey) return [];
+      const publicForSelected = normalizeSymbol(String(publicAiTools?.selected_symbol || publicAiTools?.symbol || "")) === selectedTicker;
+      return (publicForSelected ? publicAiTools?.tools?.[currentAiKey] : workspace?.ai_tools?.[currentAiKey] || publicAiTools?.tools?.[currentAiKey]) || [];
+    },
+    [currentAiKey, publicAiTools?.selected_symbol, publicAiTools?.symbol, publicAiTools?.tools, selectedTicker, workspace?.ai_tools],
   );
   useEffect(() => {
     if (!currentAiKey) return undefined;
@@ -9289,21 +9443,24 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const counts: Record<string, number> = {};
     for (const [tabId, toolKey] of Object.entries(AI_TOOL_TAB_MAP)) {
       const typedKey = toolKey as keyof WorkspaceData["ai_tools"];
-      const rows = [
-        ...(workspace?.ai_tools?.[typedKey] || []),
-        ...(publicAiTools?.tools?.[typedKey] || []),
-      ];
+      const globalScope = GLOBAL_AI_ALERT_TAB_IDS.has(tabId);
+      const rows = globalScope
+        ? (publicAiCatalog?.tools?.[typedKey] || [])
+        : [
+            ...(workspace?.ai_tools?.[typedKey] || []),
+            ...(publicAiTools?.tools?.[typedKey] || []),
+          ];
       const unique = new Set<string>();
       rows.forEach((row) => {
         const ticker = normalizeSymbol(String((row as any).ticker || (row as any).symbol || ""));
-        if (!ticker || ticker !== selectedTicker) return;
+        if (!ticker || (!globalScope && ticker !== selectedTicker)) return;
         const candidate = { ...(row as AiToolRow), tool: toolKey, ticker };
         if (!isFreshAiFindingForReset(candidate)) return;
         if (!isAiDealFinding(candidate)) return;
         unique.add(aiAlertSignalKey(candidate));
       });
       counts[tabId] = unique.size;
-      if (!counts[tabId]) {
+      if (!globalScope && !counts[tabId]) {
         // No fresh finding for the selected ticker: fall back to the real
         // per-tool count from the unfiltered public catalog (anonymous only).
         counts[tabId] = (publicAiCatalog?.tools?.[typedKey] || []).length;
@@ -9457,14 +9614,23 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const emptyChangeText = isUsLocale ? "no confirmed change" : "sem variação confirmada";
     const emptyScoreText = isUsLocale ? "no confirmed score" : "sem Score confirmado";
     const emptyBiasText = isUsLocale ? "no confirmed bias" : "sem Bias confirmado";
+    const masterScoreContract = symbolOperationalView?.operational_context.master_score;
+    const masterScoreStatus = String(masterScoreContract?.status || "PENDING").toUpperCase();
+    const usedScoreComponents = masterScoreContract?.used_components?.length || 0;
+    const missingScoreComponents = masterScoreContract?.missing_components || [];
+    const totalScoreComponents = usedScoreComponents + missingScoreComponents.length;
     const changeValue = displayQuoteHasCoreData ? formatSignedPercent(displayQuote?.change_pct) : emptyChangeText;
     const aiScoreValue = effectiveAiScore != null ? Number(effectiveAiScore).toFixed(1) : emptyScoreText;
     const scoreNumber = effectiveAiScore != null ? Number(effectiveAiScore) : Number.NaN;
     const rawChangeNumber = displayQuoteHasCoreData ? Number(displayQuote?.change_pct) : Number.NaN;
     const changeNumber = Number.isFinite(rawChangeNumber) ? rawChangeNumber : null;
-    const rawBias = displayQuoteHasCoreData ? derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || currentRanking?.trend || "" : "";
+    const operationalTechnicalBias = currentTechnicalBias(symbolOperationalView?.technical_context.technical_bias);
+    const operationalBias = operationalTechnicalBias != null
+      ? contextDirectionLabel(operationalTechnicalBias, appLocale)
+      : "";
+    const rawBias = displayQuoteHasCoreData ? operationalBias || derivedPublicInsight?.trend_bias || derivedPublicInsight?.signal || currentRanking?.trend || "" : "";
     const biasValue = displayQuoteHasCoreData ? biasStrengthLabel(rawBias, scoreNumber, changeNumber ?? 0, appLocale) : emptyBiasText;
-    const rsiDescriptor = describeRsiValue(panelRsiValue, appLocale, cardRsiTimeframeLabel);
+    const rsiDescriptor = describeRsiValue(panelRsiValue, appLocale, cardRsiTimeframeLabel, currentPublicInsight?.rsi_metadata?.status === "PENDING");
     const rsiValue = rsiDescriptor.label;
     // describeRsiValue already returns "—" when there is no usable RSI, so no
     // oversold/overbought copy can reach the screen from a 0/null payload.
@@ -9501,14 +9667,19 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       : hasVolume
         ? (isUsLocale ? "real volume confirmed; RVOL depends on historical average" : "volume real confirmado; RVOL depende da média histórica")
         : (isUsLocale ? "no reliable volume in the current provider payload" : "sem volume confiável no payload atual");
-    const scoreHint = Number.isFinite(scoreNumber)
+    const scoreHint = masterScoreStatus === "PARTIAL"
+      ? (isUsLocale
+          ? `${aiScoreValue}: partial technical score, calculated with ${usedScoreComponents} of ${totalScoreComponents} components${missingScoreComponents.length ? `; missing ${missingScoreComponents.join(", ")}` : ""}.`
+          : `${aiScoreValue}: score técnico parcial, calculado com ${usedScoreComponents} de ${totalScoreComponents} componentes${missingScoreComponents.length ? `; faltam ${missingScoreComponents.join(", ")}` : ""}.`)
+      : Number.isFinite(scoreNumber)
       ? scoreNumber >= 7
         ? (isUsLocale ? `${aiScoreValue} favors strength/buy only with confirmation.` : `${aiScoreValue} favorece força/compra apenas com confirmação.`)
         : scoreNumber <= 5.5
           ? (isUsLocale ? `${aiScoreValue} indicates weak/sell bias; avoid long without confirmation.` : `${aiScoreValue} indicando baixa/venda; evite compra sem confirmação.`)
           : (isUsLocale ? `${aiScoreValue} is moderate: wait for price/volume confirmation.` : `${aiScoreValue} é moderado: aguarde confirmação de preço/volume.`)
       : (isUsLocale ? "No Master Score confirmed for this asset yet." : "Sem Score Mestre confirmado para este ativo ainda.");
-    const rsiHint = rsiDescriptor.hint;
+    const rsiFreshness = dailyFreshnessMeta(symbolOperationalView?.technical_context.rsi_d1, symbolOperationalView?.session_date, appLocale);
+    const rsiHint = rsiFreshness ? `${rsiDescriptor.hint} ${rsiFreshness}.` : rsiDescriptor.hint;
 
     const quoteStats = [
       {
@@ -9530,10 +9701,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     return [
       ...quoteStats,
       {
-        label: isUsLocale ? "Master Score" : "Score Mestre",
-        value: aiScoreValue,
+        label: masterScoreStatus === "PARTIAL" ? (isUsLocale ? "Partial technical score" : "Score técnico parcial") : (isUsLocale ? "Master Score" : "Score Mestre"),
+        value: masterScoreStatus === "PARTIAL" && effectiveAiScore != null ? `${aiScoreValue}/10` : aiScoreValue,
         hint: scoreHint,
-        tone: Number.isFinite(scoreNumber) && scoreNumber >= 7 ? "up" : Number.isFinite(scoreNumber) && scoreNumber <= 5.5 ? "down" : "neutral",
+        tone: masterScoreStatus === "READY" && Number.isFinite(scoreNumber) && scoreNumber >= 7 ? "up" : masterScoreStatus === "READY" && Number.isFinite(scoreNumber) && scoreNumber <= 5.5 ? "down" : "neutral",
       },
       // Owner decision: the RSI card is hidden from the page. The value is still
       // computed and feeds the strategic panel / AI scoring; only the card is gone.
@@ -9543,7 +9714,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             label: (isUsLocale ? "RSI VIEW" : "RSI VISÃO"),
             value: rsiScoreValue,
             hint: rsiHint,
-            tone: rsiDescriptor.tone,
+            tone: ["READY", "PARTIAL"].includes(String(symbolOperationalView?.technical_context.rsi_d1?.freshness_status || symbolOperationalView?.technical_context.rsi_d1?.status || "").toUpperCase()) ? rsiDescriptor.tone : "neutral",
           }]
         : []),
       {
@@ -9575,6 +9746,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     displayQuoteHasCoreData,
     panelRsiValue,
     cardRsiTimeframeLabel,
+    currentPublicInsight?.rsi_metadata?.status,
+    symbolOperationalView,
   ]);
   const displayStats = useMemo(
     () => {
@@ -10054,13 +10227,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     if (!currentAiKey) return [];
     const rows = publicAiCatalog?.tools?.[currentAiKey as keyof WorkspaceData["ai_tools"]];
     if (!Array.isArray(rows) || !rows.length) return [];
-    return rows.map((row) =>
-      withAlertTimestamp({
-        ...(row as AiToolRow),
-        tool: currentAiKey,
-        ticker: normalizeSymbol(String((row as any).ticker || (row as any).symbol || "")),
-      }),
-    );
+    return rows
+      .map((row) =>
+        withAlertTimestamp({
+          ...(row as AiToolRow),
+          tool: currentAiKey,
+          ticker: normalizeSymbol(String((row as any).ticker || (row as any).symbol || "")),
+        }),
+      )
+      .filter((row) => isFreshAiFindingForReset(row))
+      .filter(isAiDealFinding);
   }, [currentAiKey, publicAiCatalog?.tools]);
   const currentTabHistory =
     aiAlertHistory[currentTab]?.resetKey === aiAlertResetKey &&
@@ -10071,12 +10247,25 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const currentTabOwnRows = (currentTabHistory?.length ? currentTabHistory : visibleAiRowsWithTimestamps)
     .filter((row) => isFreshAiFindingForReset(row))
     .filter(isAiDealFinding);
+  const normalizedAiRequestStatus = String(aiRequestState.status || "").toUpperCase();
+  const normalizedAiRequestReason = String(aiRequestState.reason || "").toLowerCase();
+  const aiRequestPendingExpired = normalizedAiRequestStatus === "PENDING_EXPIRED" || (normalizedAiRequestStatus === "PENDING" && /expired|timeout|ttl/.test(normalizedAiRequestReason));
+  const aiRequestUnsupported = normalizedAiRequestStatus === "UNSUPPORTED" || normalizedAiRequestReason.includes("unsupported");
+  const aiRequestFailed = normalizedAiRequestStatus === "ERROR" || normalizedAiRequestStatus === "PROVIDER_ERROR";
+  const aiRequestTerminal = aiRequestPendingExpired || aiRequestUnsupported || aiRequestFailed || normalizedAiRequestStatus === "INSUFFICIENT_DATA";
   // Same precedence as aiToolFindingCounts below (own rows, else catalog), so the
   // badge number and the rendered list can never disagree.
   // Most recent finding first. The history bucket sorts by alert timestamp and the
   // catalog fallback arrives score-ranked, so sort here on the same timestamp the
   // card prints as "Detectado" — that is the only ordering the owner can verify.
-  const currentTabAlertRows = [...(currentTabOwnRows.length ? currentTabOwnRows : aiCatalogFallbackRows)].sort(
+  const currentTabAlertSourceRows = GLOBAL_AI_ALERT_TAB_IDS.has(currentTab)
+    ? aiCatalogFallbackRows
+    : aiRequestTerminal
+      ? []
+      : currentTabOwnRows.length
+        ? currentTabOwnRows
+        : aiCatalogFallbackRows;
+  const currentTabAlertRows = [...currentTabAlertSourceRows].sort(
     (a, b) => (Date.parse(resolveAiFindingTimestamp(b) || "") || 0) - (Date.parse(resolveAiFindingTimestamp(a) || "") || 0),
   );
   const currentAiStaleRows = useMemo(
@@ -10090,7 +10279,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       .filter((row) => aiFindingResetKey(row) && !isFreshAiFindingForReset(row)),
     [currentAiKey, currentAiRows, selectedTicker],
   );
-  const currentAiFreshnessStatus = currentTabAlertRows.length
+  const currentAiFreshnessStatus = aiRequestTerminal && !GLOBAL_AI_ALERT_TAB_IDS.has(currentTab)
+    ? normalizedAiRequestStatus.toLowerCase()
+    : currentTabAlertRows.length
     ? "updated_today"
     : currentAiStaleRows.length
       ? "awaiting_new_daily_read"
@@ -10113,6 +10304,36 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         body: isUsLocale ? "Waiting for the current payload." : "Aguardando o payload atual.",
       };
     }
+    if (aiRequestPendingExpired) {
+      return {
+        title: isUsLocale ? "Analysis did not finish in time." : "A análise não ficou pronta a tempo.",
+        body: isUsLocale ? "The pending hydration expired; no current reading was published." : "A hidratação pendente expirou; nenhuma leitura atual foi publicada.",
+      };
+    }
+    if (aiRequestUnsupported) {
+      return {
+        title: isUsLocale ? "This analysis is not supported." : "Esta análise não é suportada.",
+        body: isUsLocale ? "The backend does not support this tool or timeframe for the current request." : "O backend não suporta esta ferramenta ou timeframe para a solicitação atual.",
+      };
+    }
+    if (aiRequestFailed) {
+      return {
+        title: isUsLocale ? "AI analysis failed." : "Falha na análise da IA.",
+        body: isUsLocale ? "The backend finished with an error; this is not an analysis still in progress." : "O backend terminou com erro; esta não é uma análise ainda em processamento.",
+      };
+    }
+    if (normalizedAiRequestStatus === "INSUFFICIENT_DATA") {
+      return {
+        title: isUsLocale ? "Insufficient current data." : "Dados atuais insuficientes.",
+        body: isUsLocale ? "The attempt finished without enough data for a validated reading." : "A tentativa terminou sem dados suficientes para uma leitura validada.",
+      };
+    }
+    if (["LOADING", "PENDING", "REFRESHING"].includes(normalizedAiRequestStatus)) {
+      return {
+        title: isUsLocale ? "Calculating analysis…" : "Calculando análise…",
+        body: isUsLocale ? "Calculating the reading for this asset from its current quote, charts and news." : "Calculando a leitura deste ativo com cotação, gráficos e notícias atuais.",
+      };
+    }
     if (!currentAiPayloadAvailable) {
       return {
         title: isUsLocale ? "AI temporarily has no data." : "IA temporariamente sem dados.",
@@ -10129,18 +10350,18 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }
     if (currentAiRows.length > 0 && currentTabAlertRows.length === 0) {
       return {
-        title: isUsLocale ? "0 current events for this asset." : "0 eventos atuais para este ativo.",
-        body: isUsLocale ? "Waiting for a new read." : "Aguardando nova leitura.",
+        title: isUsLocale ? "No new read validated today." : "Sem nova leitura validada hoje.",
+        body: isUsLocale ? "Older readings remain historical only." : "Leituras antigas ficam somente no histórico.",
       };
     }
     if (currentAiRows.length === 0) {
       return {
-        title: isUsLocale ? "0 current events for this asset." : "0 eventos atuais para este ativo.",
-        body: isUsLocale ? "Waiting for a new read." : "Aguardando nova leitura.",
+        title: isUsLocale ? "No new read validated today." : "Sem nova leitura validada hoje.",
+        body: isUsLocale ? "Waiting for a current validation." : "Aguardando validação atual.",
       };
     }
     return null;
-  }, [currentAiKey, currentAiPayloadAvailable, currentAiRows.length, currentAiStaleRows.length, currentTabAlertRows.length, isUsLocale, loading]);
+  }, [aiRequestFailed, aiRequestPendingExpired, aiRequestUnsupported, currentAiKey, currentAiPayloadAvailable, currentAiRows.length, currentAiStaleRows.length, currentTabAlertRows.length, isUsLocale, loading, normalizedAiRequestStatus]);
   const showSymbolHeader = currentTab === "grafico";
   const profileName = publicSocialName(access?.display_name);
   const activePoll = useMemo(
@@ -10168,56 +10389,15 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     }),
     [activePoll, appLocale, pollReason, pollStatus, selectedTicker],
   );
-  const hasPublicSignal = Boolean(
-    displayQuoteHasCoreData &&
-      (derivedPublicInsight?.score != null || derivedPublicInsight?.signal || derivedPublicInsight?.trend_bias),
-  );
-  const hasSignalSnapshot =
-    displayQuoteHasCoreData &&
-    (currentRanking?.score != null || hasPublicSignal);
-  const trendText = hasSignalSnapshot
-    ? String(
-        currentRanking?.trend ||
-          derivedPublicInsight?.trend_bias ||
-          derivedPublicInsight?.signal ||
-          "",
-      )
-    : "";
-  const rawSignalScore =
-    currentRanking?.score != null
-      ? Number(currentRanking.score)
-      : derivedPublicInsight?.score != null
-        ? Number(derivedPublicInsight.score)
-        : null;
+  const hasPublicSignal = Boolean(displayQuoteHasCoreData && symbolOperationalView);
+  const hasSignalSnapshot = hasPublicSignal;
+  const trendText = hasPublicSignal ? String(symbolOperationalView?.technical_context.trend_d1?.value || "") : "";
+  const rawSignalScore = firstFiniteNumber(symbolOperationalView?.operational_context.master_score?.value);
   const normalizedSignalScore = rawSignalScore == null || Number.isNaN(rawSignalScore)
-    ? null
-    : rawSignalScore <= 10
-      ? rawSignalScore * 10
-      : rawSignalScore;
-  const numericRankingScore =
-    normalizedSignalScore != null
-      ? clampNumber(normalizedSignalScore, 0, 100)
-      : null;
-  const fallbackSentimentScore = currentDerivedScore != null && currentDerivedScore > 0 ? clampNumber(Math.round(currentDerivedScore * 10), 0, 100) : null;
-  const priceSentimentScore =
-    priceMovementPercent != null
-      ? clampNumber(Math.round(50 + Number(priceMovementPercent) * 14), 5, 95)
-      : null;
-  const trendSentimentScore =
-    trendText.toLowerCase().includes("bear") || trendText.toLowerCase().includes("baixa")
-      ? 35
-      : trendText.toLowerCase().includes("bull") || trendText.toLowerCase().includes("alta")
-        ? 65
-        : null;
-  const sentimentComponents = [
-    numericRankingScore != null && numericRankingScore > 0 ? numericRankingScore : null,
-    fallbackSentimentScore,
-    priceSentimentScore,
-    trendSentimentScore,
-  ].filter((value): value is number => value != null && Number.isFinite(value));
-  const effectiveSentimentScore = sentimentComponents.length
-    ? Math.round(sentimentComponents.reduce((total, value) => total + value, 0) / sentimentComponents.length)
-    : null;
+    ? null : rawSignalScore <= 10 ? rawSignalScore * 10 : rawSignalScore;
+  const numericRankingScore = normalizedSignalScore != null ? clampNumber(normalizedSignalScore, 0, 100) : null;
+  const sentimentContract = assetMetrics?.sentiment;
+  const effectiveSentimentScore = firstFiniteNumber(sentimentContract?.status === "READY" ? sentimentContract.value : null);
   const sentimentTone =
     effectiveSentimentScore == null
       ? "neutral"
@@ -10232,71 +10412,26 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         : sentimentTone === "bullish"
           ? (isUsLocale ? "Bullish" : "Touro")
           : effectiveSentimentScore == null
-            ? (isUsLocale ? "No read" : "Sem leitura")
+            ? (isUsLocale ? "Current sentiment unavailable" : "Sentimento atual indisponível")
             : (isUsLocale ? "Neutral" : "Neutro");
-  const sentimentScore = calibrateSentimentMeterValue(effectiveSentimentScore, sentimentLabel);
-  const volumeActivity = (discussionPosts.length * 8) + (roomItems.length * 5);
-  const assetAverageVolumeForMeter = firstPositiveFiniteNumber(
-    (displayQuote as any)?.average_volume,
-    (displayQuote as any)?.averageVolume,
-    (displayQuote as any)?.avg_volume,
-    currentWatchItem?.averageVolume,
-  );
-  const assetRelativeVolumeForMeter = firstPositiveFiniteNumber(
-    derivedPublicInsight?.rel_volume,
-    currentRanking?.rel_volume,
-    (displayQuote as any)?.rel_volume,
-    (displayQuote as any)?.rvol,
-    currentWatchItem?.relVolume,
-    calculateRelativeVolume(headerVolume, assetAverageVolumeForMeter),
-  );
-  const publicVolumeScore =
-    assetRelativeVolumeForMeter != null
-      ? assetRelativeVolumeForMeter < 0.8
-        ? 28
-        : assetRelativeVolumeForMeter > 1.2
-          ? 80
-          : 52
-      : displayQuote?.volume != null
-      ? clampNumber(Math.round((Math.log10(Number(displayQuote.volume) + 1) - 4.5) * 30), 0, 100)
-      : null;
-  const rawVolumeScore = volumeActivity > 0 ? clampNumber(volumeActivity, 0, 100) : publicVolumeScore;
-  const volumeMeterTitle = volumeActivity > 0
-    ? (isUsLocale ? "Volume" : "Volume")
-    : (isUsLocale ? "Asset volume (RVOL)" : "Volume do ativo (RVOL)");
-  const volumeLabel =
-    rawVolumeScore == null
-      ? (isUsLocale ? "No read" : "Sem leitura")
-      : volumeActivity <= 0 && assetRelativeVolumeForMeter != null
-        ? assetRelativeVolumeForMeter < 0.8
-          ? (isUsLocale ? "Below average" : "Abaixo da média")
-          : assetRelativeVolumeForMeter > 1.2
-            ? (isUsLocale ? "Above average" : "Acima da média")
-            : "Normal"
-      : rawVolumeScore >= 65
-        ? (isUsLocale ? "High" : "Alto")
-        : rawVolumeScore >= 35
-          ? "Normal"
-          : (isUsLocale ? "Low" : "Baixo");
-  const volumeScore = calibrateVolumeMeterValue(rawVolumeScore, volumeLabel);
-  const volumeMeterTone =
-    volumeActivity <= 0 && assetRelativeVolumeForMeter != null
-      ? assetRelativeVolumeForMeter > 1.2
-        ? "bullish"
-        : assetRelativeVolumeForMeter < 0.8
-          ? "bearish"
-          : "neutral"
-      : rawVolumeScore != null && rawVolumeScore >= 65
-        ? "bullish"
-        : rawVolumeScore != null && rawVolumeScore < 35
-          ? "bearish"
-          : "neutral";
+  const sentimentScore = effectiveSentimentScore;
+  const dailyVolumeRatio = firstFiniteNumber(assetMetrics?.volume_vs_daily_average?.status === "READY" ? assetMetrics.volume_vs_daily_average.ratio : null);
+  const dailyVolumeLabel = dailyVolumeRatio != null
+    ? dailyVolumeRatio >= 1.3
+      ? (isUsLocale ? "Above average" : "Acima da média")
+      : dailyVolumeRatio < 0.7
+        ? (isUsLocale ? "Below average" : "Abaixo da média")
+        : (isUsLocale ? "Near average" : "Na média")
+    : (isUsLocale ? "Daily average unavailable" : "Média diária indisponível");
   const priceDirectionClass = movementClass(priceMovementPercent, currentRanking?.trend, currentRanking?.score);
   const priceMovementLabel = marketSessionLabel(selectedTicker, appLocale);
   const hasPriceMovement = priceMovementValue != null || priceMovementPercent != null;
   const essentialDecisionCards = useMemo<EssentialDecisionCard[]>(() => {
+    if (symbolOperationalView) {
+      return symbolContextDecisionCards(symbolOperationalView, appLocale);
+    }
     if (displayQuoteHasCoreData && currentStrategicPanel) {
-      return strategicPanelDecisionCards(currentStrategicPanel, appLocale);
+      return strategicPanelDecisionCards(currentStrategicPanel, appLocale, derivedPublicInsight?.trend_bias);
     }
     const rawScoreValue = effectiveAiScore != null && Number.isFinite(Number(effectiveAiScore))
       ? Number(effectiveAiScore)
@@ -10320,7 +10455,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         .filter((row) => isFreshAiFindingForReset(row))
         .filter(sameTicker);
     const flowCard = currentStrategicPanel
-      ? strategicPanelDecisionCards(currentStrategicPanel, appLocale)[4]
+      ? strategicPanelDecisionCards(currentStrategicPanel, appLocale, derivedPublicInsight?.trend_bias)[4]
       : resolveFlowCard(toolRows(["flow", "smart_money"]), appLocale);
     const flowTone = flowCard.tone;
     const baseTone = trendTone !== "neutral"
@@ -10365,15 +10500,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       },
       flowCard,
       {
-        label: isUsLocale ? "Liquidity Target" : "Liquidez alvo",
-        value: resolveLiquidityTarget(chartForOperationalLevels, displayQuote?.price, directionTone, appLocale),
-        tone: directionTone === "exit" ? "watch" : directionTone,
+        label: isUsLocale ? "Asset Liquidity" : "Liquidez Ativo",
+        value: assetMetrics?.rvol?.status === "READY"
+          ? `RVOL ${Number(assetMetrics.rvol.rvol_ratio).toFixed(2)} — ${assetMetrics.rvol.label}`
+          : (isUsLocale ? "Calculating liquidity…" : "Calculando liquidez…"),
+        tone: assetMetrics?.rvol?.status === "READY" && Number(assetMetrics.rvol.rvol_ratio) < 0.7 ? "bearish" : "neutral",
       },
       riskCard,
     ];
   }, [
     appLocale,
-    chartForOperationalLevels,
+    assetMetrics,
     currentStrategicPanel,
     currentRanking?.rsi,
     derivedPublicInsight?.rsi,
@@ -10387,10 +10524,23 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     numericRankingScore,
     publicAiTools?.tools,
     selectedTicker,
+    symbolOperationalView,
     trendText,
     workspace?.ai_tools,
   ]);
   const strategicConclusion = useMemo(() => {
+    if (symbolOperationalView) {
+      const sections = symbolContextStrategicSections(symbolOperationalView, appLocale, selectedTicker);
+      return {
+        headline: sections[0]?.body || (isUsLocale ? "Selected-symbol operational context" : "Contexto operacional do ativo"),
+        focus: sections[sections.length - 1]?.body || "",
+        basis: symbolContextStrategicBasis(symbolOperationalView, appLocale),
+        tone: symbolOperationalView.decision === "WAIT" ? "watch" as DecisionTone : decisionToneFromText(symbolOperationalView.technical_context.technical_bias?.value),
+        stamp: formatNewsClock(symbolOperationalView.as_of || undefined, appLocale),
+        source: "client_fallback" as const,
+        sections,
+      };
+    }
     if (displayQuoteHasCoreData && currentStrategicPanel) {
       return strategicConclusionFromPanel(currentStrategicPanel, appLocale);
     }
@@ -10454,13 +10604,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     numericRankingScore,
     selectedTicker,
     strategicAnalysisMinute,
+    symbolOperationalView,
   ]);
-  const rawStrategicConclusionSections = useMemo(
-    () => strategicSectionsForRender(strategicConclusion, appLocale, selectedTicker),
-    [appLocale, selectedTicker, strategicConclusion],
-  );
   const hasStrategicCoreData = Boolean(displayQuoteHasCoreData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
   const rawOperationalDecision = useMemo(() => {
+    if (symbolOperationalView) {
+      return operationalDecisionFromSymbolContext(symbolOperationalView, appLocale);
+    }
     if (displayQuoteHasCoreData && currentStrategicPanel) {
       return operationalDecisionFromPanel(currentStrategicPanel, appLocale);
     }
@@ -10481,6 +10631,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     essentialDecisionCards,
     hasStrategicCoreData,
     strategicConclusion,
+    symbolOperationalView,
   ]);
   const alignedOperationalDecision = useMemo(
     () => alignOperationalDecisionWithTrade(rawOperationalDecision, appLocale),
@@ -10493,8 +10644,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       cards: essentialDecisionCards,
       operationalDecision: alignedOperationalDecision,
       hasCoreData: hasStrategicCoreData,
+      executionReady: executionMetricsReady,
+      pendingComponents: operationalBlockComponents,
+      symbolContext: symbolOperationalView,
     }),
-    [alignedOperationalDecision, appLocale, essentialDecisionCards, hasStrategicCoreData, selectedTicker],
+    [alignedOperationalDecision, appLocale, essentialDecisionCards, executionMetricsReady, hasStrategicCoreData, operationalBlockComponents, selectedTicker, symbolOperationalView],
   );
   const operationalDecision = useMemo(
     () => operationalDecisionFromStrategicContract(strategicDecisionContract),
@@ -10678,12 +10832,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     label: string,
     value: number | null,
     tone: "bullish" | "bearish" | "neutral" = "neutral",
+    displayValue?: string | null,
+    subtext?: string,
   ) {
     const normalized = value == null ? null : clampNumber(value, 0, 100);
-    const meterAngle = normalized == null ? null : 180 - (normalized * 1.8);
-    const meterRadians = meterAngle == null ? null : (meterAngle * Math.PI) / 180;
-    const needleX = meterRadians == null ? 80 : 80 + (36 * Math.cos(meterRadians));
-    const needleY = meterRadians == null ? 82 : 82 - (36 * Math.sin(meterRadians));
+    const meterAngle = 180 - ((normalized ?? 50) * 1.8);
+    const meterRadians = (meterAngle * Math.PI) / 180;
+    const needleX = 80 + (36 * Math.cos(meterRadians));
+    const needleY = 82 - (36 * Math.sin(meterRadians));
     const labelClass = normalized == null ? "neutral" : tone;
 
     return (
@@ -10691,24 +10847,17 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         <div className="snbr-meter-copy">
           <span>{title}</span>
           <strong className={cx("snbr-meter-label", labelClass)}>{label}</strong>
+          {subtext ? <small>{subtext}</small> : null}
         </div>
-        <div className={cx("snbr-meter", tone, normalized == null && "empty")}>
+        <div className={cx("snbr-meter", tone)}>
           <svg className="snbr-meter-svg" viewBox="0 0 160 96" aria-hidden="true">
             <path className="snbr-meter-track" d="M 24 82 A 56 56 0 0 1 136 82" />
-            {normalized != null ? (
-              <>
-                <path className="snbr-meter-arc bearish" d="M 24 82 A 56 56 0 0 1 80 26" />
-                <path className="snbr-meter-arc bullish" d="M 80 26 A 56 56 0 0 1 136 82" />
-              </>
-            ) : null}
-            {normalized != null ? (
-              <>
-                <line className="snbr-meter-needle-line" x1="80" y1="82" x2={needleX} y2={needleY} />
-                <circle className="snbr-meter-needle-dot" cx="80" cy="82" r="5" />
-              </>
-            ) : null}
+            <path className="snbr-meter-arc bearish" d="M 24 82 A 56 56 0 0 1 80 26" />
+            <path className="snbr-meter-arc bullish" d="M 80 26 A 56 56 0 0 1 136 82" />
+            <line className="snbr-meter-needle-line" x1="80" y1="82" x2={needleX} y2={needleY} />
+            <circle className="snbr-meter-needle-dot" cx="80" cy="82" r="5" />
             <text className="snbr-meter-value-svg" x="80" y="58" textAnchor="middle">
-              {normalized == null ? "--" : Math.round(normalized)}
+              {displayValue ?? (normalized == null ? "—" : Math.round(normalized))}
             </text>
           </svg>
         </div>
@@ -11345,6 +11494,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               <p>{copy.description}</p>
               {copy.explanation ? <p>{copy.explanation}</p> : null}
               {lens ? <p className="snbr-tool-lens">{lens}</p> : null}
+              {GLOBAL_AI_ALERT_TAB_IDS.has(currentTab) ? (
+                <p
+                  className="snbr-tool-lens"
+                  title={isUsLocale ? "Global market alerts; they do not replace the selected asset's on-demand analysis." : "Alertas globais do mercado; não substituem a análise sob demanda do ativo selecionado."}
+                >
+                  {isUsLocale ? "Global market alerts. The selected asset analysis remains in the Strategic Panel." : "Alertas globais do mercado. A análise do ativo selecionado permanece no Painel Estratégico."}
+                </p>
+              ) : null}
             </div>
             <div className="snbr-tool-actions">
               <button className="snbr-button secondary snbr-popout-button" onClick={() => openPopout(currentTab)} type="button" aria-label={isUsLocale ? `Open ${copy.title} in another screen` : `Abrir ${copy.title} em outra tela`}>
@@ -11405,6 +11562,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   : localizeInvalidationText(invalidationSource, appLocale, item.ticker);
                 const mainReadLines = formatAiMainReadText(mainReadText, appLocale);
                 const detectedAt = resolveAiFindingTimestamp(item);
+                const updatedAt = normalizeAlertTimestamp((item as any).last_confirmed_at) || normalizeAlertTimestamp((item as any).updated_at);
+                const asOf = normalizeAlertTimestamp((item as any).as_of);
                 const publishedAt = resolveAiPublishedTimestamp(item);
                 const freshness = aiFreshnessStatus(detectedAt, viewedAtIso, appLocale);
 
@@ -11418,6 +11577,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                         </div>
                         <div className="snbr-news-chip-row snbr-temporal-chip-row">
                           <span className="snbr-chip">{isUsLocale ? "Detected" : "Detectado"}: {formatAiUpdatedAt(detectedAt, appLocale)}</span>
+                          {updatedAt ? <span className="snbr-chip">{isUsLocale ? "Updated" : "Atualizado"}: {formatAiUpdatedAt(updatedAt, appLocale)}</span> : null}
+                          {asOf ? <span className="snbr-chip">{isUsLocale ? "Data through" : "Dados até"}: {formatAiUpdatedAt(asOf, appLocale)}</span> : null}
+                          <span className="snbr-chip">{String((item as any).freshness_status || "READY")}</span>
                           {publishedAt ? <span className="snbr-chip">{isUsLocale ? "Published at" : "Publicado às"}: {formatAiUpdatedAt(publishedAt, appLocale)}</span> : null}
                           <span className={cx("snbr-chip", freshness.tone)}>{freshness.label}</span>
                         </div>
@@ -11777,10 +11939,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               sentimentTone === "bearish" ? "bearish" : sentimentTone === "bullish" ? "bullish" : "neutral",
             )}
             {renderMeterCard(
-              volumeMeterTitle,
-              volumeLabel,
-              volumeScore,
-              volumeMeterTone,
+              isUsLocale ? "Current volume / daily average" : "Volume atual / média diária",
+              dailyVolumeLabel,
+              dailyVolumeRatio == null ? null : dailyVolumeRatio * 100,
+              dailyVolumeRatio != null && dailyVolumeRatio >= 1.3 ? "bullish" : dailyVolumeRatio != null && dailyVolumeRatio < 0.7 ? "bearish" : "neutral",
+              dailyVolumeRatio == null ? "—" : `${formatLocalePrice(dailyVolumeRatio, appLocale)}×`,
+              isUsLocale ? "Informational data" : "Dado informativo",
             )}
           </div>
 
@@ -11791,6 +11955,26 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   {isUsLocale ? localizeUiText(String(zone.label || "").replace("RESISTENCIA", "RESISTANCE").replace("SUPORTE", "SUPPORT"), appLocale, selectedTicker) : zone.label}: {formatLocalePrice(zone.price, appLocale)}
                 </span>
               ))}
+            </div>
+          ) : null}
+          {showZones && chartMicroRange ? (
+            <div className="snbr-zone-row">
+              <span className="snbr-chip neutral">
+                {isUsLocale ? "Intraday micro-range" : "Microfaixa intraday"} {chartMicroRange.timeframe}: {formatLocalePrice(chartMicroRange.support, appLocale)}–{formatLocalePrice(chartMicroRange.resistance, appLocale)}
+              </span>
+              <span className="snbr-chip neutral">{isUsLocale ? "Informational — non-operational" : "Informativa — não operacional"}</span>
+              <span className="snbr-chip neutral">
+                {operationalLevelsStatus === "INSUFFICIENT_SEPARATION"
+                  ? (isUsLocale ? "Operational levels: insufficient separation" : "Níveis operacionais: sem separação suficiente")
+                  : operationalLevelsStatus === "PENDING" || operationalLevelsStatus === "REFRESHING"
+                    ? (isUsLocale ? "Operational levels: calculating…" : "Níveis operacionais: calculando…")
+                    : operationalLevelsStatus === "READY"
+                      ? (isUsLocale ? "Operational levels: confirmed" : "Níveis operacionais: confirmados")
+                      : (isUsLocale ? "Operational levels: unavailable" : "Níveis operacionais: indisponíveis")}
+              </span>
+              {operationalLevelsStatus === "INSUFFICIENT_SEPARATION" ? (
+                <span className="snbr-chip neutral">{isUsLocale ? "No support, resistance or operational entry was validated." : "Nenhum suporte, resistência ou entrada operacional validado."}</span>
+              ) : null}
             </div>
           ) : null}
         </section>
@@ -12848,12 +13032,18 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             {visibleTabs.map((tab) => {
               const meta = getTabMeta(tab, appLocale);
               const isAiTab = Boolean(AI_TOOL_TAB_MAP[tab.id as keyof typeof AI_TOOL_TAB_MAP]);
+              const isGlobalAiAlertTab = GLOBAL_AI_ALERT_TAB_IDS.has(tab.id);
               const tabCount = tab.id === "news"
                 ? newsRows.length
                 : isAiTab
                   ? aiToolFindingCounts[tab.id] ?? 0
                   : 0;
               const showTabCount = tabCount != null && (tab.id === "news" || isAiTab);
+              const tabTitle = isGlobalAiAlertTab
+                ? (isUsLocale
+                    ? `${meta.label} — ${tabCount} current global market alerts; not the selected asset's on-demand analysis.`
+                    : `${meta.label} — ${tabCount} alertas globais atuais do mercado; não são a análise sob demanda do ativo selecionado.`)
+                : meta.label;
 
               return (
                 <div key={tab.id} className="snbr-symbol-tab-shell">
@@ -12862,18 +13052,22 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                     onClick={() => setActiveTab(tab.id)}
                     aria-selected={currentTab === tab.id}
                     aria-controls={`panel-${tab.id}`}
-                    aria-label={meta.label}
+                    aria-label={tabTitle}
                     role="tab"
                     type="button"
-                    title={meta.label}
+                    title={tabTitle}
                     data-tab-id={tab.id}
                     data-tab-count={String(tabCount)}
+                    data-tab-scope={isGlobalAiAlertTab ? "global" : "selected-symbol"}
                   >
                     <span>{topTabText(tab.id, meta.short, appLocale)}</span>
                     {showTabCount ? (
                       <span
                         className="snbr-tab-count-badge"
-                        aria-label={isUsLocale ? `${tabCount} current items` : `${tabCount} itens atuais`}
+                        aria-label={isGlobalAiAlertTab
+                          ? (isUsLocale ? `${tabCount} current global market alerts` : `${tabCount} alertas globais atuais do mercado`)
+                          : (isUsLocale ? `${tabCount} current items` : `${tabCount} itens atuais`)}
+                        title={isGlobalAiAlertTab ? tabTitle : undefined}
                       >
                         {tabCount}
                       </span>
@@ -13097,7 +13291,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       <strong>{operationalDecision.action}</strong>
                       <div className="snbr-operational-confidence">
                         <span>{isUsLocale ? "Confidence" : "Confiança"}</span>
-                        <strong>{operationalDecision.confidence != null ? `${operationalDecision.confidence}%` : "n/a"}</strong>
+                        <strong>{operationalDecision.confidence != null ? `${operationalDecision.confidence}%` : (isUsLocale ? "Not confirmed" : "Não confirmada")}</strong>
                         <small>{operationalDecision.confidenceLabel}</small>
                       </div>
                     </div>
@@ -13120,7 +13314,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       </div>
                       <div>
                         <span>{isUsLocale ? "Conviction" : "Convicção"}</span>
-                        <strong>{operationalDecision.confidence != null ? `${operationalDecision.confidence}%` : "n/a"}</strong>
+                        <strong>{symbolOperationalView
+                          ? symbolOperationalView.conviction_status === "READY" && firstFiniteNumber(symbolOperationalView.conviction) != null
+                            ? `${firstFiniteNumber(symbolOperationalView.conviction)}%`
+                            : (isUsLocale ? "Not calculated" : "Não calculada")
+                          : operationalDecision.confidence != null
+                            ? `${operationalDecision.confidence}%`
+                            : (isUsLocale ? "Not calculated" : "Não calculada")}</strong>
                       </div>
                     </div>
                     <div className="snbr-operational-levels">
@@ -13154,7 +13354,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                     <article className={cx("snbr-decision-conclusion", strategicDecisionContract.tone, !strategicConclusionExpanded && "collapsed")}>
                     <div className="snbr-conclusion-topline">
                       <span>{isUsLocale ? "Conclusion" : "Conclusão"}</span>
-                      <small>{isUsLocale ? `AI Analysis Time ${strategicConclusion.stamp}` : `IA Análise Hora ${strategicConclusion.stamp}`}</small>
+                      <small>{symbolOperationalView?.as_of
+                        ? `${isUsLocale ? "Market data through" : "Dados de mercado até"} ${formatNewsClock(symbolOperationalView.as_of, appLocale)}`
+                        : (isUsLocale ? `AI Analysis Time ${strategicConclusion.stamp}` : `IA Análise Hora ${strategicConclusion.stamp}`)}</small>
                       <button
                         aria-expanded={strategicConclusionExpanded}
                         className="snbr-collapse-toggle"

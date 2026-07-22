@@ -403,6 +403,11 @@ def build_payload(
             metric_payload.setdefault(metric_key, row.get(metric_key))
     market_time = coerce_iso(market_timestamp(row))
     detected_time = coerce_iso(deal_timestamp(row), fallback=market_time)
+    confirmed_time = coerce_iso(
+        row.get("last_confirmed_at") or row.get("updated_at") or row.get("generated_at"),
+        fallback=market_time,
+    )
+    as_of = coerce_iso(row.get("as_of"), fallback=market_time)
     price = safe_float(row.get("price"))
     volume = safe_float(row.get("volume"))
     data_quality = coerce_data_quality(row)
@@ -468,8 +473,11 @@ def build_payload(
         "first_seen_at": detected_time,
         "deal_detected_at": detected_time,
         "detected_at": detected_time,
-        "updated_at": market_time,
-        "last_seen_at": market_time,
+        "updated_at": confirmed_time,
+        "last_confirmed_at": confirmed_time,
+        "as_of": as_of,
+        "snapshot_generated_at": coerce_iso(row.get("snapshot_generated_at") or row.get("generated_at"), fallback=confirmed_time),
+        "last_seen_at": confirmed_time,
     }
     if row.get("auditor") or row.get("audit_status") or row.get("blocked_by_auditor"):
         auditor = row.get("auditor") if isinstance(row.get("auditor"), dict) else {}

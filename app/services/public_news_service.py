@@ -4,7 +4,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 from zoneinfo import ZoneInfo
 
-from app.services.symbol_registry import canonical_symbol
+from app.services.symbol_registry import canonical_symbol, symbol_category
 from app.services.news_service import (
     _TICKER_NEWS_ALIASES as _SYMBOL_NEWS_ALIASES,
     NEWS_CACHE_TTL_SECONDS,
@@ -489,11 +489,11 @@ def _enrich_public_news_item(item: dict[str, Any], ticker: str) -> dict[str, Any
     return normalized
 
 
-def _request_news_warmup_safe(symbol: str, limit: int) -> bool:
+def _request_news_warmup_safe(symbol: str, limit: int, locale: str = "pt-BR") -> bool:
     try:
         from app.system.news_warmup import request_news_warmup
 
-        request_news_warmup(symbol, limit=limit)
+        request_news_warmup(symbol, limit=limit, locale=locale)
         return True
     except Exception:
         return False
@@ -515,6 +515,9 @@ def _build_news_state(
     raw_count = int(cache.get("raw_count", 0) or 0)
     filter_report = cache.get("filter_report") if isinstance(cache.get("filter_report"), dict) else {}
     discard_reason = cache.get("discard_reason") or filter_report.get("reason")
+    is_crypto = symbol_category(symbol) == "Crypto"
+    fresh_items = [item for item in items if isinstance(item, dict) and not bool(item.get("is_stale"))]
+    state_reason = discard_reason
 
     if items:
         status = "ok"
@@ -522,12 +525,28 @@ def _build_news_state(
         if cache_status == "stale_fallback":
             status = "stale_fallback"
             message = f"CACHE ANTIGO: usando notícia anterior de {symbol}; provider atual não entregou item novo."
+        if not fresh_items:
+            status = "historical"
+            state_reason = "no_fresh_crypto_news" if is_crypto else "no_fresh_news"
+            message = (
+                f"HISTORICAL NEWS: no current validated item for {symbol}."
+                if is_english
+                else f"HISTÓRICO: nenhuma notícia atual validada para {symbol}."
+            )
     else:
         status = "empty"
         message = f"NO VERIFIED NEWS NOW: no item from another ticker was reused for {symbol}." if is_english else f"SEM NOTÍCIA REAL AGORA: Sem notícia real para {symbol} agora; nenhuma notícia de outro ticker foi reaproveitada."
         if provider_error:
             status = "provider_error"
             message = f"PROVIDER INDISPONÍVEL: provider de news falhou para {symbol}: {provider_error}."
+        elif is_crypto and provider_status in {"empty", "empty_response", "no_news", "unsupported"}:
+            status = "unsupported"
+            state_reason = "crypto_news_provider_unavailable"
+            message = (
+                f"RECENT NEWS UNAVAILABLE: the provider has no current coverage for {symbol}."
+                if is_english
+                else f"NOTÍCIAS RECENTES INDISPONÍVEIS: o provider não possui cobertura atual para {symbol}."
+            )
         elif raw_count > 0 and discard_reason:
             status = "empty"
             message = f"FILTROS REMOVERAM TODAS AS NOTÍCIAS: {raw_count} notícia(s) bruta(s) para {symbol}; motivo: {discard_reason}."
@@ -545,10 +564,11 @@ def _build_news_state(
         "provider_status": provider_status,
         "provider_error": provider_error,
         "raw_count": raw_count,
-        "reason": discard_reason,
+        "reason": state_reason,
         "discard_reasons": cache.get("discard_reasons") if isinstance(cache.get("discard_reasons"), dict) else {},
         "report_status": report.get("status") or ("ok" if items else "empty"),
         "items": len(items),
+        "fresh_items": len(fresh_items),
         "warmup_requested": warmup_requested,
     }
 
@@ -578,7 +598,11 @@ def build_public_news_payload(
         fetched_items = get_symbol_news(ticker, limit=safe_limit, locale=content_locale)
     warmup_requested = False
     if not allow_fetch and schedule_warmup and needs_refresh:
-        warmup_requested = _request_news_warmup_safe(ticker, safe_limit)
+        warmup_requested = (
+            _request_news_warmup_safe(ticker, safe_limit)
+            if content_locale == "pt-BR"
+            else _request_news_warmup_safe(ticker, safe_limit, content_locale)
+        )
     normalized_items = [
         _enrich_public_news_item(_normalize_public_news_item(item, ticker, content_locale), ticker)
         for item in fetched_items
@@ -611,6 +635,15 @@ def build_public_news_payload(
         "cache": cache,
         "cache_only": not allow_fetch,
         "warmup_requested": warmup_requested,
+        "data_status": (
+            "READY" if state["status"] == "ok" else
+            "HISTORICAL" if state["status"] == "historical" else
+            "STALE" if state["status"] == "stale_fallback" else
+            "UNSUPPORTED" if state["status"] == "unsupported" else
+            "PROVIDER_ERROR" if state["status"] == "provider_error" else
+            "REFRESHING" if warmup_requested else
+            "EMPTY"
+        ),
     }
     if source:
         payload["source"] = source

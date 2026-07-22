@@ -18,7 +18,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.core.atomic_io import interprocess_file_lock, read_json_file_consistent, write_json_file_atomic
-from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases
+from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases, provider_symbol
 from app.system.system_metrics import record_cache_access, record_cache_lookup, record_external_provider_call, record_worker_stage_duration
 
 logger = logging.getLogger("stocknewsbr.news")
@@ -71,6 +71,7 @@ _TICKER_NEWS_ALIASES = {
     "BPAC11": ("btg pactual",),
     "BTCUSD": ("bitcoin", "btc"),
     "ETHUSD": ("ethereum", "ether", "eth"),
+    "BNBUSD": ("bnb", "binance coin", "bnb chain"),
 }
 _NEWS_LOCAL_TZ = ZoneInfo("America/Sao_Paulo")
 
@@ -1697,6 +1698,9 @@ def _news_ticker_candidates(ticker: str) -> list[str]:
         return []
 
     candidates = [normalized]
+    provider_candidate = provider_symbol(normalized)
+    if provider_candidate and provider_candidate != normalized:
+        candidates.append(provider_candidate)
     if "." not in normalized and "-" not in normalized and normalized[-1:].isdigit():
         candidates.append(f"{normalized}.SA")
     if normalized.endswith(".SA"):

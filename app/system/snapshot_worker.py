@@ -3,6 +3,7 @@
 # Ultra Fast + Crash Safe
 # =====================================================
 
+import os
 import time
 import logging
 import threading
@@ -37,11 +38,11 @@ def _snapshot_loop():
 
     try:
 
-        interval = max(1, int(settings.SCAN_INTERVAL))
+        interval = max(30, int(os.getenv("GLOBAL_SNAPSHOT_INTERVAL_SECONDS", "300")))
 
     except Exception:
 
-        interval = 60
+        interval = 300
 
     while not _stop_event.is_set():
 

@@ -263,7 +263,9 @@ async def lifespan(app: FastAPI):
         if not WORKERS_STARTED:
             default_background_workers = _default_start_background_workers()
             engine_worker_enabled = _env_flag("START_ENGINE_WORKER", default_background_workers)
-            snapshot_worker_enabled = _env_flag("START_SNAPSHOT_WORKER", False)
+            # API-only/local processes still need a current global snapshot.
+            # The engine remains the sole writer when it is enabled.
+            snapshot_worker_enabled = _env_flag("START_SNAPSHOT_WORKER", not engine_worker_enabled)
 
             if engine_worker_enabled:
                 from worker import start_worker

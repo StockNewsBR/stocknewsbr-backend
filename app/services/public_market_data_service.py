@@ -4,8 +4,9 @@ import json
 import math
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from statistics import median
 
 from app.engine.indicators.vector_indicator_engine import RSI_PERIOD, compute_latest_rsi
 from app.market.market_data_loader import (
@@ -31,6 +32,11 @@ _CHART_DIRECT_MAX_AGE_SECONDS = 60 * 60 * 24 * 14
 _PUBLIC_RSI_SOURCE = "canonical_indicator_engine"
 _CHART_LEVEL_SOURCE = "chart_overlay"
 _CHART_LEVEL_ALGORITHM_VERSION = "recent_extrema_v1"
+_LEVEL_MIN_SIDE_PCT = float(os.getenv("LEVEL_MIN_SIDE_PCT", "0.0015"))
+_LEVEL_MIN_WIDTH_PCT = float(os.getenv("LEVEL_MIN_WIDTH_PCT", "0.0035"))
+_LEVEL_MIN_TOUCHES = max(2, int(os.getenv("LEVEL_MIN_TOUCHES", "2")))
+# ponytail: calendar grace covers weekends; use an exchange calendar if holiday precision becomes operational.
+_DAILY_MAX_SESSION_LAG_DAYS = 3
 INDEX_SPARK_INTERVAL = "3M"
 INDEX_SPARK_MAX_POINTS = 60
 
@@ -101,6 +107,157 @@ def public_chart_as_of(rows: list[dict] | None) -> str | None:
         if as_of is not None:
             return as_of
     return None
+
+
+def public_daily_freshness_status(
+    rows: list[dict] | None,
+    session_date: object,
+    *,
+    required_count: int = RSI_PERIOD + 1,
+) -> str:
+    """Classify daily candles against the selected quote session."""
+    closes = _valid_chart_closes(rows)
+    if len(closes) < required_count:
+        return "PENDING" if not rows else "INSUFFICIENT_DATA"
+    if not session_date:
+        return "READY"
+    as_of = public_chart_as_of(rows)
+    try:
+        candle_date = datetime.fromisoformat(str(as_of)[:10]).date()
+        quote_date = datetime.fromisoformat(str(session_date)[:10]).date()
+    except (TypeError, ValueError):
+        return "STALE"
+    lag_days = (quote_date - candle_date).days
+    return "READY" if 0 <= lag_days <= _DAILY_MAX_SESSION_LAG_DAYS else "STALE"
+
+
+def public_daily_age_sessions(
+    rows: list[dict] | None,
+    session_date: object,
+    *,
+    continuous_market: bool = False,
+) -> int | None:
+    """Count elapsed market sessions after the latest daily candle."""
+    as_of = public_chart_as_of(rows)
+    if not as_of or not session_date:
+        return None
+    try:
+        candle_date = datetime.fromisoformat(str(as_of)[:10]).date()
+        quote_date = datetime.fromisoformat(str(session_date)[:10]).date()
+    except (TypeError, ValueError):
+        return None
+    if quote_date < candle_date:
+        return None
+    if continuous_market:
+        return (quote_date - candle_date).days
+    return sum(
+        1
+        for offset in range(1, (quote_date - candle_date).days + 1)
+        if (candle_date + timedelta(days=offset)).weekday() < 5
+    )
+
+
+def build_crypto_intraday_rvol_contract(
+    symbol: str,
+    rows: list[dict] | None,
+    *,
+    lookback_days: int = 20,
+    minimum_samples: int = 7,
+) -> dict:
+    """Compare a 5m crypto bucket with the same UTC bucket on prior days.
+
+    Crypto trades continuously, so an exchange-session or weekday split would
+    silently apply equity semantics. Each prior UTC date contributes at most
+    one positive-volume sample and the baseline is the median.
+    """
+    canonical = _context_symbol(symbol)
+    base = {
+        "symbol": canonical,
+        "current_volume": None,
+        "current_bucket_volume": None,
+        "average_volume_comparable": None,
+        "rvol_ratio": None,
+        "rvol_percent": None,
+        "label": "RVOL intraday indisponível",
+        "status": "INSUFFICIENT_DATA",
+        "method": "same_utc_bucket_median",
+        "baseline": "same_utc_bucket_median",
+        "timeframe": "5m",
+        "window_days": max(1, int(lookback_days or 20)),
+        "minimum_sample_count": max(1, int(minimum_samples or 7)),
+        "sample_count": 0,
+        "weekday_split": False,
+        "operational_ready": False,
+        "reason": "no_5m_candles",
+        "as_of": None,
+        "source": "chart_cache",
+    }
+
+    parsed: list[tuple[datetime, float]] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        raw_time = _row_as_of(row)
+        volume = _finite_positive(row.get("volume"))
+        if not raw_time:
+            continue
+        try:
+            stamp = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+            stamp = stamp.replace(tzinfo=timezone.utc) if stamp.tzinfo is None else stamp.astimezone(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        # Keep zero-volume current buckets visible as insufficient instead of
+        # silently falling back to an earlier, completed bucket.
+        parsed.append((stamp, float(volume or 0.0)))
+
+    if not parsed:
+        return base
+
+    parsed.sort(key=lambda item: item[0])
+    current_at, current_volume = parsed[-1]
+    base.update({
+        "current_volume": current_volume if current_volume > 0 else None,
+        "current_bucket_volume": current_volume if current_volume > 0 else None,
+        "as_of": current_at.isoformat(),
+        "current_bucket_utc": f"{current_at.hour:02d}:{(current_at.minute // 5) * 5:02d}",
+    })
+    if current_volume <= 0:
+        base["reason"] = "current_bucket_volume_unavailable"
+        return base
+
+    current_bucket = (current_at.hour, current_at.minute // 5)
+    samples_by_date: dict[object, float] = {}
+    for stamp, volume in parsed[:-1]:
+        age_days = (current_at.date() - stamp.date()).days
+        if not 1 <= age_days <= base["window_days"]:
+            continue
+        if (stamp.hour, stamp.minute // 5) != current_bucket or volume <= 0:
+            continue
+        samples_by_date[stamp.date()] = volume
+
+    samples = list(samples_by_date.values())
+    base["sample_count"] = len(samples)
+    if len(samples) < base["minimum_sample_count"]:
+        base["reason"] = "insufficient_same_utc_bucket_samples"
+        return base
+
+    comparable_median = float(median(samples))
+    if comparable_median <= 0:
+        base["reason"] = "invalid_same_utc_bucket_baseline"
+        return base
+
+    ratio = current_volume / comparable_median
+    label = "Abaixo da média" if ratio < 0.70 else "Na média" if ratio < 1.30 else "Acima da média"
+    base.update({
+        "average_volume_comparable": round(comparable_median, 6),
+        "rvol_ratio": round(ratio, 4),
+        "rvol_percent": round(ratio * 100, 1),
+        "label": label,
+        "status": "READY",
+        "operational_ready": True,
+        "reason": None,
+    })
+    return base
 
 
 def _valid_chart_closes(rows: list[dict] | None) -> list[float]:
@@ -279,6 +436,47 @@ def normalize_public_chart_zones(
             seen_prices.add(price_key)
         normalized.append(item)
 
+    latest_close = _finite_positive((rows or [{}])[-1].get("close") if rows else None)
+    support = next((item for item in normalized if item.get("kind") == "support"), None)
+    resistance = next((item for item in normalized if item.get("kind") == "resistance"), None)
+    if not (latest_close and support and resistance):
+        return normalized
+
+    ranges = []
+    for row in (rows or [])[-14:]:
+        high, low = _finite_positive(row.get("high")), _finite_positive(row.get("low"))
+        if high is not None and low is not None and high >= low:
+            ranges.append(high - low)
+    atr14 = sum(ranges) / len(ranges) if len(ranges) >= 14 else None
+    support_price, resistance_price = support["price"], resistance["price"]
+    min_side = max(latest_close * _LEVEL_MIN_SIDE_PCT, (atr14 or 0) * 0.25)
+    min_width = max(latest_close * _LEVEL_MIN_WIDTH_PCT, (atr14 or 0) * 0.75)
+    touch_tolerance = max(latest_close * 0.001, (atr14 or 0) * 0.10)
+    support_touches = sum(1 for row in rows or [] if (low := _finite_positive(row.get("low"))) is not None and abs(low - support_price) <= touch_tolerance)
+    resistance_touches = sum(1 for row in rows or [] if (high := _finite_positive(row.get("high"))) is not None and abs(high - resistance_price) <= touch_tolerance)
+    valid = (
+        atr14 is not None
+        and support_touches >= _LEVEL_MIN_TOUCHES
+        and resistance_touches >= _LEVEL_MIN_TOUCHES
+        and support_price < latest_close < resistance_price
+        and latest_close - support_price >= min_side
+        and resistance_price - latest_close >= min_side
+        and resistance_price - support_price >= min_width
+    )
+    for item, touches in ((support, support_touches), (resistance, resistance_touches)):
+        item.update({
+            "status": "READY" if valid else "INSUFFICIENT_SEPARATION",
+            "operational": valid,
+            "distance_pct": abs(item["price"] - latest_close) / latest_close * 100,
+            "atr14": atr14,
+            "distance_atr": abs(item["price"] - latest_close) / atr14 if atr14 else None,
+            "strength_score": min(100, touches * 35 + 20) if valid else None,
+            "touches": touches,
+            "rejections": touches - 1 if touches > 1 else 0,
+        })
+        if not valid:
+            item["micro_timeframe"] = normalized_timeframe
+            item["reason"] = "nearest_pivots_form_micro_range"
     return normalized
 
 
