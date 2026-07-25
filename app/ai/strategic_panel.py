@@ -98,7 +98,18 @@ _REASON_ORDER = (
 
 
 def _ticker(row: Dict[str, Any]) -> str:
-    return str(row.get("ticker") or row.get("symbol") or "").upper().strip()
+    # Canonicalize the B3 exchange suffix so panel keys match across lists. The panels are keyed
+    # from master_score_rows (clean "BBAS3") while `normalized` carries "BBAS3.SA" at merge time --
+    # without this, apply_strategic_panels_by_ticker never matched and every signal row reached the
+    # institutional contract without a strategic_panel (contract_coverage 0% -> ai-tools 0 rows ->
+    # empty IA tabs + go_live blocked).
+    # ponytail: local suffix strip, not the full registry. The canonical source of truth is
+    # app.services.symbol_registry.canonical_symbol -- consolidate _ticker onto it (Mission 30) when
+    # the ai.* import layering allows it, so every module shares one normalizer.
+    raw = str(row.get("ticker") or row.get("symbol") or "").upper().strip()
+    if raw.endswith(".SA"):
+        raw = raw[:-3]
+    return raw
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
