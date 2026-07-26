@@ -71,47 +71,61 @@ def dispatch_signal_pushes(signals):
     now = int(time.time())
     state = _load_state()
     dispatched = 0
+
+    signals_to_send = []
+    for signal in candidates:
+        ticker = str(signal.get("ticker") or signal.get("symbol"))
+        last_sent = int(state.get(ticker, 0) or 0)
+
+        if now - last_sent < PUSH_SIGNAL_COOLDOWN_SECONDS:
+            continue
+
+        title = f"Alerta SNBR: {ticker}"
+        body = (
+            f"Score {round(float(signal.get('score', 0) or 0), 2)} | "
+            f"Trend {signal.get('trend') or 'n/a'}"
+        )
+
+        signals_to_send.append({
+            "ticker": ticker,
+            "title": title,
+            "body": body,
+            "data": {
+                "ticker": ticker,
+                "score": str(signal.get("score", "")),
+                "trend": str(signal.get("trend", "")),
+            },
+            "sent": 0
+        })
+
+    if not signals_to_send:
+        return {"sent": 0, "signals": len(candidates)}
+
     db = SessionLocal()
-
     try:
-        users = db.query(User).filter(User.is_active == True, User.access_app == True).all()  # noqa: E712
+        user_ids = db.query(User.id).filter(User.is_active == True, User.access_app == True).yield_per(1000)  # noqa: E712
 
-        for signal in candidates:
-            ticker = str(signal.get("ticker") or signal.get("symbol"))
-            last_sent = int(state.get(ticker, 0) or 0)
-
-            if now - last_sent < PUSH_SIGNAL_COOLDOWN_SECONDS:
+        for (user_id,) in user_ids:
+            if not list_push_tokens(user_id):
                 continue
 
-            title = f"Alerta SNBR: {ticker}"
-            body = (
-                f"Score {round(float(signal.get('score', 0) or 0), 2)} | "
-                f"Trend {signal.get('trend') or 'n/a'}"
-            )
-
-            signal_sent = 0
-
-            for user in users:
-                if not list_push_tokens(user.id):
-                    continue
-
+            for sig in signals_to_send:
                 result = send_push_notification(
-                    user_id=user.id,
-                    title=title,
-                    body=body,
-                    data={
-                        "ticker": ticker,
-                        "score": str(signal.get("score", "")),
-                        "trend": str(signal.get("trend", "")),
-                    },
+                    user_id=user_id,
+                    title=sig["title"],
+                    body=sig["body"],
+                    data=sig["data"],
                 )
-                signal_sent += int(result.get("sent", 0) or 0)
+                sig["sent"] += int(result.get("sent", 0) or 0)
 
-            if signal_sent > 0:
-                state[ticker] = now
-                dispatched += signal_sent
+        for sig in signals_to_send:
+            if sig["sent"] > 0:
+                state[sig["ticker"]] = now
+                dispatched += sig["sent"]
 
-        _save_state(state)
+        if dispatched > 0:
+            _save_state(state)
+
         return {"sent": dispatched, "signals": len(candidates)}
     finally:
         db.close()
