@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Dict, Iterable, List
 
 from app.ai.ai_common import build_payload, normalize_row, top_n
