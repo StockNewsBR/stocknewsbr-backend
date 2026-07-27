@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, time as dtime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.ai.ai_common import describe_state
 from app.cache.snapshot_cache import get_last_good_snapshot, get_snapshot
@@ -93,7 +94,61 @@ def _is_displayable_row(row: dict[str, Any]) -> bool:
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _MAX_SNAPSHOT_AGE_SECONDS = max(60, int(os.getenv("AI_SNAPSHOT_MAX_AGE_SECONDS", "300")))
+# Intraday findings (minute/hour bars) are only current for a few minutes.
 _MAX_AS_OF_AGE_SECONDS = max(60, int(os.getenv("AI_AS_OF_MAX_AGE_SECONDS", "900")))
+
+# Freshness is GRANULARITY-AWARE. A daily/session finding (e.g. "1D") is stamped
+# with the daily-bar close timestamp, which is many hours old the moment the
+# session ends and stays that way all weekend. Judging it against the intraday
+# TTL (_MAX_AS_OF_AGE_SECONDS) wrongly flags Friday's close as HISTORICAL on
+# Saturday and would also drop any daily row during a live intraday session
+# (Mission 70 P0.3). Instead, a daily/session row is fresh while it still
+# represents the most recent COMPLETED trading session.
+_B3_TZ = ZoneInfo("America/Sao_Paulo")
+_B3_SESSION_CLOSE = dtime(17, 55)  # mirrors app/engine/events/price_event_engine.py B3_CLOSE
+# Explicit intraday interval tokens seen across the codebase. Anything not listed
+# here (daily/weekly/monthly, month-range tokens like "1M"/"3M", or missing) is
+# treated as daily-scale so historical data is never falsely staled.
+_INTRADAY_TIMEFRAMES = frozenset(
+    {"1MIN", "2MIN", "3MIN", "5MIN", "10MIN", "15MIN", "30MIN", "45MIN", "60MIN", "90MIN",
+     "2M", "5M", "10M", "15M", "30M", "45M", "60M", "90M",
+     "1H", "2H", "3H", "4H", "H1", "H4", "M5", "M15", "M30"}
+)
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _is_intraday_timeframe(timeframe: str | None) -> bool:
+    """True only for unambiguous minute/hour interval tokens.
+
+    The ambiguous "1M"/"3M"/"6M" tokens are month-ranges in this product, so they
+    are deliberately NOT intraday: erring toward the daily window avoids false
+    staling, which Mission 70 prioritizes over aggressively expiring a rare
+    genuine sub-hour row.
+    """
+    normalized = _normalize_timeframe(timeframe)
+    return bool(normalized and normalized in _INTRADAY_TIMEFRAMES)
+
+
+def _last_completed_session_start_utc(now: datetime) -> datetime:
+    """Start (00:00 BRT) of the most recent COMPLETED B3 session, as UTC.
+
+    Weekend-aware via the existing America/Sao_Paulo + 17:55 close convention; no
+    holiday calendar is hardcoded (a holiday degrades a daily row to HISTORICAL,
+    never to wrong data). Shared by US symbols too — the ~1-2h close offset is
+    immaterial at day granularity; precise US session gating stays a follow-up.
+    """
+    local = now.astimezone(_B3_TZ)
+    session_day = local.date()
+    # Before today's close the newest completed session is an earlier day.
+    if local.timetz().replace(tzinfo=None) < _B3_SESSION_CLOSE:
+        session_day = session_day - timedelta(days=1)
+    while session_day.weekday() >= 5:  # Saturday(5)/Sunday(6) are not sessions
+        session_day = session_day - timedelta(days=1)
+    session_start_local = datetime.combine(session_day, dtime(0, 0), tzinfo=_B3_TZ)
+    return session_start_local.astimezone(timezone.utc)
 
 
 def _detected_at(row: dict[str, Any]) -> datetime:
@@ -123,14 +178,49 @@ def _snapshot_timestamp(snapshot: dict[str, Any]) -> datetime:
     return _confirmed_at({"updated_at": snapshot.get("updated_at") or snapshot.get("generated_at") or snapshot.get("last_good_timestamp")})
 
 
-def _row_is_stale(row: dict[str, Any]) -> bool:
+def _row_freshness(row: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
+    """Decide row freshness by data granularity and return typed metadata.
+
+    An intraday row expires against the intraday TTL; a daily/session row expires
+    only once a newer trading session has completed. Explicit quality/stale flags
+    always win. Returns a small dict so callers can both bucket the row and stamp
+    the contract without recomputing.
+    """
+    now = now or _now_utc()
     as_of = _confirmed_at({"updated_at": row.get("as_of")})
-    return bool(
-        coerce_data_quality(row) == QUALITY_STALE
-        or row.get("stale") is True
-        or row.get("is_stale") is True
-        or (as_of != _EPOCH and (datetime.now(timezone.utc) - as_of).total_seconds() > _MAX_AS_OF_AGE_SECONDS)
-    )
+    timeframe = _row_timeframe(row)
+    intraday = _is_intraday_timeframe(timeframe)
+    basis = "intraday_ttl" if intraday else "daily_session"
+
+    if coerce_data_quality(row) == QUALITY_STALE:
+        return {"stale": True, "basis": basis, "timeframe": timeframe, "reason": "data_quality_stale"}
+    if row.get("stale") is True or row.get("is_stale") is True:
+        return {"stale": True, "basis": basis, "timeframe": timeframe, "reason": "row_flagged_stale"}
+    if as_of == _EPOCH:
+        # No usable timestamp: keep the prior lenient behaviour (not staled here).
+        return {"stale": False, "basis": basis, "timeframe": timeframe, "reason": "no_as_of"}
+
+    age_seconds = (now - as_of).total_seconds()
+    if intraday:
+        stale = age_seconds > _MAX_AS_OF_AGE_SECONDS
+        return {
+            "stale": bool(stale), "basis": basis, "timeframe": timeframe,
+            "reason": "intraday_ttl_expired" if stale else "intraday_fresh",
+            "age_seconds": age_seconds,
+        }
+    # Daily/session: fresh while it still represents the latest completed session.
+    session_start = _last_completed_session_start_utc(now)
+    stale = as_of < session_start
+    return {
+        "stale": bool(stale), "basis": basis, "timeframe": timeframe,
+        "reason": "superseded_by_newer_session" if stale else "latest_completed_session",
+        "age_seconds": age_seconds,
+        "session_start": session_start.isoformat(),
+    }
+
+
+def _row_is_stale(row: dict[str, Any]) -> bool:
+    return _row_freshness(row)["stale"]
 
 
 def _snapshot_is_stale(snapshot: dict[str, Any], *, using_fallback: bool) -> bool:
@@ -143,7 +233,7 @@ def _snapshot_is_stale(snapshot: dict[str, Any], *, using_fallback: bool) -> boo
         or snapshot.get("is_stale") is True
         or data_status.get("stale") is True
         or source in {"last_good", "snapshot_fallback", "exception_fallback", "last_good_snapshot"}
-        or (timestamp != _EPOCH and (datetime.now(timezone.utc) - timestamp).total_seconds() > _MAX_SNAPSHOT_AGE_SECONDS)
+        or (timestamp != _EPOCH and (_now_utc() - timestamp).total_seconds() > _MAX_SNAPSHOT_AGE_SECONDS)
     )
 
 
@@ -278,9 +368,18 @@ def _payload_from_snapshot(
     )
     historical_tools = _empty_tools()
     active_tools = _empty_tools()
+    evaluated_at = _now_utc()
     for key, rows in tools.items():
         for row in rows:
-            if stale or _row_is_stale(row):
+            freshness = _row_freshness(row, now=evaluated_at)
+            # Additive contract metadata so consumers can distinguish an intraday
+            # TTL expiry from a superseded daily session (Mission 70 P0.3).
+            row["freshness_basis"] = freshness["basis"]
+            row["freshness_reason"] = freshness["reason"]
+            row["data_timeframe"] = freshness["timeframe"]
+            row["source_as_of"] = row.get("as_of")
+            row["evaluated_at"] = evaluated_at.isoformat()
+            if stale or freshness["stale"]:
                 row["freshness_status"] = "HISTORICAL"
                 row["actionable"] = False
                 row["can_trade"] = False

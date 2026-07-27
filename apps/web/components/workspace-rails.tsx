@@ -117,6 +117,8 @@ export function WorkspaceLeftRail({
         ? `${categoryLabels[category]} (${watchCategoryCounts[category] || 0})`
         : categoryLabels[category];
 
+  const activeInstitutionalSection = institutionalSections.find((section) => section.id === activeInstitutionalSectionId);
+
   return (
     <aside className="snbr-left-rail" ref={railRef}>
       <div className="snbr-left-header">

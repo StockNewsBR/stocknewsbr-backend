@@ -62,11 +62,14 @@ function getTheme() {
   return "dark";
 }
 
-function buildStudies(showVwap: boolean, showMacd: boolean, showRsi: boolean) {
+function buildStudies(showVwap: boolean, showMacd: boolean, showRsi: boolean, showSupertrend: boolean) {
   const studies: string[] = [];
   if (showVwap) studies.push("VWAP@tv-basicstudies");
   if (showMacd) studies.push("MACD@tv-basicstudies");
   if (showRsi) studies.push("RSI@tv-basicstudies");
+  // TradingView's built-in Supertrend (not the community "ATR WITH TSL" script,
+  // which is a custom Pine indicator and cannot be injected via the embed widget).
+  if (showSupertrend) studies.push("STD;Supertrend");
   return studies;
 }
 
@@ -229,6 +232,7 @@ export function TickerChart({
   showVwap = true,
   showMacd = false,
   showRsi = false,
+  showSupertrend = false,
   showVolume = true,
   showSupport = true,
   showResistance = true,
@@ -326,7 +330,9 @@ export function TickerChart({
       autosize: true,
       symbol: tradingViewSymbol,
       interval: timeframe.interval,
-      range: timeframe.range,
+      // TradingView range presets also change the candle resolution (for
+      // example, 1D selects 1m). Omitting range preserves the backend's
+      // canonical candle interval, so chart indicators and AI start aligned.
       timezone: tradingViewSymbol.startsWith("BMFBOVESPA:") ? "America/Sao_Paulo" : "Etc/UTC",
       theme,
       style: "1",
@@ -341,7 +347,7 @@ export function TickerChart({
       hotlist: false,
       hide_volume: !showVolume,
       support_host: "https://www.tradingview.com",
-      studies: buildStudies(showVwap, showMacd, showRsi),
+      studies: buildStudies(showVwap, showMacd, showRsi, showSupertrend),
       studies_overrides: JSON.stringify({
         // tv.js embed override keys use the lowercase study title + plot id.
         "volume weighted average price.vwap.color": "#f97316",
@@ -380,7 +386,7 @@ export function TickerChart({
     return () => {
       container.innerHTML = "";
     };
-  }, [tradingViewSymbol, sourceSymbol, timeframe.interval, timeframe.range, theme, locale, showVwap, showMacd, showRsi, showVolume]);
+  }, [tradingViewSymbol, sourceSymbol, timeframe.interval, theme, locale, showVwap, showMacd, showRsi, showSupertrend, showVolume]);
 
   return (
     <div

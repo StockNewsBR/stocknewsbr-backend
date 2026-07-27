@@ -96,6 +96,6 @@ def get_radar():
 
     except Exception as e:
 
-        logger.error(f"Radar route error: {e}")
+        logger.error("Radar route error: %s", e)
 
         return []

@@ -113,6 +113,6 @@ def search_ticker(query: str):
 
     except Exception as e:
 
-        logger.error(f"Search error: {e}")
+        logger.error("Search error: %s", e)
 
         return []

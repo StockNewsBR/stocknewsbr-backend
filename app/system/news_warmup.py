@@ -95,7 +95,7 @@ def _is_on_cooldown(symbol: str, now: float | None = None) -> bool:
         return False
     if is_symbol_on_cooldown(ticker, now=now):
         return True
-    current_time = now or time.time()
+    current_time = now if now is not None else time.time()
     with _lock:
         cooldown_until = float(_symbol_cooldowns.get(ticker) or 0.0)
     return cooldown_until > current_time

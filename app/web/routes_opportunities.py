@@ -30,6 +30,6 @@ def get_opportunities():
 
     except Exception as e:
 
-        logger.error(f"Opportunities route error: {e}")
+        logger.error("Opportunities route error: %s", e)
 
         return []

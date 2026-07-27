@@ -50,7 +50,7 @@ def get_terminal():
 
     except Exception as e:
 
-        logger.error(f"Terminal route error: {e}")
+        logger.error("Terminal route error: %s", e)
 
         return {
 

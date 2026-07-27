@@ -3,10 +3,11 @@ import re
 from fastapi import APIRouter, Depends
 
 from app.api.routes_public_market_live import (
+    _gate_ai_tools_for_entitlement,
     _is_blocked_public_symbol,
     _payload_matches_requested_symbol as _quote_identity_matches_symbol,
 )
-from app.dependencies import require_channel_access
+from app.dependencies import require_channel_access, resolve_premium_entitlement
 from app.services.public_ai_tools_service import build_public_ai_tools_payload
 from app.services.public_market_data_service import schedule_quote_warmup
 from app.services.public_news_service import build_public_news_payload
@@ -146,5 +147,13 @@ def public_news(symbol: str, limit: int = 6, refresh: str | None = None, locale:
 
 
 @router.get("/market/ai-tools")
-def public_ai_tools(symbol: str | None = None, tool: str | None = None, timeframe: str | None = None):
-    return build_public_ai_tools_payload(symbol=symbol, tool=tool, timeframe=timeframe)
+def public_ai_tools(
+    symbol: str | None = None,
+    tool: str | None = None,
+    timeframe: str | None = None,
+    is_premium: bool = Depends(resolve_premium_entitlement),
+):
+    return _gate_ai_tools_for_entitlement(
+        build_public_ai_tools_payload(symbol=symbol, tool=tool, timeframe=timeframe),
+        is_premium,
+    )

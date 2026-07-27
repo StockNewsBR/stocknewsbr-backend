@@ -6,8 +6,12 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User
-from app.security import get_current_user
+from app.security import get_current_user, get_request_token, resolve_token_user
 from app.services.access_service import has_channel_access, refresh_user_access
+
+# Plans that unlock premium bundle fields (strategic panel, master score, AI tools, flow).
+# Kept local to avoid importing plan constants across layers; mirrors access_service tiers.
+_PREMIUM_PLANS = {"trial", "premium", "enterprise"}
 
 INSECURE_INTERNAL_API_TOKENS = frozenset(
     {
@@ -57,6 +61,28 @@ def require_active_plan(
     db.commit()
     db.refresh(current_user)
     return current_user
+
+
+def resolve_premium_entitlement(
+    token: str | None = Depends(get_request_token),
+    db: Session = Depends(get_db),
+) -> bool:
+    """Optional, never-raising premium check for public endpoints.
+
+    Returns True only when the request carries a valid token for a Trial/Pro plan.
+    Anonymous requests, Básico/free plans, expired plans and invalid tokens all
+    resolve to False so the public route keeps serving (gating decides what fields
+    it may include, not whether it answers). Never raises -- a bad token must not
+    turn a public 200 into a 401.
+    """
+    if not token:
+        return False
+    try:
+        user = resolve_token_user(token, db, HTTPException(status_code=401, detail="x"))
+        refresh_user_access(user)
+        return str(getattr(user, "plan", "") or "").lower() in _PREMIUM_PLANS
+    except Exception:
+        return False
 
 
 def require_channel_access(channel: str):

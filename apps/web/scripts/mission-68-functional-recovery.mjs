@@ -12,6 +12,7 @@ function read(relativePath) {
 const shell = read("components/workspace-shell.tsx");
 const rails = read("components/workspace-rails.tsx");
 const chart = read("components/ticker-chart.tsx");
+const sections = read("components/workspace-sections.tsx");
 const api = read("lib/api.ts");
 const types = read("lib/types.ts");
 const symbolContextSections = shell.slice(
@@ -50,6 +51,7 @@ expect("fabricated AI rows are removed", !/expandedToolCandidates/.test(shell));
 expect("Averages chart option is removed", !/show_averages|showAverages|MASimple@tv-basicstudies/.test(`${shell}\n${chart}`));
 expect("TradingView study overrides are serialized before iframe parsing", /studies_overrides:\s*JSON\.stringify\(\{/.test(chart));
 expect("TradingView uses a direct iframe without an async loader race", /www\.tradingview-widget\.com\/embed-widget\/advanced-chart/.test(chart) && !/external-embedding\/embed-widget-advanced-chart/.test(chart));
+expect("TradingView range presets do not override the canonical candle interval", /interval:\s*timeframe\.interval/.test(chart) && !/range:\s*timeframe\.range/.test(chart));
 expect("GIF search is internal", /searchGifs\(/.test(api) && !/tenor\.com\/search/.test(shell));
 expect("GIF provider errors remain errors", /payload\.status === ["']ERROR["'][\s\S]{0,120}["']error["']/.test(shell));
 expect("selected GIF is sent as image_url", /let imageUrl: string \| null = selectedGif\?\.media_url[\s\S]{0,420}image_url: imageUrl/.test(shell));
@@ -76,8 +78,9 @@ expect(
 );
 expect("synthetic sentiment and RVOL calibrators are absent", !/calibrateSentimentMeterValue|calibrateVolumeMeterValue/.test(shell));
 expect("null is not coerced into a real zero", /value == null \|\| value === ["']["']\) continue/.test(shell) && /value == null \|\| value === ["']["']\) continue/.test(chart));
-expect("insufficient sentiment keeps the original colored gauge with a neutral needle and dash", /effectiveSentimentScore = firstFiniteNumber\(sentimentContract\?\.status === ["']READY["']/.test(shell) && /\(normalized \?\? 50\) \* 1\.8/.test(shell) && /className=["']snbr-meter-arc bearish["']/.test(shell) && /normalized == null \? ["']—["']/.test(shell));
-expect("daily volume ratio is separate from intraday RVOL", /volume_vs_daily_average/.test(`${shell}\n${types}`) && /dailyVolumeRatio == null \? null : dailyVolumeRatio \* 100/.test(shell) && /formatLocalePrice\(dailyVolumeRatio, appLocale\)/.test(shell) && /Dado informativo/.test(shell));
+expect("insufficient sentiment has no neutral needle and keeps the dash", /rawSentimentValue = sentimentContract\?\.status === ["']READY["']/.test(shell) && /\{normalized != null \? \(/.test(shell) && /normalized == null \? ["']—["']/.test(shell));
+expect("classified neutral sentiment stays neutral and exposes sample size", /categoricalSentiment === ["']neutral["']/.test(shell) && /components\?\.classified_total/.test(shell) && /sentimentSampleSize/.test(shell));
+expect("daily volume ratio is centered at 1x and clamps 4.42x high", /volume_vs_daily_average/.test(`${shell}\n${types}`) && /dailyVolumeRatio == null \? null : dailyVolumeRatio \* 50/.test(shell) && Math.min(100, 4.42 * 50) === 100 && /formatLocalePrice\(dailyVolumeRatio, appLocale\)/.test(shell) && /Dado informativo/.test(shell));
 expect("non-operational daily volume never gets the green RVOL meter", !/assetRelativeVolumeForMeter/.test(shell) && !/Volume do ativo \(RVOL\)/.test(shell));
 expect("insufficient level separation is terminal, not calculating", /operationalLevelsStatus === ["']INSUFFICIENT_SEPARATION["'][\s\S]{0,180}sem separação suficiente/.test(shell) && /Nenhum suporte, resistência ou entrada operacional validado/.test(shell));
 expect("WAIT narrative preserves the technical bias", /AGUARDAR é um estado de autorização, não uma classificação de tendência neutra/.test(symbolContextSections) && !/leitura final é neutra|preço, volume e fluxo alinharem/i.test(symbolContextSections));
@@ -170,6 +173,62 @@ expect(
     && /rsiTimeframeLabel = rsiTimeframeTag\(chartRsiMetadata\)/.test(shell)
     && !/rsiTimeframeLabel = chartInterval/.test(shell)
     && /describeRsiValue\(panelRsiValue, appLocale, cardRsiTimeframeLabel[,)]/.test(shell),
+);
+expect(
+  "premium public requests propagate the authenticated token",
+  /getPublicAiTools\([\s\S]{0,220}token\?: string[\s\S]{0,420}\{ token, signal, cacheTtlMs: 15000 \}/.test(api)
+    && /getPublicMarketBundle\([\s\S]{0,260}token\?: string[\s\S]{0,420}\{ token, signal, cacheTtlMs: force \? 0 : 10000 \}/.test(api)
+    && /getPublicAiTools\(selectedTicker, currentAiKey, chartInterval, controller\.signal, token\)/.test(shell)
+    && /getPublicMarketBundle\(deferredTicker, chartInterval, appLocale, controller\.signal, false, token\)/.test(shell),
+);
+expect(
+  "anonymous and non-premium users cannot enter Pro mode",
+  /const proModeAllowed = Boolean\([\s\S]{0,360}\["trial", "premium", "enterprise"\]\.includes\(normalizedAccessPlan\)/.test(shell)
+    && /const proModeLocked = !proModeAllowed/.test(shell),
+);
+expect(
+  "PREMIUM_LOCKED is terminal and clears AI findings",
+  /const aiRequestLocked = normalizedAiRequestStatus === "PREMIUM_LOCKED"/.test(shell)
+    && /const aiRequestTerminal = aiRequestLocked \|\|/.test(shell)
+    && /const currentTabAlertSourceRows = aiAccessLocked\s*\?\s*\[\]/.test(shell)
+    && /IA Pro bloqueada/.test(shell),
+);
+expect(
+  "historical news is visible but never counted as current",
+  /const freshNewsCount = useMemo/.test(shell)
+    && /const newsIsHistorical = Boolean/.test(shell)
+    && /Última notícia disponível \(histórico\)/.test(shell)
+    && /newsStatus=\{newsStatusForPanel\}/.test(shell)
+    && /tab\.id === "news"\s*\?\s*freshNewsCount/.test(shell)
+    && /return historical \? "historical" as const : "ready" as const/.test(sections)
+    && /data-news-historical="true"/.test(sections),
+);
+expect(
+  "fallback conclusion uses real chart evidence without authorizing a trade",
+  /conclusion: StrategicConclusion/.test(shell)
+    && /strategicSectionsForRender\(input\.conclusion, input\.locale, input\.symbol\)/.test(shell)
+    && /input\.conclusion\.basis\.length/.test(shell)
+    && /executionMetricsReady = Boolean\(symbolOperationalView && operationalBlockComponents\.length === 0\)/.test(shell)
+    && /AGUARDAR é um estado de autorização, não uma classificação de tendência neutra/.test(shell)
+    && /Último evento do snapshot interno \(não é decisão operacional\)/.test(shell)
+    && /data-chart-analysis-source-note="true"/.test(shell),
+);
+expect(
+  "missing score is not converted into high risk and volume does not invent RVOL",
+  /effectiveScore == null[\s\S]{0,180}Dados insuficientes/.test(shell)
+    && !/estimateRelativeVolumeFromActivity/.test(shell)
+    && /informativo, não é RVOL operacional/.test(shell),
+);
+expect(
+  "RSI parsing ignores timeframe digits and reads the value after the label",
+  /const basisNumber = \(line: string\) =>\s*Number\(line\.match\(\/:\\s\*\(-\?\\d\+/.test(shell)
+    && /const rsiValue = basisNumber\(rsiLine\)/.test(shell)
+    && /RSI do snapshot interno/.test(shell),
+);
+expect(
+  "public D1 RSI and selected chart RSI remain available without premium operational context",
+  /firstValidRsiNumber\(\s*symbolOperationalView\?\.technical_context\.rsi_d1\?\.value,\s*currentPublicInsight\?\.rsi/.test(shell)
+    && /rsi: rsiNumber,[\s\S]{0,100}rsiTimeframe: rsiTimeframeLabel/.test(shell),
 );
 
 const failed = checks.filter((check) => !check.ok);

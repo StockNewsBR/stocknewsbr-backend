@@ -36,6 +36,6 @@ def dashboard():
 
     except Exception as e:
 
-        logger.error(f"Dashboard route error: {e}")
+        logger.error("Dashboard route error: %s", e)
 
         return {}

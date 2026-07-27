@@ -319,13 +319,18 @@ export function getPublicQuotes(symbols: string[]) {
 }
 
 export function getPublicAiTools(
-  symbol: string,
-  tool: string,
-  timeframe = "1D",
+  symbol?: string,
+  tool?: string,
+  timeframe?: string,
   signal?: AbortSignal,
+  token?: string,
 ) {
-  const query = new URLSearchParams({ symbol, tool, timeframe });
-  return request<PublicAiToolsPayload>(`/public/market/ai-tools?${query.toString()}`, { signal, cacheTtlMs: 15000 });
+  const query = new URLSearchParams();
+  if (symbol) query.set("symbol", symbol);
+  if (tool) query.set("tool", tool);
+  if (timeframe) query.set("timeframe", timeframe);
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return request<PublicAiToolsPayload>(`/public/market/ai-tools${suffix}`, { token, signal, cacheTtlMs: 15000 });
 }
 
 export function getPublicMarketBundle(
@@ -334,11 +339,12 @@ export function getPublicMarketBundle(
   locale: "pt-BR" | "en-US" = "pt-BR",
   signal?: AbortSignal,
   force = false,
+  token?: string,
 ) {
   const refresh = force ? `&refresh=${Date.now()}` : "";
   return request<PublicMarketBundlePayload>(
     `/public/market/bundle/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}&limit=6&locale=${encodeURIComponent(locale)}${refresh}`,
-    { signal, cacheTtlMs: force ? 0 : 10000 },
+    { token, signal, cacheTtlMs: force ? 0 : 10000 },
   );
 }
 

@@ -255,7 +255,7 @@ class OperationalRulesTests(unittest.TestCase):
 
         with patch.object(routes_public_market_live, "get_snapshot_ticker", return_value=enriched[0]), patch.object(
             routes_public_market_live, "_load_chart_data_fast", return_value=[]
-        ):
+        ), patch.object(routes_public_market_live, "resolve_symbol_context", return_value={}):
             insight = routes_public_market_live.public_market_insight("PETR4")
 
         self.assertIn("operational_status", ranked[0])

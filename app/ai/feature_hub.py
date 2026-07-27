@@ -14,13 +14,17 @@ from app.ai.ai_radar import run_radar
 from app.ai.ai_smart_money import run_smart_money
 from app.ai.ai_squeeze import run_squeeze
 from app.ai.ai_specialists import build_official_ai_outputs
+import math
 
 
-def safe_float(value: Any, default: float = 0.0) -> float:
+def safe_float(value: Any, default: Any = 0.0) -> Any:
     try:
         if value is None or value == "":
             return default
-        return float(value)
+        f_val = float(value)
+        if not math.isfinite(f_val):
+            return default
+        return f_val
     except (TypeError, ValueError):
         return default
 

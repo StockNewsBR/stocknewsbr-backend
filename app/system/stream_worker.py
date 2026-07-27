@@ -51,7 +51,7 @@ async def stream_loop():
 
             except Exception as e:
 
-                logger.error(f"Stream error: {e}")
+                logger.error("Stream error: %s", e)
 
             duration = asyncio.get_event_loop().time() - start
 

@@ -74,7 +74,7 @@ def _loop():
             try:
                 task["func"]()
             except Exception as e:
-                logger.error(f"Scheduler task error: {e}")
+                logger.error("Scheduler task error: %s", e)
 
         time.sleep(1)
 

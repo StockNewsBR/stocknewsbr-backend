@@ -154,9 +154,13 @@ def _metric(row: Dict[str, Any], key: str, default: Any = None) -> Any:
 
 
 def _pseudo_tool_rows_from_feature_row(row: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    flow_score = safe_float(row.get("institutional_flow_score"), safe_float(row.get("flow_score"), 50.0))
-    liquidity_sweep = safe_float(row.get("liquidity_sweep_score"), 50.0)
-    liquidity_map = safe_float(row.get("liquidity_map_score"), 50.0)
+    flow_val = row.get("institutional_flow_score") if row.get("institutional_flow_score") not in (None, "") else row.get("flow_score")
+    flow_score = safe_float(flow_val, 0.0) if flow_val not in (None, "") else None
+    
+    liq_sweep = row.get("liquidity_sweep_score")
+    liq_map = row.get("liquidity_map_score")
+    liquidity_score = max(safe_float(liq_sweep, 0.0), safe_float(liq_map, 0.0)) if liq_sweep not in (None, "") or liq_map not in (None, "") else None
+
     momentum_score = max(
         safe_float(row.get("radar_score"), 0.0),
         safe_float(row.get("breakout_probability_score"), 0.0),
@@ -168,13 +172,17 @@ def _pseudo_tool_rows_from_feature_row(row: Dict[str, Any]) -> Dict[str, Dict[st
         safe_float(row.get("accumulation_score"), 0.0),
         safe_float(row.get("absorption_score"), 0.0),
     )
-    trend_score = safe_float(row.get("trend_strength"), safe_float(row.get("trend_score"), 50.0))
-    regime_score = safe_float(row.get("market_regime_score"), safe_float(row.get("regime_score"), 50.0))
+
+    trend_val = row.get("trend_strength") if row.get("trend_strength") not in (None, "") else row.get("trend_score")
+    trend_score = safe_float(trend_val, 0.0) if trend_val not in (None, "") else None
+    
+    regime_val = row.get("market_regime_score") if row.get("market_regime_score") not in (None, "") else row.get("regime_score")
+    regime_score = safe_float(regime_val, 0.0) if regime_val not in (None, "") else None
     risk_level = str(row.get("risk_level") or "").lower()
     risk_score = {"baixo": 25.0, "low": 25.0, "medio": 55.0, "medium": 55.0, "moderado": 55.0, "alto": 82.0, "high": 82.0}.get(risk_level, 38.0)
     return {
         "flow": {"ticker": _ticker(row), "tool": "flow", "score": flow_score, "state": row.get("institutional_flow_state") or row.get("flow_state")},
-        "liquidity": {"ticker": _ticker(row), "tool": "liquidity", "score": max(liquidity_sweep, liquidity_map), "state": row.get("liquidity_map_state") or row.get("liquidity_sweep_state")},
+        "liquidity": {"ticker": _ticker(row), "tool": "liquidity", "score": liquidity_score, "state": row.get("liquidity_map_state") or row.get("liquidity_sweep_state")},
         "trend": {"ticker": _ticker(row), "tool": "trend", "score": trend_score, "state": row.get("trend_state") or row.get("chart_regime_state") or row.get("market_regime_state")},
         "momentum": {"ticker": _ticker(row), "tool": "momentum", "score": momentum_score, "state": row.get("radar_state") or row.get("breakout_probability_state") or row.get("heat_map_state")},
         "smart_money": {"ticker": _ticker(row), "tool": "smart_money", "score": smart_score, "state": row.get("smart_money_state") or row.get("accumulation_state")},
@@ -204,7 +212,8 @@ def _direction_from_text(tool: str, row: Dict[str, Any], base_row: Dict[str, Any
             metrics.get("news_state"),
         )
     )
-    score = clamp(safe_float(row.get("score"), 50.0))
+    raw_score = row.get("score")
+    score = clamp(safe_float(raw_score, 0.0)) if raw_score not in (None, "") else 50.0
 
     if tool == "risk":
         return MASTER_NEUTRAL
@@ -325,8 +334,13 @@ def _weighted_direction_score(tool_rows: Dict[str, Dict[str, Any]], directions: 
     for tool in OFFICIAL_AI_TOOLS:
         if tool == "risk" or directions.get(tool) != direction:
             continue
-        row = tool_rows.get(tool, {})
-        score = clamp(safe_float(row.get("score"), 50.0))
+        row = tool_rows.get(tool)
+        if not row:
+            continue
+        raw_score = row.get("score")
+        if raw_score in (None, ""):
+            continue
+        score = clamp(safe_float(raw_score, 0.0))
         weight = AI_WEIGHTS.get(tool, 0.0)
         total_weight += weight
         weighted += score * weight

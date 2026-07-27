@@ -101,6 +101,30 @@ class OnDemandHydrationTests(unittest.TestCase):
         self.assertIsNone(contract["intraday_rvol"]["rvol_ratio"])
         self.assertFalse(contract["intraday_rvol"]["operational_ready"])
 
+    def test_sentiment_missing_impact_is_not_reported_as_neutral(self):
+        contract = routes_public_market_live._market_metrics_contract(
+            "PETR4", "1D", {"symbol": "PETR4"}, {"summary": {}},
+            {"data_status": "READY", "items": [{"title": "Sem classificação", "is_stale": False}]},
+        )
+
+        sentiment = contract["sentiment"]
+        self.assertEqual(sentiment["status"], "INSUFFICIENT_DATA")
+        self.assertIsNone(sentiment["value"])
+        self.assertEqual(sentiment["reason"], "no_classified_sentiment")
+        self.assertEqual(sentiment["components"]["missing_impact_count"], 1)
+
+    def test_explicit_neutral_sentiment_remains_ready_and_counted(self):
+        contract = routes_public_market_live._market_metrics_contract(
+            "PETR4", "1D", {"symbol": "PETR4"}, {"summary": {}},
+            {"data_status": "READY", "items": [{"impact": "neutral", "is_stale": False}]},
+        )
+
+        sentiment = contract["sentiment"]
+        self.assertEqual(sentiment["status"], "READY")
+        self.assertEqual(sentiment["value"], "neutral")
+        self.assertEqual(sentiment["components"]["neutral_count"], 1)
+        self.assertEqual(sentiment["components"]["classified_total"], 1)
+
     def test_operational_view_uses_flow_but_rejects_score_only_liquidity(self):
         daily = [{"time": f"2026-07-{index + 7:02d}T12:00:00Z", "close": 30 + index} for index in range(15)]
         ai_tools = {
@@ -150,6 +174,26 @@ class OnDemandHydrationTests(unittest.TestCase):
         self.assertGreater(component["distance_from_price_pct"], 0)
         self.assertEqual(component["timeframe"], "5m")
         self.assertEqual(component["source"], "on_demand")
+
+    def test_liquidity_map_envelope_is_ready_without_inventing_directional_side(self):
+        ai_tools = {
+            "status": "READY",
+            "tools": {"liquidity": [{
+                "canonical_symbol": "PETR4", "score": 55.0, "price": 100.0,
+                "candle_timeframe": "5m", "as_of": "2026-07-26T15:00:00Z",
+                "source": "on_demand", "freshness_status": "READY",
+                "metrics": {"lower_liquidity": 92.5, "upper_liquidity": 107.5},
+            }]},
+        }
+
+        component = routes_public_market_live._ai_metric_component(ai_tools, "liquidity", "PETR4")
+
+        self.assertEqual(component["status"], "READY")
+        self.assertEqual(component["side"], "BOTH_SIDES")
+        self.assertEqual((component["low"], component["high"]), (92.5, 107.5))
+        self.assertEqual(component["midpoint"], 100.0)
+        self.assertEqual(component["distance_from_price_pct"], 0.0)
+        self.assertEqual(component["reason"], "validated_liquidity_envelope")
 
     def test_completed_zero_confidence_is_preserved_but_pending_confidence_is_null(self):
         daily = [{"time": f"2026-07-{index + 7:02d}T12:00:00Z", "close": 30 + index} for index in range(15)]
@@ -234,7 +278,7 @@ class OnDemandHydrationTests(unittest.TestCase):
         contract = routes_public_market_live._market_metrics_contract(
             "ABEV3", "1D", {"symbol": "ABEV3", "volume": 100, "average_volume": 100},
             {"summary": {}, "zones": [{"status": "INSUFFICIENT_SEPARATION"}]},
-            {"items": [{"published_at": "2026-06-17T12:00:00Z"}]},
+            {"items": [{"published_at": "2026-06-17T12:00:00Z", "is_stale": True, "freshness_bucket": "older"}]},
             {"trend_bias": "alta", "rsi": 61.0},
         )
 

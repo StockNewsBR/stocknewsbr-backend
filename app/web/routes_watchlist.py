@@ -45,7 +45,7 @@ def get_watchlists():
 
     except Exception as e:
 
-        logger.error(f"Watchlist route error: {e}")
+        logger.error("Watchlist route error: %s", e)
 
         return {}
 
@@ -77,6 +77,6 @@ def get_watchlist(market: str):
 
     except Exception as e:
 
-        logger.error(f"Watchlist market error: {e}")
+        logger.error("Watchlist market error: %s", e)
 
         return {"tickers": []}

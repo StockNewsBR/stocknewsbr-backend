@@ -62,7 +62,7 @@ def _snapshot_loop():
 
         except Exception as e:
 
-            logger.exception(f"Snapshot worker error: {e}")
+            logger.exception("Snapshot worker error: %s", e)
 
         duration = time.time() - start
         record_worker_stage_duration("snapshot_worker_cycle", duration, success=success)
@@ -113,7 +113,7 @@ def start_snapshot_worker():
 
         except Exception as e:
 
-            logger.exception(f"Snapshot worker start failed: {e}")
+            logger.exception("Snapshot worker start failed: %s", e)
 
             return False
 
@@ -142,4 +142,4 @@ def stop_snapshot_worker():
 
     except Exception as e:
 
-        logger.error(f"Snapshot worker stop error: {e}")
+        logger.error("Snapshot worker stop error: %s", e)

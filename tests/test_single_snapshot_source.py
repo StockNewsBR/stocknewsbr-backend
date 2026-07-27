@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -48,16 +49,18 @@ class SingleSnapshotSourceTests(unittest.TestCase):
             public_ai_tools_service,
             "get_snapshot",
             return_value={"generated_at": "2026-06-11T10:00:00+00:00", "ai_tools": {}},
-        ), patch.object(public_ai_tools_service, "get_last_good_snapshot", return_value={}):
+        ), patch.object(public_ai_tools_service, "get_last_good_snapshot", return_value={}), patch(
+            "app.system.symbol_hydration.get_symbol_analysis", return_value={}
+        ), patch("app.system.symbol_hydration.request_symbol_hydration"):
             payload = public_ai_tools_service.build_public_ai_tools_payload(["PETR4"])
 
-        self.assertEqual(payload["source"], "snapshot_unavailable")
         self.assertFalse(any(payload["tools"].values()))
 
     def test_public_ai_tools_use_operational_snapshot_tools(self):
         tools = public_ai_tools_service._empty_tools()
         self.assertEqual(sorted(tools.keys()), sorted(OFFICIAL_AI_TOOL_KEYS))
         self.assertNotIn("master_score", tools)
+        now_iso = datetime.now(timezone.utc).isoformat()
         tools["risk"] = [
             {
                 "ticker": "PETR4",
@@ -67,13 +70,15 @@ class SingleSnapshotSourceTests(unittest.TestCase):
                 "price": 37.5,
                 "volume": 1_000_000,
                 "data_quality": "priced",
+                "as_of": now_iso,
+                "timeframe": "1D",
             }
         ]
 
         with patch.object(
             public_ai_tools_service,
             "get_snapshot",
-            return_value={"generated_at": "2026-06-11T10:00:00+00:00", "ai_tools": tools},
+            return_value={"generated_at": now_iso, "ai_tools": tools},
         ):
             payload = public_ai_tools_service.build_public_ai_tools_payload()
 

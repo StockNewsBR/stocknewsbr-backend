@@ -20,7 +20,21 @@ from app.system.system_metrics import record_signal_quality_coverage, record_wor
 logger = logging.getLogger("stocknewsbr.engine.orchestrator")
 
 ENGINE_MODE = os.getenv("ENGINE_MODE", "AUTO").upper()
-EVENT_SCAN_SYMBOLS = max(20, int(os.getenv("EVENT_SCAN_SYMBOLS", "80")))
+def _env_int(name: str, default: int, minimum: int) -> int:
+    """Parse an int env var, falling back to default on missing/invalid values.
+
+    Prevents a bad env var from raising at module import time and killing the
+    worker before it can start.
+    """
+    raw = os.getenv(name)
+    try:
+        value = int(raw) if raw not in (None, "") else default
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, value)
+
+
+EVENT_SCAN_SYMBOLS = _env_int("EVENT_SCAN_SYMBOLS", 80, 20)
 MARKET_POOL_SOURCE = "warm_market_pool"
 
 
@@ -359,5 +373,5 @@ def run_engine():
 
     except Exception as exc:
         logger.exception("Engine orchestrator crash: %s", exc)
-        record_cycle(time.time() - start, 0)
+        record_cycle(time.perf_counter() - start, 0)
         return []

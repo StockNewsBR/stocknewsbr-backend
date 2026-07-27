@@ -82,8 +82,7 @@ def _item_belongs_to_symbol(item: dict[str, Any], symbol: str) -> bool:
     if _title_mentions_other_symbol_without_requested_alias(item, normalized):
         return False
     item_symbol = _news_item_symbol(item)
-    direct_marker = item.get("direct_ticker_match")
-    if item_symbol and item_symbol == normalized and direct_marker is not False:
+    if item_symbol and item_symbol == normalized:
         return True
 
     # "entities" is seeded upstream with the ticker the item was filed under, so it can
@@ -299,6 +298,13 @@ def _translate_english_news_text(value: Any, ticker: str, field: str) -> Any:
 
     text = _fix_portuguese_news_text(value.strip())
     if not _looks_like_english_news(text):
+        return text
+
+    # Article text (summary/card_summary) is the publisher's own sentence. The word-by-word
+    # regex table below only half-translates a proper-noun-heavy headline ("Goldman Sachs and
+    # Other" -> "Goldman Sachs e Other") and _has_english_residue misses hybrids like that. Per
+    # this field's contract, return it as published; language/content_locale mark it for the UI.
+    if field in _ARTICLE_TEXT_FIELDS:
         return text
 
     normalized = re.sub(r"\s+", " ", text.replace("’", "'")).strip()

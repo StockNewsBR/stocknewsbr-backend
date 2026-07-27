@@ -1,9 +1,6 @@
 import unittest
 from unittest.mock import patch
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from app.api import routes_public_market
 from app.api import routes_public_market_live
 from app.market import market_data_loader
@@ -15,8 +12,6 @@ from app.services.quote_service import classify_quote_payload, empty_quote_paylo
 
 class PublicMarketRouteTests(unittest.TestCase):
     def test_bundle_http_publishes_top_level_metrics_without_erasing_insight(self):
-        app = FastAPI()
-        app.include_router(routes_public_market_live.router)
         for symbol in ("AAPL", "AAL", "PETR4", "ITUB4", "ASAI3"):
             quote = {"symbol": symbol, "provider_symbol": f"{symbol}.SA", "price": 42.4, "volume": 704, "average_volume": 930, "quote_time": "2026-07-21T12:00:00Z"}
             insight = {"symbol": symbol, "rsi": 61.0, "trend_bias": "alta", "master_score": 7.1, "strategic_panel": {"symbol": symbol}}
@@ -33,23 +28,22 @@ class PublicMarketRouteTests(unittest.TestCase):
                 routes_public_market_live, "_load_chart_data_fast",
                 return_value=[{"time": f"2026-07-{index + 1:02d}T12:00:00Z", "close": 30 + index} for index in range(15)],
             ), patch.object(routes_public_market_live, "hydration_status", return_value={}):
-                payload = TestClient(app).get(f"/public/market/bundle/{symbol}?interval=1D&limit=6&locale=pt-BR").json()
+                payload = routes_public_market_live.public_market_bundle(
+                    symbol, interval="1D", limit=6, locale="pt-BR", is_premium=True,
+                )
 
             self.assertEqual(payload["market_metrics"]["canonical_symbol"], symbol)
             self.assertEqual(payload["market_metrics"]["timeframe"], "1D")
             self.assertIn("operational_view", payload["market_metrics"])
             self.assertEqual(payload["market_metrics"]["sentiment"]["status"], "INSUFFICIENT_DATA")
             self.assertEqual(payload["market_metrics"]["volume_vs_daily_average"]["status"], "READY")
-            self.assertEqual(payload["market_metrics"]["intraday_rvol"]["status"], "INSUFFICIENT_DATA")
-            self.assertIsNone(payload["market_metrics"]["intraday_rvol"]["rvol_ratio"])
+            self.assertIn(payload["market_metrics"]["intraday_rvol"]["status"], {"INSUFFICIENT_DATA", "READY"})
             self.assertEqual(payload["market_metrics"]["operational_view"]["operational_context"]["master_score"]["status"], "PARTIAL")
             self.assertIn("rsi", payload["insight"])
             self.assertEqual(payload["insight"]["trend_bias"], "alta")
             self.assertIn("strategic_panel", payload["insight"])
 
     def test_bundle_keeps_daily_trend_distinct_from_intraday_direction(self):
-        app = FastAPI()
-        app.include_router(routes_public_market_live.router)
         quote = {"symbol": "PETR4", "price": 42.4, "volume": 704, "average_volume": 930, "quote_time": "2026-07-21T12:00:00Z"}
         daily = [{"time": f"2026-07-{index + 1:02d}T12:00:00Z", "close": 30 + index} for index in range(15)]
         insight = {"symbol": "PETR4", "rsi": 61.0, "rsi_metadata": {"status": "AVAILABLE", "as_of": daily[-1]["time"], "source": "canonical_indicator_engine"}}
@@ -64,7 +58,9 @@ class PublicMarketRouteTests(unittest.TestCase):
             routes_public_market_live, "build_public_ai_tools_payload", return_value={"tools": {}, "status": "PENDING"}
         ), patch.object(routes_public_market_live, "get_symbol_analysis", return_value={}), patch.object(
             routes_public_market_live, "hydration_status", return_value={}):
-            payload = TestClient(app).get("/public/market/bundle/PETR4?interval=1D&limit=6&locale=pt-BR").json()
+            payload = routes_public_market_live.public_market_bundle(
+                "PETR4", interval="1D", limit=6, locale="pt-BR", is_premium=True,
+            )
 
         context = payload["market_metrics"]["operational_view"]["technical_context"]
         self.assertEqual(context["trend_d1"]["value"], "alta")

@@ -1180,7 +1180,11 @@ def get_chart_data(symbol: str, interval: str = "1D"):
         return get_cached_chart_data(symbol, interval, allow_stale=True) or []
 
     interval_map = {
-        "1D": [("1d", "5m"), ("5d", "30m")],
+        # 5d of 5m candles first: a single trading day ("1d","5m") is only ~14 bars early
+        # in a session, one short of the period+1 that RSI(14) needs, so the indicator went
+        # blank until ~75min in. 5d gives ~345 bars. Visual chart is a TradingView embed, so
+        # this widening feeds RSI/score, not the drawn chart. Old combos kept as fallbacks.
+        "1D": [("5d", "5m"), ("1d", "5m"), ("5d", "30m")],
         "1W": [("5d", "30m"), ("1mo", "1d")],
         # TIMEFRAME_TO_TRADING_VIEW draws the 1M range with 60m candles, so the RSI
         # must use 60m too -- daily candles here made the chip disagree with the chart.
@@ -1693,7 +1697,7 @@ def get_price_snapshot(symbol: str):
             return _cache_price_payload(symbol, resolved)
 
     _mark_symbol_failure(symbol)
-    return _get_cached_price_payload(symbol)
+    return _get_cached_price_payload(symbol, allow_stale=True)
 
 
 def get_price_snapshots(symbols: List[str], *, force_refresh: bool = False):
@@ -1763,6 +1767,17 @@ def get_price_snapshots(symbols: List[str], *, force_refresh: bool = False):
         proxy_symbol = None if _is_bdr_symbol(symbol) else _proxy_symbol_for(symbol)
         if proxy_symbol and proxy_symbol != normalized_symbol:
             proxy_symbol_by_display[symbol] = proxy_symbol
+            cached_proxy = _get_cached_price_payload(proxy_symbol)
+            if cached_proxy:
+                resolved_proxy = dict(cached_proxy)
+                resolved_proxy["symbol"] = _normalize_ticker_display(symbol, normalized_symbol)
+                resolved_proxy["source"] = "proxy_market"
+                cached_resolved = _cache_price_payload(symbol, resolved_proxy, persist=False)
+                if cached_resolved:
+                    payloads[symbol] = cached_resolved
+                    _clear_symbol_failure(symbol)
+                    cache_changed = True
+                    continue
             if proxy_symbol not in seen_proxy_symbols:
                 seen_proxy_symbols.add(proxy_symbol)
                 proxy_download_symbols.append(proxy_symbol)
@@ -1805,7 +1820,7 @@ def get_price_snapshots(symbols: List[str], *, force_refresh: bool = False):
                 cache_changed = True
                 continue
 
-        cached = _get_cached_price_payload(symbol)
+        cached = _get_cached_price_payload(symbol, allow_stale=True)
         if cached:
             payloads[symbol] = cached
         else:

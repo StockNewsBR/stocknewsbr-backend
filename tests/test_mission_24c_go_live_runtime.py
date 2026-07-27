@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import os
 import unittest
 from unittest.mock import patch
@@ -21,6 +22,9 @@ def _row(ticker="PETR4"):
     return {
         "ticker": ticker,
         "symbol": ticker,
+        "tool": "risk",
+        "risk_level": "low",
+        "risk_score": 25.0,
         "score": 91.0,
         "score_source_scale": "0_100",
         "master_score": 91.0,
@@ -37,6 +41,8 @@ def _row(ticker="PETR4"):
         "data_quality": "priced",
         "price": 37.5,
         "volume": 1_800_000,
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "timeframe": "1D",
         "source": "snapshot",
         "audit_status": "APPROVED",
         "auditor_status": "APPROVED",
@@ -107,13 +113,13 @@ class Mission24CGoLiveRuntimeTests(unittest.TestCase):
         with patch.object(public_ai_tools_service, "get_snapshot", return_value={"ai_tools": {}, "source": "empty"}), patch.object(
             public_ai_tools_service,
             "get_last_good_snapshot",
-            return_value={"ai_tools": _tools(), "generated_at": "2026-06-12T10:00:00+00:00"},
+            return_value={"ai_tools": _tools(), "generated_at": datetime.now(timezone.utc).isoformat()},
         ):
             payload = public_ai_tools_service.build_public_ai_tools_payload()
 
         self.assertEqual(payload["source"], "last_good_snapshot")
         self.assertTrue(payload["using_fallback"])
-        self.assertEqual(payload["tools"]["risk"][0]["ticker"], "PETR4")
+        self.assertEqual(payload["historical_tools"]["risk"][0]["ticker"], "PETR4")
 
     def test_observability_marks_empty_snapshot_critical_and_blocks_go_live(self):
         dashboard = build_observability_dashboard(

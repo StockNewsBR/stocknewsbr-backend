@@ -31,6 +31,6 @@ def get_market_pulse():
 
     except Exception as e:
 
-        logger.error(f"Market pulse route error: {e}")
+        logger.error("Market pulse route error: %s", e)
 
         return {}

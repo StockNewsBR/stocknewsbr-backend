@@ -236,6 +236,7 @@ const GLOBAL_AI_ALERT_TAB_IDS = new Set(["flow", "liquidity", "trend", "momentum
 
 const TAB_META: Record<string, { label: string; short: string }> = {
   grafico: { label: "📈 Gráfico IA / Rede Social", short: "Gráfico/Rede Social" },
+  stockflow: { label: "🔥 Stock Flow", short: "Stock Flow" },
   news: { label: "📰 Notícias", short: "Notícias" },
   busca: { label: "🔎 Busca", short: "Busca" },
   flow: { label: "🏦 Fluxo IA", short: "Fluxo" },
@@ -253,6 +254,7 @@ const TAB_META: Record<string, { label: string; short: string }> = {
 
 const TAB_META_EN: Record<string, { label: string; short: string }> = {
   grafico: { label: "📈 AI Chart / Social Network", short: "Chart/Social" },
+  stockflow: { label: "🔥 Stock Flow", short: "Stock Flow" },
   news: { label: "📰 News", short: "News" },
   busca: { label: "🔎 Search", short: "Search" },
   flow: { label: "🏦 Flow AI", short: "Flow" },
@@ -322,6 +324,7 @@ const VISIBLE_WORKSPACE_PERSONAS: WorkspacePersona[] = ["guiado"];
 
 const TOP_TAB_TEXT: Record<string, string> = {
   grafico: "Gráfico IA / Rede Social",
+  stockflow: "🔥 Stock Flow",
   news: "Notícias",
   flow: "Fluxo IA",
   liquidity: "Liquidez IA",
@@ -338,6 +341,7 @@ const TOP_TAB_TEXT: Record<string, string> = {
 
 const TOP_TAB_TEXT_EN: Record<string, string> = {
   grafico: "AI Chart / Social",
+  stockflow: "🔥 Stock Flow",
   news: "News",
   flow: "Flow AI",
   liquidity: "Liquidity AI",
@@ -354,6 +358,7 @@ const TOP_TAB_TEXT_EN: Record<string, string> = {
 
 const TAB_ORDER = [
   "grafico",
+  "stockflow",
   "news",
   "flow",
   "liquidity",
@@ -371,6 +376,7 @@ const TAB_ORDER = [
 const TOP_BAR_TAB_IDS = TAB_ORDER.filter((id) => id !== "busca");
 const SIMPLE_TOP_TAB_IDS = new Set([
   "grafico",
+  // "stockflow" is Pro/Trial-only: excluded from Modo Básico (shown only when advancedMode).
   "news",
   "referrals",
   "education",
@@ -383,6 +389,7 @@ const STRATEGIC_PANEL_STORAGE_KEY = "stocknewsbr.strategic_panel.open.v1";
 const CODE_COOLDOWN_STORAGE_KEY = "stocknewsbr.code_cooldown_until";
 const DETACHABLE_IA_TABS = new Set([
   "grafico",
+  "stockflow",
   "flow",
   "liquidity",
   "trend",
@@ -396,6 +403,7 @@ const DETACHABLE_IA_TABS = new Set([
 
 const FALLBACK_TABS: WorkspaceTab[] = [
   { id: "grafico", title: "Gráfico IA / Rede Social" },
+  { id: "stockflow", title: "🔥 Stock Flow" },
   { id: "news", title: "Notícias" },
   { id: "busca", title: "Busca" },
   { id: "flow", title: "Fluxo IA" },
@@ -417,8 +425,8 @@ const DEFAULT_CHART_SETTINGS: ChartSettings = {
   show_zones: true,
   show_price_line: true,
   show_vwap: true,
-  show_macd: false,
-  show_rsi: false,
+  show_macd: true,
+  show_rsi: true,
   show_support: true,
   show_resistance: true,
   show_supertrend: true,
@@ -604,12 +612,14 @@ const INSTITUTIONAL_SECTIONS = [
       "Gráfico IA",
       "O Gráfico IA trabalha junto com o Painel de Análise Estratégica e pode apresentar orientações como compra, venda a descoberto, encerrar posição e aguardar confirmação.",
       "Informações apresentadas: direção provável, trade sugerido, regime, fluxo institucional, liquidez-alvo, risco, cenário atual, direção da estratégia, confirmação, interpretação, foco agora e base da análise.",
-      "Indicadores disponíveis no gráfico: VWAP, MACD, RSI e volume.",
+      "Indicadores disponíveis no gráfico: VWAP, MACD, RSI, SuperTrend e volume.",
       "Rede Social de Traders",
       "A Rede Social de Traders é gratuita e aberta a traders de qualquer corretora. Ela permite trocar ideias, estratégias e análises com outros investidores.",
       "Ao abrir uma ação ou criptoativo, o usuário pode votar na estratégia do ativo e compartilhar sua ideia.",
       "Temas de discussão: condição geral do mercado, rumores e notícias relevantes, análise fundamentalista, possíveis catalisadores, posicionamento dos traders, preços de entrada e saída, indicadores técnicos, análise gráfica, rompimentos, suportes e resistências, alvos de preço, sinais de compra e venda e sentimento coletivo sobre o ativo.",
       "A discussão permanece vinculada ao ativo correspondente, criando um espaço focado e colaborativo para cada ação ou criptoativo.",
+      "Stock Flow",
+      "Stock Flow — O pulso em tempo real do mercado financeiro. Todos os dias: agenda macro, análises com IA, enquetes de sentimento e debate ao vivo com a comunidade.",
       "Inteligências Artificiais",
       "Notícias IA — analisa a notícia como contexto de mercado, apresentando relevância, confiança e situação do provedor.",
       "Fluxo IA — analisa fluxo institucional, agressão e pressão compradora ou vendedora.",
@@ -648,6 +658,7 @@ const INSTITUTIONAL_SECTIONS = [
       { item: "VWAP", explanation: "Preço médio ponderado pelo volume. É utilizado como referência de preço médio negociado." },
       { item: "MACD", explanation: "Indicador que ajuda a avaliar a força da tendência e possíveis mudanças de direção." },
       { item: "RSI", explanation: "Indicador que ajuda a identificar condições de sobrecompra ou sobrevenda." },
+      { item: "SuperTrend", explanation: "Indicador técnico para identificar tendência e possíveis pontos de entrada ou saída." },
       { item: "Volume", explanation: "Quantidade negociada, utilizada para ajudar a confirmar a força do movimento." },
       { item: "Liberar Tela", explanation: "Abre o gráfico ou módulo selecionado em uma janela separada, permitindo o uso de vários gráficos e monitores." },
     ],
@@ -732,9 +743,11 @@ const INSTITUTIONAL_SECTIONS_EN = [
     body: [
       "AI Chart",
       "The AI Chart works with the Strategic Analysis Panel and may present buy, sell short, close position and wait for confirmation guidance, plus likely direction, suggested trade, regime, institutional flow, liquidity target, risk, current scenario, strategy direction, confirmation, interpretation, focus now and analysis basis.",
-      "Available chart indicators: VWAP, MACD, RSI and volume.",
+      "Available chart indicators: VWAP, MACD, RSI, SuperTrend and volume.",
       "Trader Social Network",
       "The Trader Social Network is free and open to traders from any broker. Users can vote on an asset strategy and share ideas for each stock or cryptoasset. Discussions cover market conditions, news, fundamentals, catalysts, positioning, entry and exit prices, technical indicators, chart analysis, breakouts, support, resistance, price targets, signals and market sentiment.",
+      "Stock Flow",
+      "Stock Flow — Real-time pulse of the financial market. Every day: macro agenda, AI analysis, sentiment polls and live community debates.",
       "Artificial Intelligence",
       "News AI analyzes news as market context. Flow AI analyzes institutional flow and buying or selling pressure. Liquidity AI consolidates liquidity zones, sweeps, traps and invalidation levels. Trend AI evaluates market direction and structure. Momentum AI consolidates acceleration, breakouts and relative strength. Smart Money AI combines flow, accumulation and absorption without duplicated confirmations.",
       "Affiliate Program",
@@ -768,6 +781,7 @@ const INSTITUTIONAL_SECTIONS_EN = [
       { item: "VWAP", explanation: "Volume-weighted average price, used as a reference for the average traded price." },
       { item: "MACD", explanation: "Helps evaluate trend strength and possible changes in direction." },
       { item: "RSI", explanation: "Helps identify overbought or oversold conditions." },
+      { item: "SuperTrend", explanation: "Technical indicator to identify trends and possible entry or exit points." },
       { item: "Volume", explanation: "Traded quantity, used to help confirm movement strength." },
       { item: "Detach", explanation: "Opens the selected chart or module in a separate window, allowing multiple charts and monitors." },
     ],
@@ -1677,8 +1691,12 @@ function translateEnglishNewsHeadlineToPt(value?: string | null, symbol?: string
     .replace(/\bmore\b/gi, "mais")
     .replace(/\band\b/gi, "e");
 
-  if (cleaned !== normalized) return clampHeadline(cleaned);
-  return clampHeadline(`Notícia relevante em ${ticker}; confirme preço, volume e impacto antes de agir`);
+  // Only publish the word-swapped headline when NOTHING English survives; a partial swap reads as
+  // the "PBR ações Sinks com mercado Gains" hybrid the feed kept shipping. Otherwise show the
+  // publisher's original English headline -- consistent source language beats a broken half-translation.
+  const stillEnglish = /\b(the|and|of|for|to|in|on|is|are|was|with|why|here|amid|after|as|says|report|stock|shares|market|gains?|sinks?|beats?|misses?|jumps?|falls?|rises?|drops?|buy|sell|hold)\b/i.test(cleaned);
+  if (cleaned !== normalized && !stillEnglish) return clampHeadline(cleaned);
+  return clampHeadline(title);
 }
 
 function getSaoPauloParts(date = new Date()) {
@@ -2390,12 +2408,6 @@ function calculateRelativeVolume(volume?: number | null, averageVolume?: number 
   const average = Number(averageVolume);
   if (!Number.isFinite(current) || current <= 0 || !Number.isFinite(average) || average <= 0) return null;
   return clampNumber(Number((current / average).toFixed(2)), 0.1, 12);
-}
-
-function estimateRelativeVolumeFromActivity(volume?: number | null) {
-  const current = Number(volume);
-  if (!Number.isFinite(current) || current <= 0) return null;
-  return clampNumber(Number((Math.log10(current) - 6).toFixed(2)), 0.6, 3);
 }
 
 function deriveAdx(changePct?: number | null, rsi?: number | null, trend?: string | null) {
@@ -3779,7 +3791,7 @@ function strategicConclusionFromPanel(panel: StrategicPanel, locale: AppLocale):
     ? panel.no_trade_reasons.map((item) => strategicPanelText(item)).filter(Boolean)
     : [];
   const action = strategicPanelText(panel.recommended_action, isEnglish ? "WAIT" : "AGUARDAR");
-  const summary = strategicPanelText(panel.strategic_panel_summary, strategicPanelText(panel.master_score_block?.title, isEnglish ? "Strategic read unavailable." : "Leitura estratégica indisponível."));
+  const summary = strategicPanelText(panel.llm_conclusion, strategicPanelText(panel.strategic_panel_summary, strategicPanelText(panel.master_score_block?.title, isEnglish ? "Strategic read unavailable." : "Leitura estratégica indisponível.")));
   const basis = [
     ...(whyItems.length ? whyItems : [summary]),
     strategicPanelText(panel.auditor_block?.summary),
@@ -3917,9 +3929,18 @@ function symbolContextDecisionCards(view: SymbolOperationalView, locale: AppLoca
     : liquidity?.status === "PENDING"
       ? (isEnglish ? "Calculating liquidity…" : "Calculando liquidez…")
       : (isEnglish ? "Unavailable" : "Indisponível");
+  const liquidityUnavailableReason = liquidity?.reason === "missing_liquidity_bounds"
+    ? (isEnglish ? "Liquidity bounds unavailable" : "Limites de liquidez indisponíveis")
+    : liquidity?.reason === "missing_reference_price"
+      ? (isEnglish ? "Reference price unavailable" : "Preço de referência indisponível")
+      : liquidity?.reason === "missing_liquidity_timestamp"
+        ? (isEnglish ? "Liquidity timestamp unavailable" : "Horário da liquidez indisponível")
+        : liquidity?.reason === "invalid_liquidity_range"
+          ? (isEnglish ? "Invalid liquidity range" : "Faixa de liquidez inválida")
+          : (isEnglish ? "Insufficient data" : "Dados insuficientes");
   const liquidityMeta = liquidityReady
     ? `${liquidity?.timeframe || "5m"} · ${liquidity?.source || "—"} · ${formatNewsClock(liquidity?.as_of || undefined, locale)}`
-    : liquidity?.status === "PENDING" ? undefined : (isEnglish ? "Insufficient data" : "Dados insuficientes");
+    : liquidity?.status === "PENDING" ? undefined : liquidityUnavailableReason;
   const decision = view.decision === "WAIT" || view.decision === "AGUARDAR" ? (isEnglish ? "Wait" : "Aguardar") : view.decision;
   return [
     { label: scoreStatus === "PARTIAL" ? (isEnglish ? "Partial technical score" : "Score técnico parcial") : (isEnglish ? "Master Score" : "Score Mestre"), value: score != null ? `${score.toFixed(1)} / 10` : (isEnglish ? "No confirmed score" : "Sem score confirmado"), tone: scoreStatus === "READY" && score != null && score >= 6 ? "bullish" : "watch", meta: scoreStatus === "PARTIAL" && totalScoreComponents ? (isEnglish ? `Calculated with ${usedScoreComponents} of ${totalScoreComponents} components` : `Calculado com ${usedScoreComponents} de ${totalScoreComponents} componentes`) : scoreStatus, meter: score != null ? clampNumber(score * 10, 0, 100) : null },
@@ -4363,7 +4384,14 @@ function resolveRiskCard(
   const rsiNumber = firstValidRsiNumber(rsi);
   const extremeRsi = rsiNumber != null && (rsiNumber >= 70 || rsiNumber <= 30);
   const effectiveScore = score ?? fallbackScore;
-  if (conflict || effectiveScore == null) return { label, value: locale === "en-US" ? "High" : "Alto", tone: "bearish" };
+  if (conflict) return { label, value: locale === "en-US" ? "High" : "Alto", tone: "bearish" };
+  if (effectiveScore == null) {
+    return {
+      label,
+      value: locale === "en-US" ? "Insufficient data" : "Dados insuficientes",
+      tone: "watch",
+    };
+  }
   if (!hasCoreData) {
     if (effectiveScore >= 7 && !extremeRsi) return { label, value: locale === "en-US" ? "Medium" : "Médio", tone: "watch" };
     if (effectiveScore >= 5.5) return { label, value: locale === "en-US" ? "Medium" : "Médio", tone: "watch" };
@@ -4395,9 +4423,16 @@ function buildStrategicConclusion(input: {
   liquidity: string;
   risk: string;
   rsi: number | null;
+  rsiTimeframe?: string | null;
+  price: number | null;
+  changePct: number | null;
   volume: number | null;
-  averageVolume: number | null;
+  dailyVolumeRatio: number | null;
   relVolume: number | null;
+  chartTrend?: string | null;
+  chartSignal?: string | null;
+  chartTimeframe?: string | null;
+  chartAsOf?: string | null;
   hasCoreData: boolean;
 }): StrategicConclusion {
   const isEnglish = input.locale === "en-US";
@@ -4412,32 +4447,39 @@ function buildStrategicConclusion(input: {
   const strongScore = score != null && score >= 7;
   const moderateScore = score != null && score >= 5.5 && score < 7;
   const hasVolume = input.volume != null && input.volume > 0;
-  const calculatedRvol = firstPositiveFiniteNumber(
-    input.relVolume,
-    calculateRelativeVolume(input.volume, input.averageVolume),
-  );
-  const estimatedRvol = calculatedRvol == null ? estimateRelativeVolumeFromActivity(input.volume) : null;
-  const resolvedRvol = calculatedRvol ?? estimatedRvol;
-  const rvolIsEstimated = calculatedRvol == null && estimatedRvol != null;
+  const resolvedRvol = firstPositiveFiniteNumber(input.relVolume);
   const rvolBasis = resolvedRvol != null
     ? resolvedRvol >= 1.2
       ? (isEnglish
-          ? `Relative Volume (RVOL): ${resolvedRvol.toFixed(2)}${rvolIsEstimated ? " estimated from current activity" : ""}. The asset is trading above normal volume, which can indicate stronger institutional interest and more relevant moves.`
-          : `Volume Relativo (RVOL): ${resolvedRvol.toFixed(2)}${rvolIsEstimated ? " estimado pela atividade atual" : ""}. Significa que o ativo está negociando ${resolvedRvol.toFixed(2)} vezes acima do volume normal, o que costuma indicar maior interesse institucional e movimentos mais relevantes.`)
+          ? `Comparable intraday RVOL: ${resolvedRvol.toFixed(2)}. The validated intraday ratio is above normal.`
+          : `RVOL intraday comparável: ${resolvedRvol.toFixed(2)}. A razão intraday validada está acima do normal.`)
       : resolvedRvol < 0.8
         ? (isEnglish
-            ? `Relative Volume (RVOL): ${resolvedRvol.toFixed(2)}${rvolIsEstimated ? " estimated from current activity" : ""}. The asset is trading below normal volume, so conviction is weaker.`
-            : `Volume Relativo (RVOL): ${resolvedRvol.toFixed(2)}${rvolIsEstimated ? " estimado pela atividade atual" : ""}. O ativo negocia abaixo do volume normal, então a convicção é menor.`)
+            ? `Comparable intraday RVOL: ${resolvedRvol.toFixed(2)}. The validated intraday ratio is below normal.`
+            : `RVOL intraday comparável: ${resolvedRvol.toFixed(2)}. A razão intraday validada está abaixo do normal.`)
         : (isEnglish
-            ? `Relative Volume (RVOL): ${resolvedRvol.toFixed(2)}${rvolIsEstimated ? " estimated from current activity" : ""}. Volume is close to the normal range, so price needs more confirmation.`
-            : `Volume Relativo (RVOL): ${resolvedRvol.toFixed(2)}${rvolIsEstimated ? " estimado pela atividade atual" : ""}. O volume está perto do normal, então o preço ainda precisa confirmar melhor.`)
+            ? `Comparable intraday RVOL: ${resolvedRvol.toFixed(2)}. The validated intraday ratio is near normal.`
+            : `RVOL intraday comparável: ${resolvedRvol.toFixed(2)}. A razão intraday validada está próxima do normal.`)
     : (isEnglish
-        ? "Relative Volume (RVOL): unavailable."
-        : "Volume Relativo (RVOL): indisponível.");
+        ? "Comparable intraday RVOL: unavailable."
+        : "RVOL intraday comparável: indisponível.");
+  const priceBasis = input.price != null
+    ? `${isEnglish ? "Price" : "Preço"}: ${formatPrice(input.price, input.locale)}`
+    : (isEnglish ? "Price: unavailable" : "Preço: indisponível");
+  const changeBasis = input.changePct != null
+    ? `${isEnglish ? "Change" : "Variação"}: ${formatSignedPercent(input.changePct)}`
+    : (isEnglish ? "Change: unavailable" : "Variação: indisponível");
   const volumeBasis = hasVolume
     ? (isEnglish ? `Volume: current ${formatVolumeLong(input.volume, input.locale)}` : `Volume: atual de ${formatVolumeLong(input.volume, input.locale)}`)
     : (isEnglish ? "Volume: unavailable" : "Volume: indisponível");
-  const rsiBasis = describeRsiValue(input.rsi, input.locale).basis;
+  const dailyVolumeBasis = input.dailyVolumeRatio != null
+    ? `${isEnglish ? "Current volume / daily average" : "Volume atual / média diária"}: ${formatLocalePrice(input.dailyVolumeRatio, input.locale)}× · ${isEnglish ? "informational, not operational RVOL" : "informativo, não é RVOL operacional"}`
+    : (isEnglish ? "Current volume / daily average: unavailable" : "Volume atual / média diária: indisponível");
+  const rsiDescription = describeRsiValue(input.rsi, input.locale, input.rsiTimeframe || undefined);
+  const rsiBasis = rsiDescription.basis.replace(
+    /^RSI/i,
+    isEnglish ? "Internal snapshot RSI" : "RSI do snapshot interno",
+  );
   const scoreBasis = score == null
     ? (isEnglish ? "Master Score: no confirmed reading" : "Score Mestre: sem leitura confirmada")
     : score < 5.5
@@ -4448,13 +4490,40 @@ function buildStrategicConclusion(input: {
   const riskBasis = input.risk
     ? (isEnglish ? `Risk: ${input.risk}` : `Risco: ${input.risk}`)
     : (isEnglish ? "Risk: no read" : "Risco: sem leitura");
-  const regimeBasis = input.regime
-    ? (isEnglish ? `Main trend (BIAS): ${input.regime}` : `Tendência principal (BIAS): ${input.regime}`)
-    : (isEnglish ? "Main trend (BIAS): no clear read" : "Tendência principal (BIAS): sem leitura clara");
+  const chartTrend = input.chartTrend || input.regime;
+  const chartTimeframe = input.chartTimeframe || input.rsiTimeframe || "—";
+  const regimeBasis = chartTrend
+    ? (isEnglish ? `Internal snapshot trend (${chartTimeframe}): ${chartTrend}` : `Tendência do snapshot interno (${chartTimeframe}): ${chartTrend}`)
+    : (isEnglish ? `Internal snapshot trend (${chartTimeframe}): no clear read` : `Tendência do snapshot interno (${chartTimeframe}): sem leitura clara`);
+  const chartSignalBasis = input.chartSignal
+    ? (isEnglish
+        ? `Latest internal snapshot event (not an operational decision): ${humanizeMachineLabel(input.chartSignal, input.locale)}`
+        : `Último evento do snapshot interno (não é decisão operacional): ${humanizeMachineLabel(input.chartSignal, input.locale)}`)
+    : (isEnglish ? "Latest internal snapshot event: unavailable" : "Último evento do snapshot interno: indisponível");
+  const chartAsOfBasis = input.chartAsOf
+    ? `${isEnglish ? "Internal snapshot through" : "Snapshot interno até"}: ${formatNewsClock(input.chartAsOf, input.locale)}`
+    : (isEnglish ? "Internal snapshot through: unavailable" : "Snapshot interno até: indisponível");
   const flowBasis = input.flow
     ? (isEnglish ? `Institutional flow: ${input.flow}` : `Fluxo institucional: ${input.flow}`)
     : (isEnglish ? "Institutional flow without read" : "Fluxo institucional sem leitura");
-  const basis = [regimeBasis, scoreBasis, riskBasis, flowBasis, volumeBasis, rvolBasis, rsiBasis];
+  const liquidityBasis = input.liquidity
+    ? `${isEnglish ? "Operational liquidity" : "Liquidez operacional"}: ${input.liquidity}`
+    : (isEnglish ? "Operational liquidity: unavailable" : "Liquidez operacional: indisponível");
+  const basis = [
+    priceBasis,
+    changeBasis,
+    regimeBasis,
+    chartSignalBasis,
+    rsiBasis,
+    volumeBasis,
+    dailyVolumeBasis,
+    scoreBasis,
+    flowBasis,
+    liquidityBasis,
+    riskBasis,
+    rvolBasis,
+    chartAsOfBasis,
+  ];
   const stamp = new Date(input.minuteTick * 60_000).toLocaleTimeString(isEnglish ? "en-US" : "pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
@@ -4484,8 +4553,8 @@ function buildStrategicConclusion(input: {
     if (!input.hasCoreData || !hasVolume) {
       if (hasVolume) {
         return isEnglish
-          ? "Focus now: treat price and volume as context, but wait for real chart, liquidity and flow confirmation before execution."
-        : "Foco Agora: usar preço e volume como contexto, mas aguardar gráfico real, liquidez e fluxo confirmarem antes da execução.";
+          ? "Focus now: use the available chart, price and volume as context, but wait for Master Score, liquidity and flow confirmation before execution."
+        : "Foco Agora: usar gráfico, preço e volume disponíveis como contexto, mas aguardar Score Mestre, liquidez e fluxo confirmarem antes da execução.";
       }
       return isEnglish
         ? "Focus now: do not execute operational trades until real price and volume are confirmed."
@@ -4523,8 +4592,8 @@ function buildStrategicConclusion(input: {
   if (!input.hasCoreData || !hasVolume || score == null) {
     return {
       headline: isEnglish
-        ? "The operational read is incomplete. Use the panel as context and avoid execution until real price, volume and score are confirmed."
-        : "A leitura operacional está incompleta. Use o painel como contexto e evite execução até preço, volume e Score Mestre ficarem confirmados.",
+        ? "The chart has a technical reading, but the operational decision remains blocked until Master Score, flow and liquidity are confirmed."
+        : "O gráfico tem leitura técnica, mas a decisão operacional permanece bloqueada até Score Mestre, fluxo e liquidez ficarem confirmados.",
       focus: dynamicFocus,
       basis,
       tone: "watch",
@@ -4739,10 +4808,14 @@ function strategicSectionsForRender(conclusion: StrategicConclusion, locale: App
   const regimeLine = conclusion.basis.find((item) => /bias|trend|tend[eê]ncia|regime/i.test(item)) || "";
   const flowLine = conclusion.basis.find((item) => /flow|fluxo/i.test(item)) || "";
   const rvolLine = conclusion.basis.find((item) => /rvol|volume relativo/i.test(item)) || "";
-  const rsiLine = conclusion.basis.find((item) => /^rsi:/i.test(item)) || "";
-  const scoreValue = Number(scoreLine.match(/(\d+(?:[.,]\d+)?)/)?.[1]?.replace(",", "."));
-  const rvolValue = Number(rvolLine.match(/(\d+(?:[.,]\d+)?)/)?.[1]?.replace(",", "."));
-  const rsiValue = Number(rsiLine.match(/(\d+(?:[.,]\d+)?)/)?.[1]?.replace(",", "."));
+  const rsiLine = conclusion.basis.find((item) => /\brsi\b/i.test(item)) || "";
+  const chartSignalLine = conclusion.basis.find((item) => /latest internal snapshot event|último evento do snapshot interno/i.test(item)) || "";
+  const dailyVolumeLine = conclusion.basis.find((item) => /current volume \/ daily average|volume atual \/ média diária/i.test(item)) || "";
+  const basisNumber = (line: string) =>
+    Number(line.match(/:\s*(-?\d+(?:[.,]\d+)?)/)?.[1]?.replace(",", "."));
+  const scoreValue = basisNumber(scoreLine);
+  const rvolValue = basisNumber(rvolLine);
+  const rsiValue = basisNumber(rsiLine);
   const riskLevel = strategicRiskLevelFromText(riskLine);
   const lowConviction = /low conviction|pouca convic/i.test(basisText) || (Number.isFinite(scoreValue) && scoreValue < 5.5);
   const strongConviction = /strong conviction|convic[cç][aã]o forte/i.test(basisText) || (Number.isFinite(scoreValue) && scoreValue >= 7);
@@ -4804,65 +4877,73 @@ function strategicSectionsForRender(conclusion: StrategicConclusion, locale: App
       };
 
   if (incompleteRead) {
+    const technicalRead = regimeBear
+      ? (isEnglish ? "the chart currently has a bearish technical structure" : "o gráfico está com estrutura técnica de baixa")
+      : regimeBull
+        ? (isEnglish ? "the chart currently has a bullish technical structure" : "o gráfico está com estrutura técnica de alta")
+        : (isEnglish ? "the chart has no confirmed directional structure" : "o gráfico ainda não tem estrutura direcional confirmada");
+    const evidenceLines = [regimeLine, chartSignalLine, rsiLine, dailyVolumeLine]
+      .filter((line) => line && !/unavailable|indispon[ií]vel|sem leitura/.test(normalizeUiText(line)))
+      .slice(0, 4);
     return isEnglish
       ? [
           {
             title: standardTitles.scenario,
-            body: `${assetLabel}: the operational read is incomplete. Use the panel as context and do not execute until price, volume, Master Score and chart structure are confirmed.`,
+            body: `${assetLabel}: ${technicalRead}. The operational authorization remains blocked because Master Score, institutional flow and operational liquidity are not all confirmed.`,
           },
           {
             title: standardTitles.directive,
             items: [
-              "Block every directional setup while quote and volume are incomplete.",
-              "Wait for the next confirmed snapshot before evaluating any entry.",
-              "Use chart levels only as context, not as an execution trigger.",
+              ...evidenceLines,
+              "Treat the chart direction as technical context, not as permission to execute.",
+              "Wait for a Decision Envelope with the required components confirmed before evaluating an entry.",
             ],
           },
           {
             title: standardTitles.between,
             items: [
-              "Buy remains blocked until real price, volume and Master Score are confirmed.",
-              "Sell/short remains blocked too; incomplete data cannot create an operational edge.",
-              "Waiting is the only valid decision until the real snapshot updates.",
+              regimeBull ? "The bullish chart bias does not authorize a buy without Master Score, flow and liquidity." : "Buy remains blocked without Master Score, flow and liquidity confirmation.",
+              regimeBear ? "The bearish chart bias does not authorize a sell/short without Master Score, flow and liquidity." : "Sell/short remains blocked without Master Score, flow and liquidity confirmation.",
+              "The daily volume ratio is informational and must not be treated as comparable intraday RVOL.",
             ],
           },
           {
             title: standardTitles.interpretation,
-            body: "There is not enough real data for an operational decision. The professional choice is to wait until price, volume and score are confirmed.",
+            body: `WAIT is an authorization state, not a neutral trend classification. ${sentenceCaseFirst(technicalRead, locale)}, but the missing operational components prevent a validated trade.`,
           },
           {
             title: standardTitles.focus,
-            body: focusText || "Do not execute operational trades until real price and volume are confirmed.",
+            body: focusText || "Keep the chart bias as context and do not execute until the central decision is READY.",
           },
         ]
       : [
           {
             title: standardTitles.scenario,
-            body: `${assetLabel}: a leitura operacional está incompleta. Use o painel como contexto e não execute até preço, volume, Score Mestre e estrutura do gráfico ficarem confirmados.`,
+            body: `${assetLabel}: ${technicalRead}. A autorização operacional permanece bloqueada porque Score Mestre, fluxo institucional e liquidez operacional não estão todos confirmados.`,
           },
           {
             title: standardTitles.directive,
             items: [
-              "Bloquear qualquer setup direcional enquanto cotação e volume estiverem incompletos.",
-              "Aguardar o próximo snapshot confirmado antes de avaliar qualquer entrada.",
-              "Usar níveis do gráfico apenas como contexto, não como gatilho de execução.",
+              ...evidenceLines,
+              "Tratar a direção do gráfico como contexto técnico, não como autorização de execução.",
+              "Aguardar um Decision Envelope com os componentes obrigatórios confirmados antes de avaliar entrada.",
             ],
           },
           {
             title: standardTitles.between,
             items: [
-              "Compra fica bloqueada até preço, volume e Score Mestre reais confirmarem.",
-              "Venda/short também fica bloqueada; dado incompleto não gera vantagem operacional.",
-              "Aguardar é a única decisão válida até o snapshot real atualizar.",
+              regimeBull ? "O viés de alta do gráfico não autoriza compra sem Score Mestre, fluxo e liquidez." : "Compra permanece bloqueada sem confirmação de Score Mestre, fluxo e liquidez.",
+              regimeBear ? "O viés de baixa do gráfico não autoriza venda/short sem Score Mestre, fluxo e liquidez." : "Venda/short permanece bloqueada sem confirmação de Score Mestre, fluxo e liquidez.",
+              "A razão volume atual/média diária é informativa e não deve ser tratada como RVOL intraday comparável.",
             ],
           },
           {
             title: standardTitles.interpretation,
-            body: "Não há dados reais suficientes para decisão operacional. A escolha profissional é aguardar até preço, volume e score ficarem confirmados.",
+            body: `AGUARDAR é um estado de autorização, não uma classificação de tendência neutra. ${sentenceCaseFirst(technicalRead, locale)}, mas os componentes operacionais ausentes impedem um trade validado.`,
           },
           {
             title: standardTitles.focus,
-            body: focusText || "Não executar operação até preço e volume reais ficarem confirmados.",
+            body: focusText || "Manter o viés do gráfico como contexto e não executar até a decisão central ficar READY.",
           },
         ];
   }
@@ -5699,6 +5780,7 @@ function buildStrategicDecisionContract(input: {
   locale: AppLocale;
   symbol: string;
   cards: EssentialDecisionCard[];
+  conclusion: StrategicConclusion;
   operationalDecision: OperationalDecision;
   hasCoreData: boolean;
   executionReady?: boolean;
@@ -5770,14 +5852,16 @@ function buildStrategicDecisionContract(input: {
     levels,
     sections: input.symbolContext
       ? symbolContextStrategicSections(input.symbolContext, input.locale, input.symbol)
-      : strategicDecisionSections(side, input.locale, input.symbol),
+      : strategicSectionsForRender(input.conclusion, input.locale, input.symbol),
     basis: [] as string[],
   };
   return {
     ...contract,
     basis: input.symbolContext
       ? symbolContextStrategicBasis(input.symbolContext, input.locale)
-      : strategicDecisionBasis(contract, input.locale),
+      : input.conclusion.basis.length
+        ? input.conclusion.basis
+        : strategicDecisionBasis(contract, input.locale),
   };
 }
 
@@ -6200,7 +6284,16 @@ function buildAiToolTextFallback(
   return `${ticker}: Score ${scoreText}, preço ${priceText}, variação ${changeText}, volume ${volumeText}, RVOL ${rvolText}, RSI ${rsiText}. Use como leitura operacional apenas com confirmação.`;
 }
 
-function scoreClass(score?: number | null) {
+function scoreClass(score?: number | null, tone?: string | null) {
+  // The backend already resolved direction into `tone`. The score is only
+  // STRENGTH (and for the risk tool it is inverted — higher is worse), so
+  // colouring by magnitude painted a max score green on a bearish/critical
+  // state. When tone is present it wins; magnitude is just the fallback.
+  const normalizedTone = String(tone || "").toLowerCase();
+  if (normalizedTone === "bearish" || normalizedTone === "risk") return "down";
+  if (normalizedTone === "bullish") return "up";
+  if (normalizedTone === "neutral") return "mid";
+
   const numeric = Number(score || 0);
   if (numeric <= 10) {
     if (numeric >= 7) return "up";
@@ -6594,7 +6687,7 @@ function aiFreshnessStatus(detectedAt?: string | null, viewedAt?: string | null,
   const activeResetKey = getAlertResetKey(viewedDate);
   if (detectedKey === activeResetKey) {
     return {
-      label: isEnglish ? "Status: updated today" : "Status: atualizado hoje",
+      label: isEnglish ? "Status: data from today" : "Status: dados de hoje",
       tone: "fresh",
     };
   }
@@ -6604,8 +6697,8 @@ function aiFreshnessStatus(detectedAt?: string | null, viewedAt?: string | null,
   if (afterDailyReset) {
     return {
       label: isEnglish
-        ? "Status: previous-day read · waiting for today's new read"
-        : "Status: leitura do dia anterior · aguardando nova leitura do dia",
+        ? "Status: previous-session data"
+        : "Status: dados da sessão anterior",
       tone: "stale",
     };
   }
@@ -7056,6 +7149,96 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [appLocale, setAppLocale] = useState<AppLocale>("pt-BR");
   const [appLocaleHydrated, setAppLocaleHydrated] = useState(false);
   const isUsLocale = appLocale === "en-US";
+
+  const [activeStockFlowDay, setActiveStockFlowDay] = useState("aovivo");
+  const [stockFlowPollVote, setStockFlowPollVote] = useState<string | null>(null);
+  const [stockFlowChatInput, setStockFlowChatInput] = useState("");
+  const [stockFlowChatMessages, setStockFlowChatMessages] = useState<Array<{ id: string; time: string; user: string; text: string }>>([
+    { id: "sf1", time: "10:12", user: "@Trader_Zero", text: "PETR4 rompendo a resistência dos 38,50!" },
+    { id: "sf2", time: "10:14", user: "@Ana_Stocks", text: "De olho na ata do Copom na terça..." },
+    { id: "sf3", time: "10:15", user: "@Lucas_Quant", text: "Fluxo IA apontando forte fluxo comprador em VALE3" },
+  ]);
+
+  const handleSendStockFlowChatMessage = () => {
+    const text = stockFlowChatInput.trim();
+    if (!text) return;
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const newMsg = {
+      id: `sf-${Date.now()}`,
+      time: timeStr,
+      user: profileNameInput.trim() ? `@${profileNameInput.trim()}` : "@Trader_Guest",
+      text,
+    };
+    setStockFlowChatMessages((prev) => [...prev, newMsg]);
+    setStockFlowChatInput("");
+  };
+
+  const [stockFlowLiveItems, setStockFlowLiveItems] = useState<Array<{ id: string; text: string }>>([]);
+  const [stockFlowLiveInput, setStockFlowLiveInput] = useState("");
+
+  const handlePublishStockFlowLiveItem = () => {
+    const text = stockFlowLiveInput.trim();
+    if (!text) return;
+    const newItem = {
+      id: `live-${Date.now()}`,
+      text,
+    };
+    setStockFlowLiveItems((prev) => [newItem, ...prev]);
+    setStockFlowLiveInput("");
+  };
+
+  const [editingStockFlowEditorial, setEditingStockFlowEditorial] = useState(false);
+  const [editorialDate, setEditorialDate] = useState("24 de Julho de 2026 — 08:30");
+  const [editorialTitle, setEditorialTitle] = useState("📊 ABERTURA DO MERCADO & VISÃO DO DIA");
+  const [editorialQuote, setEditorialQuote] = useState("Atenção Traders: Mercado abre de olho nos dados do IPCA e na decisão de juros do Fed nos EUA. Liquidez IA aponta fluxo comprador no setor bancário nas primeiras horas.");
+  const [editorialPoints, setEditorialPoints] = useState<string[]>([
+    "Agenda econômica",
+    "Empresas do trimestre",
+    "Eventos do dia",
+    "Expectativa institucional",
+  ]);
+
+  const [editEditorialDateInput, setEditEditorialDateInput] = useState("");
+  const [editEditorialTitleInput, setEditEditorialTitleInput] = useState("");
+  const [editEditorialQuoteInput, setEditEditorialQuoteInput] = useState("");
+  const [editEditorialPointsInput, setEditEditorialPointsInput] = useState("");
+
+  const handleStartEditEditorial = () => {
+    setEditEditorialDateInput(editorialDate);
+    setEditEditorialTitleInput(editorialTitle);
+    setEditEditorialQuoteInput(editorialQuote);
+    setEditEditorialPointsInput(editorialPoints.join("\n"));
+    setEditingStockFlowEditorial(true);
+  };
+
+  const handleSaveEditorial = () => {
+    if (editEditorialDateInput.trim()) setEditorialDate(editEditorialDateInput.trim());
+    if (editEditorialTitleInput.trim()) setEditorialTitle(editEditorialTitleInput.trim());
+    if (editEditorialQuoteInput.trim()) setEditorialQuote(editEditorialQuoteInput.trim());
+    const parsedPoints = editEditorialPointsInput
+      .split("\n")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parsedPoints.length) setEditorialPoints(parsedPoints);
+    setEditingStockFlowEditorial(false);
+  };
+
+  const [stockFlowPollQuestion, setStockFlowPollQuestion] = useState("Qual o seu viés para o Ibovespa hoje?");
+  const [editingStockFlowPollQuestion, setEditingStockFlowPollQuestion] = useState(false);
+  const [editStockFlowPollQuestionInput, setEditStockFlowPollQuestionInput] = useState("");
+
+  const handleStartEditPollQuestion = () => {
+    setEditStockFlowPollQuestionInput(stockFlowPollQuestion);
+    setEditingStockFlowPollQuestion(true);
+  };
+
+  const handleSavePollQuestion = () => {
+    if (editStockFlowPollQuestionInput.trim()) {
+      setStockFlowPollQuestion(editStockFlowPollQuestionInput.trim());
+    }
+    setEditingStockFlowPollQuestion(false);
+  };
   const canonicalUniverse = useMemo<WatchlistItem[]>(() => {
     const fromBackend = bootstrap?.market_universe?.items;
     if (!Array.isArray(fromBackend) || !fromBackend.length) return PRELOADED_UNIVERSE;
@@ -7084,11 +7267,19 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [advancedMode, setAdvancedMode] = useState(false);
   const normalizedAccessPlan = String(access?.plan || "").toLowerCase();
   const normalizedAccessStatus = String(access?.plan_status || "").toLowerCase();
-  const proModeLocked = Boolean(
+  const proModeAllowed = Boolean(
     token &&
       access &&
-      (["free", "basic", "basico", "básico"].includes(normalizedAccessPlan) ||
-        ["expired", "inactive", "cancelled", "canceled", "trial_expired"].includes(normalizedAccessStatus)),
+      ["trial", "premium", "enterprise"].includes(normalizedAccessPlan) &&
+      !["expired", "inactive", "cancelled", "canceled", "trial_expired"].includes(normalizedAccessStatus),
+  );
+  const proModeLocked = !proModeAllowed;
+  // ponytail: Stock Flow is frontend-only local state today, so admin is a client email gate.
+  // When Stock Flow gets a backend, replace with a server-enforced role/is_admin claim (a client
+  // check secures nothing on its own).
+  const STOCK_FLOW_ADMIN_EMAILS = new Set(["dileno2010@gmail.com"]);
+  const isStockFlowAdmin = Boolean(
+    access?.email && STOCK_FLOW_ADMIN_EMAILS.has(String(access.email).trim().toLowerCase()),
   );
 
   useEffect(() => {
@@ -7635,27 +7826,30 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   }, [appLocale, deferredTicker]);
 
   useEffect(() => {
-    // AI tab badges: the bundle/ai-tools calls are symbol-filtered and return
-    // empty tool arrays whenever the selected ticker has no qualified finding,
-    // which zeroed every badge. Fetch the unfiltered public catalog so badges
-    // show the real per-tool counts. This ran for anonymous users only, so a
-    // logged-in user whose workspace.ai_tools is empty saw 0 on every tab —
-    // the endpoint is public, so fetch it regardless of token.
+    if (proModeLocked) {
+      setPublicAiCatalog(null);
+      return undefined;
+    }
+
+    // The endpoint is public at the routing layer, but premium fields are
+    // entitlement-gated. Always carry the current token so Trial/Pro users
+    // receive the real catalog instead of the anonymous PREMIUM_LOCKED shape.
     let cancelled = false;
     const controller = new AbortController();
-    fetch(`${resolveApiBase()}/public/market/ai-tools`, { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : null))
+    getPublicAiTools(undefined, undefined, undefined, controller.signal, token)
       .then((payload) => {
         if (!cancelled && payload && typeof payload === "object") {
-          setPublicAiCatalog(payload as PublicAiToolsPayload);
+          setPublicAiCatalog(payload);
         }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) setPublicAiCatalog(null);
+      });
     return () => {
       cancelled = true;
       controller.abort();
     };
-  }, []);
+  }, [proModeLocked, token]);
 
   useEffect(() => {
     if (!token) {
@@ -7767,7 +7961,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       getAccess(token),
       getWorkspace(token),
       getWorkspaceTickerBundle(token, deferredTicker, chartInterval, appLocale, controller.signal),
-      getPublicMarketBundle(deferredTicker, chartInterval, appLocale, controller.signal),
+      getPublicMarketBundle(deferredTicker, chartInterval, appLocale, controller.signal, false, token),
     ])
       .then(([nextAccess, nextWorkspace, nextTickerBundle, publicBundle]) => {
         if (cancelled) return;
@@ -7835,7 +8029,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const retries = [3000, 5000, 10000];
     const timers = retries.map((delay) =>
       window.setTimeout(() => {
-        getPublicMarketBundle(deferredTicker, chartInterval, appLocale, controller.signal, true)
+        getPublicMarketBundle(deferredTicker, chartInterval, appLocale, controller.signal, true, token || undefined)
           .then((bundle) => {
             if (cancelled) return;
             const nextQuote = bundle?.quote || null;
@@ -7890,6 +8084,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     publicHydrationPending,
     publicDataStatusKey,
     appLocale,
+    token,
   ]);
 
   useEffect(() => {
@@ -9337,7 +9532,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     liquidity: isUsLocale ? "validated liquidity" : "liquidez validada",
     levels: isUsLocale ? "valid operational levels" : "níveis operacionais válidos",
   }[item.component] || item.component));
-  const executionMetricsReady = operationalBlockComponents.length === 0;
+  const executionMetricsReady = Boolean(symbolOperationalView && operationalBlockComponents.length === 0);
   const chartCanonicalLevelZones = useMemo(
     () => resolveCanonicalChartLevelZones(chartForDisplay),
     [chartForDisplay],
@@ -9372,9 +9567,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const panelRsiValue = useMemo(
     () =>
       displayQuoteHasCoreData
-        ? firstValidRsiNumber(symbolOperationalView?.technical_context.rsi_d1?.value)
+        ? firstValidRsiNumber(symbolOperationalView?.technical_context.rsi_d1?.value,
+            currentPublicInsight?.rsi,
+          )
         : null,
-    [displayQuoteHasCoreData, symbolOperationalView],
+    [currentPublicInsight?.rsi, displayQuoteHasCoreData, symbolOperationalView],
   );
   // Mission 68: the chart chip + RSI panel follow the SELECTED timeframe, computed on
   // the exact chart candle series (activeChart is gated on ticker+interval, so it clears
@@ -9413,20 +9610,37 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const symbolLogoUrl = safeAssetLogoUrl(displayQuote?.logo_url, displayQuote?.icon_url, currentWatchItem?.logoUrl);
   const selectedTickerMarketLabel = currentWatchItem?.category || guessCategory(selectedTicker);
   const currentAiKey = AI_TOOL_TAB_MAP[currentTab as keyof typeof AI_TOOL_TAB_MAP];
+  const aiPayloadLocked = Boolean(
+    publicAiTools?.locked ||
+      publicAiCatalog?.locked ||
+      String(publicAiTools?.status || "").toUpperCase() === "PREMIUM_LOCKED" ||
+      String(publicAiCatalog?.status || "").toUpperCase() === "PREMIUM_LOCKED",
+  );
+  const aiAccessLocked = proModeLocked || aiPayloadLocked;
   const currentAiRows: AiToolRow[] = useMemo(
     () => {
-      if (!currentAiKey) return [];
+      if (!currentAiKey || aiAccessLocked) return [];
       const publicForSelected = normalizeSymbol(String(publicAiTools?.selected_symbol || publicAiTools?.symbol || "")) === selectedTicker;
       return (publicForSelected ? publicAiTools?.tools?.[currentAiKey] : workspace?.ai_tools?.[currentAiKey] || publicAiTools?.tools?.[currentAiKey]) || [];
     },
-    [currentAiKey, publicAiTools?.selected_symbol, publicAiTools?.symbol, publicAiTools?.tools, selectedTicker, workspace?.ai_tools],
+    [aiAccessLocked, currentAiKey, publicAiTools?.selected_symbol, publicAiTools?.symbol, publicAiTools?.tools, selectedTicker, workspace?.ai_tools],
   );
   useEffect(() => {
     if (!currentAiKey) return undefined;
-    const controller = new AbortController();
     const key = `${selectedTicker}|${currentAiKey}|${chartInterval}|${aiRequestNonce}`;
+    if (proModeLocked) {
+      setPublicAiTools(null);
+      setAiRequestState({
+        key,
+        status: "PREMIUM_LOCKED",
+        reason: token ? "premium_plan_required" : "authentication_required",
+      });
+      return undefined;
+    }
+
+    const controller = new AbortController();
     setAiRequestState({ key, status: "LOADING", reason: "" });
-    getPublicAiTools(selectedTicker, currentAiKey, chartInterval, controller.signal)
+    getPublicAiTools(selectedTicker, currentAiKey, chartInterval, controller.signal, token)
       .then((payload) => {
         if (controller.signal.aborted) return;
         setPublicAiTools(payload);
@@ -9438,9 +9652,15 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         setAiRequestState({ key, status: "ERROR", reason: requestError.message || "ai_request_failed" });
       });
     return () => controller.abort();
-  }, [aiRequestNonce, chartInterval, currentAiKey, selectedTicker]);
+  }, [aiRequestNonce, chartInterval, currentAiKey, proModeLocked, selectedTicker, token]);
   const aiToolFindingCounts = useMemo(() => {
     const counts: Record<string, number> = {};
+    if (aiAccessLocked) {
+      Object.keys(AI_TOOL_TAB_MAP).forEach((tabId) => {
+        counts[tabId] = 0;
+      });
+      return counts;
+    }
     for (const [tabId, toolKey] of Object.entries(AI_TOOL_TAB_MAP)) {
       const typedKey = toolKey as keyof WorkspaceData["ai_tools"];
       const globalScope = GLOBAL_AI_ALERT_TAB_IDS.has(tabId);
@@ -9467,8 +9687,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       }
     }
     return counts;
-  }, [publicAiCatalog?.tools, publicAiTools?.tools, selectedTicker, workspace?.ai_tools]);
+  }, [aiAccessLocked, publicAiCatalog?.tools, publicAiTools?.tools, selectedTicker, workspace?.ai_tools]);
   const aiFindingSignalKey = useMemo(() => {
+    if (aiAccessLocked) return "";
     const signatures: string[] = [];
     for (const [, toolKey] of Object.entries(AI_TOOL_TAB_MAP)) {
       if (!aiToolSoundEnabled(aiToolSoundSettings, toolKey)) continue;
@@ -9487,7 +9708,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       });
     }
     return Array.from(new Set(signatures)).sort().join("||");
-  }, [aiToolSoundSettings, publicAiTools?.tools, workspace?.ai_tools]);
+  }, [aiAccessLocked, aiToolSoundSettings, publicAiTools?.tools, workspace?.ai_tools]);
   useEffect(() => {
     if (aiSoundLastKeyRef.current === null) {
       aiSoundLastKeyRef.current = aiFindingSignalKey;
@@ -9597,12 +9818,37 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     },
     [activeNews?.items, selectedTicker, appLocale, isUsLocale],
   );
+  const freshNewsCount = useMemo(
+    () => newsRows.filter((item) => item.isToday === true && item.isStale !== true).length,
+    [newsRows],
+  );
+  const backendNewsStatus = String(
+    activeNews?.status ||
+      (activeNews?.state && typeof activeNews.state === "object" ? (activeNews.state as Record<string, unknown>).status : "") ||
+      "",
+  ).toLowerCase();
+  const backendNewsReason = String(
+    (activeNews?.state && typeof activeNews.state === "object" ? (activeNews.state as Record<string, unknown>).reason : "") ||
+      activeNews?.message ||
+      "",
+  ).toLowerCase();
+  const newsIsHistorical = Boolean(
+    newsRows.length > 0 &&
+      (
+        freshNewsCount === 0 ||
+        ["historical", "stale", "no_fresh_news"].includes(backendNewsStatus) ||
+        /histor|stale|no_fresh_news|sem noticia atual|sem notícia atual/.test(backendNewsReason)
+      ),
+  );
+  const newsStatusForPanel = newsIsHistorical ? "historical" : (activeNews?.status || null);
   const visibleTabs = useMemo(
     () => TOP_BAR_TAB_IDS
       .filter((id) => shouldShowTopBarTabId(id, advancedMode))
+      // Stock Flow is a Pro/Trial surface: hide it for Básico/free/expired plans.
+      .filter((id) => id !== "stockflow" || !proModeLocked)
       .map((id) => tabsById.get(id))
       .filter(Boolean) as WorkspaceTab[],
-    [advancedMode, tabsById],
+    [advancedMode, tabsById, proModeLocked],
   );
 
   useEffect(() => {
@@ -10224,7 +10470,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   // (already backend-ranked and shaped) whenever the per-ticker pipeline has
   // nothing, so lists always match badges; a row click switches the ticker.
   const aiCatalogFallbackRows = useMemo<AiToolRow[]>(() => {
-    if (!currentAiKey) return [];
+    if (!currentAiKey || aiAccessLocked) return [];
     const rows = publicAiCatalog?.tools?.[currentAiKey as keyof WorkspaceData["ai_tools"]];
     if (!Array.isArray(rows) || !rows.length) return [];
     return rows
@@ -10237,7 +10483,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       )
       .filter((row) => isFreshAiFindingForReset(row))
       .filter(isAiDealFinding);
-  }, [currentAiKey, publicAiCatalog?.tools]);
+  }, [aiAccessLocked, currentAiKey, publicAiCatalog?.tools]);
   const currentTabHistory =
     aiAlertHistory[currentTab]?.resetKey === aiAlertResetKey &&
     aiAlertHistory[currentTab]?.source === "real" &&
@@ -10247,20 +10493,25 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const currentTabOwnRows = (currentTabHistory?.length ? currentTabHistory : visibleAiRowsWithTimestamps)
     .filter((row) => isFreshAiFindingForReset(row))
     .filter(isAiDealFinding);
-  const normalizedAiRequestStatus = String(aiRequestState.status || "").toUpperCase();
+  const normalizedAiRequestStatus = aiAccessLocked
+    ? "PREMIUM_LOCKED"
+    : String(aiRequestState.status || "").toUpperCase();
   const normalizedAiRequestReason = String(aiRequestState.reason || "").toLowerCase();
+  const aiRequestLocked = normalizedAiRequestStatus === "PREMIUM_LOCKED";
   const aiRequestPendingExpired = normalizedAiRequestStatus === "PENDING_EXPIRED" || (normalizedAiRequestStatus === "PENDING" && /expired|timeout|ttl/.test(normalizedAiRequestReason));
   const aiRequestUnsupported = normalizedAiRequestStatus === "UNSUPPORTED" || normalizedAiRequestReason.includes("unsupported");
   const aiRequestFailed = normalizedAiRequestStatus === "ERROR" || normalizedAiRequestStatus === "PROVIDER_ERROR";
-  const aiRequestTerminal = aiRequestPendingExpired || aiRequestUnsupported || aiRequestFailed || normalizedAiRequestStatus === "INSUFFICIENT_DATA";
+  const aiRequestTerminal = aiRequestLocked || aiRequestPendingExpired || aiRequestUnsupported || aiRequestFailed || normalizedAiRequestStatus === "INSUFFICIENT_DATA";
   // Same precedence as aiToolFindingCounts below (own rows, else catalog), so the
   // badge number and the rendered list can never disagree.
   // Most recent finding first. The history bucket sorts by alert timestamp and the
   // catalog fallback arrives score-ranked, so sort here on the same timestamp the
   // card prints as "Detectado" — that is the only ordering the owner can verify.
-  const currentTabAlertSourceRows = GLOBAL_AI_ALERT_TAB_IDS.has(currentTab)
-    ? aiCatalogFallbackRows
-    : aiRequestTerminal
+  const currentTabAlertSourceRows = aiAccessLocked
+    ? []
+    : GLOBAL_AI_ALERT_TAB_IDS.has(currentTab)
+      ? aiCatalogFallbackRows
+      : aiRequestTerminal
       ? []
       : currentTabOwnRows.length
         ? currentTabOwnRows
@@ -10269,7 +10520,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     (a, b) => (Date.parse(resolveAiFindingTimestamp(b) || "") || 0) - (Date.parse(resolveAiFindingTimestamp(a) || "") || 0),
   );
   const currentAiStaleRows = useMemo(
-    () => currentAiRows
+    () => aiAccessLocked
+      ? []
+      : currentAiRows
       .map((row) => ({
         ...(row as AiToolRow),
         tool: currentAiKey || (row as AiToolRow).tool,
@@ -10277,9 +10530,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       }))
       .filter((row) => row.ticker === selectedTicker)
       .filter((row) => aiFindingResetKey(row) && !isFreshAiFindingForReset(row)),
-    [currentAiKey, currentAiRows, selectedTicker],
+    [aiAccessLocked, currentAiKey, currentAiRows, selectedTicker],
   );
-  const currentAiFreshnessStatus = aiRequestTerminal && !GLOBAL_AI_ALERT_TAB_IDS.has(currentTab)
+  const currentAiFreshnessStatus = aiRequestLocked
+    ? "premium_locked"
+    : aiRequestTerminal && !GLOBAL_AI_ALERT_TAB_IDS.has(currentTab)
     ? normalizedAiRequestStatus.toLowerCase()
     : currentTabAlertRows.length
     ? "updated_today"
@@ -10289,6 +10544,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         ? "no_current_asset_finding"
         : "no_payload_rows";
   const currentAiPayloadAvailable = Boolean(
+    !aiAccessLocked &&
     currentAiKey &&
     (
       aiCatalogFallbackRows.length > 0 ||
@@ -10298,6 +10554,18 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   );
   const currentAiEmptyState = useMemo(() => {
     if (!currentAiKey) return null;
+    if (aiRequestLocked) {
+      return {
+        title: isUsLocale ? "AI Pro is locked." : "IA Pro bloqueada.",
+        body: token
+          ? (isUsLocale
+              ? "Your current plan does not unlock these AI lenses. An active Trial, Premium or Enterprise plan is required."
+              : "Seu plano atual não libera estas lentes de IA. É necessário um plano Trial, Premium ou Enterprise ativo.")
+          : (isUsLocale
+              ? "Sign in with your email and activate Trial or Premium access to use these AI lenses."
+              : "Entre com seu e-mail e ative o acesso Trial ou Premium para usar estas lentes de IA."),
+      };
+    }
     if (loading) {
       return {
         title: isUsLocale ? "AI loading." : "IA carregando.",
@@ -10361,7 +10629,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       };
     }
     return null;
-  }, [aiRequestFailed, aiRequestPendingExpired, aiRequestUnsupported, currentAiKey, currentAiPayloadAvailable, currentAiRows.length, currentAiStaleRows.length, currentTabAlertRows.length, isUsLocale, loading, normalizedAiRequestStatus]);
+  }, [aiRequestFailed, aiRequestLocked, aiRequestPendingExpired, aiRequestUnsupported, currentAiKey, currentAiPayloadAvailable, currentAiRows.length, currentAiStaleRows.length, currentTabAlertRows.length, isUsLocale, loading, normalizedAiRequestStatus, token]);
   const showSymbolHeader = currentTab === "grafico";
   const profileName = publicSocialName(access?.display_name);
   const activePoll = useMemo(
@@ -10391,29 +10659,51 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   );
   const hasPublicSignal = Boolean(displayQuoteHasCoreData && symbolOperationalView);
   const hasSignalSnapshot = hasPublicSignal;
-  const trendText = hasPublicSignal ? String(symbolOperationalView?.technical_context.trend_d1?.value || "") : "";
+  const chartTrendText = String(activeChart?.summary?.trend_bias || "");
+  const chartSignalText = String(activeChart?.summary?.latest_signal || "");
+  const chartDataAsOf = String(activeChart?.summary?.as_of || "");
+  const chartAnalysisTimeframe = String(activeChart?.summary?.interval || activeChart?.interval || chartInterval || "");
+  const trendText = hasPublicSignal
+    ? String(symbolOperationalView?.technical_context.trend_d1?.value || "")
+    : chartTrendText || String(currentPublicInsight?.trend_bias || currentPublicInsight?.signal || "");
   const rawSignalScore = firstFiniteNumber(symbolOperationalView?.operational_context.master_score?.value);
   const normalizedSignalScore = rawSignalScore == null || Number.isNaN(rawSignalScore)
     ? null : rawSignalScore <= 10 ? rawSignalScore * 10 : rawSignalScore;
   const numericRankingScore = normalizedSignalScore != null ? clampNumber(normalizedSignalScore, 0, 100) : null;
   const sentimentContract = assetMetrics?.sentiment;
-  const effectiveSentimentScore = firstFiniteNumber(sentimentContract?.status === "READY" ? sentimentContract.value : null);
+  const rawSentimentValue = sentimentContract?.status === "READY" ? sentimentContract.value : null;
+  const effectiveSentimentScore = firstFiniteNumber(rawSentimentValue);
+  const categoricalSentiment = typeof rawSentimentValue === "string" ? rawSentimentValue.toLowerCase() : "";
   const sentimentTone =
-    effectiveSentimentScore == null
+    categoricalSentiment === "bullish"
+      ? "bullish"
+      : categoricalSentiment === "bearish"
+        ? "bearish"
+        : categoricalSentiment === "neutral" || categoricalSentiment === "mixed"
+          ? "neutral"
+    : effectiveSentimentScore == null
       ? "neutral"
       : effectiveSentimentScore >= 55
         ? "bullish"
         : effectiveSentimentScore <= 45
           ? "bearish"
           : "neutral";
-  const sentimentLabel =
-    sentimentTone === "bearish"
+  const sentimentSampleSize = firstFiniteNumber(sentimentContract?.components?.classified_total);
+  const sentimentBaseLabel =
+    categoricalSentiment === "mixed"
+      ? (isUsLocale ? "Mixed" : "Misto")
+      : categoricalSentiment === "neutral"
+        ? (isUsLocale ? "Neutral" : "Neutro")
+      : sentimentTone === "bearish"
         ? (isUsLocale ? "Bearish" : "Urso")
         : sentimentTone === "bullish"
           ? (isUsLocale ? "Bullish" : "Touro")
           : effectiveSentimentScore == null
             ? (isUsLocale ? "Current sentiment unavailable" : "Sentimento atual indisponível")
             : (isUsLocale ? "Neutral" : "Neutro");
+  const sentimentLabel = sentimentSampleSize != null && sentimentSampleSize > 0
+    ? `${sentimentBaseLabel} · ${sentimentSampleSize} ${isUsLocale ? "classified" : "classificada(s)"}`
+    : sentimentBaseLabel;
   const sentimentScore = effectiveSentimentScore;
   const dailyVolumeRatio = firstFiniteNumber(assetMetrics?.volume_vs_daily_average?.status === "READY" ? assetMetrics.volume_vs_daily_average.ratio : null);
   const dailyVolumeLabel = dailyVolumeRatio != null
@@ -10529,6 +10819,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     workspace?.ai_tools,
   ]);
   const strategicConclusion = useMemo(() => {
+    // The per-asset LLM conclusion, once generated, is the richest read -- prefer it over the
+    // operational-context template below (symbolContextStrategicSections), which otherwise wins
+    // first and hides it. strategicConclusionFromPanel surfaces panel.llm_conclusion. When it is
+    // still null (cold LLM), the existing paths render as before.
+    if (!proModeLocked && currentStrategicPanel?.llm_conclusion) {
+      return strategicConclusionFromPanel(currentStrategicPanel, appLocale);
+    }
     if (symbolOperationalView) {
       const sections = symbolContextStrategicSections(symbolOperationalView, appLocale, selectedTicker);
       return {
@@ -10541,7 +10838,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         sections,
       };
     }
-    if (displayQuoteHasCoreData && currentStrategicPanel) {
+    if (!proModeLocked && displayQuoteHasCoreData && currentStrategicPanel) {
       return strategicConclusionFromPanel(currentStrategicPanel, appLocale);
     }
     const hasCoreData = Boolean(displayQuoteHasCoreData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
@@ -10550,7 +10847,13 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       : hasCoreData && numericRankingScore != null
         ? numericRankingScore / 10
         : null;
-    const rsiNumber = firstValidRsiNumber(derivedPublicInsight?.rsi, currentRanking?.rsi, (displayQuote as any)?.rsi);
+    const rsiNumber = firstValidRsiNumber(
+      chartTimeframeRsi,
+      panelRsiValue,
+      derivedPublicInsight?.rsi,
+      currentRanking?.rsi,
+      (displayQuote as any)?.rsi,
+    );
     const averageVolume = firstPositiveFiniteNumber(
       (displayQuote as any)?.average_volume,
       (displayQuote as any)?.averageVolume,
@@ -10558,13 +10861,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       currentWatchItem?.averageVolume,
     );
     const resolvedVolume = firstPositiveFiniteNumber(headerVolume, displayQuote?.volume);
-    const relVolume = firstPositiveFiniteNumber(
-      derivedPublicInsight?.rel_volume,
-      currentRanking?.rel_volume,
-      (displayQuote as any)?.rel_volume,
-      (displayQuote as any)?.rvol,
-      currentWatchItem?.relVolume,
+    const resolvedDailyVolumeRatio = firstPositiveFiniteNumber(
+      dailyVolumeRatio,
       calculateRelativeVolume(resolvedVolume, averageVolume),
+    );
+    const relVolume = firstPositiveFiniteNumber(
+      assetMetrics?.rvol?.status === "READY" ? assetMetrics.rvol.rvol_ratio : null,
     );
     const [scoreCard, directionCard, tradeCard, regimeCard, flowCard, liquidityCard, riskCard] = essentialDecisionCards;
     return buildStrategicConclusion({
@@ -10579,39 +10881,52 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       liquidity: liquidityCard?.value || "",
       risk: riskCard?.value || "",
       rsi: rsiNumber,
+      rsiTimeframe: rsiTimeframeLabel,
+      price: firstFiniteNumber(displayQuote?.price),
+      changePct: firstFiniteNumber(displayQuote?.change_pct),
       volume: resolvedVolume,
-      averageVolume,
+      dailyVolumeRatio: resolvedDailyVolumeRatio,
       relVolume,
+      chartTrend: humanizeMachineLabel(chartTrendText || trendText, appLocale),
+      chartSignal: chartSignalText,
+      chartTimeframe: chartAnalysisTimeframe,
+      chartAsOf: chartDataAsOf || null,
       hasCoreData: Boolean(hasCoreData && resolvedVolume != null && resolvedVolume > 0 && numericScoreFromDecisionCard(scoreCard) != null),
     });
   }, [
     appLocale,
+    assetMetrics,
+    chartAnalysisTimeframe,
+    chartDataAsOf,
+    chartSignalText,
+    chartTimeframeRsi,
+    chartTrendText,
     currentStrategicPanel,
-    currentRanking?.rel_volume,
     currentRanking?.rsi,
-    currentRanking?.trend,
     currentWatchItem?.averageVolume,
-    currentWatchItem?.relVolume,
-    derivedPublicInsight?.rel_volume,
     derivedPublicInsight?.rsi,
+    dailyVolumeRatio,
     displayQuote,
-    displayQuote?.price,
-    displayQuote?.volume,
     displayQuoteHasCoreData,
     effectiveAiScore,
     essentialDecisionCards,
     headerVolume,
+    isUsLocale,
     numericRankingScore,
+    panelRsiValue,
+    proModeLocked,
+    rsiTimeframeLabel,
     selectedTicker,
     strategicAnalysisMinute,
     symbolOperationalView,
+    trendText,
   ]);
   const hasStrategicCoreData = Boolean(displayQuoteHasCoreData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
   const rawOperationalDecision = useMemo(() => {
     if (symbolOperationalView) {
       return operationalDecisionFromSymbolContext(symbolOperationalView, appLocale);
     }
-    if (displayQuoteHasCoreData && currentStrategicPanel) {
+    if (!proModeLocked && displayQuoteHasCoreData && currentStrategicPanel) {
       return operationalDecisionFromPanel(currentStrategicPanel, appLocale);
     }
     return buildOperationalDecision({
@@ -10630,6 +10945,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     displayQuoteHasCoreData,
     essentialDecisionCards,
     hasStrategicCoreData,
+    proModeLocked,
     strategicConclusion,
     symbolOperationalView,
   ]);
@@ -10642,13 +10958,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       locale: appLocale,
       symbol: selectedTicker,
       cards: essentialDecisionCards,
+      conclusion: strategicConclusion,
       operationalDecision: alignedOperationalDecision,
       hasCoreData: hasStrategicCoreData,
       executionReady: executionMetricsReady,
       pendingComponents: operationalBlockComponents,
       symbolContext: symbolOperationalView,
     }),
-    [alignedOperationalDecision, appLocale, essentialDecisionCards, executionMetricsReady, hasStrategicCoreData, operationalBlockComponents, selectedTicker, symbolOperationalView],
+    [alignedOperationalDecision, appLocale, essentialDecisionCards, executionMetricsReady, hasStrategicCoreData, operationalBlockComponents, selectedTicker, strategicConclusion, symbolOperationalView],
   );
   const operationalDecision = useMemo(
     () => operationalDecisionFromStrategicContract(strategicDecisionContract),
@@ -10854,8 +11171,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             <path className="snbr-meter-track" d="M 24 82 A 56 56 0 0 1 136 82" />
             <path className="snbr-meter-arc bearish" d="M 24 82 A 56 56 0 0 1 80 26" />
             <path className="snbr-meter-arc bullish" d="M 80 26 A 56 56 0 0 1 136 82" />
-            <line className="snbr-meter-needle-line" x1="80" y1="82" x2={needleX} y2={needleY} />
-            <circle className="snbr-meter-needle-dot" cx="80" cy="82" r="5" />
+            {normalized != null ? (
+              <>
+                <line className="snbr-meter-needle-line" x1="80" y1="82" x2={needleX} y2={needleY} />
+                <circle className="snbr-meter-needle-dot" cx="80" cy="82" r="5" />
+              </>
+            ) : null}
             <text className="snbr-meter-value-svg" x="80" y="58" textAnchor="middle">
               {displayValue ?? (normalized == null ? "—" : Math.round(normalized))}
             </text>
@@ -11214,12 +11535,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
   function renderDiscussionList(posts: FeedPost[], emptyText: string) {
     if (!posts.length) {
-      return (
-        <div className="snbr-empty-thread">
-          <strong>{isUsLocale ? "No featured social discussion for this ticker yet." : emptyText}</strong>
-          <p>{isUsLocale ? `Open the conversation with your thesis, post a chart screenshot or comment on the market read for ${selectedTicker}.` : `Abra a conversa com sua tese, poste um print do gráfico ou comente a leitura do mercado para ${selectedTicker}.`}</p>
-        </div>
-      );
+      return null;
     }
 
     return (
@@ -11478,7 +11794,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
     if (currentAiKey) {
       const currentAiSoundEnabled = aiToolSoundEnabled(aiToolSoundSettings, currentAiKey);
-      const aiSoundLocked = proModeLocked && currentAiKey !== "risk";
+      const aiSoundLocked = aiAccessLocked;
       return (
         <section
           id={`panel-${currentTab}`}
@@ -11564,8 +11880,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 const detectedAt = resolveAiFindingTimestamp(item);
                 const updatedAt = normalizeAlertTimestamp((item as any).last_confirmed_at) || normalizeAlertTimestamp((item as any).updated_at);
                 const asOf = normalizeAlertTimestamp((item as any).as_of);
+                const sourceAsOf = normalizeAlertTimestamp(item.source_as_of) || asOf;
+                const evaluatedAt = normalizeAlertTimestamp(item.evaluated_at) || updatedAt || detectedAt;
                 const publishedAt = resolveAiPublishedTimestamp(item);
-                const freshness = aiFreshnessStatus(detectedAt, viewedAtIso, appLocale);
+                const freshness = aiFreshnessStatus(sourceAsOf || detectedAt, viewedAtIso, appLocale);
 
                 return (
                   <div key={`${currentTab}-${item.ticker}-${index}`} className="snbr-tool-row">
@@ -11576,10 +11894,8 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                           <p>{isUsLocale ? "Daily alert from the current lens, with detection time and execution criteria." : "Alerta diário da lente atual, com horário detectado e critérios de execução."}</p>
                         </div>
                         <div className="snbr-news-chip-row snbr-temporal-chip-row">
-                          <span className="snbr-chip">{isUsLocale ? "Detected" : "Detectado"}: {formatAiUpdatedAt(detectedAt, appLocale)}</span>
-                          {updatedAt ? <span className="snbr-chip">{isUsLocale ? "Updated" : "Atualizado"}: {formatAiUpdatedAt(updatedAt, appLocale)}</span> : null}
-                          {asOf ? <span className="snbr-chip">{isUsLocale ? "Data through" : "Dados até"}: {formatAiUpdatedAt(asOf, appLocale)}</span> : null}
-                          <span className="snbr-chip">{String((item as any).freshness_status || "READY")}</span>
+                          <span className="snbr-chip">{isUsLocale ? "Analysis calculated at" : "Análise calculada em"}: {formatAiUpdatedAt(evaluatedAt, appLocale)}</span>
+                          {sourceAsOf ? <span className="snbr-chip">{isUsLocale ? "Data used through" : "Dados usados até"}: {formatAiUpdatedAt(sourceAsOf, appLocale)}</span> : null}
                           {publishedAt ? <span className="snbr-chip">{isUsLocale ? "Published at" : "Publicado às"}: {formatAiUpdatedAt(publishedAt, appLocale)}</span> : null}
                           <span className={cx("snbr-chip", freshness.tone)}>{freshness.label}</span>
                         </div>
@@ -11587,7 +11903,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                       <button className="snbr-asset-box snbr-asset-box-large" onClick={() => selectTicker(item.ticker)} type="button">
                         <div className="snbr-asset-box-head">
                           <strong>{item.ticker}</strong>
-                          <span className={cx("snbr-side-badge", scoreClass(item.score))}>
+                          <span className={cx("snbr-side-badge", scoreClass(item.score, (item as any).tone))}>
                             {currentTab === "flow" ? <i className={cx("snbr-score-dot", tone)} aria-hidden="true" /> : null}
                             Score {item.score.toFixed(1)}
                           </span>
@@ -11752,7 +12068,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                   <button className="snbr-asset-box snbr-asset-box-large" onClick={() => selectTicker(item.symbol)} type="button">
                     <div className="snbr-asset-box-head">
                       <strong>{item.symbol}</strong>
-                      <span className={cx("snbr-side-badge", scoreClass(item.score))}>
+                      <span className={cx("snbr-side-badge", scoreClass(item.score, (item as any).tone))}>
                         {currentTab === "flow" ? <i className={cx("snbr-score-dot", tone)} aria-hidden="true" /> : null}
                         Score {item.score != null ? item.score.toFixed(1) : "n/a"}
                       </span>
@@ -11845,6 +12161,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     // a count: an item missing only a source_url is still worth reading.
     const chartNews = newsRows.find((item) => !item.isIncomplete) || newsRows[0];
     const chartNewsTime = chartNews?.publishedTime || "";
+    const chartNewsHistorical = Boolean(
+      chartNews && (newsIsHistorical || chartNews.isStale === true || chartNews.isToday === false),
+    );
     const chartNewsTitle = chartNews
       ? chartNews.headline
       : (isUsLocale ? "No ticker-specific news" : "Sem notícia específica do ativo");
@@ -11858,6 +12177,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       { key: "show_vwap", checked: showVwap, label: "VWAP" },
       { key: "show_macd", checked: showMacd, label: "MACD" },
       { key: "show_rsi", checked: showRsi, label: isUsLocale ? "Panel RSI" : "RSI painel" },
+      { key: "show_supertrend", checked: showSupertrend, label: "Supertrend" },
       { key: "show_volume", checked: showVolume, label: isUsLocale ? "Chart volume" : "Volume gráfico" },
     ];
 
@@ -11911,14 +12231,28 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             }}
             locale={appLocale}
           />
+          <p className="snbr-assistive-copy" data-chart-analysis-source-note="true">
+            {isUsLocale
+              ? "TradingView indicators use an external feed. The AI conclusion uses the normalized internal snapshot whose timeframe and cutoff are shown in the analysis basis; a provider difference never authorizes a trade."
+              : "Os indicadores da TradingView usam fonte externa. A conclusão da IA usa o snapshot interno normalizado, com timeframe e horário-limite informados na base da análise; divergência entre provedores nunca autoriza operação."}
+          </p>
 
           <div className="snbr-chart-now-strip">
             <div>
               <span>
-                {isUsLocale ? "Latest news" : "Última notícia"} · {selectedTicker}
+                {chartNewsHistorical
+                  ? (isUsLocale ? "Latest available news (historical)" : "Última notícia disponível (histórico)")
+                  : (isUsLocale ? "Latest news" : "Última notícia")} · {selectedTicker}
                 {chartNews?.source ? ` · ${chartNews.source}` : ""}
                 {chartNewsTime ? ` · ${chartNewsTime}` : ""}
               </span>
+              {chartNewsHistorical ? (
+                <p className="snbr-assistive-copy">
+                  {isUsLocale
+                    ? `No current validated news for ${selectedTicker}. Showing the latest historical item available${chartNewsTime ? ` from ${chartNewsTime}` : ""}.`
+                    : `Sem notícia atual validada para ${selectedTicker}. Exibindo a última disponível no histórico${chartNewsTime ? `, de ${chartNewsTime}` : ""}.`}
+                </p>
+              ) : null}
               <strong>{chartNewsTitle}</strong>
               {showChartNewsBody ? <p>{chartNewsText}</p> : null}
             </div>
@@ -11941,7 +12275,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             {renderMeterCard(
               isUsLocale ? "Current volume / daily average" : "Volume atual / média diária",
               dailyVolumeLabel,
-              dailyVolumeRatio == null ? null : dailyVolumeRatio * 100,
+              dailyVolumeRatio == null ? null : dailyVolumeRatio * 50,
               dailyVolumeRatio != null && dailyVolumeRatio >= 1.3 ? "bullish" : dailyVolumeRatio != null && dailyVolumeRatio < 0.7 ? "bearish" : "neutral",
               dailyVolumeRatio == null ? "—" : `${formatLocalePrice(dailyVolumeRatio, appLocale)}×`,
               isUsLocale ? "Informational data" : "Dado informativo",
@@ -11978,6 +12312,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             </div>
           ) : null}
         </section>
+
+        <div className="snbr-trader-social-banner">
+          <h2>{isUsLocale ? "Trader Social Network" : "Rede Social do Trader"}</h2>
+        </div>
 
         <section className="snbr-poll-inline">
           <div className="snbr-plain-panel snbr-poll-shell">
@@ -12056,6 +12394,12 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
                 </div>
               ) : null}
             </div>
+            ) : pollOpen ? (
+              <p className="snbr-assistive-copy snbr-poll-empty">
+                {isUsLocale
+                  ? "No active vote. Votes open automatically around the asset's relevant events."
+                  : "Sem votação ativa. As votações são abertas automaticamente quando há eventos relevantes do ativo."}
+              </p>
             ) : null}
           </div>
         </section>
@@ -12076,6 +12420,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         selectedTicker={selectedTicker}
         newsRows={newsRows}
         newsStateText={newsStateText}
+        newsStatus={newsStatusForPanel}
       />
     );
   }
@@ -12243,8 +12588,248 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     );
   }
 
+  function renderStockFlowPanel() {
+    return (
+      <div className="snbr-stock-flow-container">
+        <div className="snbr-stock-flow-banner">
+          <div className="snbr-stock-flow-title-row">
+            <div className="snbr-stock-flow-brand-title">
+              <h2>🔥 STOCK FLOW</h2>
+              <span className="snbr-stock-flow-badge">{isUsLocale ? "Official Real-Time Market Flow" : "O fluxo oficial do mercado em tempo real"}</span>
+            </div>
+            <span className="snbr-chip neutral">{isUsLocale ? "Monday 07/27" : "Segunda 27/07"}</span>
+          </div>
+          <p className="snbr-stock-flow-desc">
+            {isUsLocale
+              ? "The heart of StockNewsBR community. Every day a new theme, exclusive analysis, polls and community discussions."
+              : "O coração da comunidade StockNewsBR. Todos os dias um novo tema, análises exclusivas, enquetes e discussão da comunidade."}
+          </p>
+        </div>
+
+        <div className="snbr-stock-flow-subnav" role="tablist" aria-label="Stock Flow Days">
+          {[
+            { id: "aovivo", label: "🔴 Ao Vivo" },
+            { id: "seg", label: "Seg" },
+            { id: "ter", label: "Ter" },
+            { id: "qua", label: "Qua" },
+            { id: "qui", label: "Qui" },
+            { id: "sex", label: "Sex" },
+            { id: "sab", label: "Sáb" },
+            { id: "dom", label: "Dom" },
+          ].map((dayItem) => (
+            <button
+              key={dayItem.id}
+              className={cx("snbr-stock-flow-subnav-btn", activeStockFlowDay === dayItem.id && "active")}
+              onClick={() => setActiveStockFlowDay(dayItem.id)}
+              type="button"
+              role="tab"
+              aria-selected={activeStockFlowDay === dayItem.id}
+            >
+              {dayItem.label}
+            </button>
+          ))}
+        </div>
+
+        {activeStockFlowDay === "aovivo" ? (
+          <div className="snbr-stock-flow-live-card">
+            <div className="snbr-stock-flow-live-header">
+              <span className="snbr-live-pulse-dot">🔴</span>
+              <strong>AO VIVO</strong>
+              <span className="snbr-chip neutral">{isUsLocale ? "Se acontecer algo importante... fica fixo no topo." : "Se acontecer algo importante... fica fixo no topo."}</span>
+            </div>
+            {stockFlowLiveItems.length > 0 ? (
+              <div className="snbr-stock-flow-live-updates">
+                {stockFlowLiveItems.map((item) => (
+                  <div key={item.id} className="snbr-live-update-item">
+                    {item.text}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {isStockFlowAdmin ? (
+            <div className="snbr-live-composer">
+              <textarea
+                className="snbr-input"
+                style={{ minHeight: "180px" }}
+                value={stockFlowLiveInput}
+                onChange={(e) => setStockFlowLiveInput(e.target.value)}
+                placeholder=""
+              />
+              <button className="snbr-button primary" onClick={handlePublishStockFlowLiveItem} type="button">
+                {isUsLocale ? "PUBLICAR AO VIVO" : "PUBLICAR AO VIVO"}
+              </button>
+            </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="snbr-plain-panel snbr-stock-flow-card">
+          <div className="snbr-stock-flow-card-head">
+            <div>
+              <h3>📢 EDITORIAL OFICIAL STOCKNEWSBR</h3>
+              <span>{editorialDate}</span>
+            </div>
+            {isStockFlowAdmin ? (
+            <div className="snbr-pill-row">
+              <button
+                className="snbr-button secondary"
+                onClick={editingStockFlowEditorial ? () => setEditingStockFlowEditorial(false) : handleStartEditEditorial}
+                type="button"
+              >
+                {editingStockFlowEditorial ? (isUsLocale ? "Cancelar" : "Cancelar") : (isUsLocale ? "✍️ Editar" : "✍️ Editar")}
+              </button>
+            </div>
+            ) : null}
+          </div>
+
+          {editingStockFlowEditorial ? (
+            <div className="snbr-editorial-form">
+              <div className="snbr-editorial-field">
+                <label>{isUsLocale ? "Data / Horário" : "Data / Horário"}</label>
+                <input
+                  className="snbr-input"
+                  value={editEditorialDateInput}
+                  onChange={(e) => setEditEditorialDateInput(e.target.value)}
+                  placeholder="Ex: 24 de Julho de 2026 — 08:30"
+                />
+              </div>
+              <div className="snbr-editorial-field">
+                <label>{isUsLocale ? "Título do Editorial" : "Título do Editorial"}</label>
+                <input
+                  className="snbr-input"
+                  value={editEditorialTitleInput}
+                  onChange={(e) => setEditEditorialTitleInput(e.target.value)}
+                  placeholder="Ex: 📊 ABERTURA DO MERCADO & VISÃO DO DIA"
+                />
+              </div>
+              <div className="snbr-editorial-field">
+                <label>{isUsLocale ? "Texto Principal / Citação" : "Texto Principal / Citação"}</label>
+                <textarea
+                  className="snbr-input"
+                  style={{ minHeight: "80px" }}
+                  value={editEditorialQuoteInput}
+                  onChange={(e) => setEditEditorialQuoteInput(e.target.value)}
+                  placeholder="Escreva a visão de mercado do dia..."
+                />
+              </div>
+              <div className="snbr-editorial-field">
+                <label>{isUsLocale ? "Pontos Importantes (1 por linha)" : "Pontos Importantes (1 por linha)"}</label>
+                <textarea
+                  className="snbr-input"
+                  style={{ minHeight: "80px" }}
+                  value={editEditorialPointsInput}
+                  onChange={(e) => setEditEditorialPointsInput(e.target.value)}
+                  placeholder="Agenda econômica&#10;Empresas do trimestre&#10;Eventos do dia"
+                />
+              </div>
+              <button className="snbr-button primary" onClick={handleSaveEditorial} type="button">
+                {isUsLocale ? "PUBLICAR EDITORIAL" : "PUBLICAR EDITORIAL"}
+              </button>
+            </div>
+          ) : (
+            <div className="snbr-stock-flow-editorial-body">
+              <h4>{editorialTitle}</h4>
+              <p className="snbr-editorial-quote">
+                &quot;{editorialQuote}&quot;
+              </p>
+              <div className="snbr-editorial-points">
+                <strong>Pontos importantes:</strong>
+                <ul>
+                  {editorialPoints.map((pt, idx) => (
+                    <li key={idx}>{pt}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="snbr-plain-panel snbr-stock-flow-card">
+          <div className="snbr-stock-flow-card-head">
+            {editingStockFlowPollQuestion ? (
+              <div style={{ flex: 1, marginRight: "12px" }}>
+                <input
+                  className="snbr-input"
+                  value={editStockFlowPollQuestionInput}
+                  onChange={(e) => setEditStockFlowPollQuestionInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSavePollQuestion(); }}
+                  placeholder="Qual o seu viés para o Ibovespa hoje?"
+                />
+              </div>
+            ) : (
+              <h3>📊 ENQUETE DO DIA: {stockFlowPollQuestion}</h3>
+            )}
+            <div className="snbr-pill-row">
+              <span className="snbr-chip">1.910 {isUsLocale ? "votes" : "votos"}</span>
+              {isStockFlowAdmin ? (
+              <button
+                className="snbr-button secondary"
+                onClick={editingStockFlowPollQuestion ? handleSavePollQuestion : handleStartEditPollQuestion}
+                type="button"
+              >
+                {editingStockFlowPollQuestion ? (isUsLocale ? "Salvar" : "Salvar") : (isUsLocale ? "✍️ Editar" : "✍️ Editar")}
+              </button>
+              ) : null}
+            </div>
+          </div>
+          <div className="snbr-stock-flow-poll-options">
+            <div className={cx("snbr-stock-flow-poll-option", stockFlowPollVote === "A" && "selected")}>
+              <div className="snbr-poll-opt-info">
+                <strong>[ A ] 🐂 Touro (Alta)</strong>
+                <span>{stockFlowPollVote ? "65% (1.240 votos)" : "65%"}</span>
+              </div>
+              <div className="snbr-poll-bar-bg"><div className="snbr-poll-bar-fill bullish" style={{ width: "65%" }}></div></div>
+              <button className="snbr-button secondary" onClick={() => setStockFlowPollVote("A")} type="button">
+                {stockFlowPollVote === "A" ? (isUsLocale ? "Voted ✓" : "Votado ✓") : (isUsLocale ? "VOTAR AGORA" : "VOTAR AGORA")}
+              </button>
+            </div>
+            <div className={cx("snbr-stock-flow-poll-option", stockFlowPollVote === "B" && "selected")}>
+              <div className="snbr-poll-opt-info">
+                <strong>[ B ] 🐻 Urso (Baixa)</strong>
+                <span>{stockFlowPollVote ? "35% (670 votos)" : "35%"}</span>
+              </div>
+              <div className="snbr-poll-bar-bg"><div className="snbr-poll-bar-fill bearish" style={{ width: "35%" }}></div></div>
+              <button className="snbr-button secondary" onClick={() => setStockFlowPollVote("B")} type="button">
+                {stockFlowPollVote === "B" ? (isUsLocale ? "Voted ✓" : "Votado ✓") : (isUsLocale ? "VOTAR AGORA" : "VOTAR AGORA")}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="snbr-plain-panel snbr-stock-flow-card">
+          <div className="snbr-stock-flow-card-head">
+            <h3>💬 CHAT DOS TRADERS | NOTICIA DO DIA</h3>
+            <span className="snbr-chip bullish">342 online</span>
+          </div>
+          <div className="snbr-stock-flow-chat-messages">
+            {stockFlowChatMessages.map((msg) => (
+              <div key={msg.id} className="snbr-stock-flow-chat-line">
+                <span className="snbr-chat-time">[{msg.time}]</span>
+                <strong className="snbr-chat-user">{msg.user}:</strong>
+                <span className="snbr-chat-text">&quot;{msg.text}&quot;</span>
+              </div>
+            ))}
+          </div>
+          <div className="snbr-stock-flow-chat-composer">
+            <input
+              className="snbr-input"
+              value={stockFlowChatInput}
+              onChange={(e) => setStockFlowChatInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSendStockFlowChatMessage(); }}
+              placeholder={isUsLocale ? "Type your message or analysis here..." : "✍️ Digite sua mensagem ou análise aqui..."}
+            />
+            <button className="snbr-button primary" onClick={handleSendStockFlowChatMessage} type="button">
+              {isUsLocale ? "SEND" : "ENVIAR"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderCenterPanel() {
     if (currentTab === "grafico") return renderGrafico();
+    if (currentTab === "stockflow") return renderStockFlowPanel();
     if (currentTab === "news") return renderNews();
     if (currentTab === "busca") return renderSearchTab();
     if (currentTab === "flow") return renderToolTab(TOOL_COPY.flow.title, TOOL_COPY.flow.description);
@@ -13034,16 +13619,27 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               const isAiTab = Boolean(AI_TOOL_TAB_MAP[tab.id as keyof typeof AI_TOOL_TAB_MAP]);
               const isGlobalAiAlertTab = GLOBAL_AI_ALERT_TAB_IDS.has(tab.id);
               const tabCount = tab.id === "news"
-                ? newsRows.length
+                ? freshNewsCount
                 : isAiTab
                   ? aiToolFindingCounts[tab.id] ?? 0
                   : 0;
-              const showTabCount = tabCount != null && (tab.id === "news" || isAiTab);
-              const tabTitle = isGlobalAiAlertTab
-                ? (isUsLocale
+              // A "0" chip on every AI tab reads as a broken feature. The count badge is meant to
+              // flag "N findings here" -- with none, show just the tab name (the panel itself says
+              // "no signals" on open). Only surface the chip when there is a real count.
+              const showTabCount = tabCount != null && tabCount > 0 && (tab.id === "news" || isAiTab);
+              const tabTitle = tab.id === "news"
+                ? newsIsHistorical
+                  ? (isUsLocale
+                      ? `${meta.label} — no current validated news; ${newsRows.length} historical item(s) available.`
+                      : `${meta.label} — nenhuma notícia atual validada; ${newsRows.length} item(ns) histórico(s) disponível(is).`)
+                  : (isUsLocale
+                      ? `${meta.label} — ${freshNewsCount} current validated news item(s).`
+                      : `${meta.label} — ${freshNewsCount} notícia(s) atual(is) validada(s).`)
+                : isGlobalAiAlertTab
+                  ? (isUsLocale
                     ? `${meta.label} — ${tabCount} current global market alerts; not the selected asset's on-demand analysis.`
                     : `${meta.label} — ${tabCount} alertas globais atuais do mercado; não são a análise sob demanda do ativo selecionado.`)
-                : meta.label;
+                  : meta.label;
 
               return (
                 <div key={tab.id} className="snbr-symbol-tab-shell">

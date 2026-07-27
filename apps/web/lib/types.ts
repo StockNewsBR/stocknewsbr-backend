@@ -46,6 +46,7 @@ export type StrategicPanel = {
   recommended_action?: string;
   liquidez_alvo?: number | null;
   strategic_panel_summary?: string;
+  llm_conclusion?: string | null;
   why?: StrategicPanelWhyItem[];
   opinion_change_conditions?: string[];
   no_trade_now?: boolean;
@@ -378,6 +379,11 @@ export type AiToolRow = {
   updated_at?: string;
   detected_at?: string;
   last_seen_at?: string;
+  source_as_of?: string | null;
+  evaluated_at?: string | null;
+  freshness_status?: string | null;
+  freshness_basis?: string | null;
+  freshness_reason?: string | null;
   active?: boolean;
   decision_state?: string | null;
   decision_ready?: boolean | null;
@@ -449,6 +455,8 @@ export type PublicAiToolsPayload = {
   analyzed_at?: string | null;
   displayable_count?: number;
   actionable_count?: number;
+  locked?: boolean;
+  access_status?: string | null;
 };
 
 export type HelpGuide = {
@@ -1000,7 +1008,7 @@ export type SymbolMetricComponent = {
   source?: string | null;
   reason?: string | null;
   thresholds?: Record<string, number> | null;
-  side?: "BUY_SIDE" | "SELL_SIDE" | null;
+  side?: "BUY_SIDE" | "SELL_SIDE" | "BOTH_SIDES" | null;
   low?: number | null;
   high?: number | null;
   midpoint?: number | null;

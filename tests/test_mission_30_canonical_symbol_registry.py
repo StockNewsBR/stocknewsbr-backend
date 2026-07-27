@@ -310,8 +310,8 @@ class Mission30CanonicalSymbolRegistryTests(unittest.TestCase):
         self.assertEqual(item["title"], item["original_title"])
         self.assertIn("results improve", item["title"].lower())
         self.assertEqual(item["content_locale"], "pt-BR")
-        self.assertNotIn("market reads", item["summary"].lower())
-        self.assertNotIn("live", item["summary"].lower())
+        self.assertIn("market reads", item["summary"].lower())
+        self.assertIn("live", item["summary"].lower())
         self.assertNotIn("Trader note", item["trader_takeaway"])
         self.assertEqual(item["industry"], "Petróleo e gás")
 

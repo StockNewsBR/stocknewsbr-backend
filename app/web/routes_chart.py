@@ -91,6 +91,6 @@ def get_chart(ticker: str, interval: str = "1D"):
 
     except Exception as e:
 
-        logger.error(f"Chart route error: {e}")
+        logger.error("Chart route error: %s", e)
 
         return {}

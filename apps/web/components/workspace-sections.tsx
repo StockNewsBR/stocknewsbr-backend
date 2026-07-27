@@ -225,7 +225,7 @@ type NewsPanelProps = {
   selectedTicker: string;
   newsRows: WorkspaceNewsRow[];
   newsStateText?: string | null;
-  /** Backend news payload status ("ok" | "empty" | "error"); inferred from newsStateText when absent. */
+  /** Backend news payload status; historical rows remain visible but are never presented as current. */
   newsStatus?: string | null;
   onRetry?: () => void;
 };
@@ -234,12 +234,20 @@ type NewsPanelProps = {
  * loading = no payload for this ticker yet, or the backend only scheduled the real fetch
  * error   = the fetch failed
  * empty   = the backend answered for this ticker and there is genuinely nothing
- * ready   = at least one row to render
+ * historical = rows exist, but none is a current validated headline
+ * ready      = at least one current row to render
  */
 export function newsPanelPhase(rowCount: number, newsStateText?: string | null, newsStatus?: string | null) {
-  if (rowCount > 0) return "ready" as const;
   const status = normalizeText(newsStatus || "");
   const state = normalizeText(newsStateText || "");
+  const historical =
+    status.includes("historical") ||
+    status.includes("stale") ||
+    status.includes("no_fresh_news") ||
+    state.includes("histor") ||
+    state.includes("sem noticia atual") ||
+    state.includes("no current news");
+  if (rowCount > 0) return historical ? "historical" as const : "ready" as const;
   if (status === "error" || state.includes("falha") || state.includes("failed")) return "error" as const;
   if (status === "loading" || status === "pending") return "loading" as const;
   // The backend always ships a message with a real answer, so no message means the
@@ -277,7 +285,9 @@ export function WorkspaceNewsPanel({
     ? `Could not load the news for ${selectedTicker}.`
     : `Não foi possível carregar as notícias de ${selectedTicker}.`;
   const assistiveText = phase === "ready"
-    ? `${newsRows.length} ${isEnglish ? `useful news items prepared for ${selectedTicker}.` : `notícias úteis preparadas para ${selectedTicker}.`}`
+    ? `${newsRows.length} ${isEnglish ? "useful news items prepared :" : "notícias úteis preparadas :"}`
+    : phase === "historical"
+      ? `${newsRows.length} ${isEnglish ? "historical news item(s) available; no current headline was validated." : "notícia(s) histórica(s) disponível(is); nenhuma manchete atual foi validada."}`
     : phase === "loading"
       ? loadingNewsText
       : phase === "error"
@@ -305,11 +315,25 @@ export function WorkspaceNewsPanel({
         <div className="snbr-section-head">
           <div>
             <h3>{isEnglish ? "News for" : "Notícias de"} {selectedTicker}</h3>
-            <p>{isEnglish ? "Relevant ticker news, cleaned, deduplicated and prioritized for a quick read." : "Notícias relevantes do ativo, limpadas, deduplicadas e priorizadas para leitura rápida."}</p>
+            <p>{isEnglish ? "Relevant ticker news." : "Notícias relevantes do ativo."}</p>
           </div>
         </div>
         <p className="snbr-assistive-copy" aria-live="polite">{assistiveText}</p>
         <div className="snbr-headline-list">
+          {phase === "historical" ? (
+            <div className="snbr-empty-thread" data-news-historical="true">
+              <strong>
+                {isEnglish
+                  ? `No current validated news for ${selectedTicker}.`
+                  : `Sem notícia atual validada para ${selectedTicker}.`}
+              </strong>
+              <p>
+                {isEnglish
+                  ? "The items below are the latest historical records available and do not count as today's news."
+                  : "Os itens abaixo são os últimos registros históricos disponíveis e não contam como notícias de hoje."}
+              </p>
+            </div>
+          ) : null}
           {newsRows.map((item) => {
             const detailLines = uniqueNewsLines(item.headline, [
               item.title,

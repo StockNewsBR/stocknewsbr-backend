@@ -52,7 +52,7 @@ def detect_liquidity_sweep(df):
 
     except Exception as e:
 
-        logger.debug(f"Liquidity sweep error: {e}")
+        logger.debug("Liquidity sweep error: %s", e)
 
         return False
 
@@ -73,7 +73,7 @@ def detect_stop_hunt(df):
 
     except Exception as e:
 
-        logger.debug(f"Stop hunt error: {e}")
+        logger.debug("Stop hunt error: %s", e)
 
         return False
 
@@ -95,7 +95,7 @@ def detect_fake_breakout(df):
 
     except Exception as e:
 
-        logger.debug(f"Fake breakout error: {e}")
+        logger.debug("Fake breakout error: %s", e)
 
         return False
 
@@ -118,7 +118,7 @@ def detect_momentum_burst(df):
 
     except Exception as e:
 
-        logger.debug(f"Momentum burst error: {e}")
+        logger.debug("Momentum burst error: %s", e)
 
         return False
 
@@ -141,7 +141,7 @@ def detect_volume_expansion(df):
 
     except Exception as e:
 
-        logger.debug(f"Volume expansion error: {e}")
+        logger.debug("Volume expansion error: %s", e)
 
         return False
 
@@ -187,7 +187,7 @@ def analyze_market_radar(ticker, df):
 
     except Exception as e:
 
-        logger.error(f"Market radar error {ticker}: {e}")
+        logger.error("Market radar error {ticker}: %s", e)
 
         return None
 
@@ -218,6 +218,6 @@ Events detected:
 
     except Exception as e:
 
-        logger.error(f"Radar formatting error: {e}")
+        logger.error("Radar formatting error: %s", e)
 
         return "Radar formatting error"

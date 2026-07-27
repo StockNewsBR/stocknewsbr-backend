@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 from typing import Any, Iterable
 
 from app.services.score_display import attach_master_score_display_contract
@@ -138,11 +139,14 @@ def data_quality_score(quality: str) -> int:
     }.get(normalized, 0)
 
 
-def safe_float(value: Any, default: float = 0.0) -> float:
+def safe_float(value: Any, default: Any = 0.0) -> Any:
     try:
         if value is None or value == "":
             return default
-        return float(value)
+        f_val = float(value)
+        if not math.isfinite(f_val):
+            return default
+        return f_val
     except (TypeError, ValueError):
         return default
 

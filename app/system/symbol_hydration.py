@@ -171,7 +171,7 @@ def _gate_decision(payload: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         confidence = None
     reasons = []
-    if not any(isinstance(row, dict) for row in tools.get("flow", [])):
+    if not any(isinstance(row, dict) for row in tools.get("institutional_flow", [])):
         reasons.append("fluxo institucional sem leitura atual")
     if not any(isinstance(row, dict) for row in tools.get("liquidity", [])):
         reasons.append("liquidez sem leitura atual")
@@ -210,7 +210,11 @@ def _run(symbol: str, timeframe: str) -> None:
             quote = _quote(symbol)
             intraday = _chart(symbol, "1D")
             daily = _chart(symbol, "3M")
-            if quote and intraday and daily:
+            # Quote is optional: _analysis_input builds the seed from candles alone. Many B3
+            # symbols never get a cached quote, so requiring it here left every one of them stuck
+            # in INSUFFICIENT_DATA with no strategic_panel -- i.e. the same "AGUARDAR" template
+            # for a rising and a falling stock. Candles (with closes) are what the panel needs.
+            if intraday and daily:
                 seed = _analysis_input(symbol, intraday, daily, quote)
                 if seed is None:
                     missing_components = []
@@ -281,9 +285,9 @@ def request_symbol_hydration(symbol: str, *, timeframe: str = "1D", locale: str 
     from app.system.quote_warmup import request_on_demand_quote_warmup
 
     request_on_demand_quote_warmup(ticker)
-    chart_intervals = ["1D", "3M", timeframe]
-    if symbol_category(ticker) == "Crypto":
-        chart_intervals.append("@5M")
+    # @5M (multi-day 5m) is required by the comparable intraday-RVOL component. Warming it only
+    # for crypto is why equities never got that component -> auditor blocked -> same NEUTRAL verdict.
+    chart_intervals = ["1D", "3M", timeframe, "@5M"]
     request_on_demand_chart_warmup(ticker, tuple(dict.fromkeys(chart_intervals)))
     request_news_warmup(ticker, limit=news_limit, locale=content_locale)
     key = _key(ticker, timeframe)

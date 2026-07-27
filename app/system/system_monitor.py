@@ -33,7 +33,7 @@ def check_database() -> str:
 
     except Exception as e:
 
-        logger.error(f"Database error: {e}")
+        logger.error("Database error: %s", e)
 
         return "offline"
 
@@ -58,7 +58,7 @@ def check_engine() -> str:
 
     except Exception as e:
 
-        logger.error(f"Engine error: {e}")
+        logger.error("Engine error: %s", e)
 
         return "error"
 
@@ -78,7 +78,7 @@ def check_service(name: str) -> str:
 
     except Exception as e:
 
-        logger.error(f"{name} status error: {e}")
+        logger.error("{name} status error: %s", e)
 
         return "unknown"
 
@@ -107,7 +107,7 @@ def check_signal_cache() -> Dict[str, Any]:
 
     except Exception as e:
 
-        logger.error(f"Signal cache error: {e}")
+        logger.error("Signal cache error: %s", e)
 
         return {
             "status": "error",
@@ -145,7 +145,7 @@ def get_system_status() -> Dict[str, Any]:
 
     except Exception as e:
 
-        logger.error(f"System monitor error: {e}")
+        logger.error("System monitor error: %s", e)
 
         return {
 

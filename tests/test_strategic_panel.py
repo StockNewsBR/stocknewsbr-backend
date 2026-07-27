@@ -246,7 +246,7 @@ class StrategicPanelTests(unittest.TestCase):
         }
         with patch.object(routes_public_market_live, "get_snapshot_ticker", return_value=row), patch.object(
             routes_public_market_live, "_load_chart_data_fast", return_value=[]
-        ):
+        ), patch.object(routes_public_market_live, "resolve_symbol_context", return_value={}):
             payload = routes_public_market_live.public_market_insight("PETR4")
 
         self.assertEqual(payload["strategic_panel"]["recommended_action"], panel["recommended_action"])

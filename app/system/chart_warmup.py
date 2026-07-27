@@ -72,7 +72,7 @@ def _is_on_cooldown(symbol: str, interval: str, now: float | None = None) -> boo
         return True
     if is_symbol_on_cooldown(symbol, now=now):
         return True
-    current_time = now or time.time()
+    current_time = now if now is not None else time.time()
     with _REQUEST_LOCK:
         cooldown_until = float(_pair_cooldowns.get(key) or 0.0)
     return cooldown_until > current_time

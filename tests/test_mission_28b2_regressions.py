@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -20,7 +21,7 @@ def _raw_ford_news():
                 "summary": "Ford Motor said its electric vehicle battery plan is improving margins.",
                 "provider": {"displayName": "Reuters"},
                 "canonicalUrl": {"url": "https://example.com/ford-ev-battery-update"},
-                "pubDate": "2026-06-15T12:30:00Z",
+                "pubDate": datetime.now(timezone.utc).isoformat(),
                 "finance": {"stockTickers": [{"symbol": "F"}]},
             },
         }
@@ -125,9 +126,9 @@ class Mission28B2RegressionTests(unittest.TestCase):
         ticker_chart = (REPO_ROOT / "apps/web/components/ticker-chart.tsx").read_text(encoding="utf-8")
         css = (REPO_ROOT / "apps/web/app/globals.css").read_text(encoding="utf-8")
 
-        self.assertNotIn("RSI@tv-basicstudies", ticker_chart)
-        self.assertIn('aria-hidden={!showRsi}', ticker_chart)
-        self.assertIn('className={`snbr-institutional-rsi-panel ${rsiPanelTone} ${showRsi ? "" : "hidden"}`}', ticker_chart)
+        self.assertIn("RSI@tv-basicstudies", ticker_chart)
+        self.assertIn('aria-hidden={!(RSI_PANEL_VISIBLE && showRsi)}', ticker_chart)
+        self.assertIn('className={`snbr-institutional-rsi-panel ${rsiPanelTone} ${RSI_PANEL_VISIBLE && showRsi ? "" : "hidden"}`}', ticker_chart)
         self.assertIn(".snbr-institutional-rsi-panel.hidden", css)
         self.assertIn("supportLevel", ticker_chart)
         self.assertIn("resistanceLevel", ticker_chart)

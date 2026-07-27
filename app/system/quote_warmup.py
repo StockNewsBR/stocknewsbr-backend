@@ -155,7 +155,7 @@ def _is_quote_on_cooldown(symbol: str, now: float | None = None) -> bool:
         return False
     if is_symbol_on_cooldown(key, now=now):
         return True
-    current_time = now or time.time()
+    current_time = now if now is not None else time.time()
     with _lock:
         cooldown_until = float(_quote_cooldowns.get(key) or 0.0)
     return cooldown_until > current_time
@@ -175,7 +175,7 @@ def _is_chart_on_cooldown(symbol: str, interval: str, now: float | None = None) 
         return False
     if is_symbol_on_cooldown(key, now=now):
         return True
-    current_time = now or time.time()
+    current_time = now if now is not None else time.time()
     with _lock:
         cooldown_until = float(_chart_cooldowns.get(key) or 0.0)
     return cooldown_until > current_time

@@ -17,11 +17,16 @@ from app.services.snapshot_contract import (
 from app.services.symbol_registry import canonical_symbol
 
 
-def safe_float(value: Any, default: float = 0.0) -> float:
+import math
+
+def safe_float(value: Any, default: Any = 0.0) -> Any:
     try:
         if value is None or value == "":
             return default
-        return float(value)
+        f_val = float(value)
+        if not math.isfinite(f_val):
+            return default
+        return f_val
     except (TypeError, ValueError):
         return default
 
@@ -105,6 +110,20 @@ def deal_timestamp(row: Dict[str, Any]) -> Any:
         if value not in (None, ""):
             return value
     return market_timestamp(row)
+
+
+def _min_iso(a: str, b: str) -> str:
+    """Return the earlier of two ISO timestamps, tolerant of parse failures.
+
+    Used to clamp worker-cycle timestamps so a signal is never reported as
+    fresher than the market data it was derived from.
+    """
+    try:
+        da = datetime.fromisoformat(a)
+        db = datetime.fromisoformat(b)
+    except (TypeError, ValueError):
+        return a
+    return a if da <= db else b
 
 
 def get_symbol(row: Dict[str, Any]) -> str:
@@ -407,6 +426,10 @@ def build_payload(
         row.get("last_confirmed_at") or row.get("updated_at") or row.get("generated_at"),
         fallback=market_time,
     )
+    # A confirmation timestamp reflects a worker cycle and can run ahead of the
+    # market data the signal was derived from. Never report data as fresher
+    # than its source: clamp the confirmation to the market timestamp.
+    confirmed_time = _min_iso(confirmed_time, market_time)
     as_of = coerce_iso(row.get("as_of"), fallback=market_time)
     price = safe_float(row.get("price"))
     volume = safe_float(row.get("volume"))

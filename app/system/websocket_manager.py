@@ -130,7 +130,7 @@ class ConnectionManager:
         except Exception as exc:
             with self._lock:
                 self._release_pending_locked(websocket)
-            logger.warning(f"WebSocket accept failed or timed out: {exc}")
+            logger.warning("WebSocket accept failed or timed out: %s", exc)
             await _close_websocket(websocket, 1013, "accept_failed")
             return False
 
@@ -207,7 +207,7 @@ class ConnectionManager:
         try:
             await websocket.send_json(message)
         except Exception as e:
-            logger.warning(f"WebSocket send error: {e}")
+            logger.warning("WebSocket send error: %s", e)
             self.disconnect(websocket)
 
     # --------------------------------------------------

@@ -38,4 +38,4 @@ async def broadcast_market():
 
     except Exception as e:
 
-        logger.error(f"Market broadcast error: {e}")
+        logger.error("Market broadcast error: %s", e)
