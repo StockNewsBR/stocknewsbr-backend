@@ -4,6 +4,7 @@
 
 import logging
 from typing import List, Dict
+from functools import lru_cache
 
 logger = logging.getLogger("stocknewsbr.portfolio")
 
@@ -47,18 +48,25 @@ PORTFOLIOS: Dict[str, List[str]] = {
 # GET PORTFOLIO
 # =====================================================
 
+@lru_cache(maxsize=128)
+def _get_portfolio_cached(name: str):
+    portfolio = PORTFOLIOS.get(name)
+    if not portfolio:
+        return ()
+    return tuple(portfolio)
+
 def get_portfolio(name: str) -> List[str]:
 
-    portfolio = PORTFOLIOS.get(name)
+    portfolio_tuple = _get_portfolio_cached(name)
 
-    if not portfolio:
+    if not portfolio_tuple:
 
         logger.warning(f"Portfolio not found: {name}")
 
         return []
 
     # return copy to prevent mutation
-    return list(portfolio)
+    return list(portfolio_tuple)
 
 
 # =====================================================
