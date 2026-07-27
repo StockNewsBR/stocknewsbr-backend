@@ -8,7 +8,6 @@ import os
 import threading
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Request
