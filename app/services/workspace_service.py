@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any, Dict, List
 
 from app.Frontend.layout import get_layout
