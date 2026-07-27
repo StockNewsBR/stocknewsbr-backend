@@ -329,38 +329,22 @@ def _event_payload(
     }
 
 
-def _build_ai_bias(ai_context: Dict[str, Any] | None, profile: str) -> Dict[str, Any]:
-    context = ai_context or {}
-    heat_map = context.get("heat_map")
-    breakout_probability = context.get("breakout_probability")
-    institutional_flow = context.get("institutional_flow")
-    market_regime = context.get("market_regime")
-    smart_money = context.get("smart_money")
-    volatility_squeeze = context.get("volatility_squeeze")
-    liquidity_sweep = context.get("liquidity_sweep")
-    liquidity_map = context.get("liquidity_map")
-    master_score = context.get("master_score")
-    profile_rules = _PROFILE_AI_RULES.get(profile, _PROFILE_AI_RULES["us_stock"])
-
-    regime_state = _ai_state(market_regime)
-    regime_score = _ai_score(market_regime)
-    heat_map_score = _ai_score(heat_map)
-    breakout_score = _ai_score(breakout_probability)
-    flow_score = _ai_score(institutional_flow)
-    smart_money_score = _ai_score(smart_money)
-    volatility_squeeze_state = _ai_state(volatility_squeeze)
-    master_score_value = _ai_score(master_score)
-
+def _calculate_ai_bonuses(
+    regime_is_bull: bool,
+    regime_is_bear: bool,
+    regime_is_high_vol: bool,
+    regime_is_range: bool,
+    smart_money_score: float,
+    flow_score: float,
+    breakout_score: float,
+    volatility_squeeze_state: str,
+    master_score_value: float,
+    profile_rules: Dict[str, Any]
+) -> tuple[int, int, int, bool]:
     long_bonus = 0
     short_bonus = 0
-    long_block = False
-    short_block = False
     threshold_adjust = 0
-
-    regime_is_bull = regime_state in {"bull_trend", "bullish", "uptrend"}
-    regime_is_bear = regime_state in {"bear_trend", "bearish", "downtrend"}
-    regime_is_high_vol = regime_state == "high_volatility"
-    regime_is_range = regime_state in {"range", "sideways", "neutral"}
+    short_block_from_squeeze = False
 
     if regime_is_bull:
         long_bonus += 3
@@ -397,7 +381,7 @@ def _build_ai_bias(ai_context: Dict[str, Any] | None, profile: str) -> Dict[str,
 
     if volatility_squeeze_state in {"squeeze_ready", "compression"} and smart_money_score >= 60 and not regime_is_bear:
         long_bonus += 2
-        short_block = True
+        short_block_from_squeeze = True
 
     if master_score_value >= 85:
         if regime_is_bull:
@@ -424,6 +408,21 @@ def _build_ai_bias(ai_context: Dict[str, Any] | None, profile: str) -> Dict[str,
             long_bonus -= 1
             short_bonus -= 1
 
+    return long_bonus, short_bonus, threshold_adjust, short_block_from_squeeze
+
+
+def _calculate_ai_blocks_and_exits(
+    regime_is_bull: bool,
+    regime_is_bear: bool,
+    regime_is_high_vol: bool,
+    master_score_value: float,
+    smart_money_score: float,
+    short_block_from_squeeze: bool,
+    profile_rules: Dict[str, Any]
+) -> tuple[bool, bool, bool, bool]:
+    long_block = False
+    short_block = short_block_from_squeeze
+
     if regime_is_bear and master_score_value < profile_rules["bear_block_master_score"]:
         long_block = True
     if regime_is_bull and master_score_value < profile_rules["bull_block_master_score"]:
@@ -435,6 +434,59 @@ def _build_ai_bias(ai_context: Dict[str, Any] | None, profile: str) -> Dict[str,
 
     exit_long_on_ai = regime_is_bear and (master_score_value < 60 or smart_money_score < 45)
     exit_short_on_ai = regime_is_bull and (master_score_value < 60 or smart_money_score >= 60)
+
+    return long_block, short_block, exit_long_on_ai, exit_short_on_ai
+
+
+def _build_ai_bias(ai_context: Dict[str, Any] | None, profile: str) -> Dict[str, Any]:
+    context = ai_context or {}
+    heat_map = context.get("heat_map")
+    breakout_probability = context.get("breakout_probability")
+    institutional_flow = context.get("institutional_flow")
+    market_regime = context.get("market_regime")
+    smart_money = context.get("smart_money")
+    volatility_squeeze = context.get("volatility_squeeze")
+    liquidity_sweep = context.get("liquidity_sweep")
+    liquidity_map = context.get("liquidity_map")
+    master_score = context.get("master_score")
+    profile_rules = _PROFILE_AI_RULES.get(profile, _PROFILE_AI_RULES["us_stock"])
+
+    regime_state = _ai_state(market_regime)
+    regime_score = _ai_score(market_regime)
+    heat_map_score = _ai_score(heat_map)
+    breakout_score = _ai_score(breakout_probability)
+    flow_score = _ai_score(institutional_flow)
+    smart_money_score = _ai_score(smart_money)
+    volatility_squeeze_state = _ai_state(volatility_squeeze)
+    master_score_value = _ai_score(master_score)
+
+    regime_is_bull = regime_state in {"bull_trend", "bullish", "uptrend"}
+    regime_is_bear = regime_state in {"bear_trend", "bearish", "downtrend"}
+    regime_is_high_vol = regime_state == "high_volatility"
+    regime_is_range = regime_state in {"range", "sideways", "neutral"}
+
+    long_bonus, short_bonus, threshold_adjust, short_block_from_squeeze = _calculate_ai_bonuses(
+        regime_is_bull,
+        regime_is_bear,
+        regime_is_high_vol,
+        regime_is_range,
+        smart_money_score,
+        flow_score,
+        breakout_score,
+        volatility_squeeze_state,
+        master_score_value,
+        profile_rules
+    )
+
+    long_block, short_block, exit_long_on_ai, exit_short_on_ai = _calculate_ai_blocks_and_exits(
+        regime_is_bull,
+        regime_is_bear,
+        regime_is_high_vol,
+        master_score_value,
+        smart_money_score,
+        short_block_from_squeeze,
+        profile_rules
+    )
 
     return {
         "market_regime_state": regime_state,
