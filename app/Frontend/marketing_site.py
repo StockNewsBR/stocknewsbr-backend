@@ -4,25 +4,8 @@ from app.services.media_service import get_media_status
 from app.services.push_service import get_push_status
 from app.services.storage_service import get_storage_status
 
-
-def get_marketing_site():
-    bootstrap = get_public_bootstrap()
-    help_center = get_help_center_blueprint()
-    media = get_media_status()
-    push = get_push_status()
-    storage = get_storage_status()
-
-    ai_modules = bootstrap.get("ai_modules", [])
-    social_features = bootstrap.get("social_features", {})
-    guides = help_center.get("guides", [])[:4]
-    pricing = bootstrap.get("pricing", {})
-    social_items = [
-        key.replace("_", " ").title()
-        for key, enabled in social_features.items()
-        if enabled
-    ]
-
-    feature_cards = "".join(
+def _build_feature_cards(ai_modules):
+    return "".join(
         f"""
         <article class="feature-card">
           <span class="eyebrow">IA</span>
@@ -33,7 +16,8 @@ def get_marketing_site():
         for module in ai_modules[:8]
     )
 
-    social_cards = "".join(
+def _build_social_cards(social_items):
+    return "".join(
         f"""
         <article class="mini-card">
           <h3>{item}</h3>
@@ -43,7 +27,8 @@ def get_marketing_site():
         for item in social_items[:6]
     )
 
-    guide_cards = "".join(
+def _build_guide_cards(guides):
+    return "".join(
         f"""
         <article class="guide-card">
           <span class="eyebrow">Ajuda</span>
@@ -55,6 +40,7 @@ def get_marketing_site():
         for guide in guides
     )
 
+def _render_marketing_html(bootstrap, help_center, media, push, storage, pricing, feature_cards, social_cards, guide_cards):
     return f"""
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -267,3 +253,37 @@ a {{ color:inherit; text-decoration:none; }}
 </body>
 </html>
 """
+
+def get_marketing_site():
+    bootstrap = get_public_bootstrap()
+    help_center = get_help_center_blueprint()
+    media = get_media_status()
+    push = get_push_status()
+    storage = get_storage_status()
+
+    ai_modules = bootstrap.get("ai_modules", [])
+    social_features = bootstrap.get("social_features", {})
+    guides = help_center.get("guides", [])[:4]
+    pricing = bootstrap.get("pricing", {})
+
+    social_items = [
+        key.replace("_", " ").title()
+        for key, enabled in social_features.items()
+        if enabled
+    ]
+
+    feature_cards = _build_feature_cards(ai_modules)
+    social_cards = _build_social_cards(social_items)
+    guide_cards = _build_guide_cards(guides)
+
+    return _render_marketing_html(
+        bootstrap=bootstrap,
+        help_center=help_center,
+        media=media,
+        push=push,
+        storage=storage,
+        pricing=pricing,
+        feature_cards=feature_cards,
+        social_cards=social_cards,
+        guide_cards=guide_cards
+    )
