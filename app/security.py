@@ -18,7 +18,10 @@ from app.models import User, UserSession
 
 logger = logging.getLogger("stocknewsbr.security")
 
-SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE_THIS_SECRET")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY or SECRET_KEY == "CHANGE_THIS_SECRET":
+    raise ValueError("SECRET_KEY environment variable is not set or is set to a weak default. Set it to a secure, random value.")
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 1440))
 STRICT_SESSION_PLANS = {
