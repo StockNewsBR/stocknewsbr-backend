@@ -99,7 +99,7 @@ def _cors_origins():
         "https://www.stocknewsbr.com,https://stocknewsbr.com,http://localhost:3000,http://127.0.0.1:3000",
     )
     origins = [item.strip() for item in raw_value.split(",") if item.strip()]
-    return origins or ["*"]
+    return origins
 
 
 def _create_tables_if_needed():
