@@ -350,114 +350,132 @@ def record_signal_quality_coverage(rows, source: str = "signal_cache"):
         }
 
 
+def _get_http_metrics_snapshot() -> dict:
+    http_metrics = {}
+    for (method, route), entry in _http_endpoint_latency.items():
+        samples = sorted(float(value) for value in entry.get("samples", []))
+        http_metrics[f"{method} {route}"] = {
+            "count": int(entry.get("count", 0)),
+            "errors": int(entry.get("errors", 0)),
+            "last_status": int(entry.get("last_status", 0)),
+            "last_seconds": round(float(entry.get("last_seconds", 0.0)), 6),
+            "max_seconds": round(float(entry.get("max_seconds", 0.0)), 6),
+            "p50": _quantile(samples, 0.50),
+            "p95": _quantile(samples, 0.95),
+            "p99": _quantile(samples, 0.99),
+            "sample_count": len(samples),
+        }
+    return http_metrics
+
+
+def _get_cache_metrics_snapshot() -> dict:
+    return {
+        name: {
+            "hit": int(entry.get("hit", 0)),
+            "miss": int(entry.get("miss", 0)),
+            "sources": dict(entry.get("sources", {})),
+            "lookup_count": int(entry.get("lookup_count", 0)),
+            "last_size": int(entry.get("last_size", 0)),
+            "last_lookup_seconds": round(float(entry.get("last_lookup_seconds", 0.0)), 6),
+            "max_lookup_seconds": round(float(entry.get("max_lookup_seconds", 0.0)), 6),
+            "avg_lookup_seconds": round(float(entry.get("avg_lookup_seconds", 0.0)), 6),
+            "hit_ratio": round(
+                int(entry.get("hit", 0)) / max(1, int(entry.get("hit", 0)) + int(entry.get("miss", 0))),
+                4,
+            ),
+        }
+        for name, entry in _cache_access.items()
+    }
+
+
+def _get_provider_metrics_snapshot() -> dict:
+    provider_metrics = {}
+    for (source, provider, operation, outcome), entry in _external_provider_calls.items():
+        count = int(entry.get("count", 0))
+        provider_metrics[f"{source}:{provider}:{operation}:{outcome}"] = {
+            "source": source,
+            "provider": provider,
+            "operation": operation,
+            "outcome": outcome,
+            "count": count,
+            "total_seconds": round(float(entry.get("total_seconds", 0.0)), 6),
+            "last_seconds": round(float(entry.get("last_seconds", 0.0)), 6),
+            "max_seconds": round(float(entry.get("max_seconds", 0.0)), 6),
+            "avg_seconds": round(float(entry.get("total_seconds", 0.0)) / max(1, count), 6),
+        }
+    return provider_metrics
+
+
+def _get_provider_symbol_metrics_snapshot() -> dict:
+    provider_symbol_metrics = {}
+    for (source, provider, operation, outcome, symbol), entry in _external_provider_symbol_calls.items():
+        count = int(entry.get("count", 0))
+        provider_symbol_metrics[f"{source}:{provider}:{operation}:{outcome}:{symbol}"] = {
+            "source": source,
+            "provider": provider,
+            "operation": operation,
+            "outcome": outcome,
+            "symbol": symbol,
+            "count": count,
+            "total_seconds": round(float(entry.get("total_seconds", 0.0)), 6),
+            "last_seconds": round(float(entry.get("last_seconds", 0.0)), 6),
+            "max_seconds": round(float(entry.get("max_seconds", 0.0)), 6),
+            "avg_seconds": round(float(entry.get("total_seconds", 0.0)) / max(1, count), 6),
+        }
+    return provider_symbol_metrics
+
+
+def _get_worker_metrics_snapshot() -> dict:
+    return {
+        stage: {
+            "count": int(entry.get("count", 0)),
+            "errors": int(entry.get("errors", 0)),
+            "total_seconds": round(float(entry.get("total_seconds", 0.0)), 6),
+            "last_seconds": round(float(entry.get("last_seconds", 0.0)), 6),
+            "max_seconds": round(float(entry.get("max_seconds", 0.0)), 6),
+            "avg_seconds": round(float(entry.get("total_seconds", 0.0)) / max(1, int(entry.get("count", 0))), 6),
+        }
+        for stage, entry in _worker_stage_timings.items()
+    }
+
+
+def _get_signal_quality_snapshot() -> dict:
+    return {
+        source: dict(entry)
+        for source, entry in _signal_quality_coverage.items()
+    }
+
+
+def _get_provider_failures_snapshot() -> list:
+    return sorted(
+        (
+            {
+                "symbol": symbol,
+                "count": int(entry.get("count", 0)),
+                "provider": entry.get("provider"),
+                "operation": entry.get("operation"),
+                "source": entry.get("source"),
+                "last_error": entry.get("last_error"),
+                "last_seen": entry.get("last_seen"),
+            }
+            for symbol, entry in _external_provider_failures.items()
+        ),
+        key=lambda item: item["count"],
+        reverse=True,
+    )
+
+
 def get_performance_metrics_snapshot():
     with _lock:
-        http_metrics = {}
-        for (method, route), entry in _http_endpoint_latency.items():
-            samples = sorted(float(value) for value in entry.get("samples", []))
-            http_metrics[f"{method} {route}"] = {
-                "count": int(entry.get("count", 0)),
-                "errors": int(entry.get("errors", 0)),
-                "last_status": int(entry.get("last_status", 0)),
-                "last_seconds": round(float(entry.get("last_seconds", 0.0)), 6),
-                "max_seconds": round(float(entry.get("max_seconds", 0.0)), 6),
-                "p50": _quantile(samples, 0.50),
-                "p95": _quantile(samples, 0.95),
-                "p99": _quantile(samples, 0.99),
-                "sample_count": len(samples),
-            }
-
-        cache_metrics = {
-            name: {
-                "hit": int(entry.get("hit", 0)),
-                "miss": int(entry.get("miss", 0)),
-                "sources": dict(entry.get("sources", {})),
-                "lookup_count": int(entry.get("lookup_count", 0)),
-                "last_size": int(entry.get("last_size", 0)),
-                "last_lookup_seconds": round(float(entry.get("last_lookup_seconds", 0.0)), 6),
-                "max_lookup_seconds": round(float(entry.get("max_lookup_seconds", 0.0)), 6),
-                "avg_lookup_seconds": round(float(entry.get("avg_lookup_seconds", 0.0)), 6),
-                "hit_ratio": round(
-                    int(entry.get("hit", 0)) / max(1, int(entry.get("hit", 0)) + int(entry.get("miss", 0))),
-                    4,
-                ),
-            }
-            for name, entry in _cache_access.items()
+        return {
+            "http_endpoint_latency_seconds": _get_http_metrics_snapshot(),
+            "cache": _get_cache_metrics_snapshot(),
+            "external_provider_call_total": _get_provider_metrics_snapshot(),
+            "external_provider_symbol_call_total": _get_provider_symbol_metrics_snapshot(),
+            "worker_stage_seconds": _get_worker_metrics_snapshot(),
+            "signal_quality_coverage": _get_signal_quality_snapshot(),
+            "provider_symbol_failures": _get_provider_failures_snapshot(),
         }
-
-        provider_metrics = {}
-        for (source, provider, operation, outcome), entry in _external_provider_calls.items():
-            count = int(entry.get("count", 0))
-            provider_metrics[f"{source}:{provider}:{operation}:{outcome}"] = {
-                "source": source,
-                "provider": provider,
-                "operation": operation,
-                "outcome": outcome,
-                "count": count,
-                "total_seconds": round(float(entry.get("total_seconds", 0.0)), 6),
-                "last_seconds": round(float(entry.get("last_seconds", 0.0)), 6),
-                "max_seconds": round(float(entry.get("max_seconds", 0.0)), 6),
-                "avg_seconds": round(float(entry.get("total_seconds", 0.0)) / max(1, count), 6),
-            }
-
-        provider_symbol_metrics = {}
-        for (source, provider, operation, outcome, symbol), entry in _external_provider_symbol_calls.items():
-            count = int(entry.get("count", 0))
-            provider_symbol_metrics[f"{source}:{provider}:{operation}:{outcome}:{symbol}"] = {
-                "source": source,
-                "provider": provider,
-                "operation": operation,
-                "outcome": outcome,
-                "symbol": symbol,
-                "count": count,
-                "total_seconds": round(float(entry.get("total_seconds", 0.0)), 6),
-                "last_seconds": round(float(entry.get("last_seconds", 0.0)), 6),
-                "max_seconds": round(float(entry.get("max_seconds", 0.0)), 6),
-                "avg_seconds": round(float(entry.get("total_seconds", 0.0)) / max(1, count), 6),
-            }
-
-        worker_metrics = {
-            stage: {
-                "count": int(entry.get("count", 0)),
-                "errors": int(entry.get("errors", 0)),
-                "total_seconds": round(float(entry.get("total_seconds", 0.0)), 6),
-                "last_seconds": round(float(entry.get("last_seconds", 0.0)), 6),
-                "max_seconds": round(float(entry.get("max_seconds", 0.0)), 6),
-                "avg_seconds": round(float(entry.get("total_seconds", 0.0)) / max(1, int(entry.get("count", 0))), 6),
-            }
-            for stage, entry in _worker_stage_timings.items()
-        }
-        signal_quality = {
-            source: dict(entry)
-            for source, entry in _signal_quality_coverage.items()
-        }
-
-        repeated_failures = sorted(
-            (
-                {
-                    "symbol": symbol,
-                    "count": int(entry.get("count", 0)),
-                    "provider": entry.get("provider"),
-                    "operation": entry.get("operation"),
-                    "source": entry.get("source"),
-                    "last_error": entry.get("last_error"),
-                    "last_seen": entry.get("last_seen"),
-                }
-                for symbol, entry in _external_provider_failures.items()
-            ),
-            key=lambda item: item["count"],
-            reverse=True,
-        )
-
-    return {
-        "http_endpoint_latency_seconds": http_metrics,
-        "cache": cache_metrics,
-        "external_provider_call_total": provider_metrics,
-        "external_provider_symbol_call_total": provider_symbol_metrics,
-        "worker_stage_seconds": worker_metrics,
-        "signal_quality_coverage": signal_quality,
-        "provider_symbol_failures": repeated_failures,
-    }
 
 
 def _label_value(value) -> str:
