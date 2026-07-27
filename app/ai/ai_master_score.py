@@ -668,8 +668,7 @@ def _score_row(
     payload.update(decision)
     payload.update(
         {
-            "ticker": ticker,
-            "symbol": ticker,
+
             "score": score,
             "score_source_scale": "0_100",
             "_rank_score": score,

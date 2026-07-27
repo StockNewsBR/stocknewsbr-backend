@@ -443,8 +443,8 @@ def build_payload(
     decision_state = "WATCH" if signal == "WATCH" else "WAIT"
     state_label, tone = describe_state(state)
     payload = {
-        "ticker": get_symbol(row),
-        "symbol": get_symbol(row),
+        "ticker": row.get("ticker") or row.get("symbol") or get_symbol(row),
+        "symbol": row.get("symbol") or row.get("ticker") or get_symbol(row),
         "canonical_symbol": get_symbol(row),
         "name": row.get("name", get_symbol(row)),
         "tool": tool,

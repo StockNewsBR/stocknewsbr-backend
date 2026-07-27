@@ -1,5 +1,4 @@
 import unittest
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.ai.ai_master_score import apply_master_scores_by_ticker, run_master_score
@@ -194,7 +193,7 @@ class InstitutionalMasterScoreTests(unittest.TestCase):
             ai_tools={"flow": [_tool("PETR4", "flow", 88, "institutional_buying", "fluxo comprador bull")]},
         )[0]
 
-        self.assertEqual(master["ticker"], "PETR4")
+        self.assertEqual(master["ticker"], "PETR4.SA")
         self.assertEqual(master["master_components"]["flow"], 88)
         self.assertIn("institutional_buying", master["master_reasoning"]["flow_reason"])
 
@@ -209,7 +208,7 @@ class InstitutionalMasterScoreTests(unittest.TestCase):
         }
 
         by_ticker = {row["ticker"]: row for row in run_master_score(rows, ai_tools=tools)}
-        petr4, aapl = by_ticker["PETR4"], by_ticker["AAPL"]
+        petr4, aapl = by_ticker["PETR4.SA"], by_ticker["AAPL"]
 
         self.assertEqual(petr4["master_components"]["flow"], 0)
         self.assertIn("distribution_risk", petr4["master_reasoning"]["flow_reason"])

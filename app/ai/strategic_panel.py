@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List
 
 from app.ai.ai_master_score import confidence_label
 from app.ai.institutional_auditor import AUDIT_APPROVED, AUDIT_BLOCKED, AUDIT_CAUTION
+from app.services.symbol_registry import canonical_symbol
 from app.services.snapshot_contract import (
     ACTIONABLE_SIGNALS,
     BEARISH_ACTIONS,
@@ -19,10 +20,6 @@ from app.services.snapshot_contract import (
     DECISION_NO_TRADE,
     DECISION_READY,
     DECISION_STALE_DATA,
-    QUALITY_EMPTY,
-    QUALITY_INVALID,
-    QUALITY_SCORE_ONLY,
-    QUALITY_STALE,
 )
 
 
@@ -97,19 +94,6 @@ _REASON_ORDER = (
 )
 
 
-def _ticker(row: Dict[str, Any]) -> str:
-    # Canonicalize the B3 exchange suffix so panel keys match across lists. The panels are keyed
-    # from master_score_rows (clean "BBAS3") while `normalized` carries "BBAS3.SA" at merge time --
-    # without this, apply_strategic_panels_by_ticker never matched and every signal row reached the
-    # institutional contract without a strategic_panel (contract_coverage 0% -> ai-tools 0 rows ->
-    # empty IA tabs + go_live blocked).
-    # ponytail: local suffix strip, not the full registry. The canonical source of truth is
-    # app.services.symbol_registry.canonical_symbol -- consolidate _ticker onto it (Mission 30) when
-    # the ai.* import layering allows it, so every module shares one normalizer.
-    raw = str(row.get("ticker") or row.get("symbol") or "").upper().strip()
-    if raw.endswith(".SA"):
-        raw = raw[:-3]
-    return raw
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -141,16 +125,16 @@ def _normalize_direction(value: Any) -> str:
 
 
 def _risk_index(ai_tools: Dict[str, Any] | None) -> Dict[str, Dict[str, Any]]:
-    rows = ai_tools.get("risk") if isinstance(ai_tools, dict) else []
-    if not isinstance(rows, list):
+    if not isinstance(ai_tools, dict):
         return {}
     output: Dict[str, Dict[str, Any]] = {}
+    rows = ai_tools.get("risk") or []
     for row in rows:
         if not isinstance(row, dict):
             continue
-        ticker = _ticker(row)
-        if ticker and ticker not in output:
-            output[ticker] = row
+        key = _ticker(row)
+        if key and key not in output:
+            output[key] = row
     return output
 
 
@@ -677,7 +661,7 @@ def validate_canonical_analysis(raw: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def build_strategic_panel(master_row: Dict[str, Any], risk_row: Dict[str, Any] | None = None) -> Dict[str, Any]:
-    ticker = _ticker(master_row) or "UNKNOWN"
+    ticker = _display_ticker(master_row) or "UNKNOWN"
     score = round(_safe_float(master_row.get("master_score") or master_row.get("score")), 1)
     direction = _normalize_direction(master_row.get("master_direction"))
     master_status = _normalize_status(master_row.get("master_status"))
@@ -890,14 +874,24 @@ def build_strategic_panel(master_row: Dict[str, Any], risk_row: Dict[str, Any] |
     return panel
 
 
+def _display_ticker(row: Dict[str, Any]) -> str:
+    return str(row.get("ticker") or row.get("symbol") or "").upper().strip()
+
+
+def _ticker(row: Dict[str, Any]) -> str:
+    raw = _display_ticker(row)
+    c = canonical_symbol(raw)
+    return c or raw
+
+
 def strategic_panel_index(rows: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     output: Dict[str, Dict[str, Any]] = {}
     for row in rows or []:
         if not isinstance(row, dict):
             continue
-        ticker = _ticker(row)
-        if ticker and ticker not in output:
-            output[ticker] = dict(row)
+        key = _ticker(row)
+        if key and key not in output:
+            output[key] = dict(row)
     return output
 
 
@@ -908,7 +902,8 @@ def apply_strategic_panels_by_ticker(rows: Iterable[Dict[str, Any]], strategic_p
         if not isinstance(row, dict):
             continue
         item = dict(row)
-        panel = index.get(_ticker(item))
+        t = _ticker(item)
+        panel = index.get(t)
         if panel:
             item["strategic_panel"] = panel
             item["strategic_panel_summary"] = panel.get("strategic_panel_summary")
