@@ -16,22 +16,10 @@ def _ema(values: Iterable[float], period: int) -> List[float]:
     return ema_values
 
 
-def build_chart_overlays(ticker: str, ohlc: list, signals: list):
-    ticker = (ticker or "").upper().strip()
-    close_prices = [float(row.get("close", 0) or 0) for row in ohlc]
-    high_prices = [float(row.get("high", 0) or 0) for row in ohlc]
-    low_prices = [float(row.get("low", 0) or 0) for row in ohlc]
-
-    ema9 = _ema(close_prices, 9)
-    ema21 = _ema(close_prices, 21)
-    ema50 = _ema(close_prices, 50)
-
+def _build_series(
+    ohlc: list, close_prices: list, ema9: list, ema21: list, ema50: list
+) -> list:
     series = []
-    markers = []
-    bullish_markers = 0
-    bearish_markers = 0
-    latest_signal = "NEUTRAL"
-
     for index, row in enumerate(ohlc):
         series.append(
             {
@@ -42,6 +30,14 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list):
                 "ema50": ema50[index] if index < len(ema50) else None,
             }
         )
+    return series
+
+
+def _process_signals(ticker: str, signals: list) -> tuple:
+    markers = []
+    bullish_markers = 0
+    bearish_markers = 0
+    latest_signal = "NEUTRAL"
 
     for signal in signals or []:
         if signal.get("signal"):
@@ -93,15 +89,31 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list):
                 }
             )
 
+    return markers, bullish_markers, bearish_markers, latest_signal
+
+
+def _build_zones(high_prices: list, low_prices: list) -> list:
     recent_high = max(high_prices[-20:], default=0)
     recent_low = min(low_prices[-20:], default=0)
 
-    zones = [
+    return [
         {"label": "resistencia", "price": recent_high},
         {"label": "suporte", "price": recent_low},
     ]
 
-    summary = {
+
+def _build_summary(
+    ticker: str,
+    close_prices: list,
+    ema9: list,
+    ema21: list,
+    ema50: list,
+    latest_signal: str,
+    bullish_markers: int,
+    bearish_markers: int,
+    markers_len: int,
+) -> dict:
+    return {
         "ticker": ticker,
         "latest_close": close_prices[-1] if close_prices else None,
         "trend_bias": (
@@ -112,8 +124,36 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list):
         "latest_signal": latest_signal,
         "bullish_markers": bullish_markers,
         "bearish_markers": bearish_markers,
-        "markers": len(markers),
+        "markers": markers_len,
     }
+
+
+def build_chart_overlays(ticker: str, ohlc: list, signals: list):
+    ticker = (ticker or "").upper().strip()
+    close_prices = [float(row.get("close", 0) or 0) for row in ohlc]
+    high_prices = [float(row.get("high", 0) or 0) for row in ohlc]
+    low_prices = [float(row.get("low", 0) or 0) for row in ohlc]
+
+    ema9 = _ema(close_prices, 9)
+    ema21 = _ema(close_prices, 21)
+    ema50 = _ema(close_prices, 50)
+
+    series = _build_series(ohlc, close_prices, ema9, ema21, ema50)
+    markers, bullish_markers, bearish_markers, latest_signal = _process_signals(
+        ticker, signals
+    )
+    zones = _build_zones(high_prices, low_prices)
+    summary = _build_summary(
+        ticker,
+        close_prices,
+        ema9,
+        ema21,
+        ema50,
+        latest_signal,
+        bullish_markers,
+        bearish_markers,
+        len(markers),
+    )
 
     return {
         "series": series,
