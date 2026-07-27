@@ -14,7 +14,7 @@ except Exception:  # pragma: no cover - optional dependency fallback
 
         return decorator
 
-from app.market.warm_data_pool import get_market_pool
+from app.data.warm_data_pool import get_market_pool
 
 logger = logging.getLogger("stocknewsbr.engine.v36")
 
