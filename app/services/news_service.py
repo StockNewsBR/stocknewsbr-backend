@@ -1112,6 +1112,126 @@ def _fetch_yfinance_news(ticker: str) -> list[dict[str, Any]]:
         return []
 
 
+def _find_candidate_clusters(
+    story_key: str,
+    token_keys: tuple[str, ...],
+    story_index: dict[str, dict[str, Any]],
+    token_index: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    candidate_clusters: list[dict[str, Any]] = []
+    candidate_ids: set[int] = set()
+
+    if story_key and story_key in story_index:
+        matched = story_index[story_key]
+        candidate_clusters.append(matched)
+        candidate_ids.add(int(matched["cluster_id"]))
+
+    for token in token_keys:
+        for cluster in token_index.get(token, []):
+            cluster_id = int(cluster["cluster_id"])
+            if cluster_id in candidate_ids:
+                continue
+            candidate_ids.add(cluster_id)
+            candidate_clusters.append(cluster)
+            if len(candidate_clusters) >= _NEWS_MAX_CLUSTER_CANDIDATES:
+                break
+        if len(candidate_clusters) >= _NEWS_MAX_CLUSTER_CANDIDATES:
+            break
+    return candidate_clusters
+
+
+def _find_best_match(item: dict[str, Any], candidate_clusters: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for cluster in candidate_clusters:
+        canonical = cluster["canonical"]
+        same_story = item["story_key"] == canonical["story_key"]
+        similarity = _headline_similarity(item["title"], canonical["title"])
+        token_overlap = 0.0
+        if item["title"] and canonical["title"]:
+            left_tokens = set(_token_set(item["title"]))
+            right_tokens = set(_token_set(canonical["title"]))
+            if left_tokens and right_tokens:
+                token_overlap = len(left_tokens & right_tokens) / max(1, min(len(left_tokens), len(right_tokens)))
+        if same_story or similarity >= 0.86 or token_overlap >= 0.7:
+            return cluster
+    return None
+
+
+def _create_new_cluster(
+    item: dict[str, Any],
+    story_key: str,
+    token_keys: tuple[str, ...],
+    clusters: list[dict[str, Any]],
+    story_index: dict[str, dict[str, Any]],
+    token_index: dict[str, list[dict[str, Any]]],
+) -> None:
+    cluster = {
+        "cluster_id": len(clusters),
+        "canonical": item,
+        "items": [item],
+        "score": item.get("ranking_score", 0.0),
+        "token_keys": set(token_keys),
+    }
+    clusters.append(cluster)
+    if story_key:
+        story_index[story_key] = cluster
+    for token in token_keys:
+        token_index.setdefault(token, []).append(cluster)
+
+
+def _update_existing_cluster(
+    item: dict[str, Any],
+    matched_cluster: dict[str, Any],
+    story_key: str,
+    token_keys: tuple[str, ...],
+    story_index: dict[str, dict[str, Any]],
+    token_index: dict[str, list[dict[str, Any]]],
+) -> None:
+    matched_cluster["items"].append(item)
+    if item.get("ranking_score", 0.0) > matched_cluster["canonical"].get("ranking_score", 0.0):
+        matched_cluster["canonical"] = item
+    if story_key:
+        story_index[story_key] = matched_cluster
+    new_tokens = set(token_keys) - set(matched_cluster.get("token_keys", set()))
+    if new_tokens:
+        matched_cluster.setdefault("token_keys", set()).update(new_tokens)
+        for token in new_tokens:
+            token_index.setdefault(token, []).append(matched_cluster)
+
+
+def _format_cluster_result(cluster: dict[str, Any]) -> dict[str, Any]:
+    canonical = dict(cluster["canonical"])
+    sources = [str(entry.get("source") or "").strip() for entry in cluster["items"] if str(entry.get("source") or "").strip()]
+    unique_sources = list(dict.fromkeys(sources))
+    canonical["same_story_count"] = len(cluster["items"])
+    canonical["source_count"] = len(unique_sources) or 1
+    canonical["sources"] = unique_sources
+    canonical["duplicate_titles"] = [entry["title"] for entry in cluster["items"] if entry["title"] != canonical["title"]]
+    confidence, relevance_score = _adjust_quality_scores(
+        float(canonical.get("confidence_score", 0.0) or 0.0),
+        float(canonical.get("relevance_score", 0.0) or 0.0),
+        float(canonical.get("directness_score", 50.0) or 50.0),
+        float(canonical.get("ambiguity_score", 0.0) or 0.0),
+        same_story_count=len(cluster["items"]),
+    )
+    canonical["confidence_score"] = confidence
+    canonical["relevance_score"] = relevance_score
+    canonical["ranking_score"] = round(
+        (0.38 * _recency_score(_parse_published_at(canonical))) + (0.42 * relevance_score) + (0.20 * confidence),
+        2,
+    )
+    canonical["editorial"] = _build_editorial_final(
+        str(canonical.get("ticker") or ""),
+        list(canonical.get("labels") or []),
+        str(canonical.get("impact") or "neutral"),
+        confidence,
+        str(canonical.get("sector") or "Mercado"),
+        float(canonical.get("ambiguity_score", 0.0) or 0.0),
+        canonical["source_count"],
+        bool(canonical.get("direct_ticker_match")),
+    )
+    return canonical
+
+
 def _cluster_news(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     clusters: list[dict[str, Any]] = []
     story_index: dict[str, dict[str, Any]] = {}
@@ -1130,104 +1250,16 @@ def _cluster_news(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
 
         story_key = str(item.get("story_key") or "")
-        candidate_clusters: list[dict[str, Any]] = []
-        candidate_ids: set[int] = set()
-
-        if story_key and story_key in story_index:
-            matched = story_index[story_key]
-            candidate_clusters.append(matched)
-            candidate_ids.add(int(matched["cluster_id"]))
-
         token_keys = _cluster_key_tokens(item)
-        for token in token_keys:
-            for cluster in token_index.get(token, []):
-                cluster_id = int(cluster["cluster_id"])
-                if cluster_id in candidate_ids:
-                    continue
-                candidate_ids.add(cluster_id)
-                candidate_clusters.append(cluster)
-                if len(candidate_clusters) >= _NEWS_MAX_CLUSTER_CANDIDATES:
-                    break
-            if len(candidate_clusters) >= _NEWS_MAX_CLUSTER_CANDIDATES:
-                break
-
-        matched_cluster = None
-        for cluster in candidate_clusters:
-            canonical = cluster["canonical"]
-            same_story = item["story_key"] == canonical["story_key"]
-            similarity = _headline_similarity(item["title"], canonical["title"])
-            token_overlap = 0.0
-            if item["title"] and canonical["title"]:
-                left_tokens = set(_token_set(item["title"]))
-                right_tokens = set(_token_set(canonical["title"]))
-                if left_tokens and right_tokens:
-                    token_overlap = len(left_tokens & right_tokens) / max(1, min(len(left_tokens), len(right_tokens)))
-            if same_story or similarity >= 0.86 or token_overlap >= 0.7:
-                matched_cluster = cluster
-                break
+        candidate_clusters = _find_candidate_clusters(story_key, token_keys, story_index, token_index)
+        matched_cluster = _find_best_match(item, candidate_clusters)
 
         if matched_cluster is None:
-            cluster = {
-                "cluster_id": len(clusters),
-                "canonical": item,
-                "items": [item],
-                "score": item.get("ranking_score", 0.0),
-                "token_keys": set(token_keys),
-            }
-            clusters.append(cluster)
-            if story_key:
-                story_index[story_key] = cluster
-            for token in token_keys:
-                token_index.setdefault(token, []).append(cluster)
-            continue
+            _create_new_cluster(item, story_key, token_keys, clusters, story_index, token_index)
+        else:
+            _update_existing_cluster(item, matched_cluster, story_key, token_keys, story_index, token_index)
 
-        matched_cluster["items"].append(item)
-        if item.get("ranking_score", 0.0) > matched_cluster["canonical"].get("ranking_score", 0.0):
-            matched_cluster["canonical"] = item
-        if story_key:
-            story_index[story_key] = matched_cluster
-        new_tokens = set(token_keys) - set(matched_cluster.get("token_keys", set()))
-        if new_tokens:
-            matched_cluster.setdefault("token_keys", set()).update(new_tokens)
-            for token in new_tokens:
-                token_index.setdefault(token, []).append(matched_cluster)
-
-    results: list[dict[str, Any]] = []
-
-    for cluster in clusters:
-        canonical = dict(cluster["canonical"])
-        sources = [str(entry.get("source") or "").strip() for entry in cluster["items"] if str(entry.get("source") or "").strip()]
-        unique_sources = list(dict.fromkeys(sources))
-        canonical["same_story_count"] = len(cluster["items"])
-        canonical["source_count"] = len(unique_sources) or 1
-        canonical["sources"] = unique_sources
-        canonical["duplicate_titles"] = [entry["title"] for entry in cluster["items"] if entry["title"] != canonical["title"]]
-        confidence, relevance_score = _adjust_quality_scores(
-            float(canonical.get("confidence_score", 0.0) or 0.0),
-            float(canonical.get("relevance_score", 0.0) or 0.0),
-            float(canonical.get("directness_score", 50.0) or 50.0),
-            float(canonical.get("ambiguity_score", 0.0) or 0.0),
-            same_story_count=len(cluster["items"]),
-        )
-        canonical["confidence_score"] = confidence
-        canonical["relevance_score"] = relevance_score
-        canonical["ranking_score"] = round(
-            (0.38 * _recency_score(_parse_published_at(canonical))) + (0.42 * relevance_score) + (0.20 * confidence),
-            2,
-        )
-        canonical["editorial"] = _build_editorial_final(
-            str(canonical.get("ticker") or ""),
-            list(canonical.get("labels") or []),
-            str(canonical.get("impact") or "neutral"),
-            confidence,
-            str(canonical.get("sector") or "Mercado"),
-            float(canonical.get("ambiguity_score", 0.0) or 0.0),
-            canonical["source_count"],
-            bool(canonical.get("direct_ticker_match")),
-        )
-        results.append(canonical)
-
-    return results
+    return [_format_cluster_result(cluster) for cluster in clusters]
 
 
 def build_symbol_news(ticker: str, raw_items: list[dict[str, Any]], limit: int = 6) -> list[dict[str, Any]]:
