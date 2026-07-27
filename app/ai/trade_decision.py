@@ -4,7 +4,6 @@ from typing import Any, Dict, Iterable, List
 
 from app.ai.ai_common import clamp, safe_float
 
-
 _BULLISH_COMPONENTS = (
     ("institutional_flow_score", 0.28),
     ("smart_money_score", 0.24),
@@ -87,7 +86,10 @@ def _breakout_without_volume(row: Dict[str, Any]) -> bool:
     rel_volume = safe_float(row.get("rel_volume"), 0.0)
     volume_score = _score(row, "volume_score")
 
-    if breakout_state in {"ready_to_break", "building_pressure"} or breakout_score >= 55:
+    if (
+        breakout_state in {"ready_to_break", "building_pressure"}
+        or breakout_score >= 55
+    ):
         return rel_volume < 1.05 and volume_score < 35
     return False
 
@@ -100,7 +102,9 @@ def _liquidity_event(row: Dict[str, Any]) -> str:
     return _state(row.get("liquidity_event") or row.get("liquidity_read"))
 
 
-def _institutional_confidence(row: Dict[str, Any], side: str, pressure: float, opposite: float) -> float:
+def _institutional_confidence(
+    row: Dict[str, Any], side: str, pressure: float, opposite: float
+) -> float:
     regime_state = _state(row.get("market_regime_state"))
     chart_regime = _chart_regime(row)
     liquidity_event = _liquidity_event(row)
@@ -125,7 +129,10 @@ def _institutional_confidence(row: Dict[str, Any], side: str, pressure: float, o
             confidence += 5.0
         if smart_money_score >= 65:
             confidence += 5.0
-        if regime_state == "bear_trend" and liquidity_event not in {"sweep_low_reclaim", "bear_trap"}:
+        if regime_state == "bear_trend" and liquidity_event not in {
+            "sweep_low_reclaim",
+            "bear_trap",
+        }:
             confidence -= 18.0
     else:
         if regime_state == "bear_trend":
@@ -138,7 +145,10 @@ def _institutional_confidence(row: Dict[str, Any], side: str, pressure: float, o
             confidence += 5.0
         if smart_money_score <= 35:
             confidence += 5.0
-        if regime_state == "bull_trend" and liquidity_event not in {"sweep_high_reject", "bull_trap"}:
+        if regime_state == "bull_trend" and liquidity_event not in {
+            "sweep_high_reject",
+            "bull_trap",
+        }:
             confidence -= 18.0
 
     if chart_regime in {"chop", "range", "squeeze"}:
@@ -160,9 +170,15 @@ def _reversal_exception(row: Dict[str, Any], side: str) -> bool:
     change_pct = safe_float(row.get("change_pct"), 0.0)
 
     if side == "long":
-        return above_vwap and change_pct >= 0 and max(smart_money_score, flow_score) >= 60
+        return (
+            above_vwap and change_pct >= 0 and max(smart_money_score, flow_score) >= 60
+        )
     if side == "short":
-        return (not above_vwap) and change_pct <= 0 and max(100 - smart_money_score, 100 - flow_score) >= 55
+        return (
+            (not above_vwap)
+            and change_pct <= 0
+            and max(100 - smart_money_score, 100 - flow_score) >= 55
+        )
     return False
 
 
@@ -171,12 +187,18 @@ def _risk_level(blocked: List[str], warnings: List[str], row: Dict[str, Any]) ->
         return "alto"
     if _state(row.get("market_regime_state")) == "high_volatility":
         return "alto"
-    if warnings or row.get("data_quality") == "score_only" or row.get("volume_known") is False:
+    if (
+        warnings
+        or row.get("data_quality") == "score_only"
+        or row.get("volume_known") is False
+    ):
         return "medio"
     return "baixo"
 
 
-def _action_after_block(action: str, bullish: float, bearish: float, row: Dict[str, Any], blocked: List[str]) -> str:
+def _action_after_block(
+    action: str, bullish: float, bearish: float, row: Dict[str, Any], blocked: List[str]
+) -> str:
     if not blocked:
         return action
 
@@ -189,13 +211,18 @@ def _action_after_block(action: str, bullish: float, bearish: float, row: Dict[s
             return "BUY"
         return "SELL"
     if action == "COVER":
-        if bearish > bullish + 10 and _state(row.get("market_regime_state")) == "bear_trend":
+        if (
+            bearish > bullish + 10
+            and _state(row.get("market_regime_state")) == "bear_trend"
+        ):
             return "SHORT"
         return "COVER"
     return action
 
 
-def _build_trade_instructions(action: str, row: Dict[str, Any], blocked: List[str], warnings: List[str]) -> Dict[str, Any]:
+def _build_trade_instructions(
+    action: str, row: Dict[str, Any], blocked: List[str], warnings: List[str]
+) -> Dict[str, Any]:
     ticker = row.get("ticker") or row.get("symbol") or "UNKNOWN"
     regime = _state(row.get("market_regime_state")) or "unknown"
     rel_volume = safe_float(row.get("rel_volume"), 0.0)
@@ -244,11 +271,17 @@ def _build_trade_instructions(action: str, row: Dict[str, Any], blocked: List[st
         invalidation = "Manter short apenas se perder suporte novamente com volume vendedor e sem defesa institucional."
     else:
         trigger = "Aguardar alinhamento entre regime, liquidez, fluxo, tendencia e volatilidade."
-        invalidation = "Sem entrada enquanto os filtros operacionais continuarem conflitantes."
+        invalidation = (
+            "Sem entrada enquanto os filtros operacionais continuarem conflitantes."
+        )
 
     risk = "Risco baixo: filtros principais alinhados."
     if risk_parts:
-        risk = f"Risco {_risk_level(blocked, warnings, row)}: " + "; ".join(dict.fromkeys(risk_parts[:5])) + "."
+        risk = (
+            f"Risco {_risk_level(blocked, warnings, row)}: "
+            + "; ".join(dict.fromkeys(risk_parts[:5]))
+            + "."
+        )
 
     return {
         "trigger": trigger,
@@ -288,7 +321,10 @@ def evaluate_trade_coherence(
             blocked.append("buy_in_downtrend")
         if _breakout_without_volume(row):
             blocked.append("breakout_without_volume")
-        if smart_money_state == "retail_noise" or institutional_state == "distribution_risk":
+        if (
+            smart_money_state == "retail_noise"
+            or institutional_state == "distribution_risk"
+        ):
             blocked.append("buy_against_flow")
         if liquidity_event in {"sweep_high_reject", "bull_trap", "supply_absorption"}:
             blocked.append("buy_into_supply_liquidity")
@@ -298,7 +334,11 @@ def evaluate_trade_coherence(
     elif action == "SELL":
         if _is_bullish_squeeze(row):
             blocked.append("sell_into_bullish_squeeze")
-        if regime_state == "bull_trend" and _score(row, "smart_money_score") >= 60 and _score(row, "master_score", _score(row, "score")) >= 60:
+        if (
+            regime_state == "bull_trend"
+            and _score(row, "smart_money_score") >= 60
+            and _score(row, "master_score", _score(row, "score")) >= 60
+        ):
             blocked.append("sell_against_bull_regime")
         if chart_regime in {"trend_up", "breakout_up"} and bullish > bearish + 8:
             warnings.append("exit_long_against_uptrend_continuation")
@@ -310,7 +350,10 @@ def evaluate_trade_coherence(
             blocked.append("short_in_bulltrend")
         if _is_bullish_squeeze(row):
             blocked.append("short_into_bullish_squeeze")
-        if smart_money_state in {"smart_money_active", "smart_money_interest"} and regime_state != "bear_trend":
+        if (
+            smart_money_state in {"smart_money_active", "smart_money_interest"}
+            and regime_state != "bear_trend"
+        ):
             blocked.append("short_against_smart_money")
         if _breakout_without_volume(row):
             blocked.append("short_without_volume_confirmation")
@@ -318,7 +361,11 @@ def evaluate_trade_coherence(
             blocked.append("short_into_demand_liquidity")
 
     elif action == "COVER":
-        if regime_state == "bear_trend" and institutional_state == "distribution_risk" and not _reversal_exception(row, "long"):
+        if (
+            regime_state == "bear_trend"
+            and institutional_state == "distribution_risk"
+            and not _reversal_exception(row, "long")
+        ):
             warnings.append("cover_against_bearish_flow")
         if chart_regime in {"trend_down", "breakout_down"} and bearish > bullish + 8:
             warnings.append("exit_short_against_downtrend_continuation")
@@ -345,7 +392,8 @@ def evaluate_trade_coherence(
             "flow": institutional_state or "unknown",
             "smart_money": smart_money_state or "unknown",
             "trend_strength": round(trend_strength, 1),
-            "volatility_squeeze": _state(row.get("volatility_squeeze_state")) or "unknown",
+            "volatility_squeeze": _state(row.get("volatility_squeeze_state"))
+            or "unknown",
         },
         **instructions,
     }
@@ -363,7 +411,9 @@ def _weighted_component_score(row: Dict[str, Any]) -> float:
     return bullish, bearish
 
 
-def _apply_state_boosts(row: Dict[str, Any], bullish: float, bearish: float) -> tuple[float, float, List[str]]:
+def _apply_state_boosts(
+    row: Dict[str, Any], bullish: float, bearish: float
+) -> tuple[float, float, List[str]]:
     conflicts: List[str] = []
 
     regime_state = _state(row.get("market_regime_state"))
@@ -384,7 +434,12 @@ def _apply_state_boosts(row: Dict[str, Any], bullish: float, bearish: float) -> 
         state = _state(row.get(field))
         if state in mapping:
             bullish += mapping[state]
-            if state in {"mixed", "building_pressure", "smart_money_interest", "early_accumulation"}:
+            if state in {
+                "mixed",
+                "building_pressure",
+                "smart_money_interest",
+                "early_accumulation",
+            }:
                 conflicts.append(f"{field}:{state}")
 
     for field, mapping in _STATE_BEARISH_BOOSTS.items():
@@ -423,7 +478,61 @@ def _apply_state_boosts(row: Dict[str, Any], bullish: float, bearish: float) -> 
     return bullish, bearish, conflicts
 
 
-def _decision_reason(action: str, bullish: float, bearish: float, row: Dict[str, Any], conflicts: List[str]) -> str:
+def _determine_base_action(
+    bullish: float,
+    bearish: float,
+    long_confidence: float,
+    short_confidence: float,
+    regime_state: str,
+    above_vwap: bool,
+    liquidity_state: str,
+    chart_regime: str,
+) -> str:
+    diff = bullish - bearish
+    if diff >= 16.0 and bullish >= 60.0 and long_confidence >= 58:
+        return "BUY"
+    if diff <= -16.0 and bearish >= 60.0 and short_confidence >= 58:
+        return "SHORT"
+    if regime_state == "bear_trend" and bearish >= bullish:
+        return "SHORT" if bearish >= 55.0 and short_confidence >= 56 else "COVER"
+    if regime_state == "bull_trend" and bullish >= bearish:
+        return "BUY" if bullish >= 55.0 and long_confidence >= 56 else "SELL"
+    if (
+        liquidity_state == "liquidity_sweep_detected"
+        and above_vwap
+        and bullish >= bearish
+    ):
+        return "BUY"
+    if (
+        liquidity_state == "liquidity_sweep_detected"
+        and not above_vwap
+        and bearish >= bullish
+    ):
+        return "SHORT"
+    if (
+        chart_regime in {"breakout_down", "trend_down"}
+        and short_confidence >= 62
+        and bearish >= bullish + 4
+    ):
+        return "SHORT"
+    if (
+        chart_regime in {"breakout_up", "trend_up"}
+        and long_confidence >= 62
+        and bullish >= bearish + 4
+    ):
+        return "BUY"
+    if bullish >= bearish:
+        return "BUY" if bullish >= 52.0 and long_confidence >= 58 else "SELL"
+    return "SHORT" if bearish >= 52.0 and short_confidence >= 58 else "COVER"
+
+
+def _decision_reason(
+    action: str,
+    bullish: float,
+    bearish: float,
+    row: Dict[str, Any],
+    conflicts: List[str],
+) -> str:
     ticker = row.get("ticker") or row.get("symbol") or "UNKNOWN"
     regime_state = row.get("market_regime_state") or "n/a"
     support = []
@@ -460,7 +569,6 @@ def resolve_trade_action(row: Dict[str, Any]) -> Dict[str, Any]:
 
     bullish = clamp(bullish, 0.0, 100.0)
     bearish = clamp(bearish, 0.0, 100.0)
-    diff = bullish - bearish
     regime_state = _state(row.get("market_regime_state"))
     above_vwap = bool(row.get("above_vwap", False))
     liquidity_state = _state(row.get("liquidity_sweep_state"))
@@ -470,9 +578,17 @@ def resolve_trade_action(row: Dict[str, Any]) -> Dict[str, Any]:
     long_confidence = _institutional_confidence(row, "long", bullish, bearish)
     short_confidence = _institutional_confidence(row, "short", bearish, bullish)
 
-    if chart_regime in {"trend_down", "breakout_down"} and short_confidence >= 62 and bearish >= bullish:
+    if (
+        chart_regime in {"trend_down", "breakout_down"}
+        and short_confidence >= 62
+        and bearish >= bullish
+    ):
         bearish += 5.0
-    if chart_regime in {"trend_up", "breakout_up"} and long_confidence >= 62 and bullish >= bearish:
+    if (
+        chart_regime in {"trend_up", "breakout_up"}
+        and long_confidence >= 62
+        and bullish >= bearish
+    ):
         bullish += 5.0
     if liquidity_event in {"sweep_high_reject", "bull_trap", "supply_absorption"}:
         bearish += 4.0
@@ -485,33 +601,25 @@ def resolve_trade_action(row: Dict[str, Any]) -> Dict[str, Any]:
 
     bullish = clamp(bullish, 0.0, 100.0)
     bearish = clamp(bearish, 0.0, 100.0)
-    diff = bullish - bearish
     long_confidence = _institutional_confidence(row, "long", bullish, bearish)
     short_confidence = _institutional_confidence(row, "short", bearish, bullish)
 
-    action = "SELL"
-    if diff >= 16.0 and bullish >= 60.0 and long_confidence >= 58:
-        action = "BUY"
-    elif diff <= -16.0 and bearish >= 60.0 and short_confidence >= 58:
-        action = "SHORT"
-    elif regime_state == "bear_trend" and bearish >= bullish:
-        action = "SHORT" if bearish >= 55.0 and short_confidence >= 56 else "COVER"
-    elif regime_state == "bull_trend" and bullish >= bearish:
-        action = "BUY" if bullish >= 55.0 and long_confidence >= 56 else "SELL"
-    elif liquidity_state == "liquidity_sweep_detected" and above_vwap and bullish >= bearish:
-        action = "BUY"
-    elif liquidity_state == "liquidity_sweep_detected" and not above_vwap and bearish >= bullish:
-        action = "SHORT"
-    elif chart_regime in {"breakout_down", "trend_down"} and short_confidence >= 62 and bearish >= bullish + 4:
-        action = "SHORT"
-    elif chart_regime in {"breakout_up", "trend_up"} and long_confidence >= 62 and bullish >= bearish + 4:
-        action = "BUY"
-    elif bullish >= bearish:
-        action = "BUY" if bullish >= 52.0 and long_confidence >= 58 else "SELL"
-    else:
-        action = "SHORT" if bearish >= 52.0 and short_confidence >= 58 else "COVER"
+    action = _determine_base_action(
+        bullish,
+        bearish,
+        long_confidence,
+        short_confidence,
+        regime_state,
+        above_vwap,
+        liquidity_state,
+        chart_regime,
+    )
 
-    if action == "SELL" and bearish > bullish and regime_state in {"bear_trend", "high_volatility"}:
+    if (
+        action == "SELL"
+        and bearish > bullish
+        and regime_state in {"bear_trend", "high_volatility"}
+    ):
         action = "COVER"
     if action == "COVER" and bullish > bearish + 10.0 and above_vwap:
         action = "BUY"
@@ -520,7 +628,9 @@ def resolve_trade_action(row: Dict[str, Any]) -> Dict[str, Any]:
     action = coherence["final_action"]
 
     side_confidence = long_confidence if action in {"BUY", "SELL"} else short_confidence
-    confidence = clamp(side_confidence + (safe_float(row.get("score"), 0.0) - 50.0) * 0.08, 5.0, 100.0)
+    confidence = clamp(
+        side_confidence + (safe_float(row.get("score"), 0.0) - 50.0) * 0.08, 5.0, 100.0
+    )
     confidence = clamp(
         confidence
         - len(coherence["blocked_reasons"]) * 12.0
@@ -589,9 +699,16 @@ def summarize_trade_decision(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
             safe_float(row.get("score"), 0.0),
         ),
     )
-    if top.get("trade_action") or top.get("signal") in {"BUY", "SELL", "SHORT", "COVER"}:
+    if top.get("trade_action") or top.get("signal") in {
+        "BUY",
+        "SELL",
+        "SHORT",
+        "COVER",
+    }:
         resolved = dict(top)
-        action = str(resolved.get("trade_action") or resolved.get("signal") or "SELL").upper()
+        action = str(
+            resolved.get("trade_action") or resolved.get("signal") or "SELL"
+        ).upper()
         resolved["signal"] = action
         resolved["trade_action"] = action
         resolved["trade_direction"] = resolved.get("trade_direction") or {
@@ -600,19 +717,36 @@ def summarize_trade_decision(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
             "SHORT": "short",
             "COVER": "exit_short",
         }.get(action, "exit_long")
-        resolved["trade_confidence"] = round(safe_float(resolved.get("trade_confidence"), safe_float(resolved.get("confidence"), 0.0)), 1)
+        resolved["trade_confidence"] = round(
+            safe_float(
+                resolved.get("trade_confidence"),
+                safe_float(resolved.get("confidence"), 0.0),
+            ),
+            1,
+        )
         resolved["trade_bias"] = round(safe_float(resolved.get("trade_bias"), 0.0), 1)
-        resolved["bullish_pressure"] = round(safe_float(resolved.get("bullish_pressure"), 0.0), 1)
-        resolved["bearish_pressure"] = round(safe_float(resolved.get("bearish_pressure"), 0.0), 1)
-        resolved["market_regime_state"] = resolved.get("market_regime_state") or "unknown"
+        resolved["bullish_pressure"] = round(
+            safe_float(resolved.get("bullish_pressure"), 0.0), 1
+        )
+        resolved["bearish_pressure"] = round(
+            safe_float(resolved.get("bearish_pressure"), 0.0), 1
+        )
+        resolved["market_regime_state"] = (
+            resolved.get("market_regime_state") or "unknown"
+        )
         resolved["conflicts"] = list(resolved.get("conflicts") or [])
         resolved["reason"] = resolved.get("reason") or "Master score consolidado."
         resolved.setdefault("coherence_status", "unknown")
         resolved.setdefault("blocked_reasons", [])
         resolved.setdefault("warnings", [])
         resolved.setdefault("coherence_rules", {})
-        resolved.setdefault("trigger", "Aguardar confirmacao operacional antes de executar.")
-        resolved.setdefault("invalidation", "Sair se o contexto de regime, fluxo ou liquidez virar contra.")
+        resolved.setdefault(
+            "trigger", "Aguardar confirmacao operacional antes de executar."
+        )
+        resolved.setdefault(
+            "invalidation",
+            "Sair se o contexto de regime, fluxo ou liquidez virar contra.",
+        )
         resolved.setdefault("risk", "Risco nao detalhado no payload original.")
         resolved.setdefault("risk_level", "medio")
     else:
@@ -620,5 +754,10 @@ def summarize_trade_decision(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
 
     resolved["ticker"] = top.get("ticker") or top.get("symbol") or "UNKNOWN"
     resolved["score"] = round(safe_float(top.get("score"), 0.0), 1)
-    resolved["decision_ready"] = resolved.get("trade_action") in {"BUY", "SELL", "SHORT", "COVER"}
+    resolved["decision_ready"] = resolved.get("trade_action") in {
+        "BUY",
+        "SELL",
+        "SHORT",
+        "COVER",
+    }
     return resolved
