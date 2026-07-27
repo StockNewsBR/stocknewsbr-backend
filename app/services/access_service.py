@@ -224,9 +224,10 @@ def expire_access(user: User, reason: str = "expired"):
     return user
 
 
-def refresh_user_access(user: User):
+def refresh_user_access(user: User, touch_last_access: bool = False):
     now = utcnow()
-    user.last_access_at = now
+    if touch_last_access:
+        user.last_access_at = now
 
     if not user.is_active:
         return expire_access(user, reason="inactive")
@@ -238,27 +239,45 @@ def refresh_user_access(user: User):
         return downgrade_to_free(user, reason="premium_expired")
 
     if user.plan in PAID_PLANS:
-        user.plan_status = "active"
-        user.access_app = True
-        user.access_web = True
-        user.access_telegram = True
-        user.updated_at = now
+        if (
+            user.plan_status != "active"
+            or not user.access_app
+            or not user.access_web
+            or not user.access_telegram
+        ):
+            user.plan_status = "active"
+            user.access_app = True
+            user.access_web = True
+            user.access_telegram = True
+            user.updated_at = now
         return user
 
     if user.plan == TRIAL_PLAN:
-        user.plan_status = "trialing"
-        user.access_app = True
-        user.access_web = True
-        user.access_telegram = True
-        user.updated_at = now
+        if (
+            user.plan_status != "trialing"
+            or not user.access_app
+            or not user.access_web
+            or not user.access_telegram
+        ):
+            user.plan_status = "trialing"
+            user.access_app = True
+            user.access_web = True
+            user.access_telegram = True
+            user.updated_at = now
         return user
 
     if user.plan == FREE_PLAN:
-        user.plan_status = "active"
-        user.access_app = True
-        user.access_web = False
-        user.access_telegram = False
-        user.updated_at = now
+        if (
+            user.plan_status != "active"
+            or not user.access_app
+            or user.access_web
+            or user.access_telegram
+        ):
+            user.plan_status = "active"
+            user.access_app = True
+            user.access_web = False
+            user.access_telegram = False
+            user.updated_at = now
         return user
 
     return user

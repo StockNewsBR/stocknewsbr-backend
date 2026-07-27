@@ -150,7 +150,9 @@ def test_resolve_premium_entitlement(mock_refresh, mock_resolve):
     mock_resolve.side_effect = None
     mock_user.plan = 'trial'
     mock_resolve.return_value = mock_user
-    mock_refresh.side_effect = Exception("expired")
+    def mock_refresh_behavior(user, **kwargs):
+        user.plan = 'free'
+    mock_refresh.side_effect = mock_refresh_behavior
     assert resolve_premium_entitlement("valid_token", db_mock) is False
 
 if __name__ == "__main__":
