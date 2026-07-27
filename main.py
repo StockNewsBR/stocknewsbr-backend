@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from app.ai.ai_market_pulse import market_pulse
 from app.cache.snapshot_cache import get_snapshot, get_snapshot_info, get_snapshot_signals
@@ -317,16 +317,9 @@ def ping():
 def debug_tables(_internal=Depends(require_internal_token)):
     del _internal
 
-    query = (
-        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        if engine.url.drivername.startswith("sqlite")
-        else "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
-    )
-
     try:
-        with engine.connect() as conn:
-            result = conn.execute(text(query))
-            return {"tables": [row[0] for row in result]}
+        inspector = inspect(engine)
+        return {"tables": inspector.get_table_names()}
     except Exception as exc:
         return {"error": str(exc)}
 
