@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models import Referral, ReferralStats, SubscriptionAuditLog, User
 from app.services.access_service import PAID_PLANS, REFUND_WINDOW_DAYS
@@ -156,6 +156,74 @@ def _apply_reward_months(user: User | None, stats: ReferralStats, months: int, n
     user.plan_expires_at = max(expires_at, now) + extension
 
 
+def _batch_sync_referrer_stats(db: Session, referrer_ids: list[int], now: datetime):
+    if not referrer_ids:
+        return
+
+    # Pre-fetch existing stats
+    existing_stats = db.query(ReferralStats).filter(ReferralStats.user_id.in_(referrer_ids)).all()
+    stats_map = {s.user_id: s for s in existing_stats}
+
+    # Create missing stats
+    missing_ids = [rid for rid in referrer_ids if rid not in stats_map]
+    if missing_ids:
+        new_stats = [
+            ReferralStats(
+                user_id=rid,
+                total_validated=0,
+                total_active=0,
+                benefit_level=0,
+                reward_balance_months=0,
+            ) for rid in missing_ids
+        ]
+        db.add_all(new_stats)
+        for s in new_stats:
+            stats_map[s.user_id] = s
+
+    # Fetch validated referrals for all users in one query, eager loading the referred_user
+    all_validated_refs = (
+        db.query(Referral)
+        .filter(
+            Referral.referrer_id.in_(referrer_ids),
+            Referral.status == VALID_REFERRAL_STATUS,
+        )
+        .options(joinedload(Referral.referred_user))
+        .all()
+    )
+
+    refs_by_referrer = {rid: [] for rid in referrer_ids}
+    for ref in all_validated_refs:
+        refs_by_referrer[ref.referrer_id].append(ref)
+
+    # Process stats for each referrer
+    referrers_to_update = []
+    for referrer_id in referrer_ids:
+        stats = stats_map[referrer_id]
+        validated_refs = refs_by_referrer.get(referrer_id, [])
+
+        active_count = sum(1 for ref in validated_refs if _is_paid_active(ref.referred_user, now))
+        total_validated = len(validated_refs)
+
+        stats.total_validated = total_validated
+        stats.total_active = active_count
+
+        earned_reward_months = total_validated // REFERRAL_REWARD_EVERY
+        processed_months = stats.benefit_level or 0
+        new_months = max(0, earned_reward_months - processed_months)
+        if new_months:
+            referrers_to_update.append((referrer_id, stats, new_months))
+            stats.benefit_level = earned_reward_months
+
+    # If any rewards to apply, fetch those referrers and apply
+    if referrers_to_update:
+        r_ids_to_update = [r[0] for r in referrers_to_update]
+        referrers = db.query(User).filter(User.id.in_(r_ids_to_update)).all()
+        referrers_map = {u.id: u for u in referrers}
+        for referrer_id, stats, new_months in referrers_to_update:
+            user = referrers_map.get(referrer_id)
+            _apply_reward_months(user, stats, new_months, now)
+
+
 def _sync_referrer_stats(db: Session, referrer_id: int, now: datetime):
     stats = _ensure_stats(db, referrer_id)
     validated_refs = (
@@ -251,12 +319,13 @@ def referral_leaderboard(db: Session, limit: int = 50):
         .distinct()
         .all()
     ]
-    for referrer_id in referrer_ids:
-        _sync_referrer_stats(db, referrer_id, now)
+
+    _batch_sync_referrer_stats(db, referrer_ids, now)
     db.flush()
 
     stats_rows = (
         db.query(ReferralStats)
+        .options(joinedload(ReferralStats.user))
         .filter(ReferralStats.total_validated > 0)
         .order_by(ReferralStats.total_validated.desc(), ReferralStats.total_active.desc())
         .limit(max(1, min(limit, 100)))
@@ -265,9 +334,9 @@ def referral_leaderboard(db: Session, limit: int = 50):
 
     rows = []
     for position, stats in enumerate(stats_rows, start=1):
-        _sync_referrer_stats(db, stats.user_id, now)
         validated_refs = (
             db.query(Referral)
+            .options(joinedload(Referral.referred_user))
             .filter(Referral.referrer_id == stats.user_id, Referral.status == VALID_REFERRAL_STATUS)
             .order_by(Referral.validated_at.desc())
             .limit(10)
