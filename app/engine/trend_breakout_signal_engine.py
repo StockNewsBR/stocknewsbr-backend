@@ -329,28 +329,15 @@ def _event_payload(
     }
 
 
-def _build_ai_bias(ai_context: Dict[str, Any] | None, profile: str) -> Dict[str, Any]:
-    context = ai_context or {}
-    heat_map = context.get("heat_map")
-    breakout_probability = context.get("breakout_probability")
-    institutional_flow = context.get("institutional_flow")
-    market_regime = context.get("market_regime")
-    smart_money = context.get("smart_money")
-    volatility_squeeze = context.get("volatility_squeeze")
-    liquidity_sweep = context.get("liquidity_sweep")
-    liquidity_map = context.get("liquidity_map")
-    master_score = context.get("master_score")
-    profile_rules = _PROFILE_AI_RULES.get(profile, _PROFILE_AI_RULES["us_stock"])
-
-    regime_state = _ai_state(market_regime)
-    regime_score = _ai_score(market_regime)
-    heat_map_score = _ai_score(heat_map)
-    breakout_score = _ai_score(breakout_probability)
-    flow_score = _ai_score(institutional_flow)
-    smart_money_score = _ai_score(smart_money)
-    volatility_squeeze_state = _ai_state(volatility_squeeze)
-    master_score_value = _ai_score(master_score)
-
+def _calculate_bias_adjustments(
+    regime_state: str,
+    smart_money_score: float,
+    flow_score: float,
+    breakout_score: float,
+    volatility_squeeze_state: str,
+    master_score_value: float,
+    profile_rules: Dict[str, Any],
+) -> Dict[str, Any]:
     long_bonus = 0
     short_bonus = 0
     long_block = False
@@ -437,6 +424,49 @@ def _build_ai_bias(ai_context: Dict[str, Any] | None, profile: str) -> Dict[str,
     exit_short_on_ai = regime_is_bull and (master_score_value < 60 or smart_money_score >= 60)
 
     return {
+        "long_bonus": long_bonus,
+        "short_bonus": short_bonus,
+        "long_block": long_block,
+        "short_block": short_block,
+        "threshold_adjust": threshold_adjust,
+        "exit_long_on_ai": exit_long_on_ai,
+        "exit_short_on_ai": exit_short_on_ai,
+    }
+
+
+def _build_ai_bias(ai_context: Dict[str, Any] | None, profile: str) -> Dict[str, Any]:
+    context = ai_context or {}
+    heat_map = context.get("heat_map")
+    breakout_probability = context.get("breakout_probability")
+    institutional_flow = context.get("institutional_flow")
+    market_regime = context.get("market_regime")
+    smart_money = context.get("smart_money")
+    volatility_squeeze = context.get("volatility_squeeze")
+    liquidity_sweep = context.get("liquidity_sweep")
+    liquidity_map = context.get("liquidity_map")
+    master_score = context.get("master_score")
+    profile_rules = _PROFILE_AI_RULES.get(profile, _PROFILE_AI_RULES["us_stock"])
+
+    regime_state = _ai_state(market_regime)
+    regime_score = _ai_score(market_regime)
+    heat_map_score = _ai_score(heat_map)
+    breakout_score = _ai_score(breakout_probability)
+    flow_score = _ai_score(institutional_flow)
+    smart_money_score = _ai_score(smart_money)
+    volatility_squeeze_state = _ai_state(volatility_squeeze)
+    master_score_value = _ai_score(master_score)
+
+    adjustments = _calculate_bias_adjustments(
+        regime_state=regime_state,
+        smart_money_score=smart_money_score,
+        flow_score=flow_score,
+        breakout_score=breakout_score,
+        volatility_squeeze_state=volatility_squeeze_state,
+        master_score_value=master_score_value,
+        profile_rules=profile_rules,
+    )
+
+    return {
         "market_regime_state": regime_state,
         "market_regime_score": regime_score,
         "heat_map_score": heat_map_score,
@@ -450,13 +480,7 @@ def _build_ai_bias(ai_context: Dict[str, Any] | None, profile: str) -> Dict[str,
         "liquidity_sweep_state": _ai_state(liquidity_sweep),
         "liquidity_map_state": _ai_state(liquidity_map),
         "master_score": master_score_value,
-        "long_bonus": long_bonus,
-        "short_bonus": short_bonus,
-        "long_block": long_block,
-        "short_block": short_block,
-        "threshold_adjust": threshold_adjust,
-        "exit_long_on_ai": exit_long_on_ai,
-        "exit_short_on_ai": exit_short_on_ai,
+        **adjustments,
     }
 
 
