@@ -699,10 +699,15 @@ def schedule_quote_warmup(symbol: str) -> bool:
 
 
 def _cached_index_quote(provider_symbol: str) -> dict:
-    for payload in cached_price_payloads([provider_symbol], allow_stale=True).values():
-        if isinstance(payload, dict) and _finite_positive(payload.get("price")) is not None:
-            return payload
-    return {}
+    aliases = _symbol_aliases(provider_symbol)
+    best = {}
+    for payload in cached_price_payloads(aliases, allow_stale=True).values():
+        if isinstance(payload, dict):
+            if _finite_positive(payload.get("price")) is not None:
+                return payload
+            if not best:
+                best = payload
+    return best
 
 
 def build_public_indices_payload() -> dict:
@@ -710,21 +715,35 @@ def build_public_indices_payload() -> dict:
     items = []
     for symbol, provider, display_name, currency in INDEX_UNIVERSE:
         quote = _cached_index_quote(provider)
-        price = _finite_positive(quote.get("price"))
         rows = load_public_chart_rows(_symbol_aliases(provider), INDEX_SPARK_INTERVAL, scope="public_indices")
+        spark_closes = _valid_chart_closes(rows)[-INDEX_SPARK_MAX_POINTS:]
+
+        price = _finite_positive(quote.get("price"))
+        prev_close = _finite_positive(quote.get("previous_close"))
+        change = _finite_number(quote.get("change"))
+        change_pct = _finite_number(quote.get("change_pct"))
+
+        if price is None and spark_closes:
+            price = spark_closes[-1]
+            if len(spark_closes) > 1:
+                prev_close = prev_close or spark_closes[-2]
+                if prev_close and prev_close > 0:
+                    change = round(price - prev_close, 4)
+                    change_pct = round(((price - prev_close) / prev_close) * 100, 2)
+
         items.append({
             "symbol": symbol,
             "display_name": display_name,
             "price": price,
-            "change": _finite_number(quote.get("change")),
-            "change_pct": _finite_number(quote.get("change_pct")),
+            "change": change,
+            "change_pct": change_pct,
             # Same baseline contract as the quote surfaces: the producer already
             # measures against the previous SESSION close, so the strip only has
             # to publish it for auditability.
-            "previous_close": _finite_positive(quote.get("previous_close")),
+            "previous_close": prev_close,
             "quote_time": quote.get("quote_time") or None,
             "market_state": quote.get("market_state") or None,
-            "spark": _valid_chart_closes(rows)[-INDEX_SPARK_MAX_POINTS:],
+            "spark": spark_closes,
             "currency": currency,
             "status": "valid" if price is not None else "empty",
         })
