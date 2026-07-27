@@ -27,7 +27,6 @@ from app.schemas import (
     UserRegister,
 )
 from app.security import (
-    create_access_token,
     decode_access_token_payload,
     get_current_user,
     hash_password,
@@ -88,7 +87,11 @@ def _serialize_access(user: User) -> UserAccessResponse:
 
 
 def _require_legal_acceptance(user_data: UserRegister):
-    if not (user_data.accepted_terms and user_data.accepted_privacy and user_data.accepted_risk_notice):
+    if not (
+        user_data.accepted_terms
+        and user_data.accepted_privacy
+        and user_data.accepted_risk_notice
+    ):
         raise HTTPException(status_code=400, detail="legal_acceptance_required")
 
 
@@ -117,7 +120,12 @@ def _complete_login(
             code=code,
             plan=user.plan,
             channel=normalized_channel,
-            expires_minutes=max(1, int((challenge.expires_at - challenge.created_at).total_seconds() // 60)),
+            expires_minutes=max(
+                1,
+                int(
+                    (challenge.expires_at - challenge.created_at).total_seconds() // 60
+                ),
+            ),
         )
         return AuthFlowResponse(
             otp_required=True,
@@ -181,7 +189,11 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
         ensure_referral_code(db, new_user)
 
         if user_data.referral_code:
-            referrer = db.query(User).filter(User.referral_code == user_data.referral_code).first()
+            referrer = (
+                db.query(User)
+                .filter(User.referral_code == user_data.referral_code)
+                .first()
+            )
 
             if referrer:
                 register_referral(db, referrer.id, new_user.id)
