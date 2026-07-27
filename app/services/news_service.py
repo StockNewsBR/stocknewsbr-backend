@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import hashlib
 import logging
 import re
@@ -69,6 +67,7 @@ def _latest_news_provider_status(ticker: str) -> dict[str, Any]:
         if isinstance(payload, dict):
             return dict(payload)
     return {"provider": "yfinance", "ticker": normalized, "status": "not_checked", "error": None, "raw_count": 0, "checked_at": None}
+
 
 _PORTUGUESE_STOPWORDS = {
     "a",
@@ -906,6 +905,7 @@ def _relevance_score(labels: list[str], confidence: float, title: str, summary: 
     if len(summary.split()) >= 10:
         base += 5.0
     return max(0.0, min((base * 0.6) + (confidence * 0.4), 100.0))
+
 
 def _should_keep_item(
     relevance_score: float,
