@@ -5,6 +5,7 @@
 import logging
 import os
 import time
+from functools import lru_cache
 
 from app.cache.signal_cache import get_all_signals, update_signals
 from app.data.warm_data_pool import get_market_pool
@@ -74,22 +75,11 @@ def _attach_events(ranked, events):
 
     events_by_ticker = {}
 
-    def normalize_ticker(value):
-        ticker = str(value or "").upper().strip()
-
-        if ticker.endswith(".SA"):
-            ticker = ticker[:-3]
-
-        if ticker.endswith("-USD"):
-            ticker = ticker[:-4] + "USD"
-
-        return ticker
-
     for event in events:
         if not isinstance(event, dict):
             continue
 
-        ticker = normalize_ticker(event.get("ticker") or event.get("symbol"))
+        ticker = _normalize_ticker(event.get("ticker") or event.get("symbol"))
 
         if not ticker:
             continue
@@ -105,7 +95,7 @@ def _attach_events(ranked, events):
         item = dict(row)
         ticker = item.get("ticker") or item.get("symbol")
         row_events = list(item.get("events", []))
-        normalized_ticker = normalize_ticker(ticker)
+        normalized_ticker = _normalize_ticker(ticker)
 
         if ticker:
             item["ticker"] = ticker
@@ -122,6 +112,7 @@ def _attach_events(ranked, events):
     return annotated
 
 
+@lru_cache(maxsize=4096)
 def _normalize_ticker(value):
     ticker = str(value or "").upper().strip()
 
