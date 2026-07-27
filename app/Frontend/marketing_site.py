@@ -5,57 +5,7 @@ from app.services.push_service import get_push_status
 from app.services.storage_service import get_storage_status
 
 
-def get_marketing_site():
-    bootstrap = get_public_bootstrap()
-    help_center = get_help_center_blueprint()
-    media = get_media_status()
-    push = get_push_status()
-    storage = get_storage_status()
-
-    ai_modules = bootstrap.get("ai_modules", [])
-    social_features = bootstrap.get("social_features", {})
-    guides = help_center.get("guides", [])[:4]
-    pricing = bootstrap.get("pricing", {})
-    social_items = [
-        key.replace("_", " ").title()
-        for key, enabled in social_features.items()
-        if enabled
-    ]
-
-    feature_cards = "".join(
-        f"""
-        <article class="feature-card">
-          <span class="eyebrow">IA</span>
-          <h3>{module}</h3>
-          <p>Scanner institucional ligado ao ranking, grafico, feed e alertas.</p>
-        </article>
-        """
-        for module in ai_modules[:8]
-    )
-
-    social_cards = "".join(
-        f"""
-        <article class="mini-card">
-          <h3>{item}</h3>
-          <p>Construido para manter o trader operando dentro do ecossistema.</p>
-        </article>
-        """
-        for item in social_items[:6]
-    )
-
-    guide_cards = "".join(
-        f"""
-        <article class="guide-card">
-          <span class="eyebrow">Ajuda</span>
-          <h3>{guide['title']}</h3>
-          <p>{guide.get('tagline', '')}</p>
-          <a href="{guide.get('demo_video_url', '#')}">Ver demo</a>
-        </article>
-        """
-        for guide in guides
-    )
-
-    return f"""
+MARKETING_SITE_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -192,15 +142,15 @@ a {{ color:inherit; text-decoration:none; }}
           <a class="cta secondary" href="/site/workspace">Explorar o website</a>
         </div>
         <div class="metric-grid" style="margin-top:22px;">
-          <div class="metric"><span>Trial inicial</span><strong>{pricing.get('trial_days', 90)} dias</strong><span>Depois vai automaticamente para a conta basica/free.</span></div>
-          <div class="metric"><span>Mensal Premium</span><strong>R$ {pricing.get('premium_monthly', {}).get('price_brl', 49)}</strong><span>App Google + website + Telegram.</span></div>
-          <div class="metric"><span>Anual Premium</span><strong>R$ {pricing.get('premium_annual', {}).get('price_brl', 500)}</strong><span>Desenhado para retention e uso diario.</span></div>
+          <div class="metric"><span>Trial inicial</span><strong>{trial_days} dias</strong><span>Depois vai automaticamente para a conta basica/free.</span></div>
+          <div class="metric"><span>Mensal Premium</span><strong>R$ {premium_monthly_price}</strong><span>App Google + website + Telegram.</span></div>
+          <div class="metric"><span>Anual Premium</span><strong>R$ {premium_annual_price}</strong><span>Desenhado para retention e uso diario.</span></div>
         </div>
       </div>
       <aside class="hero-card hero-side">
-        <div class="metric"><span>Roadmap atual</span><strong>{bootstrap.get('launch_roadmap', {}).get('current', 'google_app')}</strong><span>{bootstrap.get('launch_roadmap', {}).get('summary', 'Android primeiro, Apple depois.')}</span></div>
-        <div class="metric"><span>Videos de ajuda</span><strong>{help_center.get('video_status', {}).get('available_videos', 0)}/{help_center.get('video_status', {}).get('planned_videos', 0)}</strong><span>{help_center.get('video_status', {}).get('next_step', '')}</span></div>
-        <div class="metric"><span>Infra</span><strong>{storage.get('provider', 'local').upper()}</strong><span>Upload/CDN: {'pronto' if media.get('cdn_ready') else 'em configuracao'} | Push Android: {'pronto' if push.get('android_ready') else 'pendente'}</span></div>
+        <div class="metric"><span>Roadmap atual</span><strong>{roadmap_current}</strong><span>{roadmap_summary}</span></div>
+        <div class="metric"><span>Videos de ajuda</span><strong>{available_videos}/{planned_videos}</strong><span>{help_center_next_step}</span></div>
+        <div class="metric"><span>Infra</span><strong>{storage_provider}</strong><span>Upload/CDN: {cdn_status} | Push Android: {push_status}</span></div>
       </aside>
     </section>
 
@@ -253,9 +203,9 @@ a {{ color:inherit; text-decoration:none; }}
       <h2>Operacao pronta para escala</h2>
       <p class="lead">Upload/CDN, push mobile, observabilidade, websocket e moderacao entram como parte do produto, nao como remendo.</p>
       <div class="ops-grid">
-        <article class="ops-card"><span class="eyebrow">Upload</span><h3>Storage + CDN</h3><strong>{storage.get('provider', 'local').upper()}</strong><p>{media.get('next_step', '')}</p></article>
-        <article class="ops-card"><span class="eyebrow">Push</span><h3>Android / Apple</h3><strong>{'Android pronto' if push.get('android_ready') else 'Configurar Firebase'}</strong><p>{push.get('next_step', '')}</p></article>
-        <article class="ops-card"><span class="eyebrow">Ajuda</span><h3>Biblioteca de videos</h3><strong>{help_center.get('video_status', {}).get('available_videos', 0)} videos</strong><p>{help_center.get('video_status', {}).get('next_step', '')}</p></article>
+        <article class="ops-card"><span class="eyebrow">Upload</span><h3>Storage + CDN</h3><strong>{storage_provider}</strong><p>{media_next_step}</p></article>
+        <article class="ops-card"><span class="eyebrow">Push</span><h3>Android / Apple</h3><strong>{push_android_status}</strong><p>{push_next_step}</p></article>
+        <article class="ops-card"><span class="eyebrow">Ajuda</span><h3>Biblioteca de videos</h3><strong>{available_videos} videos</strong><p>{help_center_next_step}</p></article>
       </div>
     </section>
 
@@ -267,3 +217,73 @@ a {{ color:inherit; text-decoration:none; }}
 </body>
 </html>
 """
+
+def get_marketing_site():
+    bootstrap = get_public_bootstrap()
+    help_center = get_help_center_blueprint()
+    media = get_media_status()
+    push = get_push_status()
+    storage = get_storage_status()
+
+    ai_modules = bootstrap.get("ai_modules", [])
+    social_features = bootstrap.get("social_features", {})
+    guides = help_center.get("guides", [])[:4]
+    pricing = bootstrap.get("pricing", {})
+    social_items = [
+        key.replace("_", " ").title()
+        for key, enabled in social_features.items()
+        if enabled
+    ]
+
+    feature_cards = "".join(
+        f"""
+        <article class="feature-card">
+          <span class="eyebrow">IA</span>
+          <h3>{module}</h3>
+          <p>Scanner institucional ligado ao ranking, grafico, feed e alertas.</p>
+        </article>
+        """
+        for module in ai_modules[:8]
+    )
+
+    social_cards = "".join(
+        f"""
+        <article class="mini-card">
+          <h3>{item}</h3>
+          <p>Construido para manter o trader operando dentro do ecossistema.</p>
+        </article>
+        """
+        for item in social_items[:6]
+    )
+
+    guide_cards = "".join(
+        f"""
+        <article class="guide-card">
+          <span class="eyebrow">Ajuda</span>
+          <h3>{guide['title']}</h3>
+          <p>{guide.get('tagline', '')}</p>
+          <a href="{guide.get('demo_video_url', '#')}">Ver demo</a>
+        </article>
+        """
+        for guide in guides
+    )
+
+    return MARKETING_SITE_TEMPLATE.format(
+        trial_days=pricing.get('trial_days', 90),
+        premium_monthly_price=pricing.get('premium_monthly', {}).get('price_brl', 49),
+        premium_annual_price=pricing.get('premium_annual', {}).get('price_brl', 500),
+        roadmap_current=bootstrap.get('launch_roadmap', {}).get('current', 'google_app'),
+        roadmap_summary=bootstrap.get('launch_roadmap', {}).get('summary', 'Android primeiro, Apple depois.'),
+        available_videos=help_center.get('video_status', {}).get('available_videos', 0),
+        planned_videos=help_center.get('video_status', {}).get('planned_videos', 0),
+        help_center_next_step=help_center.get('video_status', {}).get('next_step', ''),
+        storage_provider=storage.get('provider', 'local').upper(),
+        cdn_status='pronto' if media.get('cdn_ready') else 'em configuracao',
+        push_status='pronto' if push.get('android_ready') else 'pendente',
+        push_android_status='Android pronto' if push.get('android_ready') else 'Configurar Firebase',
+        media_next_step=media.get('next_step', ''),
+        push_next_step=push.get('next_step', ''),
+        feature_cards=feature_cards,
+        social_cards=social_cards,
+        guide_cards=guide_cards
+    )
