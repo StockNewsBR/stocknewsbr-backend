@@ -9,6 +9,34 @@ from app.services.public_market_data_service import (
     cached_price_payloads
 )
 
+
+import pytest
+from app.market import market_data_loader
+from app.services import public_market_data_service
+
+@pytest.fixture(autouse=True)
+def isolated_market_caches(monkeypatch, tmp_path):
+    quote_file = tmp_path / "quotes.json"
+    chart_file = tmp_path / "charts.json"
+
+    quote_file.write_text("{}", encoding="utf-8")
+    chart_file.write_text('{"charts": {}}', encoding="utf-8")
+
+    monkeypatch.setattr(public_market_data_service, "_QUOTE_CACHE_FILE", quote_file)
+    monkeypatch.setattr(public_market_data_service, "_CHART_CACHE_FILE", chart_file)
+    monkeypatch.setattr(market_data_loader, "_PRICE_CACHE_FILE", quote_file)
+    monkeypatch.setattr(market_data_loader, "_CHART_CACHE_FILE", chart_file)
+
+    monkeypatch.delenv("MARKET_QUOTES_CACHE_FILE", raising=False)
+    monkeypatch.delenv("MARKET_CHARTS_CACHE_FILE", raising=False)
+
+    monkeypatch.setattr(market_data_loader, "_PRICE_SNAPSHOT_CACHE", {})
+    monkeypatch.setattr(market_data_loader, "_CHART_DATA_CACHE", {})
+    monkeypatch.setattr(market_data_loader, "_PRICE_CACHE_LOADED", False)
+    monkeypatch.setattr(market_data_loader, "_CHART_CACHE_LOADED", False)
+    monkeypatch.setattr(market_data_loader, "_PRICE_CACHE_MTIME", 0.0)
+    monkeypatch.setattr(market_data_loader, "_CHART_CACHE_MTIME", 0.0)
+
 def _dt(days_ago=0, seconds_ago=0):
     return datetime.now(timezone.utc) - timedelta(days=days_ago, seconds=seconds_ago)
 
