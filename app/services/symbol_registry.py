@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import re
 from typing import Any, Iterable
 
@@ -334,7 +336,6 @@ def canonical_symbol(value: Any, *, fallback: bool = True) -> str:
     if key in CRYPTO_BASES:
         if _is_ambiguous_crypto_key(key, value) or key not in US_EXCHANGE_BY_SYMBOL:
             return ""
-    crypto_match = _CRYPTO_RE.match(key or "")
     if key and _is_disallowed_qualified_crypto_pair(key, value):
         return ""
     if key and _is_disallowed_qualified_b3_key(key, value):
@@ -470,7 +471,12 @@ def canonicalize_symbol_row(row: dict[str, Any]) -> dict[str, Any]:
 def _row_quality_score(row: dict[str, Any]) -> tuple[float, float, float]:
     def safe_float(value: Any) -> float:
         try:
-            return float(value)
+            if value is None or value == "":
+                return 0.0
+            f_val = float(value)
+            if not math.isfinite(f_val):
+                return 0.0
+            return f_val
         except (TypeError, ValueError):
             return 0.0
 
