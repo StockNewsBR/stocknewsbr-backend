@@ -27,8 +27,10 @@ from app.system.system_metrics import record_cache_access
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _QUOTE_CACHE_FILE = Path(os.getenv("MARKET_QUOTES_CACHE_FILE") or _PROJECT_ROOT / "runtime" / "cache" / "market_quotes.json")
 _CHART_CACHE_FILE = Path(os.getenv("MARKET_CHARTS_CACHE_FILE") or _PROJECT_ROOT / "runtime" / "cache" / "market_charts.json")
-_QUOTE_DIRECT_MAX_AGE_SECONDS = 60 * 60 * 24 * 7
+_QUOTE_DIRECT_MAX_AGE_SECONDS = 300
+_QUOTE_RETENTION_SECONDS = 60 * 60 * 24 * 7
 _CHART_DIRECT_MAX_AGE_SECONDS = 60 * 60 * 24 * 14
+_CHART_RETENTION_SECONDS = 60 * 60 * 24 * 14
 _PUBLIC_RSI_SOURCE = "canonical_indicator_engine"
 _CHART_LEVEL_SOURCE = "chart_overlay"
 _CHART_LEVEL_ALGORITHM_VERSION = "recent_extrema_v1"
@@ -480,13 +482,18 @@ def normalize_public_chart_zones(
     return normalized
 
 
-def _fresh_enough(entry: dict, allow_stale: bool, max_age_seconds: int) -> bool:
-    if allow_stale:
-        return True
+def _fresh_enough(entry: dict, allow_stale: bool, max_age_seconds: int, retention_seconds: int = None) -> bool:
     timestamp = _finite_positive(entry.get("timestamp"))
     if timestamp is None:
         return False
-    return (time.time() - timestamp) <= max_age_seconds
+    age = time.time() - timestamp
+    if age < 0:
+        return False
+    if retention_seconds is not None and age > retention_seconds:
+        return False
+    if age <= max_age_seconds:
+        return True
+    return allow_stale
 
 
 def _symbol_aliases(symbol: str) -> list[str]:
@@ -568,7 +575,7 @@ def _direct_cached_price_payloads(symbols: list[str], allow_stale: bool) -> dict
             entry = raw_cache.get(alias)
             if not isinstance(entry, dict):
                 entry = raw_cache.get(alias.replace(".SA", ""))
-            if not isinstance(entry, dict) or not _fresh_enough(entry, allow_stale, _QUOTE_DIRECT_MAX_AGE_SECONDS):
+            if not isinstance(entry, dict) or not _fresh_enough(entry, allow_stale, _QUOTE_DIRECT_MAX_AGE_SECONDS, _QUOTE_RETENTION_SECONDS):
                 continue
             payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else entry
             if not isinstance(payload, dict) or _finite_positive(payload.get("price")) is None:
@@ -633,7 +640,7 @@ def _direct_cached_chart_data(alias: str, interval: str, allow_stale: bool) -> l
 
     for candidate in _symbol_aliases(alias):
         entry = charts.get(f"{candidate}:{interval}") or charts.get(f"{candidate.replace('.SA', '')}:{interval}")
-        if not isinstance(entry, dict) or not _fresh_enough(entry, allow_stale, _CHART_DIRECT_MAX_AGE_SECONDS):
+        if not isinstance(entry, dict) or not _fresh_enough(entry, allow_stale, _CHART_DIRECT_MAX_AGE_SECONDS, _CHART_RETENTION_SECONDS):
             continue
         rows = entry.get("rows")
         if isinstance(rows, list) and rows:
