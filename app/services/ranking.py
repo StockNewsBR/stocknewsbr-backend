@@ -179,7 +179,7 @@ def _normalize_snapshot_ranking():
     return results
 
 
-def _get_symbol_frame(data, symbol):
+def _get_symbol_frame(data, symbol, available_symbols=None):
     if data is None:
         return None
 
@@ -189,10 +189,13 @@ def _get_symbol_frame(data, symbol):
         return None
 
     if hasattr(columns, "levels"):
-        available = set(columns.get_level_values(0))
-
-        if symbol not in available:
-            return None
+        if available_symbols is not None:
+            if symbol not in available_symbols:
+                return None
+        else:
+            available = set(columns.get_level_values(0))
+            if symbol not in available:
+                return None
 
         return data[symbol]
 
@@ -229,9 +232,12 @@ def generate_ranking(force_refresh: bool = False):
 
     results = []
 
+    columns = getattr(data, "columns", None)
+    available_symbols = set(columns.get_level_values(0)) if columns is not None and hasattr(columns, "levels") else None
+
     for symbol in SYMBOLS:
         try:
-            frame = _get_symbol_frame(data, symbol)
+            frame = _get_symbol_frame(data, symbol, available_symbols)
             score = calculate_score(symbol, frame)
 
             if score:
