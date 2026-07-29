@@ -1,4 +1,5 @@
 import unittest
+import pytest
 from unittest.mock import patch
 
 from app.ai.final_decision import (
@@ -155,6 +156,7 @@ def _history(ticker="PETR4", wins=9, losses=1):
     return [{**_row(ticker), "historical_result": "win" if index < wins else "loss"} for index in range(wins + losses)]
 
 
+@pytest.mark.usefixtures("isolated_market_data_cache")
 class FinalDecisionTests(unittest.TestCase):
     def test_final_decision_levels(self):
         rows, _ = enrich_final_decision_rows(

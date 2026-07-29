@@ -1,4 +1,5 @@
 import unittest
+import pytest
 from unittest.mock import patch
 
 from app.ai.institutional_auditor import AUDIT_APPROVED, AUDIT_BLOCKED, AUDIT_CAUTION
@@ -129,6 +130,7 @@ def _bullish_tools(ticker="PETR4", risk_score=22, risk_state="low_risk"):
     }
 
 
+@pytest.mark.usefixtures("isolated_market_data_cache")
 class InstitutionalRankingTests(unittest.TestCase):
     def test_classification_excellent_strong_moderate_and_watch(self):
         excellent = _row("EXC1")

@@ -1,4 +1,5 @@
 import unittest
+import pytest
 from unittest.mock import patch
 
 from app.ai.institutional_auditor import AUDIT_APPROVED, AUDIT_BLOCKED, AUDIT_CAUTION
@@ -151,6 +152,7 @@ def _history(ticker="PETR4", wins=9, losses=1):
     return [{**_row(ticker), "historical_result": "win" if index < wins else "loss"} for index in range(wins + losses)]
 
 
+@pytest.mark.usefixtures("isolated_market_data_cache")
 class InstitutionalPriorityTests(unittest.TestCase):
     def test_priority_levels_critical_high_medium_and_low(self):
         rows, _ = enrich_institutional_priority_rows(

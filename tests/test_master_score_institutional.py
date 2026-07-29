@@ -1,4 +1,5 @@
 import unittest
+import pytest
 from unittest.mock import patch
 
 from app.ai.ai_master_score import apply_master_scores_by_ticker, run_master_score
@@ -99,6 +100,7 @@ def _bearish_tools(ticker="PETR4"):
     }
 
 
+@pytest.mark.usefixtures("isolated_market_data_cache")
 class InstitutionalMasterScoreTests(unittest.TestCase):
     def test_bullish_strong_contract_explains_context(self):
         master = run_master_score([_row()], ai_tools=_bullish_tools(), market_pulse={"sentiment": "bullish"})[0]

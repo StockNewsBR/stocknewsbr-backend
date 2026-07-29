@@ -1,4 +1,5 @@
 import unittest
+import pytest
 from unittest.mock import patch
 
 from app.ai.historical_confidence import (
@@ -144,6 +145,7 @@ def _bullish_tools(ticker="PETR4"):
     }
 
 
+@pytest.mark.usefixtures("isolated_market_data_cache")
 class HistoricalConfidenceTests(unittest.TestCase):
     def test_high_moderate_low_and_insufficient_labels(self):
         high, _ = enrich_historical_confidence_rows([_row("ALTA1")], history_rows=_history("ALTA1", wins=9, losses=1))
