@@ -174,6 +174,42 @@ def compute_core(price_matrix, volume_matrix):
 # MATRIX BUILDER
 # =====================================================
 
+def _sanitize_array(arr: np.ndarray, name: str, ticker: str) -> np.ndarray:
+    """Replace NaN/Inf with linear interpolation or forward/backward fill. Returns finite array."""
+    finite_mask = np.isfinite(arr)
+    if np.all(finite_mask):
+        return arr
+
+    bad_count = int(np.sum(~finite_mask))
+    logger.warning("Sanitizing %s for %s: %d non-finite values", name, ticker, bad_count)
+
+    if bad_count >= len(arr):
+        logger.error("All values non-finite for %s (%s), using safe fallback", name, ticker)
+        return np.full_like(arr, EPS, dtype=np.float32)
+
+    if not finite_mask[0]:
+        first_finite_idx = np.argmax(finite_mask)
+        if finite_mask[first_finite_idx]:
+            arr[:first_finite_idx] = arr[first_finite_idx]
+
+    if not finite_mask[-1]:
+        last_finite_idx = len(arr) - 1 - np.argmax(finite_mask[::-1])
+        if finite_mask[last_finite_idx]:
+            arr[last_finite_idx + 1:] = arr[last_finite_idx]
+
+    finite_indices = np.where(finite_mask)[0]
+    for i in range(1, len(finite_indices)):
+        prev_idx = finite_indices[i - 1]
+        curr_idx = finite_indices[i]
+        if curr_idx - prev_idx > 1:
+            gap = curr_idx - prev_idx
+            for j in range(prev_idx + 1, curr_idx):
+                weight = (j - prev_idx) / gap
+                arr[j] = arr[prev_idx] * (1.0 - weight) + arr[curr_idx] * weight
+
+    return arr
+
+
 def build_matrices(pool):
 
     tickers = []
@@ -190,6 +226,9 @@ def build_matrices(pool):
 
             if len(close) < 120:
                 continue
+
+            close = _sanitize_array(close.astype(np.float32), "price", ticker)
+            volume = _sanitize_array(volume.astype(np.float32), "volume", ticker)
 
             tickers.append(ticker)
             prices.append(close)
