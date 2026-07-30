@@ -21,7 +21,7 @@ class OnDemandHydrationTests(unittest.TestCase):
 
     def test_chart_request_worker_fetches_a_cache_miss(self):
         with patch.object(chart_warmup, "get_cached_chart_data", return_value=[]), patch.object(
-            chart_warmup, "get_chart_data", return_value=[{"close": 10.0}]
+            chart_warmup, "_get_chart_data_no_persist", return_value=[{"close": 10.0}]
         ) as fetch, patch.object(chart_warmup, "_drop_warmed_requests"), patch.object(
             chart_warmup, "record_worker_stage_duration"
         ):

@@ -16,6 +16,7 @@ import logging
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import requests
@@ -26,6 +27,8 @@ _OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 _MODEL = os.getenv("CONCLUSION_LLM_MODEL", "qwen3.5:9b")
 _TIMEOUT = float(os.getenv("CONCLUSION_LLM_TIMEOUT", "20"))
 _TTL_SECONDS = float(os.getenv("CONCLUSION_LLM_TTL", "180"))
+# Max concurrent LLM workers - bounds resource usage
+_MAX_WORKERS = min(4, int(os.getenv("CONCLUSION_LLM_MAX_WORKERS", "4")))
 
 # Provider selection. Default "ollama" keeps the existing behaviour untouched;
 # set LLM_PROVIDER=omniroute to route the conclusion through the local OmniRoute
@@ -43,133 +46,48 @@ _OMNI_TIMEOUT = float(os.getenv("OMNIROUTE_TIMEOUT", "20"))
 # ponytail: process-local dict cache -- fine for a single web worker. Move to the
 # shared snapshot cache if several workers each pay the first-miss LLM cost.
 _CACHE: dict[tuple, tuple[str, float]] = {}
-
-
-def _round(value: Any, ndigits: int = 0) -> float | None:
-    try:
-        return round(float(value), ndigits)
-    except (TypeError, ValueError):
-        return None
-
-
-def _cache_key(d: dict[str, Any]) -> tuple:
-    return (
-        str(d.get("symbol") or "").upper(),
-        str(d.get("trend_bias") or "").lower(),
-        str(d.get("signal") or "").lower(),
-        str(d.get("master_verdict") or "").upper(),
-        _round(d.get("rsi")),
-        _round(d.get("change_pct"), 1),
-    )
-
-
-def _build_prompt(d: dict[str, Any]) -> str:
-    return (
-        "Você é um analista que EXPLICA a decisão de um motor quantitativo de trading. "
-        "Regras: NÃO decida nada, NÃO recomende comprar ou vender, NÃO invente dados. "
-        "Escreva 2 a 3 frases em português, explicando o cenário do ativo e por que o "
-        "veredito do motor é o que é. Use SOMENTE os dados abaixo.\n\n"
-        f"Ativo: {d.get('symbol')}\n"
-        f"Variação no dia: {d.get('change_pct')}%\n"
-        f"RSI: {d.get('rsi')}\n"
-        f"Tendência (trend_bias): {d.get('trend_bias')}\n"
-        f"Sinal técnico: {d.get('signal')}\n"
-        f"Suporte: {d.get('support')} | Resistência: {d.get('resistance')}\n"
-        f"VEREDITO DO MOTOR (imutável, não altere): {d.get('master_verdict')}\n\n"
-        "Conclusão:"
-    )
-
-
-def _call_ollama(prompt: str) -> str:
-    resp = requests.post(
-        f"{_OLLAMA_URL}/api/generate",
-        json={
-            "model": _MODEL,
-            "prompt": prompt,
-            "stream": False,
-            # qwen3 is a "thinking" model: without this it spends the whole token
-            # budget in the `thinking` field and returns an empty `response`.
-            "think": False,
-            "options": {"temperature": 0.4, "num_predict": 220},
-        },
-        timeout=_TIMEOUT,
-    )
-    resp.raise_for_status()
-    text = (resp.json().get("response") or "").strip()
-    if not text:
-        raise ValueError("empty LLM response")
-    return text
-
-
-def _call_omniroute(prompt: str) -> str:
-    """OpenAI-compatible call to the local OmniRoute gateway. Raises on any failure."""
-    headers = {"Content-Type": "application/json"}
-    if _OMNI_KEY:
-        headers["Authorization"] = f"Bearer {_OMNI_KEY}"
-    resp = requests.post(
-        f"{_OMNI_URL}/chat/completions",
-        json={
-            "model": _OMNI_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "temperature": 0.4,
-            "max_tokens": 400,
-        },
-        headers=headers,
-        timeout=_OMNI_TIMEOUT,
-    )
-    resp.raise_for_status()
-    choice = (resp.json().get("choices") or [{}])[0]
-    text = ((choice.get("message") or {}).get("content") or "").strip()
-    # A reasoning model can burn the whole budget into reasoning_content and return
-    # empty content -> treat as failure so we fall back to Ollama instead of blanking.
-    if not text:
-        raise ValueError("empty OmniRoute response")
-    return text
-
-
-def _call_llm(prompt: str) -> str:
-    """Primary provider with automatic fallback. Order set by LLM_PROVIDER env.
-
-    omniroute -> try gateway, fall back to Ollama on any error (the '1-2 attempts,
-    different provider' policy). Any other value keeps the original Ollama-only path.
-    """
-    if _PROVIDER == "omniroute":
-        try:
-            return _call_omniroute(prompt)
-        except Exception as exc:  # noqa: BLE001 -- fall back to the local model
-            logger.warning("OmniRoute failed (%s: %s), falling back to Ollama", _OMNI_MODEL, exc)
-            return _call_ollama(prompt)
-    return _call_ollama(prompt)
-
-
-def generate_conclusion(data: dict[str, Any]) -> str:
-    """LLM prose for one asset. Raises on ANY failure so the caller can fall back."""
-    key = _cache_key(data)
-    hit = _CACHE.get(key)
-    if hit and hit[1] > time.time():
-        return hit[0]
-    text = _call_llm(_build_prompt(data))
-    # Sanity ceiling: reject absurd length or a naked trade order (the verdict is the
-    # engine's job, never the LLM's). Rejection -> caller uses the template.
-    lowered = text.lower()
-    if len(text) > 900 or any(w in lowered for w in ("compre agora", "venda agora", "buy now", "sell now")):
-        raise ValueError("LLM output failed sanity guard")
-    _CACHE[key] = (text, time.time() + _TTL_SECONDS)
-    return text
-
-
-def conclusion_or_template(data: dict[str, Any], template_text: str) -> str:
-    """Public entrypoint: LLM prose, or the Python template on ANY failure."""
-    try:
-        return generate_conclusion(data)
-    except Exception as exc:  # noqa: BLE001 -- the fallback must catch everything
-        logger.warning("conclusion LLM fallback for %s: %s", data.get("symbol"), exc)
-        return template_text
-
-
 _SCHEDULED: set = set()
 _SCHED_LOCK = threading.Lock()
+_EXECUTOR: ThreadPoolExecutor | None = None
+_EXECUTOR_LOCK = threading.Lock()
+
+
+def _get_executor() -> ThreadPoolExecutor:
+    """Get or create the bounded thread pool executor."""
+    global _EXECUTOR
+    with _EXECUTOR_LOCK:
+        if _EXECUTOR is None:
+            _EXECUTOR = ThreadPoolExecutor(
+                max_workers=_MAX_WORKERS,
+                thread_name_prefix="conclusion-llm",
+            )
+        return _EXECUTOR
+
+
+def _evict_expired_cache(now: float | None = None) -> int:
+    """Evict expired entries from _CACHE and stale keys from _SCHEDULED.
+    Returns number of evicted cache entries."""
+    if now is None:
+        now = time.time()
+    with _SCHED_LOCK:
+        # Evict expired cache entries
+        expired_keys = [k for k, (_, exp) in _CACHE.items() if exp <= now]
+        for k in expired_keys:
+            _CACHE.pop(k, None)
+        # Also clean _SCHEDULED of keys no longer relevant (expired or done)
+        # Note: _SCHEDULED only tracks in-flight generations, not finished ones
+        scheduled_count_before = len(_SCHEDULED)
+        # We can't easily know which scheduled keys are done; they're removed in _fill()
+        # But we can limit _SCHEDULED size to prevent unbounded growth
+        if scheduled_count_before > _MAX_WORKERS * 2:
+            # If too many pending, clear the oldest (set is unordered, so just clear some)
+            # Actually, since it's a set, we remove entries whose cache entries are expired
+            active_keys = set(_CACHE.keys())
+            # Remove scheduled keys that are no longer in cache (expired or never cached)
+            stale_scheduled = _SCHEDULED - active_keys
+            for k in stale_scheduled:
+                _SCHEDULED.discard(k)
+        return len(expired_keys)
 
 
 def get_cached_or_schedule(data: dict[str, Any]) -> str | None:
@@ -177,9 +95,11 @@ def get_cached_or_schedule(data: dict[str, Any]) -> str | None:
 
     This is the hot-path entrypoint. The panel calls it every refresh: the first call
     for a symbol returns None (panel keeps the template) and kicks off one LLM call in a
-    daemon thread; once it lands in the cache the next refresh picks it up. In-flight keys
+    bounded worker pool; once it lands in the cache the next refresh picks it up. In-flight keys
     are deduped so concurrent refreshes never stack LLM calls for the same symbol.
     """
+    # Bounded eviction on hot path access (ponytail: O(n) scan, fine for small cache)
+    _evict_expired_cache()
     key = _cache_key(data)
     hit = _CACHE.get(key)
     if hit and hit[1] > time.time():
@@ -198,7 +118,7 @@ def get_cached_or_schedule(data: dict[str, Any]) -> str | None:
             with _SCHED_LOCK:
                 _SCHEDULED.discard(key)
 
-    threading.Thread(target=_fill, name="conclusion-llm", daemon=True).start()
+    _get_executor().submit(_fill)
     return None
 
 

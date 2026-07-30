@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import RLock, Thread
 from typing import Iterable
 
-from app.market.market_data_loader import get_cached_chart_data, get_chart_data
+from app.market.market_data_loader import get_cached_chart_data, get_chart_data, _get_chart_data_no_persist, _persist_chart_cache
 from app.services.symbol_sanitizer import (
     is_symbol_on_cooldown,
     mark_symbol_cooldown,
@@ -166,7 +166,7 @@ def _warm_single_request(symbol: str, interval: str, key: str) -> None:
         # legacy 240-row crypto @5M cache is not enough for same-UTC-bucket
         # RVOL and must not short-circuit the longer background refresh.
         with provider_call_context("chart_request_warmup"):
-            rows = get_chart_data(symbol, interval)
+            rows = _get_chart_data_no_persist(symbol, interval)
         success = bool(rows)
         if rows:
             _drop_warmed_requests([(symbol, interval)])
@@ -254,7 +254,7 @@ def warm_charts_once(limit: int = 24, max_calls: int = 12, intervals: Iterable[s
                 continue
             attempted += 1
             try:
-                rows = get_chart_data(symbol, interval)
+                rows = _get_chart_data_no_persist(symbol, interval)
                 if rows:
                     warmed.append((symbol, interval))
                 else:
@@ -264,5 +264,7 @@ def warm_charts_once(limit: int = 24, max_calls: int = 12, intervals: Iterable[s
                 logger.warning("Chart warmup failed | symbol=%s | interval=%s | error=%s", symbol, interval, exc)
 
     _drop_warmed_requests(warmed)
+    if warmed or skipped:
+        _persist_chart_cache()
     record_worker_stage_duration("chart_warmup", time.perf_counter() - start, success=bool(warmed) or skipped > 0)
     return {"requested": len(requested_pairs), "attempted": attempted, "warmed": len(warmed), "skipped": skipped}

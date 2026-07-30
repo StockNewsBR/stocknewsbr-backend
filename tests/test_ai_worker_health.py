@@ -293,7 +293,7 @@ class AiWorkerHealthTests(unittest.TestCase):
                 return_value=[],
             ), patch.object(
                 chart_warmup,
-                "get_chart_data",
+                "_get_chart_data_no_persist",
                 return_value=[],
             ) as get_chart, patch.object(
                 chart_warmup,
@@ -316,9 +316,9 @@ class AiWorkerHealthTests(unittest.TestCase):
                 return_value=[],
             ), patch.object(
                 chart_warmup,
-                "get_chart_data",
+                "_get_chart_data_no_persist",
                 return_value=[],
-            ) as get_chart_second, patch.object(
+            ) as get_chart2, patch.object(
                 chart_warmup,
                 "_is_on_cooldown",
                 return_value=True,
@@ -331,7 +331,7 @@ class AiWorkerHealthTests(unittest.TestCase):
         self.assertEqual(first["attempted"], 1)
         self.assertEqual(second["attempted"], 0)
         self.assertEqual(get_chart.call_count, 1)
-        self.assertEqual(get_chart_second.call_count, 0)
+        self.assertEqual(get_chart2.call_count, 0)
 
 
 if __name__ == "__main__":

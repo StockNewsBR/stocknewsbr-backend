@@ -855,8 +855,6 @@ def _persist_price_cache():
                     and isinstance(value.get("payload"), dict)
                     and _has_real_price_payload(value["payload"])
                 }
-                for key, value in _PRICE_SNAPSHOT_CACHE.items():
-                    value.pop("dirty", None)
 
             final_payload = dict(disk_payload)
             final_payload.update(payload_to_merge)
@@ -876,6 +874,13 @@ def _persist_price_cache():
                     if attempt >= 2:
                         raise
                     time.sleep(0.05 * (attempt + 1))
+
+            # Clear dirty flags only after successful disk write
+            with _PRICE_SNAPSHOT_CACHE_LOCK:
+                for key, value in _PRICE_SNAPSHOT_CACHE.items():
+                    if isinstance(value, dict):
+                        value.pop("dirty", None)
+
             try:
                 _PRICE_CACHE_MTIME = _PRICE_CACHE_FILE.stat().st_mtime
             except Exception:
@@ -1010,7 +1015,7 @@ def get_cached_chart_data(symbol: str, interval: str = "1D", allow_stale: bool =
     return [dict(row) for row in rows] if isinstance(rows, list) else None
 
 
-def _cache_chart_data(symbol: str, interval: str, rows: list):
+def _cache_chart_data(symbol: str, interval: str, rows: list, persist: bool = True):
     if not rows:
         return rows
 
@@ -1023,7 +1028,8 @@ def _cache_chart_data(symbol: str, interval: str, rows: list):
             "timestamp": time.time(),
             "rows": [dict(row) for row in rows],
         }
-    _persist_chart_cache()
+    if persist:
+        _persist_chart_cache()
     return rows
 
 
@@ -1149,7 +1155,7 @@ def batch_download(
         return None
 
 
-def _extract_single_ticker_frame(data: Optional[pd.DataFrame], symbol: str) -> Optional[pd.DataFrame]:
+def _extract_single_ticker_frame(data: Optional[pd.DataFrame], symbol: str, is_multi: bool = False) -> Optional[pd.DataFrame]:
     if data is None or data.empty:
         return None
 
@@ -1167,6 +1173,8 @@ def _extract_single_ticker_frame(data: Optional[pd.DataFrame], symbol: str) -> O
 
         frame = data[normalized_symbol].copy()
     else:
+        if is_multi:
+            return None
         frame = data.copy()
 
     return frame if frame is not None and not frame.empty else None
@@ -1307,6 +1315,106 @@ def get_chart_data(symbol: str, interval: str = "1D"):
         )
 
     return _cache_chart_data(symbol, interval, rows)
+
+
+def _get_chart_data_no_persist(symbol: str, interval: str = "1D") -> list:
+    """Fetch and cache chart data without persisting to disk. For batch warmup."""
+    if not sanitize_market_symbol(symbol, allow_provider_symbols=True):
+        _mark_symbol_failure(symbol, error="invalid_symbol")
+        return []
+    normalized_interval = str(interval or "1D").upper()
+    min_rows_map = {
+        "1D": 12,
+        "1W": 18,
+        "1M": 18,
+        "3M": 30,
+        "6M": 40,
+        "YTD": 40,
+        "1Y": 60,
+        "ALL": 60,
+    }
+    min_rows = (
+        8 * 24 * 12
+        if normalized_interval == "@5M" and crypto_provider_symbol(symbol)
+        else 20
+        if normalized_interval.startswith("@")
+        else min_rows_map.get(normalized_interval, 12)
+    )
+
+    cached = get_cached_chart_data(symbol, interval)
+    if cached and len(cached) >= min_rows:
+        return cached
+
+    if not _network_provider_allowed():
+        _record_blocked_http_provider(symbol, "chart")
+        if cached:
+            return cached
+        return get_cached_chart_data(symbol, interval, allow_stale=True) or []
+
+    interval_map = {
+        "1D": [("5d", "5m"), ("1d", "5m"), ("5d", "30m")],
+        "1W": [("5d", "30m"), ("1mo", "1d")],
+        "1M": [("1mo", "1h"), ("1mo", "1d"), ("3mo", "1d")],
+        "3M": [("3mo", "1d"), ("6mo", "1d")],
+        "6M": [("6mo", "1d"), ("1y", "1d")],
+        "YTD": [("ytd", "1d"), ("1y", "1d")],
+        "1Y": [("1y", "1d"), ("2y", "1wk")],
+        "ALL": [("5y", "1wk"), ("2y", "1d"), ("1y", "1d")],
+        "@1M": [("5d", "1m")],
+        "@5M": [("1mo", "5m")],
+        "@15M": [("1mo", "15m")],
+        "@30M": [("1mo", "30m")],
+        "@1H": [("3mo", "1h")],
+        "@1D": [("1y", "1d")],
+        "@1WK": [("5y", "1wk")],
+    }
+
+    frame = None
+    for period, yf_interval in interval_map.get(normalized_interval, [("1d", "5m"), ("5d", "30m")]):
+        frame = get_ticker_frame(symbol, period=period, interval=yf_interval, auto_adjust=False)
+        if frame is not None and not frame.empty:
+            try:
+                candidate_rows = frame.dropna(subset=["Close"]) if hasattr(frame, "dropna") else frame
+            except Exception:
+                candidate_rows = frame
+            if candidate_rows is not None and len(candidate_rows) >= min_rows:
+                frame = candidate_rows
+                break
+            frame = candidate_rows
+        if frame is not None and not frame.empty and len(frame) >= min_rows:
+            break
+
+    if frame is None or frame.empty:
+        return []
+
+    try:
+        frame = frame.dropna(subset=["Close"])
+    except Exception:
+        pass
+
+    if frame is None or frame.empty:
+        return []
+
+    rows = []
+
+    row_limit = 9000 if normalized_interval == "@5M" else 240
+    for index, row in frame.tail(row_limit).iterrows():
+        close = float(row.get("Close", 0) or 0)
+        if close <= 0:
+            continue
+
+        rows.append(
+            {
+                "time": str(index),
+                "open": float(row.get("Open", 0) or close),
+                "high": float(row.get("High", 0) or close),
+                "low": float(row.get("Low", 0) or close),
+                "close": close,
+                "volume": float(row.get("Volume", 0) or 0),
+            }
+        )
+
+    return _cache_chart_data(symbol, interval, rows, persist=False)
 
 
 def _session_day(stamp, timezone_name: str | None = None):
@@ -1834,13 +1942,14 @@ def get_price_snapshots(symbols: List[str], *, force_refresh: bool = False):
         direct_symbols.append(symbol)
 
     data = batch_download(direct_symbols + proxy_download_symbols, period="5d", interval="30m")
+    is_multi_download = len(direct_symbols + proxy_download_symbols) > 1
     for symbol in missing_symbols:
         payload = None
         proxy_symbol = proxy_symbol_by_display.get(symbol)
 
         if data is not None and not data.empty:
             frame_symbol = proxy_symbol or symbol
-            frame = _extract_single_ticker_frame(data, frame_symbol)
+            frame = _extract_single_ticker_frame(data, frame_symbol, is_multi=is_multi_download)
             payload = _price_payload_from_frame(frame_symbol, frame)
             if payload:
                 payload = _payload_with_volume_fallback(frame_symbol, payload)
