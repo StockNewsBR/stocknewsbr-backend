@@ -52,6 +52,126 @@ _EXECUTOR: ThreadPoolExecutor | None = None
 _EXECUTOR_LOCK = threading.Lock()
 
 
+def _cache_key(data: dict[str, Any]) -> tuple:
+    """Generate a cache key from the relevant indicator values."""
+    symbol = data.get("symbol") or data.get("ticker") or "UNKNOWN"
+    signal = str(data.get("signal") or "").strip().lower()
+    verdict = str(data.get("master_verdict") or "").strip().upper()
+    rsi = round(float(data.get("rsi") or 50.0), 1)
+    change = round(float(data.get("change_pct") or 0.0), 1)
+    return (symbol, signal, verdict, rsi, change)
+
+
+def _call_llm(prompt: str) -> str | None:
+    """Call the configured LLM provider and return the generated text, or None on failure."""
+    if _PROVIDER == "omniroute":
+        return _call_omniroute(prompt)
+    return _call_ollama(prompt)
+
+
+def _call_ollama(prompt: str) -> str | None:
+    """Call Ollama API and return generated text."""
+    try:
+        resp = requests.post(
+            f"{_OLLAMA_URL}/api/generate",
+            json={"model": _MODEL, "prompt": prompt, "stream": False},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("response", "").strip()
+    except Exception as exc:
+        logger.warning("Ollama conclusion call failed: %s", exc)
+        return None
+
+
+def _call_omniroute(prompt: str) -> str | None:
+    """Call OmniRoute (OpenAI-compatible) API and return generated text."""
+    if not _OMNI_KEY:
+        logger.warning("OmniRoute API key not configured")
+        return None
+    try:
+        headers = {"Authorization": f"Bearer {_OMNI_KEY}", "Content-Type": "application/json"}
+        resp = requests.post(
+            f"{_OMNI_URL}/chat/completions",
+            json={
+                "model": _OMNI_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 256,
+            },
+            timeout=_OMNI_TIMEOUT,
+            headers=headers,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        choices = data.get("choices", [])
+        if choices:
+            return choices[0].get("message", {}).get("content", "").strip()
+        return None
+    except Exception as exc:
+        logger.warning("OmniRoute conclusion call failed: %s", exc)
+        return None
+
+
+def _build_prompt(data: dict[str, Any]) -> str:
+    """Build the prompt for the LLM from the engine's per-asset data."""
+    symbol = data.get("symbol") or data.get("ticker") or "UNKNOWN"
+    trend_bias = data.get("trend_bias", "")
+    signal = data.get("signal", "")
+    rsi = data.get("rsi", 50)
+    change_pct = data.get("change_pct", 0)
+    master_verdict = data.get("master_verdict", "")
+    support = data.get("support")
+    resistance = data.get("resistance")
+
+    lines = [
+        f"Ativo: {symbol}",
+        f"Viés de tendência: {trend_bias}",
+        f"Sinal: {signal}",
+        f"RSI: {rsi:.1f}",
+        f"Variação: {change_pct:.2f}%",
+        f"Veredito do Score Mestre: {master_verdict}",
+    ]
+    if support is not None:
+        lines.append(f"Suporte: {support:.2f}")
+    if resistance is not None:
+        lines.append(f"Resistência: {resistance:.2f}")
+    lines.append("Escreva uma conclusão curta (máx 3 frases) em português, explicando o veredito do Score Mestre para este ativo, sem inventar dados, sem dar ordem de compra/venda.")
+    return "\n".join(lines)
+
+
+def generate_conclusion(data: dict[str, Any]) -> str | None:
+    """Synchronously generate an LLM conclusion for the given asset data.
+
+    Returns the generated prose on success, None on any failure (LLM down, timeout, empty output).
+    Callers MUST fall back to the Python template on None.
+    """
+    prompt = _build_prompt(data)
+    text = _call_llm(prompt)
+    if not text:
+        return None
+
+    # Cache the result
+    key = _cache_key(data)
+    _CACHE[key] = (text, time.time() + _TTL_SECONDS)
+    return text
+
+
+def conclusion_or_template(data: dict[str, Any], template: str) -> str:
+    """Public API: try LLM conclusion, fall back to template on any failure.
+
+    This is the ONLY function consumers should call. It never raises.
+    """
+    try:
+        result = generate_conclusion(data)
+        if result:
+            return result
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("conclusion_or_template failed for %s: %s", data.get("symbol"), exc)
+    return template
+
+
 def _get_executor() -> ThreadPoolExecutor:
     """Get or create the bounded thread pool executor."""
     global _EXECUTOR
