@@ -2,6 +2,7 @@ import threading
 import time
 import json
 import os
+import logging
 import hashlib
 import atexit
 import shutil
@@ -343,16 +344,30 @@ class SnapshotCache:
             last_good_timestamp = float(raw.get("last_good_timestamp") or 0.0)
 
             with self._lock:
-                self._payload = payload
-                self._timestamp = timestamp
-                self._last_good_payload = last_good_payload
-                self._last_good_timestamp = last_good_timestamp
+                # Preserve newer in-memory state: only reload from disk if disk is newer
+                if timestamp > self._timestamp:
+                    self._payload = payload
+                    self._timestamp = timestamp
+                # For last_good, also only update if disk is newer
+                if last_good_timestamp > self._last_good_timestamp:
+                    self._last_good_payload = last_good_payload
+                    self._last_good_timestamp = last_good_timestamp
                 self._disk_mtime = stable_mtime or file_mtime
                 self._last_disk_write_at = stable_mtime or file_mtime
-                self._last_disk_signature = self._payload_signature(payload)
-                self._last_good_signature = self._payload_signature(last_good_payload)
-        except Exception:
+                self._last_disk_signature = self._payload_signature(self._payload)
+                self._last_good_signature = self._payload_signature(self._last_good_payload)
+        except TimeoutError:
+            # Contention on read - keep in-memory state, will retry on next call
             pass
+        except Exception as exc:
+            # B3: Log structured error for corruption vs missing file, increment metric
+            logger = logging.getLogger("stocknewsbr.snapshot_cache")
+            logger.warning(
+                "Snapshot cache disk load failed | path=%s | error=%s",
+                self._storage_path, exc
+            )
+            record_snapshot_write_metric(False)
+            # Preserve good in-memory state - DO NOT pass silently
 
     def update(self, data: Any):
         normalized = self._clone_payload(self._normalize_payload(data))
@@ -378,8 +393,11 @@ class SnapshotCache:
                         self._last_good_payload = self._clone_payload(self._payload)
                         self._last_good_signature = signature
                     else:
+                        # Preserve historical last_good by creating fresh clone with updated timestamps
+                        self._last_good_payload = self._clone_payload(self._payload)
                         self._last_good_payload["updated_at"] = self._payload.get("updated_at")
                         self._last_good_payload["generated_at"] = self._payload.get("generated_at")
+                        self._last_good_signature = signature
                     self._last_good_timestamp = self._timestamp
                 elif not self._payload.get("signals") and self._is_promotable_last_good(previous_payload):
                     previous_signature = self._payload_signature(previous_payload)
