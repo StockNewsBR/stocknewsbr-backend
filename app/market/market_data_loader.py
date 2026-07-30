@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import uuid
 from datetime import datetime, timezone as dt_timezone
 from pathlib import Path
 from threading import RLock, get_ident
@@ -772,58 +773,64 @@ def _load_price_cache_once(include_stale: bool = False, force: bool = False):
             return
 
         if force or file_mtime > float(_PRICE_CACHE_MTIME or 0) or (include_stale and not _PRICE_CACHE_INCLUDE_STALE):
-            dirty_entries = {k: v for k, v in _PRICE_SNAPSHOT_CACHE.items() if v.get("dirty")}
-            _PRICE_SNAPSHOT_CACHE.clear()
-            _PRICE_SNAPSHOT_CACHE.update(dirty_entries)
+            # Preserve in-memory entries that are newer than disk or marked dirty.
+            # We merge disk data, keeping the newer entry per key.
+            if _PRICE_CACHE_FILE.exists():
+                try:
+                    raw = json.loads(_PRICE_CACHE_FILE.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict):
+                        now = time.time()
+                        for key, value in raw.items():
+                            if not isinstance(value, dict):
+                                continue
+                            timestamp = float(value.get("timestamp") or 0)
+                            payload = value.get("payload")
+                            if not _has_real_price_payload(payload):
+                                continue
+                            if include_stale or now - timestamp <= _PRICE_CACHE_TTL_SECONDS:
+                                payload = dict(payload)
+                                identity_symbol = str(
+                                    payload.get("requested_symbol")
+                                    or payload.get("display_symbol")
+                                    or payload.get("symbol")
+                                    or key
+                                )
+                                if not _has_identity_contract(identity_symbol, payload):
+                                    if payload.get("identity_preserved") is True:
+                                        continue
+                                    migrated_payload = _attach_identity_contract(identity_symbol, payload)
+                                    if not _has_identity_contract(identity_symbol, migrated_payload):
+                                        continue
+                                    payload = migrated_payload
+                                cache_key = _cache_key(identity_symbol) or _cache_key(str(key))
+                                if not cache_key:
+                                    continue
+                                disk_entry = {
+                                    "timestamp": timestamp,
+                                    "payload": payload,
+                                }
+                                # Merge: keep in-memory entry if newer than disk or marked dirty
+                                existing = _PRICE_SNAPSHOT_CACHE.get(cache_key)
+                                existing_ts = float(existing.get("timestamp") or 0) if existing else 0
+                                existing_dirty = bool(existing and existing.get("dirty"))
+                                if existing is None or existing_dirty or existing_ts >= timestamp:
+                                    # Keep existing (newer or dirty), ensure dirty flag persists
+                                    if existing_dirty:
+                                        disk_entry["dirty"] = True
+                                    _PRICE_SNAPSHOT_CACHE[cache_key] = disk_entry
+                                else:
+                                    # Disk is newer; use disk entry
+                                    _PRICE_SNAPSHOT_CACHE[cache_key] = disk_entry
+                                if cache_key != str(key):
+                                    _PRICE_SNAPSHOT_CACHE.setdefault(str(key), _PRICE_SNAPSHOT_CACHE[cache_key])
+                except Exception:
+                    # If disk read fails, keep all existing in-memory entries
+                    pass
             _PRICE_CACHE_MTIME = file_mtime
 
         _PRICE_CACHE_LOADED = True
         if include_stale:
             _PRICE_CACHE_INCLUDE_STALE = True
-        try:
-            if not _PRICE_CACHE_FILE.exists():
-                return
-            raw = json.loads(_PRICE_CACHE_FILE.read_text(encoding="utf-8"))
-            if not isinstance(raw, dict):
-                return
-            now = time.time()
-            for key, value in raw.items():
-                if not isinstance(value, dict):
-                    continue
-                timestamp = float(value.get("timestamp") or 0)
-                payload = value.get("payload")
-                if not _has_real_price_payload(payload):
-                    continue
-                if include_stale or now - timestamp <= _PRICE_CACHE_TTL_SECONDS:
-                    payload = dict(payload)
-                    identity_symbol = str(
-                        payload.get("requested_symbol")
-                        or payload.get("display_symbol")
-                        or payload.get("symbol")
-                        or key
-                    )
-                    if not _has_identity_contract(identity_symbol, payload):
-                        if payload.get("identity_preserved") is True:
-                            continue
-                        migrated_payload = _attach_identity_contract(identity_symbol, payload)
-                        if not _has_identity_contract(identity_symbol, migrated_payload):
-                            continue
-                        payload = migrated_payload
-                    cache_key = _cache_key(identity_symbol) or _cache_key(str(key))
-                    if not cache_key:
-                        continue
-                    if cache_key in _PRICE_SNAPSHOT_CACHE and _PRICE_SNAPSHOT_CACHE[cache_key].get("dirty"):
-                        continue
-                    cache_entry = {
-                        "timestamp": timestamp,
-                        "payload": payload,
-                    }
-                    _PRICE_SNAPSHOT_CACHE[cache_key] = cache_entry
-                    if cache_key != str(key):
-                        if str(key) not in _PRICE_SNAPSHOT_CACHE or not _PRICE_SNAPSHOT_CACHE[str(key)].get("dirty"):
-                            _PRICE_SNAPSHOT_CACHE.setdefault(str(key), cache_entry)
-        except Exception as exc:
-            logger.warning("Failed to load market quote cache: %s", exc)
 
 
 def _persist_price_cache():
@@ -855,7 +862,7 @@ def _persist_price_cache():
             final_payload.update(payload_to_merge)
 
             tmp = _PRICE_CACHE_FILE.with_name(
-                f"{_PRICE_CACHE_FILE.stem}.{os.getpid()}.{get_ident()}.tmp"
+                f"{_PRICE_CACHE_FILE.stem}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
             )
             tmp.write_text(
                 json.dumps(final_payload, ensure_ascii=False, separators=(",", ":")),
@@ -887,7 +894,10 @@ def _load_chart_cache_once(force: bool = False):
             if not force and _CHART_CACHE_LOADED and file_mtime <= float(_CHART_CACHE_MTIME or 0):
                 return
 
-        payload = json.loads(_CHART_CACHE_FILE.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(_CHART_CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
         charts = payload.get("charts", payload) if isinstance(payload, dict) else {}
         if not isinstance(charts, dict):
             charts = {}
@@ -923,10 +933,24 @@ def _persist_chart_cache():
     try:
         _CHART_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
         with _CHART_CACHE_PERSIST_LOCK:
+            disk_payload = {}
+            if _CHART_CACHE_FILE.exists():
+                try:
+                    raw = json.loads(_CHART_CACHE_FILE.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict) and isinstance(raw.get("charts"), dict):
+                        disk_payload = raw["charts"]
+                except Exception:
+                    pass
+
             with _PRICE_SNAPSHOT_CACHE_LOCK:
-                payload = {"charts": dict(_CHART_DATA_CACHE)}
+                payload_to_merge = dict(_CHART_DATA_CACHE)
+
+            final_charts = dict(disk_payload)
+            final_charts.update(payload_to_merge)
+            payload = {"charts": final_charts}
+
             tmp = _CHART_CACHE_FILE.with_name(
-                f"{_CHART_CACHE_FILE.stem}.{os.getpid()}.{get_ident()}.tmp"
+                f"{_CHART_CACHE_FILE.stem}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
             )
             tmp.write_text(
                 json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
