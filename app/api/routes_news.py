@@ -17,7 +17,7 @@ def symbol_news(
     current_user: User = Depends(require_any_channel_access("app", "web")),
 ):
     del current_user
-    kwargs = {"limit": limit, "allow_fetch": refresh, "schedule_warmup": True}
+    kwargs = {"limit": limit, "allow_fetch": False, "schedule_warmup": refresh}
     if locale != "pt-BR":
         kwargs["locale"] = locale
     return build_public_news_payload(symbol, **kwargs)

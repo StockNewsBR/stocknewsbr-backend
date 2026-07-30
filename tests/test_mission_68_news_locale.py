@@ -290,7 +290,7 @@ class Mission68NewsLocaleTests(unittest.TestCase):
         with patch.object(routes_news, "build_public_news_payload", return_value={"locale": "en-US"}) as private_builder:
             routes_news.symbol_news("AAPL", locale="en-US", current_user=object())
         private_builder.assert_called_once_with(
-            "AAPL", limit=6, allow_fetch=False, schedule_warmup=True, locale="en-US"
+            "AAPL", limit=6, allow_fetch=False, schedule_warmup=False, locale="en-US"
         )
 
         with patch.object(routes_public_market, "build_public_news_payload", return_value={"locale": "en-US"}) as public_builder:

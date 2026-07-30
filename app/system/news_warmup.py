@@ -160,19 +160,26 @@ def request_news_warmup(symbol: str, limit: int = 6, locale: str = "pt-BR") -> N
         )
         requests[key] = current
         _write_requests(requests)
-        last_async = float(_async_last_request_at.get(key) or 0.0)
-        if key not in _async_running and now - last_async >= 20.0:
-            _async_running.add(key)
-            _async_last_request_at[key] = now
-            should_start_async = True
+        cooldown_until = float(_symbol_cooldowns.get(ticker) or 0.0)
+        if key not in _async_running and cooldown_until <= now:
+            if len(_async_running) < DEFAULT_NEWS_WARMUP_LIMIT:
+                _async_running.add(key)
+                _async_last_request_at[key] = now
+                should_start_async = True
 
     if should_start_async:
-        Thread(
-            target=_warm_single_request,
-            args=(ticker, item_limit, content_locale, key),
-            name=f"news-warmup-{ticker}",
-            daemon=True,
-        ).start()
+        try:
+            Thread(
+                target=_warm_single_request,
+                args=(ticker, item_limit, content_locale, key),
+                name=f"news-warmup-{ticker}",
+                daemon=True,
+            ).start()
+        except Exception:
+            with _lock:
+                _async_running.discard(key)
+                _async_last_request_at.pop(key, None)
+            logger.exception("Failed to start async news warmup thread for %s", ticker)
 
 
 def _warm_single_request(symbol: str, limit: int, locale: str, key: str) -> None:
@@ -194,8 +201,11 @@ def _warm_single_request(symbol: str, limit: int, locale: str, key: str) -> None
         else:
             _mark_cooldown(symbol)
     except Exception:
-        _mark_cooldown(symbol)
+        # Don't mark cooldown on provider exception (R5: allow immediate retry)
         logger.exception("Async news warmup failed for %s", symbol)
+        with _lock:
+            # Allow immediate retry on failure
+            _async_last_request_at.pop(key, None)
     finally:
         with _lock:
             _async_running.discard(key)
