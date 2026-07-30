@@ -136,23 +136,24 @@ def _write_requests(requests: dict[str, dict]) -> None:
         logger.exception("Failed to write news warmup requests")
 
 
-def request_news_warmup(symbol: str, limit: int = 6, locale: str = "pt-BR") -> None:
+def request_news_warmup(symbol: str, limit: int = 6, locale: str = "pt-BR") -> bool:
     ticker = _clean_symbol(symbol)
     if not ticker:
-        return
+        return False
 
     item_limit = max(1, min(int(limit or 6), 20))
     content_locale = normalize_news_locale(locale)
-    key = f"{ticker}:{item_limit}:{content_locale}"
+    key = f"{ticker}:{content_locale}"
     now = time.time()
     should_start_async = False
+    is_running = False
     with _lock:
         requests = _read_requests()
         current = dict(requests.get(key) or {})
         current.update(
             {
                 "symbol": ticker,
-                "limit": item_limit,
+                "limit": max(item_limit, int(current.get("limit") or 0)),
                 "locale": content_locale,
                 "requested_at": now,
                 "count": int(current.get("count") or 0) + 1,
@@ -161,11 +162,15 @@ def request_news_warmup(symbol: str, limit: int = 6, locale: str = "pt-BR") -> N
         requests[key] = current
         _write_requests(requests)
         cooldown_until = float(_symbol_cooldowns.get(ticker) or 0.0)
-        if key not in _async_running and cooldown_until <= now:
+        
+        if key in _async_running:
+            is_running = True
+        elif cooldown_until <= now:
             if len(_async_running) < DEFAULT_NEWS_WARMUP_LIMIT:
                 _async_running.add(key)
                 _async_last_request_at[key] = now
                 should_start_async = True
+                is_running = True
 
     if should_start_async:
         try:
@@ -180,6 +185,9 @@ def request_news_warmup(symbol: str, limit: int = 6, locale: str = "pt-BR") -> N
                 _async_running.discard(key)
                 _async_last_request_at.pop(key, None)
             logger.exception("Failed to start async news warmup thread for %s", ticker)
+            return False
+
+    return is_running
 
 
 def _warm_single_request(symbol: str, limit: int, locale: str, key: str) -> None:
@@ -210,6 +218,27 @@ def _warm_single_request(symbol: str, limit: int, locale: str, key: str) -> None
         with _lock:
             _async_running.discard(key)
         record_worker_stage_duration("news_request_warmup", time.perf_counter() - start, success=success)
+
+
+def _graceful_shutdown() -> None:
+    """Signal all warmup threads to stop and wait briefly for completion."""
+    with _lock:
+        _shutdown_requested = True
+    # Give running threads a moment to notice and exit
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        with _lock:
+            if not _async_running:
+                break
+        time.sleep(0.05)
+
+
+# Register shutdown handler only once
+import atexit
+atexit.register(_graceful_shutdown)
+
+
+_shutdown_requested = False
 
 
 def _requested_symbols() -> list[tuple[str, int, str]]:
@@ -285,8 +314,9 @@ def warm_news_once(limit: int = DEFAULT_NEWS_WARMUP_LIMIT, max_calls: int = DEFA
                 else:
                     _mark_cooldown(symbol)
             except Exception:
-                _mark_cooldown(symbol)
+                # Don't mark cooldown on provider exception (R5: allow immediate retry)
                 logger.warning("News warmup failed | symbol=%s | limit=%s", symbol, item_limit)
+                # Allow immediate retry by not setting cooldown
 
     _drop_warmed_requests(warmed)
     _last_warmup_at = now
