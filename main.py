@@ -370,8 +370,10 @@ async def add_process_time_header(request: Request, call_next):
         )
         response.headers["X-Process-Time-Ms"] = f"{duration_ms:.2f}"
         response.headers["X-Request-Id"] = request_id
-        route = getattr(request.scope.get("route"), "path", None) or request.url.path
-        record_http_endpoint_latency(route, request.method, response.status_code, duration_ms / 1000)
+        route_match = request.scope.get("route")
+        route = getattr(route_match, "path", None) if route_match is not None else None
+        endpoint_key = route or "unmatched"
+        record_http_endpoint_latency(endpoint_key, request.method, response.status_code, duration_ms / 1000)
         return response
 
     duration_ms = (time.perf_counter() - start) * 1000
@@ -381,8 +383,10 @@ async def add_process_time_header(request: Request, call_next):
     if response.status_code >= 500:
         increment_http_errors()
 
-    route = getattr(request.scope.get("route"), "path", None) or request.url.path
-    record_http_endpoint_latency(route, request.method, response.status_code, duration_ms / 1000)
+    route_match = request.scope.get("route")
+    route = getattr(route_match, "path", None) if route_match is not None else None
+    endpoint_key = route or "unmatched"
+    record_http_endpoint_latency(endpoint_key, request.method, response.status_code, duration_ms / 1000)
 
     return response
 
