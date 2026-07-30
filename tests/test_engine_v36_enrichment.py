@@ -62,6 +62,9 @@ class EngineV36EnrichmentTests(unittest.TestCase):
         closes[125] = np.inf
         closes[130] = -np.inf
         volumes = [100_000 + index * 500 for index in range(periods)]
+        volumes[122] = np.nan
+        volumes[127] = np.inf
+        volumes[132] = -np.inf
         volumes[-1] = 5_000_000
 
         df = pd.DataFrame(
