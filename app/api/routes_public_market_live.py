@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from app.dependencies import resolve_premium_entitlement
 
 from app.cache.snapshot_cache import get_snapshot, get_snapshot_ticker
-from app.engine.signal_engine import build_chart_signal_payload
+from app.engine.chart_signal_adapter import build_chart_signal_payload
 from app.market.market_data_loader import (
     get_display_symbol,
     previous_session_close,

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 import logging
 
 from app.dependencies import require_channel_access
-from app.engine.signal_engine import build_chart_signal_payload
+from app.engine.chart_signal_adapter import build_chart_signal_payload
 from app.market.market_data_loader import get_cached_chart_data
 from app.cache.snapshot_cache import get_snapshot_signals
 from app.services.chart_overlay_service import build_chart_overlays
