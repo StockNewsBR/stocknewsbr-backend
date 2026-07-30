@@ -162,7 +162,7 @@ def test_thread_start_failure_clears_reservation(monkeypatch):
     
     client.get("/news/FAILSTART?refresh=true")
     # Reservation should be cleared
-    assert "FAILSTART:6:pt-BR" not in news_warmup._async_running
+    assert "FAILSTART:pt-BR" not in news_warmup._async_running
 
 def test_provider_exception_clears_running(monkeypatch):
     def fake_get(*args, **kwargs):
@@ -172,7 +172,7 @@ def test_provider_exception_clears_running(monkeypatch):
     
     client.get("/news/EXC1?refresh=true")
     time.sleep(0.1) # Thread finishes quickly due to exception
-    assert "EXC1:6:pt-BR" not in news_warmup._async_running
+    assert "EXC1:pt-BR" not in news_warmup._async_running
 
 def test_provider_exception_clears_cooldown_for_retry(monkeypatch):
     def fake_get(*args, **kwargs):
@@ -184,7 +184,7 @@ def test_provider_exception_clears_cooldown_for_retry(monkeypatch):
     time.sleep(0.1)
     
     assert "RETRY1" not in news_warmup._symbol_cooldowns
-    assert "RETRY1:6:pt-BR" not in news_warmup._async_last_request_at
+    assert "RETRY1:pt-BR" not in news_warmup._async_last_request_at
     
     # We can retry immediately
     client.get("/news/RETRY1?refresh=true")

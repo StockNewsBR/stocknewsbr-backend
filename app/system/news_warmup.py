@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import time
@@ -234,7 +235,6 @@ def _graceful_shutdown() -> None:
 
 
 # Register shutdown handler only once
-import atexit
 atexit.register(_graceful_shutdown)
 
 

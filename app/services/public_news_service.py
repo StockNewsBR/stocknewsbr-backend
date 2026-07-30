@@ -499,8 +499,7 @@ def _request_news_warmup_safe(symbol: str, limit: int, locale: str = "pt-BR") ->
     try:
         from app.system.news_warmup import request_news_warmup
 
-        request_news_warmup(symbol, limit=limit, locale=locale)
-        return True
+        return request_news_warmup(symbol, limit=limit, locale=locale)
     except Exception:
         return False
 
