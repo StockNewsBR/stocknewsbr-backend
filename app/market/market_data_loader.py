@@ -13,7 +13,11 @@ from datetime import datetime, timezone as dt_timezone
 from pathlib import Path
 from threading import RLock, get_ident
 import time
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas as pd
+
 from zoneinfo import ZoneInfo
 
 from app.system.system_metrics import (
@@ -768,7 +772,9 @@ def _load_price_cache_once(include_stale: bool = False, force: bool = False):
             return
 
         if force or file_mtime > float(_PRICE_CACHE_MTIME or 0) or (include_stale and not _PRICE_CACHE_INCLUDE_STALE):
+            dirty_entries = {k: v for k, v in _PRICE_SNAPSHOT_CACHE.items() if v.get("dirty")}
             _PRICE_SNAPSHOT_CACHE.clear()
+            _PRICE_SNAPSHOT_CACHE.update(dirty_entries)
             _PRICE_CACHE_MTIME = file_mtime
 
         _PRICE_CACHE_LOADED = True
@@ -806,13 +812,16 @@ def _load_price_cache_once(include_stale: bool = False, force: bool = False):
                     cache_key = _cache_key(identity_symbol) or _cache_key(str(key))
                     if not cache_key:
                         continue
+                    if cache_key in _PRICE_SNAPSHOT_CACHE and _PRICE_SNAPSHOT_CACHE[cache_key].get("dirty"):
+                        continue
                     cache_entry = {
                         "timestamp": timestamp,
                         "payload": payload,
                     }
                     _PRICE_SNAPSHOT_CACHE[cache_key] = cache_entry
                     if cache_key != str(key):
-                        _PRICE_SNAPSHOT_CACHE.setdefault(str(key), cache_entry)
+                        if str(key) not in _PRICE_SNAPSHOT_CACHE or not _PRICE_SNAPSHOT_CACHE[str(key)].get("dirty"):
+                            _PRICE_SNAPSHOT_CACHE.setdefault(str(key), cache_entry)
         except Exception as exc:
             logger.warning("Failed to load market quote cache: %s", exc)
 
@@ -822,19 +831,34 @@ def _persist_price_cache():
     try:
         _PRICE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
         with _PRICE_CACHE_PERSIST_LOCK:
+            disk_payload = {}
+            if _PRICE_CACHE_FILE.exists():
+                try:
+                    raw = json.loads(_PRICE_CACHE_FILE.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict):
+                        disk_payload = raw
+                except Exception:
+                    pass
+
             with _PRICE_SNAPSHOT_CACHE_LOCK:
-                payload = {
+                payload_to_merge = {
                     key: value
                     for key, value in _PRICE_SNAPSHOT_CACHE.items()
                     if isinstance(value, dict)
                     and isinstance(value.get("payload"), dict)
                     and _has_real_price_payload(value["payload"])
                 }
+                for key, value in _PRICE_SNAPSHOT_CACHE.items():
+                    value.pop("dirty", None)
+
+            final_payload = dict(disk_payload)
+            final_payload.update(payload_to_merge)
+
             tmp = _PRICE_CACHE_FILE.with_name(
                 f"{_PRICE_CACHE_FILE.stem}.{os.getpid()}.{get_ident()}.tmp"
             )
             tmp.write_text(
-                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                json.dumps(final_payload, ensure_ascii=False, separators=(",", ":")),
                 encoding="utf-8",
             )
             for attempt in range(3):
@@ -997,6 +1021,7 @@ def _cache_price_payload(symbol: str, payload: Optional[dict], persist: bool = T
         _PRICE_SNAPSHOT_CACHE[key] = {
             "timestamp": time.time(),
             "payload": dict(payload),
+            "dirty": not persist,
         }
     if persist:
         _persist_price_cache()
