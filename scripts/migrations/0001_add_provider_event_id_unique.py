@@ -154,7 +154,11 @@ def _database_url_from_env() -> str:
     database_url = os.getenv("DATABASE_URL")
     if not database_url or not database_url.strip():
         raise MigrationBlocked("DATABASE_URL is required and must be provided by environment only")
-    return database_url
+    # Same normalisation the application authority applies
+    # (app.core.settings.validate_database_configuration). Without it a padded
+    # value reaches create_engine unstripped and dies on an opaque ArgumentError,
+    # while the app it is migrating connects to that very database.
+    return database_url.strip()
 
 
 def _rows_to_dicts(rows) -> list[dict[str, Any]]:
