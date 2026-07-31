@@ -318,6 +318,29 @@ def _preserve_history_metadata(
     return output
 
 
+def _published_snapshot_if_newer(held: Dict[str, Any]) -> Dict[str, Any] | None:
+    """Return the live snapshot when it advanced past the copy this cycle holds.
+
+    This worker owns only the ai_tools* keys. Republishing a payload it read
+    earlier would revert whatever another producer published in between -- its
+    own thread races the internal ai-tabs audit refresh, and a shared runtime/
+    directory adds worker.py to the same file.
+    """
+    current = get_snapshot()
+
+    if not isinstance(current, dict):
+        return None
+
+    current_at = _coerce_timestamp(current.get("updated_at"))
+
+    if current_at is None:
+        return None
+
+    held_at = _coerce_timestamp(held.get("updated_at")) if isinstance(held, dict) else None
+
+    return current if held_at is None or current_at > held_at else None
+
+
 def _refresh_ai_tools_for_cycle(
     signals: List[Dict[str, Any]],
     snapshot_payload: Dict[str, Any],
@@ -351,8 +374,12 @@ def _refresh_ai_tools_for_cycle(
     if any(ai_tools.values()):
         historical_ai_tools = persist_ai_alert_history(ai_tools)
         ai_tools = _preserve_history_metadata(ai_tools, historical_ai_tools)
+        # ponytail: re-read plus narrow merge, not a cross-process lock. It shrinks
+        # the revert window from a whole cycle to the write itself; upgrade to
+        # app.core.atomic_io.interprocess_file_lock if web and worker ever share one
+        # runtime/ directory in production.
         snapshot_payload = {
-            **snapshot_payload,
+            **(_published_snapshot_if_newer(snapshot_payload) or snapshot_payload),
             "ai_tools": ai_tools,
             "ai_tools_source": source,
             "ai_tools_generated_at": _timestamp(),
