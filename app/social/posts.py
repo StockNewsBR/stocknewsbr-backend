@@ -186,7 +186,12 @@ def delete_post(post_id, user_id=None, *, can_moderate=False):
         if not post:
             return False
 
-        if user_id is not None and post.user_id != user_id and not can_moderate:
+        # Fail closed on the caller's identity. The previous form skipped the
+        # ownership comparison entirely when `user_id` was None, so any caller
+        # that forgot to pass the acting user deleted arbitrary posts. Deleting
+        # someone else's post now requires either being its owner or holding an
+        # explicit moderation grant -- an absent identity is never enough.
+        if not can_moderate and (user_id is None or post.user_id != user_id):
             return False
 
         target_user_id = post.user_id

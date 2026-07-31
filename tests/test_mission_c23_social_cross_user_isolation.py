@@ -87,6 +87,25 @@ class MissionC23SocialCrossUserIsolationTests(unittest.TestCase):
     def test_non_owner_without_moderation_is_refused_even_for_missing_posts(self):
         self.assertFalse(social_posts.delete_post(999_999, USER_B))
 
+    def test_absent_caller_identity_cannot_delete_a_post(self):
+        """`user_id` defaults to None, and that default must not bypass ownership.
+
+        The route always passes `current_user.id`, so this is not reachable today
+        -- it pins the service so a future caller that forgets the acting user is
+        refused instead of silently deleting somebody else's post.
+        """
+        post_id = self._post_for(USER_A)
+
+        self.assertFalse(social_posts.delete_post(post_id, None))
+        self.assertFalse(social_posts.delete_post(post_id))
+        self.assertEqual(self._post_rows(), 1, "an absent caller identity must never delete a post")
+
+    def test_absent_caller_identity_is_still_refused_with_moderation_off(self):
+        post_id = self._post_for(USER_A)
+
+        self.assertFalse(social_posts.delete_post(post_id, None, can_moderate=False))
+        self.assertEqual(self._post_rows(), 1)
+
     def test_repost_removal_is_scoped_to_its_owner(self):
         post_id = self._post_for(USER_A)
         self.assertIsNotNone(social_reposts.create_repost(post_id, USER_A))
