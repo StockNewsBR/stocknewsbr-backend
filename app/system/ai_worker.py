@@ -341,6 +341,26 @@ def _published_snapshot_if_newer(held: Dict[str, Any]) -> Dict[str, Any] | None:
     return current if held_at is None or current_at > held_at else None
 
 
+def _snapshot_generation(payload: Any) -> Any:
+    """Identity of a snapshot generation, matching what source_snapshot_id resolves to."""
+    if not isinstance(payload, dict):
+        return None
+
+    return payload.get("source_snapshot_id") or payload.get("snapshot_id") or payload.get("generated_at")
+
+
+def _rederive_ai_tools(snapshot: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]] | None:
+    """Rebuild the tools from a snapshot's own rows. None when it yields nothing."""
+    rows = _safe_rows(snapshot.get("signals"))
+
+    if not rows:
+        return None
+
+    derived = _coerce_ai_tools(build_ai_tool_payload(top_signals=rows, ranking=rows, limit=20))
+
+    return derived if any(derived.values()) else None
+
+
 def _refresh_ai_tools_for_cycle(
     signals: List[Dict[str, Any]],
     snapshot_payload: Dict[str, Any],
@@ -372,14 +392,23 @@ def _refresh_ai_tools_for_cycle(
     ai_tools = _coerce_ai_tools(snapshot_payload.get("ai_tools"))
     history_persisted = False
     if any(ai_tools.values()):
-        historical_ai_tools = persist_ai_alert_history(ai_tools)
-        ai_tools = _preserve_history_metadata(ai_tools, historical_ai_tools)
         # ponytail: re-read plus narrow merge, not a cross-process lock. It shrinks
         # the revert window from a whole cycle to the write itself; upgrade to
         # app.core.atomic_io.interprocess_file_lock if web and worker ever share one
         # runtime/ directory in production.
+        base = _published_snapshot_if_newer(snapshot_payload)
+
+        if base is None:
+            base = snapshot_payload
+        elif _snapshot_generation(base) != _snapshot_generation(snapshot_payload):
+            # Shipping onto a different generation would present prices and scores
+            # that generation never had, so the tools are rebuilt from its own rows.
+            ai_tools = _rederive_ai_tools(base) or ai_tools
+
+        historical_ai_tools = persist_ai_alert_history(ai_tools)
+        ai_tools = _preserve_history_metadata(ai_tools, historical_ai_tools)
         snapshot_payload = {
-            **(_published_snapshot_if_newer(snapshot_payload) or snapshot_payload),
+            **base,
             "ai_tools": ai_tools,
             "ai_tools_source": source,
             "ai_tools_generated_at": _timestamp(),
