@@ -202,6 +202,10 @@ def _warm_single_request(symbol: str, limit: int, locale: str, key: str) -> None
             _drop_warmed_requests([symbol])
             return
 
+        with _lock:
+            if _shutdown_requested:
+                return
+
         with provider_call_context("news_request_warmup"):
             items = get_symbol_news(symbol, limit=limit, locale=locale)
         success = bool(items)
@@ -223,6 +227,7 @@ def _warm_single_request(symbol: str, limit: int, locale: str, key: str) -> None
 
 def _graceful_shutdown() -> None:
     """Signal all warmup threads to stop and wait briefly for completion."""
+    global _shutdown_requested
     with _lock:
         _shutdown_requested = True
     # Give running threads a moment to notice and exit
