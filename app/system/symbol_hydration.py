@@ -109,6 +109,8 @@ def _store(symbol: str, timeframe: str, **entry: Any) -> dict[str, Any]:
         for field in ("started_at", "deadline_at", "retry_count"):
             if field not in entry and previous.get(field) is not None:
                 payload[field] = previous[field]
+        if key not in _CACHE and len(_CACHE) >= 4096:
+            _CACHE.pop(next(iter(_CACHE)))
         _CACHE[key] = payload
         _persist()
     return payload

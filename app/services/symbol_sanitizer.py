@@ -51,6 +51,9 @@ def mark_symbol_cooldown(value: Any, reason: str = "provider_failure", seconds: 
     if not key:
         return
     with _lock:
+        if key not in _cooldowns and len(_cooldowns) >= 4096:
+            # Prevent cardinality explosion by evicting oldest
+            _cooldowns.pop(next(iter(_cooldowns)))
         _cooldowns[key] = {
             "until": time.time() + max(60, int(seconds or DEFAULT_SYMBOL_COOLDOWN_SECONDS)),
             "reason": str(reason or "provider_failure")[:120],

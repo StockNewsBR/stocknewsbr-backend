@@ -709,6 +709,8 @@ def _mark_symbol_failure(symbol: str, provider: str = "yfinance", error: str | N
                 count = int(current.get("count", 0)) + 1
             else:
                 count = 1
+            if failure_key not in _SYMBOL_FAILURES and len(_SYMBOL_FAILURES) >= 4096:
+                _SYMBOL_FAILURES.pop(next(iter(_SYMBOL_FAILURES)))
             _SYMBOL_FAILURES[failure_key] = {
                 "timestamp": time.time(),
                 "symbol": key,
@@ -1024,6 +1026,8 @@ def _cache_chart_data(symbol: str, interval: str, rows: list, persist: bool = Tr
         if not cache_key:
             mark_symbol_cooldown(symbol, reason="invalid_symbol")
             return rows
+        if cache_key not in _CHART_DATA_CACHE and len(_CHART_DATA_CACHE) >= 2048:
+            _CHART_DATA_CACHE.pop(next(iter(_CHART_DATA_CACHE)))
         _CHART_DATA_CACHE[cache_key] = {
             "timestamp": time.time(),
             "rows": [dict(row) for row in rows],
@@ -1048,6 +1052,8 @@ def _cache_price_payload(symbol: str, payload: Optional[dict], persist: bool = T
         mark_symbol_cooldown(symbol, reason="invalid_symbol")
         return None
     with _PRICE_SNAPSHOT_CACHE_LOCK:
+        if key not in _PRICE_SNAPSHOT_CACHE and len(_PRICE_SNAPSHOT_CACHE) >= 4096:
+            _PRICE_SNAPSHOT_CACHE.pop(next(iter(_PRICE_SNAPSHOT_CACHE)))
         _PRICE_SNAPSHOT_CACHE[key] = {
             "timestamp": time.time(),
             "payload": dict(payload),
