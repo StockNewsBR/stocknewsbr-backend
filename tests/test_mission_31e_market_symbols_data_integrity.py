@@ -137,6 +137,28 @@ class Mission31EMarketSymbolsDataIntegrityTests(unittest.TestCase):
         self.assertEqual(canonical_symbol("A1MD34"), "A1MD34")
         self.assertTrue(is_bdr_symbol("A1MD34"))
 
+    def test_renamed_b3_symbol_pairs_share_one_canonical_identity(self):
+        # market_data_loader already collapses old/new tickers to the same cache
+        # key for these corporate-action renames; canonical_symbol must agree,
+        # otherwise routes using canonical_symbol() as identity (search, radar,
+        # feed) treat the old and new ticker as two different assets while price
+        # data is cached under a single key.
+        renamed_pairs = (
+            ("CCRO3", "MOTV3"),
+            ("NTCO3", "NATU3"),
+            ("VIIA3", "BHIA3"),
+        )
+        for old_symbol, new_symbol in renamed_pairs:
+            with self.subTest(old_symbol=old_symbol, new_symbol=new_symbol):
+                self.assertEqual(canonical_symbol(old_symbol), canonical_symbol(new_symbol))
+                self.assertEqual(canonical_symbol(new_symbol), old_symbol)
+                self.assertEqual(
+                    market_data_loader._cache_key(old_symbol),
+                    market_data_loader._cache_key(new_symbol),
+                )
+                self.assertEqual(symbol_category(old_symbol), "B3")
+                self.assertEqual(symbol_category(new_symbol), "B3")
+
         with patch.object(
             market_data_loader,
             "get_ticker_frame",

@@ -107,6 +107,13 @@ _CURATED_ALIASES: dict[str, tuple[str, ...]] = {
     "BRAV3": ("BRAV3.SA", "BRAV3 B3", "RRRP3", "RRRP3.SA", "BVMF:BRAV3", "BMFBOVESPA:BRAV3", "BVMF:RRRP3", "BMFBOVESPA:RRRP3"),
     "MBRF3": ("MBRF3.SA", "MBRF3 B3", "MRFG3", "MRFG3.SA", "BRFS3", "BRFS3.SA", "BVMF:MBRF3", "BMFBOVESPA:MBRF3", "BVMF:MRFG3", "BMFBOVESPA:MRFG3", "BVMF:BRFS3", "BMFBOVESPA:BRFS3"),
     "EMBJ3": ("EMBJ3.SA", "EMBJ3 B3", "EMBR3", "EMBR3.SA", "BVMF:EMBJ3", "BMFBOVESPA:EMBJ3", "BVMF:EMBR3", "BMFBOVESPA:EMBR3"),
+    # CCR renamed to Motiva (ticker MOTV3); market_data_loader already caches/displays
+    # this line under CCRO3, so canonical identity must match that convention.
+    "CCRO3": ("CCRO3.SA", "CCRO3 B3", "MOTV3", "MOTV3.SA", "BVMF:CCRO3", "BMFBOVESPA:CCRO3", "BVMF:MOTV3", "BMFBOVESPA:MOTV3"),
+    # Natura renamed to Natura&Co (ticker NATU3); same cache-identity convention as CCRO3.
+    "NTCO3": ("NTCO3.SA", "NTCO3 B3", "NATU3", "NATU3.SA", "BVMF:NTCO3", "BMFBOVESPA:NTCO3", "BVMF:NATU3", "BMFBOVESPA:NATU3"),
+    # Via renamed to Bemobi/BHIA (ticker BHIA3); same cache-identity convention as CCRO3.
+    "VIIA3": ("VIIA3.SA", "VIIA3 B3", "BHIA3", "BHIA3.SA", "BVMF:VIIA3", "BMFBOVESPA:VIIA3", "BVMF:BHIA3", "BMFBOVESPA:BHIA3"),
     # B3 renamed AZUL ON from AZUL4 to AZUL54 (Dec/2025); Yahoo serves AZUL54.SA.
     "AZUL54": ("AZUL54.SA", "AZUL54 B3", "AZUL4", "AZUL4.SA", "BVMF:AZUL54", "BMFBOVESPA:AZUL54", "BVMF:AZUL4", "BMFBOVESPA:AZUL4"),
     # CPLE6 still trades on B3 as its own line — do NOT fold it into CPLE3.
