@@ -13,8 +13,10 @@ from app.services.snapshot_contract import (
     DECISION_INSUFFICIENT_DATA,
     DECISION_READY,
     DECISION_STALE_DATA,
+    attach_decision_envelope,
     build_decision_envelope,
     is_actionable_snapshot_row,
+    resolve_decision_envelope,
 )
 from app.system import push_dispatcher
 from app.system.performance_intelligence import calculate_performance_intelligence
@@ -82,6 +84,32 @@ class Mission29DecisionEnvelopeTests(unittest.TestCase):
                 self.assertIn(expected_blocker, envelope["blockers"])
                 self.assertIn(envelope["decision_status"], CANONICAL_DECISION_STATUSES)
                 self.assertFalse(is_actionable_snapshot_row(row))
+
+    def test_consumers_reuse_canonical_envelope_instead_of_recomputing_divergent_status(self):
+        # A row that already carries the producer's canonical envelope (computed
+        # with snapshot-level staleness context no per-row field reflects) must
+        # keep that exact status for every consumer. Blindly recomputing via
+        # build_decision_envelope(row) here drops the snapshot_stale context and
+        # relabels STALE_DATA as NO_TRADE for the same row.
+        row = attach_decision_envelope(
+            _ready_row(),
+            snapshot_stale=True,
+            source_snapshot_id="snap-29-stale",
+            timestamp="2026-07-31T00:00:00Z",
+        )
+        self.assertEqual(row["decision_envelope"]["decision_status"], DECISION_STALE_DATA)
+
+        blind_recompute = build_decision_envelope(row)
+        self.assertNotEqual(blind_recompute["decision_status"], DECISION_STALE_DATA)
+
+        reused = resolve_decision_envelope(row)
+        self.assertEqual(reused["decision_status"], DECISION_STALE_DATA)
+        self.assertIs(reused, row["decision_envelope"])
+
+        self.assertFalse(is_actionable_snapshot_row(row))
+        blocked_reason = telegram_alert_engine._blocking_reason(row)
+        self.assertIsNotNone(blocked_reason)
+        self.assertIn(f"decision_envelope={DECISION_STALE_DATA}", blocked_reason)
 
     def test_ranking_excludes_blocked_rows_and_returns_envelope_for_actionable_rows(self):
         ready = _ready_row()

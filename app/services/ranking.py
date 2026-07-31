@@ -25,7 +25,7 @@ from app.config import SYMBOLS
 from app.dependencies import require_active_plan
 from app.engine.indicators.vector_indicator_engine import compute_latest_rsi
 from app.services.score_display import attach_master_score_display_contract, normalize_master_score_display
-from app.services.snapshot_contract import build_decision_envelope, coerce_data_quality, data_quality_label, data_quality_score, is_actionable_snapshot_row
+from app.services.snapshot_contract import coerce_data_quality, data_quality_label, data_quality_score, is_actionable_snapshot_row, resolve_decision_envelope
 from app.services.symbol_registry import canonical_symbol
 from app.system.system_metrics import current_provider_call_source
 
@@ -512,7 +512,7 @@ def _normalize_snapshot_ranking(snapshot_info: dict | None = None):
         if display_contract.get("master_score_display_warning") == "master_score_display_invalid":
             continue
         normalized_score = display_contract.get("master_score", display_score)
-        decision_envelope = build_decision_envelope(row)
+        decision_envelope = resolve_decision_envelope(row)
 
         results.append(
             {

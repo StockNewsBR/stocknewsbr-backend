@@ -649,10 +649,24 @@ def master_confirms_signal(row: dict[str, Any]) -> bool:
     return False
 
 
+def resolve_decision_envelope(row: Any) -> dict[str, Any]:
+    """Reuse the canonical envelope already attached by attach_decision_envelope
+    (which carries the producer's snapshot_stale/source_snapshot_id/timestamp
+    context); only recompute when the row never went through that producer.
+    Recomputing blindly here would drop that context and can label the same
+    row differently than the canonical pipeline did (e.g. STALE_DATA vs
+    NO_TRADE) for a snapshot-level stale flag no per-row field reflects.
+    """
+    existing = row.get("decision_envelope") if isinstance(row, dict) else None
+    if isinstance(existing, dict) and existing.get("decision_status"):
+        return existing
+    return build_decision_envelope(row)
+
+
 def is_actionable_snapshot_row(row: Any) -> bool:
     if not isinstance(row, dict):
         return False
-    envelope = build_decision_envelope(row)
+    envelope = resolve_decision_envelope(row)
     if envelope.get("decision_status") != DECISION_READY or envelope.get("decision_ready") is not True:
         return False
     if is_auditor_blocked(row):

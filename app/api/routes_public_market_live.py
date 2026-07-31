@@ -40,7 +40,7 @@ from app.services.quote_service import (
     with_quote_diagnostics,
 )
 from app.services.score_display import attach_master_score_display_contract
-from app.services.snapshot_contract import build_decision_envelope
+from app.services.snapshot_contract import resolve_decision_envelope
 from app.services.symbol_registry import (
     canonical_symbol,
     canonical_symbol_aliases,
@@ -371,7 +371,7 @@ def _snapshot_master_context(symbol: str, source_payload: dict | None = None) ->
     if not isinstance(row, dict):
         return {}
     row = attach_master_score_display_contract(dict(row))
-    decision_envelope = build_decision_envelope(row)
+    decision_envelope = resolve_decision_envelope(row)
     return _json_safe_payload({
         "master_score": row.get("master_score"),
         "master_score_raw": row.get("master_score_raw"),

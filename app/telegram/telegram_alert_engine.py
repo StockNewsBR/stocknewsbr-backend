@@ -19,7 +19,7 @@ from app.ai.institutional_priority import PRIORITY_CRITICAL, PRIORITY_HIGH, PRIO
 from app.ai.operational_rules import OPERATIONAL_BLOCKED, OPERATIONAL_READY
 from app.core.settings import settings
 from app.services.score_display import attach_master_score_display_contract
-from app.services.snapshot_contract import DECISION_READY, audit_status_value, build_decision_envelope
+from app.services.snapshot_contract import DECISION_READY, audit_status_value, resolve_decision_envelope
 from app.services.symbol_registry import canonical_symbol
 from app.system.kill_switches import alert_channel_block_reason, symbol_block_reason
 from app.system.observability_engine import record_observability_event
@@ -270,7 +270,7 @@ def _cooldown_key(signal: dict[str, Any], alert_level: str) -> str:
 
 
 def _blocking_reason(signal: dict[str, Any]) -> str | None:
-    envelope = build_decision_envelope(signal)
+    envelope = resolve_decision_envelope(signal)
     if envelope.get("decision_status") != DECISION_READY or envelope.get("decision_ready") is not True:
         blockers = envelope.get("blockers") if isinstance(envelope.get("blockers"), list) else []
         reason = ";".join(str(item) for item in blockers[:4] if str(item or "").strip())

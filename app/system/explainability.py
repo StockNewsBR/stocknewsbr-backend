@@ -4,7 +4,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 from app.cache.snapshot_cache import get_snapshot
 from app.services.score_display import attach_master_score_display_contract
-from app.services.snapshot_contract import build_decision_envelope
+from app.services.snapshot_contract import resolve_decision_envelope
 from app.system.system_metrics import record_explainability_metrics
 
 BREAKDOWN_CATEGORIES: Dict[str, Tuple[str, ...]] = {
@@ -207,7 +207,7 @@ def why_this_score(row: Dict[str, Any]) -> Dict[str, List[str]]:
     for field in ("operational_warnings", "audit_warnings"):
         neutral.extend(_listify(row.get(field)))
 
-    envelope = build_decision_envelope(row)
+    envelope = resolve_decision_envelope(row)
     negative.extend(_listify(envelope.get("blockers")))
     neutral.extend(_listify(envelope.get("warnings")))
 
@@ -276,7 +276,7 @@ def decision_explainability_score(row: Dict[str, Any], why: Dict[str, List[str]]
 
 def explain_signal(row: Dict[str, Any]) -> Dict[str, Any]:
     display_row = attach_master_score_display_contract(row)
-    envelope = build_decision_envelope(display_row)
+    envelope = resolve_decision_envelope(display_row)
     why = why_this_score(row)
     change_mind = what_would_change_my_mind(row)
     breakdown = score_breakdown(row)

@@ -404,7 +404,7 @@ class PushDispatcherTests(_EnvCleanMixin):
             patch.object(pd_mod, "PUSH_DISPATCH_STATE_PATH", state_path),
             patch.object(pd_mod, "SessionLocal", lambda: _FakeSession([_FakeUser(1)])),
             patch.object(pd_mod, "get_push_token_store", lambda: {"1": [{"token": TOKEN_A, "active": True}]}),
-            patch.object(pd_mod, "build_decision_envelope", lambda signal: {"decision_status": "READY"}),
+            patch.object(pd_mod, "resolve_decision_envelope", lambda signal: {"decision_status": "READY"}),
             patch.object(
                 pd_mod,
                 "attach_master_score_display_contract",

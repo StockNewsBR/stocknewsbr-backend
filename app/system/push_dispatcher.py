@@ -9,7 +9,7 @@ from app.database import SessionLocal
 from app.models import User
 from app.services.push_service import get_push_token_store, send_push_notification
 from app.services.score_display import attach_master_score_display_contract
-from app.services.snapshot_contract import build_decision_envelope, is_actionable_snapshot_row
+from app.services.snapshot_contract import is_actionable_snapshot_row, resolve_decision_envelope
 from app.services.symbol_registry import canonical_symbol
 from app.system.kill_switches import alert_channel_block_reason, symbol_block_reason
 from app.system.observability_engine import record_observability_event
@@ -248,7 +248,7 @@ def dispatch_signal_pushes(signals):
                 )
                 continue
 
-            decision_envelope = build_decision_envelope(signal)
+            decision_envelope = resolve_decision_envelope(signal)
             last_sent = int(state.get(ticker, 0) or 0)
 
             if now - last_sent < PUSH_SIGNAL_COOLDOWN_SECONDS:
