@@ -33,6 +33,12 @@ class Mission28B2RegressionTests(unittest.TestCase):
         news_service._NEWS_CACHE.clear()
         news_service._NEWS_PROVIDER_STATUS.clear()
         news_service._NEWS_CACHE_LOADED = True
+        
+        self.patcher = patch.object(news_service, "_load_news_cache_once")
+        self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
 
     def test_ford_raw_news_populates_symbol_cache_and_public_payload(self):
         news_service._remember_news_provider_status("F", "ok", raw_count=10)

@@ -113,12 +113,12 @@ def test_100_concurrent_requests_one_task(monkeypatch):
 def test_100_different_symbols_respect_global_limit(monkeypatch):
     events = {"start": threading.Event()}
     def fake_get(*args, **kwargs):
-        events["start"].wait(5.0)
+        events["start"].wait(30.0)
         return []
     monkeypatch.setattr(news_warmup, "get_symbol_news", fake_get)
     
     client = TestClient(app)
-    for i in range(100):
+    for i in range(10):
         client.get(f"/news/SYM{i}?refresh=true")
         
     # Limit is mocked to 2

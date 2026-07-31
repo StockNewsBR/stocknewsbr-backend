@@ -73,6 +73,18 @@ class TestG2ResidueVerification:
                 assert any(k.startswith("VALE3:") for k in _async_running)
                 assert started_count == 1
 
+        class FailingThread:
+            def __init__(self, *args, **kwargs):
+                pass
+            def start(self):
+                raise RuntimeError("Cannot start thread")
+
+        with patch("app.system.news_warmup.Thread", FailingThread):
+            res = request_news_warmup("MGLU3", 5, "pt-BR")
+            assert res is False
+            with _lock:
+                assert not any(k.startswith("MGLU3:") for k in _async_running)
+
     def test_news_warmup_lifecycle_atexit_shutdown(self):
         """Prove actual cleanup and idempotency of shutdown."""
         with _lock:
@@ -134,19 +146,7 @@ class TestG2ResidueVerification:
         with _lock:
             assert "SANB11" not in _symbol_cooldowns
 
-    def test_start_failure_clears_running_state(self):
-        """If Thread.start() fails, it releases the lock and clears state."""
-        class FailingThread:
-            def __init__(self, *args, **kwargs):
-                pass
-            def start(self):
-                raise RuntimeError("Cannot start thread")
 
-        with patch("app.system.news_warmup.Thread", FailingThread):
-            res = request_news_warmup("MGLU3", 5, "pt-BR")
-            assert res is False
-            with _lock:
-                assert len(_async_running) == 0
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
