@@ -235,12 +235,11 @@ class AiWorkerHealthTests(unittest.TestCase):
         self.assertEqual(get_news_second.call_count, 0)
 
     def test_quote_warmup_skips_repeated_empty_provider_calls_during_cooldown(self):
-        from app.services import symbol_sanitizer
+        from app.services.symbol_sanitizer import clear_symbol_cooldown
         original_quote_cooldowns = dict(quote_warmup._quote_cooldowns)
-        original_symbol_cooldowns = dict(symbol_sanitizer._cooldowns)
         try:
             quote_warmup._quote_cooldowns.clear()
-            symbol_sanitizer._cooldowns.clear()
+            clear_symbol_cooldown("PETR4")
             with patch.object(
                 quote_warmup,
                 "public_quote_symbols",
@@ -273,8 +272,7 @@ class AiWorkerHealthTests(unittest.TestCase):
         finally:
             quote_warmup._quote_cooldowns.clear()
             quote_warmup._quote_cooldowns.update(original_quote_cooldowns)
-            symbol_sanitizer._cooldowns.clear()
-            symbol_sanitizer._cooldowns.update(original_symbol_cooldowns)
+            clear_symbol_cooldown("PETR4")
 
         self.assertEqual(first["resolved"], 0)
         self.assertEqual(second["resolved"], 0)
