@@ -9,7 +9,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from fastapi import FastAPI
 
-from main import _safe_import_router, _include_routers, ROUTER_SPECS, app
+from main import _safe_import_router, _include_routers, ROUTER_SPECS
 
 
 class TestB7CriticalRouterStartup:
@@ -126,11 +126,6 @@ class TestB7CriticalRouterStartup:
     def test_include_routers_skips_failed_optional(self, caplog):
         """_include_routers should continue on optional router failures."""
         with patch("importlib.import_module") as mock_import:
-            # Make first router succeed, second (optional) fail, third succeed
-            mock_router1 = MagicMock()
-            mock_router2_fail = MagicMock(side_effect=ImportError("Fail"))
-            mock_router3 = MagicMock()
-
             def side_effect(module_path):
                 if "routes_opportunity" in module_path:
                     raise ImportError("Fail")
