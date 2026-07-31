@@ -2364,11 +2364,11 @@ class Mission36PgAuditTests(unittest.TestCase):
             cur.execute('DELETE FROM public."%s" WHERE label=%%s' % tbl, ("probe-write",))
             cur.execute('TRUNCATE public."%s"' % tbl)
         lines = self._wait_for_audit(
-            lambda ls: any(tbl in l and self._audit_class(l) == "WRITE" for l in ls)
+            lambda ls: any(tbl in line and self._audit_class(line) == "WRITE" for line in ls)
         )
-        role_lines = [l for l in lines if self._audit_class(l) == "ROLE" and role in l]
-        ddl_lines = [l for l in lines if self._audit_class(l) == "DDL" and tbl in l]
-        write_lines = [l for l in lines if self._audit_class(l) == "WRITE" and tbl in l]
+        role_lines = [line for line in lines if self._audit_class(line) == "ROLE" and role in line]
+        ddl_lines = [line for line in lines if self._audit_class(line) == "DDL" and tbl in line]
+        write_lines = [line for line in lines if self._audit_class(line) == "WRITE" and tbl in line]
         self.assertTrue(role_lines, "no ROLE-class audit lines for the probe role")
         self.assertTrue(ddl_lines, "no DDL-class audit lines for the probe table")
         self.assertTrue(write_lines, "no WRITE-class audit lines for the probe table")
@@ -2384,7 +2384,7 @@ class Mission36PgAuditTests(unittest.TestCase):
             cur.execute("SELECT current_timestamp")
             cur.execute("SELECT id FROM users WHERE id = -1")
         time.sleep(0.8)
-        read_lines = [l for l in self._audit_lines() if self._audit_class(l) == "READ"]
+        read_lines = [line for line in self._audit_lines() if self._audit_class(line) == "READ"]
         self.assertEqual(read_lines, [], "READ class must not be audited under the selective policy")
 
     # ---- bound (extended-protocol) parameter VALUES never reach the log ----
@@ -2426,10 +2426,10 @@ class Mission36PgAuditTests(unittest.TestCase):
         self.assertNotIn(sentinel_tok, text_log, "bound token value leaked into the audit log")
         # The bound INSERTs must still have been audited as WRITE (structural only).
         bound_writes = [
-            l for l in self._wait_for_audit(
-                lambda ls: any(self.tbl_bind in l and self._audit_class(l) == "WRITE" and "$1" in l for l in ls)
+            line for line in self._wait_for_audit(
+                lambda ls: any(self.tbl_bind in line and self._audit_class(line) == "WRITE" and "$1" in line for line in ls)
             )
-            if self.tbl_bind in l and self._audit_class(l) == "WRITE" and "$1" in l
+            if self.tbl_bind in line and self._audit_class(line) == "WRITE" and "$1" in line
         ]
         self.assertTrue(bound_writes, "the extended-protocol INSERT was not audited as WRITE")
 

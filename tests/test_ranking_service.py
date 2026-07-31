@@ -140,7 +140,8 @@ class RankingServiceTests(unittest.TestCase):
             ranking_reason="lower-raw-row",
         )
 
-        pass_through = lambda rows: rows
+        def pass_through(rows):
+            return rows
         for snapshot_rows in (
             [normalized_row, raw_duplicate, lower_row],
             [raw_duplicate, normalized_row, lower_row],
@@ -213,7 +214,8 @@ class RankingServiceTests(unittest.TestCase):
             )
         ]
 
-        pass_through = lambda rows: rows
+        def pass_through(rows):
+            return rows
         with patch.object(
             ranking,
             "get_snapshot_info",
@@ -253,7 +255,8 @@ class RankingServiceTests(unittest.TestCase):
             )
         ]
 
-        pass_through = lambda rows: rows
+        def pass_through(rows):
+            return rows
         with patch.object(
             ranking,
             "get_snapshot_info",
@@ -293,7 +296,8 @@ class RankingServiceTests(unittest.TestCase):
             )
         ]
 
-        pass_through = lambda rows: rows
+        def pass_through(rows):
+            return rows
         with patch.object(
             ranking,
             "get_snapshot_info",

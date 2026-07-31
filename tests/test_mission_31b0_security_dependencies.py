@@ -16,8 +16,8 @@ from fastapi.testclient import TestClient
 TEST_SECRET_KEY = "mission31b0-jwt-key-valid-20260630-x9"
 os.environ["SECRET_KEY"] = TEST_SECRET_KEY
 
-from app import security
-from app.core import settings as runtime_settings
+from app import security  # noqa: E402
+from app.core import settings as runtime_settings  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _SECRET_MISSING = object()

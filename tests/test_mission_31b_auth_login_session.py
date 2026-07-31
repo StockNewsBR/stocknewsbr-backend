@@ -6,7 +6,6 @@ import asyncio
 import inspect
 import logging
 import os
-import re
 import tempfile
 import threading
 import unittest
@@ -43,7 +42,6 @@ from app.security import ALGORITHM, create_access_token, get_jwt_secret, hash_pa
 from app.services import auth_audit_service as auth_audit
 from app.services import email_service
 from app.services.auth_session_service import (
-    CHALLENGE_PURPOSE_EMAIL_CHANGE,
     CHALLENGE_PURPOSE_LOGIN,
     DELIVERY_FAILED,
     DELIVERY_INVALIDATED,

@@ -31,14 +31,12 @@ from app.services.official_identity_service import (
     ROLE_OFFICIAL,
     assert_bot_content_allowed,
     ensure_official_identities,
-    is_privileged_role,
     user_is_official,
 )
 from app.social.identity_guard import (
     check_impersonation,
     is_official_link,
     is_reserved_identity,
-    normalize_identity,
 )
 
 
@@ -404,7 +402,6 @@ class AuditTests(DbCase):
             reason="impersonation_display_name_reserved",
         )
         self.db.commit()
-        events = auth_audit.recent_events(self.db, limit=5) if hasattr(auth_audit, "recent_events") else None
         # Fallback: query the table directly.
         from app.models import AuthAuditEvent
         rows = self.db.query(AuthAuditEvent).filter(

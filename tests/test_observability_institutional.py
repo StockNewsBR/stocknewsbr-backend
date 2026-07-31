@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from app.api import routes_system
 from app.services import workspace_service
-from app.system.observability_engine import build_observability_dashboard, record_observability_event
+from app.system.observability_engine import build_observability_dashboard
 
 
 class ObservabilityInstitutionalTests(unittest.TestCase):

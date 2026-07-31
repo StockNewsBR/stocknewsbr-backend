@@ -172,7 +172,9 @@ class Mission31CCriticalCleanupTests(unittest.TestCase):
             operational_status="READY",
             data_quality="priced",
         )
-        pass_through = lambda rows: rows
+        def pass_through(rows):
+            return rows
+
         with patch.object(ranking, "get_snapshot_info", return_value={"signals": 1, "age_seconds": 1}), patch.object(
             ranking, "get_snapshot_signals", return_value=[row]
         ), patch.object(ranking, "ensure_institutional_ranking_rows", side_effect=pass_through), patch.object(
@@ -206,7 +208,9 @@ class Mission31CCriticalCleanupTests(unittest.TestCase):
             operational_status="READY",
             data_quality="priced",
         )
-        pass_through = lambda rows: rows
+        def pass_through(rows):
+            return rows
+
         with patch.object(ranking, "get_snapshot_info", return_value={"signals": 1, "age_seconds": 1}), patch.object(
             ranking, "get_snapshot_signals", return_value=[row]
         ), patch.object(ranking, "ensure_institutional_ranking_rows", side_effect=pass_through), patch.object(
