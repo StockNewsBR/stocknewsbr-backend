@@ -46,7 +46,7 @@ class NumbaFallbackTests(unittest.TestCase):
             
         with patch('builtins.__import__', side_effect=mock_import):
             with self.assertRaises(ValueError):
-                pass
+                import app.engine.core.engine_v36  # noqa: F401
 
 if __name__ == '__main__':
     unittest.main()
