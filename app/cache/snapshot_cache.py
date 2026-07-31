@@ -475,6 +475,23 @@ class SnapshotCache:
             )
             record_snapshot_write_metric(False)
 
+    def _is_stale_generation(self, incoming: Dict[str, Any]) -> bool:
+        """True when `incoming` was built before what is already published.
+
+        Producers stamp generated_at when they *start* building, so a slow
+        producer can finish after a faster one that started later and move the
+        snapshot backwards. `_load_from_disk_if_needed` already refuses an older
+        generation; publishing had no equivalent guard.
+        """
+        current_at = self._parse_timestamp(self._payload.get("generated_at"))
+
+        if not current_at:
+            return False
+
+        incoming_at = self._parse_timestamp(incoming.get("generated_at"))
+
+        return bool(incoming_at) and incoming_at < current_at
+
     def update(self, data: Any):
         normalized = self._clone_payload(self._normalize_payload(data))
         now = time.time()
@@ -489,6 +506,9 @@ class SnapshotCache:
 
         with self._disk_write_lock:
             with self._lock:
+                if self._is_stale_generation(normalized):
+                    return
+
                 previous_payload = self._payload
                 previous_timestamp = self._timestamp
                 self._payload = normalized
