@@ -19,14 +19,18 @@ import pytest
 import app.ai.conclusion_generator as cg
 from app.ai.conclusion_generator import (
     _CACHE,
+    _EVICT_INTERVAL,
+    _MAX_CACHE_ENTRIES,
     _MAX_PENDING,
     _MAX_WORKERS,
     _SCHED_LOCK,
     _SCHEDULED,
     _cache_key,
+    _cache_put,
     _evict_expired_cache,
     _get_executor,
     conclusion_or_template,
+    generate_conclusion,
     get_cached_or_schedule,
     shutdown_executor,
 )
@@ -61,10 +65,12 @@ def _reset_module_state():
     shutdown_executor(wait=True)
     _CACHE.clear()
     _SCHEDULED.clear()
+    cg._last_evict_at = 0.0
     yield
     shutdown_executor(wait=True)
     _CACHE.clear()
     _SCHEDULED.clear()
+    cg._last_evict_at = 0.0
 
 
 def _asset(symbol: str, **overrides) -> dict:
@@ -285,6 +291,111 @@ class TestB6BoundedCacheTTLEviction:
 
         with patch.object(_get_executor(), "submit"):
             assert get_cached_or_schedule(data) is None
+
+    def test_thousands_of_expired_entries_are_evicted(self):
+        """B6: a long-lived process must not accumulate dead keys."""
+        expired = time.time() - 1
+        fresh_until = time.time() + 300
+        for i in range(5000):
+            _CACHE[(f"DEAD{i}", "compra", "COMPRA", 50.0, 1.0)] = ("old", expired)
+        fresh = {(f"LIVE{i}", "venda", "VENDA", 30.0, -1.0) for i in range(10)}
+        for key in fresh:
+            _CACHE[key] = ("new", fresh_until)
+
+        assert _evict_expired_cache() == 5000
+        assert set(_CACHE) == fresh
+
+    def test_maxsize_caps_the_cache(self):
+        """B6: TTL alone does not bound memory -- the ceiling does."""
+        for i in range(_MAX_CACHE_ENTRIES + 200):
+            _cache_put((f"BULK{i}", "compra", "COMPRA", 50.0, 1.0), "prose")
+
+        assert len(_CACHE) <= _MAX_CACHE_ENTRIES
+
+    def test_maxsize_drops_soonest_to_expire_first(self):
+        """B6: the ceiling must not evict entries that still have the most life left."""
+        now = time.time()
+        doomed = ("DOOMED3", "compra", "COMPRA", 50.0, 1.0)
+        for i in range(_MAX_CACHE_ENTRIES - 1):
+            _CACHE[(f"KEEP{i}", "compra", "COMPRA", 50.0, 1.0)] = ("prose", now + 9000)
+        _CACHE[doomed] = ("about to die", now + 1)
+
+        _cache_put(("NEWEST3", "compra", "COMPRA", 50.0, 1.0), "prose", now=now)
+
+        assert len(_CACHE) == _MAX_CACHE_ENTRIES
+        assert doomed not in _CACHE
+        assert ("NEWEST3", "compra", "COMPRA", 50.0, 1.0) in _CACHE
+
+    def test_generate_conclusion_respects_the_ceiling(self):
+        with patch.object(cg, "_call_llm", return_value="prose"):
+            for i in range(_MAX_CACHE_ENTRIES + 20):
+                generate_conclusion(_asset(f"GEN{i}", rsi=40.0 + (i % 50)))
+
+        assert len(_CACHE) <= _MAX_CACHE_ENTRIES
+
+    def test_opportunistic_cleanup_is_throttled_on_hot_path(self):
+        """B6: the request path must not pay an O(n) sweep every time."""
+        data = _asset("THROTTLE3", rsi=44.0)
+        key = _cache_key(data)
+        _CACHE[key] = ("stale prose", time.time() - 1)
+        cg._last_evict_at = time.time()  # pretend a sweep just ran
+
+        with patch.object(_get_executor(), "submit"):
+            assert get_cached_or_schedule(data) is None  # expired entry never served
+
+        assert key in _CACHE  # sweep was skipped ...
+        assert _evict_expired_cache() == 1  # ... but a forced sweep still collects it
+
+    def test_sweep_resumes_after_the_interval(self):
+        data = _asset("THROTTLE4", rsi=45.0)
+        key = _cache_key(data)
+        _CACHE[key] = ("stale prose", time.time() - 1)
+        cg._last_evict_at = time.time() - _EVICT_INTERVAL - 1  # window elapsed
+
+        with patch.object(_get_executor(), "submit"):
+            get_cached_or_schedule(data)
+
+        assert key not in _CACHE
+
+    def test_malformed_payload_does_not_break_the_hot_path(self):
+        """A bad rsi must not raise out of the panel's entrypoint."""
+        assert get_cached_or_schedule(_asset("BAD3", rsi="not-a-number")) is None
+
+
+class TestB6CacheThreadSafety:
+    """B6 regression: the sweep used to iterate _CACHE while writers mutated it unlocked."""
+
+    def test_concurrent_writes_and_eviction_never_raise(self):
+        errors = []
+        stop = threading.Event()
+
+        def _writer(offset):
+            try:
+                i = 0
+                while not stop.is_set():
+                    _cache_put((f"W{offset}", "compra", "COMPRA", float(i % 100), 1.0), "prose")
+                    i += 1
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        def _sweeper():
+            try:
+                while not stop.is_set():
+                    _evict_expired_cache()
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_writer, args=(n,)) for n in range(6)]
+        threads += [threading.Thread(target=_sweeper) for _ in range(3)]
+        for t in threads:
+            t.start()
+        time.sleep(0.5)
+        stop.set()
+        for t in threads:
+            t.join(5)
+
+        assert errors == []
+        assert len(_CACHE) <= _MAX_CACHE_ENTRIES
 
 
 class TestConclusionGeneratorIntegration:

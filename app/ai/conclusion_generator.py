@@ -34,6 +34,13 @@ _MAX_WORKERS = max(1, min(32, int(os.getenv("CONCLUSION_LLM_MAX_WORKERS", "4")))
 # queue N tasks, each pinning its `data` dict. Cap the reserved (in-flight + queued) set
 # instead; past the cap the panel simply keeps its template for this refresh.
 _MAX_PENDING = max(1, int(os.getenv("CONCLUSION_LLM_MAX_PENDING", str(_MAX_WORKERS * 4))))
+# Cache ceiling. TTL alone does not bound memory: the key carries rounded RSI and change_pct,
+# so one symbol yields many distinct keys and a busy process accumulates every one of them
+# for a full TTL window. Past this size the soonest-to-expire entries are dropped.
+_MAX_CACHE_ENTRIES = max(1, int(os.getenv("CONCLUSION_LLM_CACHE_MAXSIZE", "512")))
+# Opportunistic cleanup: sweeping the whole cache on every request is O(n) on the hot path.
+# Between sweeps correctness is preserved by the per-entry expiry check in the lookup.
+_EVICT_INTERVAL = float(os.getenv("CONCLUSION_LLM_EVICT_INTERVAL", "30"))
 
 # Provider selection. Default "ollama" keeps the existing behaviour untouched;
 # set LLM_PROVIDER=omniroute to route the conclusion through the local OmniRoute
@@ -51,6 +58,10 @@ _OMNI_TIMEOUT = float(os.getenv("OMNIROUTE_TIMEOUT", "20"))
 # ponytail: process-local dict cache -- fine for a single web worker. Move to the
 # shared snapshot cache if several workers each pay the first-miss LLM cost.
 _CACHE: dict[tuple, tuple[str, float]] = {}
+# _CACHE_LOCK guards _CACHE; _SCHED_LOCK guards _SCHEDULED. They are never held at the
+# same time, so there is no lock ordering to get wrong.
+_CACHE_LOCK = threading.Lock()
+_last_evict_at = 0.0
 _SCHEDULED: set = set()
 _SCHED_LOCK = threading.Lock()
 _EXECUTOR: ThreadPoolExecutor | None = None
@@ -157,9 +168,7 @@ def generate_conclusion(data: dict[str, Any]) -> str | None:
     if not text:
         return None
 
-    # Cache the result
-    key = _cache_key(data)
-    _CACHE[key] = (text, time.time() + _TTL_SECONDS)
+    _cache_put(_cache_key(data), text)
     return text
 
 
@@ -211,8 +220,32 @@ def shutdown_executor(wait: bool = True, *, cancel_futures: bool = True) -> None
         _SCHEDULED.clear()
 
 
-def _evict_expired_cache(now: float | None = None) -> int:
-    """Evict expired entries from _CACHE. Returns the number of entries removed.
+def _cache_get(key: tuple) -> tuple[str, float] | None:
+    """Read one entry under _CACHE_LOCK."""
+    with _CACHE_LOCK:
+        return _CACHE.get(key)
+
+
+def _cache_put(key: tuple, text: str, now: float | None = None) -> None:
+    """Store one entry under _CACHE_LOCK, keeping _CACHE within _MAX_CACHE_ENTRIES."""
+    if now is None:
+        now = time.time()
+    with _CACHE_LOCK:
+        _CACHE[key] = (text, now + _TTL_SECONDS)
+        overflow = len(_CACHE) - _MAX_CACHE_ENTRIES
+        if overflow <= 0:
+            return
+        # Over the ceiling: drop whatever expires soonest, already-expired entries first.
+        for stale_key in sorted(_CACHE, key=lambda k: _CACHE[k][1])[:overflow]:
+            _CACHE.pop(stale_key, None)
+
+
+def _evict_expired_cache(now: float | None = None, *, force: bool = True) -> int:
+    """Drop expired entries from _CACHE. Returns the number of entries removed.
+
+    force=False is the hot-path mode: it skips the O(n) sweep unless _EVICT_INTERVAL has
+    elapsed or the cache sits above its ceiling. Skipping is safe because the caller
+    re-checks each entry's own expiry before serving it.
 
     _SCHEDULED is deliberately NOT purged here. It holds only in-flight keys, which are
     exactly the keys not yet in _CACHE -- a "stale scheduled" sweep therefore released
@@ -220,9 +253,17 @@ def _evict_expired_cache(now: float | None = None) -> int:
     same symbol. It is bounded at admission by _MAX_PENDING and always released in
     _fill()'s finally (or on submit failure), so it never needs a sweep.
     """
+    global _last_evict_at
     if now is None:
         now = time.time()
-    with _SCHED_LOCK:
+    with _CACHE_LOCK:
+        if (
+            not force
+            and now - _last_evict_at < _EVICT_INTERVAL
+            and len(_CACHE) <= _MAX_CACHE_ENTRIES
+        ):
+            return 0
+        _last_evict_at = now
         expired_keys = [k for k, (_, exp) in _CACHE.items() if exp <= now]
         for k in expired_keys:
             _CACHE.pop(k, None)
@@ -237,10 +278,14 @@ def get_cached_or_schedule(data: dict[str, Any]) -> str | None:
     bounded worker pool; once it lands in the cache the next refresh picks it up. In-flight keys
     are deduped so concurrent refreshes never stack LLM calls for the same symbol.
     """
-    # Bounded eviction on hot path access (ponytail: O(n) scan, fine for small cache)
-    _evict_expired_cache()
-    key = _cache_key(data)
-    hit = _CACHE.get(key)
+    _evict_expired_cache(force=False)
+    try:
+        key = _cache_key(data)
+    except (TypeError, ValueError) as exc:
+        # A malformed payload must never break the bundle; the panel keeps its template.
+        logger.warning("unusable conclusion payload for %s: %s", data.get("symbol"), exc)
+        return None
+    hit = _cache_get(key)
     if hit and hit[1] > time.time():
         return hit[0]
     with _SCHED_LOCK:
