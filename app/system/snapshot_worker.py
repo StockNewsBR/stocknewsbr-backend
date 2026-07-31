@@ -9,7 +9,6 @@ import logging
 import threading
 
 from app.cache.signal_cache import get_all_signals
-from app.core.settings import settings
 from app.engine.market_snapshot_engine import generate_market_snapshot
 from app.system.system_metrics import provider_call_context, record_worker_stage_duration
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import RLock, Thread
 from typing import Iterable
 
-from app.market.market_data_loader import get_cached_chart_data, get_chart_data, _get_chart_data_no_persist, _persist_chart_cache
+from app.market.market_data_loader import get_cached_chart_data, _get_chart_data_no_persist, _persist_chart_cache
 from app.services.symbol_sanitizer import (
     is_symbol_on_cooldown,
     mark_symbol_cooldown,

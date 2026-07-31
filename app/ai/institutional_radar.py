@@ -9,11 +9,9 @@ from app.ai.strategic_panel import ACTION_NO_TRADE
 from app.services.snapshot_contract import (
     audit_status_value,
     coerce_data_quality,
-    data_quality_score,
     is_actionable_snapshot_row,
     is_auditor_blocked,
     master_status_value,
-    safe_float,
 )
 from app.system.system_metrics import record_institutional_radar_metrics
 

@@ -14,7 +14,6 @@ from app.services.public_news_service import build_public_news_payload
 from app.services.quote_service import (
     empty_quote_payload,
     get_cached_quote_payload,
-    get_quote_payload,
     is_usable_quote_payload,
     with_quote_diagnostics,
 )

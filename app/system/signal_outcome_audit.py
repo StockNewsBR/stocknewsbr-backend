@@ -14,7 +14,6 @@ from app.services.snapshot_contract import (
     build_decision_envelope,
     coerce_data_quality,
     has_blocking_reasons,
-    has_positive_value,
     is_actionable_snapshot_row,
     is_auditor_blocked,
     master_confirms_signal,

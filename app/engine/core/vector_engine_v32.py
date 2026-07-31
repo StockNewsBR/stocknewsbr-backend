@@ -1,5 +1,3 @@
-import numpy as np
-
 from app.engine.core.numba_compute_engine import (
     compute_returns,
     compute_momentum,

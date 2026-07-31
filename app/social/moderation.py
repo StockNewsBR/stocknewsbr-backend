@@ -2,7 +2,6 @@
 # MODERATION ENGINE (ADVANCED SAFE VERSION)
 # =====================================================
 
-import json
 import os
 import threading
 import time

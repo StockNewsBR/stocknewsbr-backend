@@ -2,7 +2,6 @@
 # INCREMENTAL MATRIX ENGINE
 # =====================================================
 
-import numpy as np
 import logging
 
 logger = logging.getLogger("stocknewsbr.engine.incremental_matrix")

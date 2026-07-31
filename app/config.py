@@ -5,7 +5,6 @@
 import logging
 import os
 
-from app.core.settings import DATABASE_URL
 from app.services.symbol_sanitizer import sanitize_market_symbol
 
 logger = logging.getLogger("stocknewsbr.config")
