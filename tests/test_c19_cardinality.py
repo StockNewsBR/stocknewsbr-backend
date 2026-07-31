@@ -1,5 +1,3 @@
-import pytest
-import time
 import threading
 from app.services import symbol_sanitizer
 from app.market import market_data_loader

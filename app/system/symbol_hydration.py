@@ -18,7 +18,7 @@ from app.services.public_market_data_service import (
     cached_price_payloads,
     public_daily_freshness_status,
 )
-from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases, symbol_category
+from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases
 
 logger = logging.getLogger("stocknewsbr.symbol_hydration")
 _CACHE_PATH = Path(os.getenv("SYMBOL_ANALYSIS_CACHE_FILE") or Path(__file__).resolve().parents[2] / "runtime" / "cache" / "symbol_analysis.json")
