@@ -19,6 +19,7 @@
     "test:mission31a-composer": "node scripts/mission-31a-social-composer-regression.mjs",
     "test:mission31a2": "node scripts/mission-31a2-web-p0-hotfix-audit.mjs",
     "test:mission31b": "node scripts/mission-31b-auth-session-audit.mjs",
+    "test:mission31b1": "node scripts/mission-31b1-official-accounts-audit.mjs",
     "test:mission68": "node scripts/mission-68-functional-recovery.mjs",
     "test:help-menu": "node scripts/help-menu-contract.mjs",
     "tsc": "tsc --noEmit --incremental false",
