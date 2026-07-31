@@ -433,3 +433,37 @@ class TestConclusionGeneratorIntegration:
 
     def test_cache_key_separates_symbols(self):
         assert _cache_key(_asset("PETR4")) != _cache_key(_asset("VALE3"))
+
+    def test_prompt_omits_indicators_it_never_had_instead_of_inventing_neutral_values(self):
+        """The module's own contract says it must never invent data (see its
+        docstring). An asset missing rsi/change_pct entirely must not have the
+        LLM told "RSI: 50.0" / "Variação: 0.00%" as if that were real -- the
+        line must simply be absent, exactly like the existing support/resistance
+        handling already does for those fields."""
+        data = _asset("NORSI1")
+        del data["rsi"]
+        del data["change_pct"]
+
+        prompt = cg._build_prompt(data)
+
+        assert "RSI:" not in prompt
+        assert "Variação:" not in prompt
+        assert "Ativo: NORSI1" in prompt
+
+    def test_prompt_keeps_real_zero_and_invalid_indicators_distinct_from_absence(self):
+        zero_prompt = cg._build_prompt(_asset("ZERORSI", rsi=0.0, change_pct=0.0))
+        assert "RSI: 0.0" in zero_prompt
+        assert "Variação: 0.00%" in zero_prompt
+
+        invalid_prompt = cg._build_prompt(_asset("BADRSI2", rsi="not-a-number"))
+        assert "RSI:" not in invalid_prompt
+
+    def test_cache_key_does_not_collapse_absent_rsi_into_neutral_fifty(self):
+        data = _asset("NOCACHE1")
+        del data["rsi"]
+        del data["change_pct"]
+
+        absent_key = _cache_key(data)
+        neutral_key = _cache_key(_asset("NOCACHE1", rsi=50.0, change_pct=0.0))
+
+        assert absent_key != neutral_key

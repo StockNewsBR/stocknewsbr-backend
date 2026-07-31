@@ -68,13 +68,29 @@ _EXECUTOR: ThreadPoolExecutor | None = None
 _EXECUTOR_LOCK = threading.Lock()
 
 
+def _rounded_indicator(value: Any, digits: int) -> float | None:
+    """Round a numeric indicator, or None when it's absent/invalid.
+
+    None must stay None (never a placeholder number): callers use it both as a
+    cache-key component and to decide whether to print the indicator at all,
+    and collapsing "unavailable" into a fabricated value would present it as
+    real data in both places.
+    """
+    if value is None:
+        return None
+    try:
+        return round(float(value), digits)
+    except (TypeError, ValueError):
+        return None
+
+
 def _cache_key(data: dict[str, Any]) -> tuple:
     """Generate a cache key from the relevant indicator values."""
     symbol = data.get("symbol") or data.get("ticker") or "UNKNOWN"
     signal = str(data.get("signal") or "").strip().lower()
     verdict = str(data.get("master_verdict") or "").strip().upper()
-    rsi = round(float(data.get("rsi") or 50.0), 1)
-    change = round(float(data.get("change_pct") or 0.0), 1)
+    rsi = _rounded_indicator(data.get("rsi"), 1)
+    change = _rounded_indicator(data.get("change_pct"), 1)
     return (symbol, signal, verdict, rsi, change)
 
 
@@ -135,8 +151,8 @@ def _build_prompt(data: dict[str, Any]) -> str:
     symbol = data.get("symbol") or data.get("ticker") or "UNKNOWN"
     trend_bias = data.get("trend_bias", "")
     signal = data.get("signal", "")
-    rsi = data.get("rsi", 50)
-    change_pct = data.get("change_pct", 0)
+    rsi = _rounded_indicator(data.get("rsi"), 1)
+    change_pct = _rounded_indicator(data.get("change_pct"), 2)
     master_verdict = data.get("master_verdict", "")
     support = data.get("support")
     resistance = data.get("resistance")
@@ -145,10 +161,12 @@ def _build_prompt(data: dict[str, Any]) -> str:
         f"Ativo: {symbol}",
         f"Viés de tendência: {trend_bias}",
         f"Sinal: {signal}",
-        f"RSI: {rsi:.1f}",
-        f"Variação: {change_pct:.2f}%",
-        f"Veredito do Score Mestre: {master_verdict}",
     ]
+    if rsi is not None:
+        lines.append(f"RSI: {rsi:.1f}")
+    if change_pct is not None:
+        lines.append(f"Variação: {change_pct:.2f}%")
+    lines.append(f"Veredito do Score Mestre: {master_verdict}")
     if support is not None:
         lines.append(f"Suporte: {support:.2f}")
     if resistance is not None:
