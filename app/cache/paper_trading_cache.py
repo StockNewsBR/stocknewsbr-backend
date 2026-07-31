@@ -25,7 +25,10 @@ def _is_test_process() -> bool:
     argv = " ".join(str(arg).lower() for arg in sys.argv)
     return (
         "pytest" in argv
-        or ("unittest" in argv and ("discover" in argv or "tests" in argv or "test_" in argv))
+        or (
+            "unittest" in argv
+            and ("discover" in argv or "tests" in argv or "test_" in argv)
+        )
         or any(str(arg).lower().startswith("tests.") for arg in sys.argv)
         or any(Path(str(arg)).name.lower().startswith("test_") for arg in sys.argv)
     )
@@ -43,7 +46,11 @@ def _test_runtime_root() -> Path:
     global _TEST_RUNTIME_CLEANUP_REGISTERED
 
     if _TEST_RUNTIME_ROOT is None:
-        _TEST_RUNTIME_ROOT = Path(tempfile.gettempdir()) / "stocknewsbr-tests" / f"paper-trading-{os.getpid()}"
+        _TEST_RUNTIME_ROOT = (
+            Path(tempfile.gettempdir())
+            / "stocknewsbr-tests"
+            / f"paper-trading-{os.getpid()}"
+        )
         _TEST_RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
     if not _TEST_RUNTIME_CLEANUP_REGISTERED:
         atexit.register(_cleanup_test_runtime_root, _TEST_RUNTIME_ROOT)
@@ -103,15 +110,31 @@ def _normalize_state(state: Any) -> Dict[str, Any]:
         return empty_paper_trading_state()
 
     normalized = empty_paper_trading_state()
-    normalized.update({key: value for key, value in state.items() if key in normalized or key == "state_error"})
+    normalized.update(
+        {
+            key: value
+            for key, value in state.items()
+            if key in normalized or key == "state_error"
+        }
+    )
     normalized["mode"] = "PAPER_ONLY"
     normalized["simulation"] = "SIMULATED"
-    normalized["positions"] = [dict(item) for item in normalized.get("positions", []) if isinstance(item, dict)]
-    normalized["trades"] = [dict(item) for item in normalized.get("trades", []) if isinstance(item, dict)]
-    normalized["skipped"] = [dict(item) for item in normalized.get("skipped", []) if isinstance(item, dict)]
-    metrics = normalized.get("metrics") if isinstance(normalized.get("metrics"), dict) else {}
+    normalized["positions"] = [
+        dict(item) for item in normalized.get("positions", []) if isinstance(item, dict)
+    ]
+    normalized["trades"] = [
+        dict(item) for item in normalized.get("trades", []) if isinstance(item, dict)
+    ]
+    normalized["skipped"] = [
+        dict(item) for item in normalized.get("skipped", []) if isinstance(item, dict)
+    ]
+    metrics = (
+        normalized.get("metrics") if isinstance(normalized.get("metrics"), dict) else {}
+    )
     normalized["metrics"] = {**_empty_metrics(), **metrics}
-    normalized["last_update_timestamp"] = normalized["metrics"].get("last_update_timestamp") or normalized.get("last_update_timestamp")
+    normalized["last_update_timestamp"] = normalized["metrics"].get(
+        "last_update_timestamp"
+    ) or normalized.get("last_update_timestamp")
     return normalized
 
 
@@ -161,7 +184,8 @@ class PaperTradingCache:
         except Exception:
             pass
         with self._lock:
-            return _clone(self._state)
+            state_ref = self._state
+        return _clone(state_ref)
 
     def update(self, state: Dict[str, Any]) -> Dict[str, Any]:
         normalized = _normalize_state(state)
@@ -188,11 +212,13 @@ class PaperTradingCache:
                     if self._state is normalized:
                         self._state["paper_trading_status"] = "DEGRADED"
                         self._state["state_error"] = "state_write_failed"
-                    return _clone(self._state)
+                    state_ref = self._state
+                return _clone(state_ref)
             with self._lock:
                 if self._state is normalized:
                     self._disk_mtime = disk_mtime
-                return _clone(self._state)
+                state_ref = self._state
+            return _clone(state_ref)
 
     def reset(self) -> Dict[str, Any]:
         state = empty_paper_trading_state()

@@ -18,7 +18,11 @@ def _project_runtime_path(env_name: str, default_relative: str) -> Path:
     configured = os.getenv(env_name)
     if configured:
         configured_path = Path(configured)
-        return configured_path if configured_path.is_absolute() else _PROJECT_ROOT / configured_path
+        return (
+            configured_path
+            if configured_path.is_absolute()
+            else _PROJECT_ROOT / configured_path
+        )
     return _PROJECT_ROOT / default_relative
 
 
@@ -30,24 +34,40 @@ class SignalCacheLayer:
         self._lock = threading.RLock()
         self._disk_write_lock = threading.Lock()
         self._write_epoch = 0
-        self._storage_path = _project_runtime_path("SIGNAL_CACHE_FILE", "runtime/cache/signals.json")
+        self._storage_path = _project_runtime_path(
+            "SIGNAL_CACHE_FILE", "runtime/cache/signals.json"
+        )
 
     def _ensure_storage_dir(self):
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _write_to_disk(self, *, expected_timestamp: float | None = None, expected_epoch: int | None = None):
+    def _write_to_disk(
+        self,
+        *,
+        expected_timestamp: float | None = None,
+        expected_epoch: int | None = None,
+    ):
         try:
             self._ensure_storage_dir()
             with self._disk_write_lock:
                 with self._lock:
-                    if expected_timestamp is not None and self._timestamp != expected_timestamp:
+                    if (
+                        expected_timestamp is not None
+                        and self._timestamp != expected_timestamp
+                    ):
                         return
-                    if expected_epoch is not None and self._write_epoch != expected_epoch:
+                    if (
+                        expected_epoch is not None
+                        and self._write_epoch != expected_epoch
+                    ):
                         return
-                    payload = {
-                        "timestamp": self._timestamp,
-                        "signals": deepcopy(self._signals[:MAX_SIGNALS]),
-                    }
+                    signals_ref = self._signals[:MAX_SIGNALS]
+                    ts = self._timestamp
+
+                payload = {
+                    "timestamp": ts,
+                    "signals": deepcopy(signals_ref),
+                }
                 write_json_file_atomic(self._storage_path, payload, ensure_ascii=False)
                 with self._lock:
                     if self._timestamp == float(payload.get("timestamp") or 0.0):
@@ -83,8 +103,10 @@ class SignalCacheLayer:
             if len(signals) > MAX_SIGNALS:
                 signals = signals[:MAX_SIGNALS]
 
+            new_signals = [deepcopy(item) for item in signals if isinstance(item, dict)]
+
             with self._lock:
-                self._signals = [deepcopy(item) for item in signals if isinstance(item, dict)]
+                self._signals = new_signals
                 self._timestamp = float(timestamp or 0.0)
                 self._disk_mtime = stable_mtime or file_mtime
         except Exception as exc:
@@ -100,8 +122,10 @@ class SignalCacheLayer:
             if len(signals) > MAX_SIGNALS:
                 signals = signals[:MAX_SIGNALS]
 
+            new_signals = [deepcopy(item) for item in signals if isinstance(item, dict)]
+
             with self._lock:
-                self._signals = [deepcopy(item) for item in signals if isinstance(item, dict)]
+                self._signals = new_signals
                 self._timestamp = now
                 write_epoch = self._write_epoch
 
@@ -114,7 +138,8 @@ class SignalCacheLayer:
         try:
             self._load_from_disk_if_needed()
             with self._lock:
-                return deepcopy(self._signals)
+                signals_ref = self._signals
+            return deepcopy(signals_ref)
         except Exception:
             return []
 
@@ -122,7 +147,8 @@ class SignalCacheLayer:
         try:
             self._load_from_disk_if_needed()
             with self._lock:
-                return deepcopy(self._signals[:limit])
+                signals_ref = self._signals[:limit]
+            return deepcopy(signals_ref)
         except Exception:
             return []
 
