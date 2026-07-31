@@ -70,6 +70,51 @@ def _score_surface_rows(value: Any) -> List[Dict[str, Any]]:
     return [canonicalize_master_score_row(dict(row)) for row in _safe_rows(value)]
 
 
+# Top-level compatibility fields are projections of market_snapshot, never a second
+# computation -- that duplication is exactly what let the two representations diverge.
+# Containers are shallow-copied so mutating one representation cannot silently rewrite
+# the other; values stay equal. Deep copying is deliberately avoided: this runs on every
+# workspace request over 200-row lists.
+_CANONICAL_COMPAT_FIELDS = (
+    "institutional_radar",
+    "institutional_ranking",
+    "historical_confidence",
+    "historical_confidences",
+    "operational_rules",
+    "institutional_convictions",
+    "institutional_conviction",
+    "institutional_priorities",
+    "institutional_priority",
+    "final_decisions",
+    "final_decision",
+    "institutional_consistency",
+    "go_live_ready",
+    "go_live",
+    "institutional_consistency_score",
+    "contract_coverage",
+    "institutional_certified",
+    "certification_timestamp",
+    "certification_reasons",
+)
+
+
+def _project_value(value: Any) -> Any:
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, dict):
+        return dict(value)
+    return value
+
+
+def _canonical_compat_fields(market_snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """Derive the backward-compatible top-level fields from the canonical snapshot."""
+    return {
+        key: _project_value(market_snapshot[key])
+        for key in _CANONICAL_COMPAT_FIELDS
+        if key in market_snapshot
+    }
+
+
 def _empty_ai_outputs() -> Dict[str, List[Dict[str, Any]]]:
     return {key: [] for key in OFFICIAL_AI_TOOL_KEYS}
 
@@ -424,6 +469,8 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "channel": channel,
         "tabs": tabs,
         "top_signals": top_signals,
+        # Backward-compatible projections of market_snapshot (single canonical source).
+        **_canonical_compat_fields(market_snapshot),
         "ranking": ranking,
         "blocked_signals": blocked_signals[:50],
         "symbol_snapshots": symbol_snapshots,
@@ -494,8 +541,8 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
         "strategic_panel": snapshot.get("strategic_panel") if isinstance(snapshot.get("strategic_panel"), dict) else {},
         "strategic_panels": snapshot.get("strategic_panels") if isinstance(snapshot.get("strategic_panels"), list) else [],
         "strategic_panel_summary": snapshot.get("strategic_panel_summary") or "",
-        "institutional_conviction": market_snapshot["institutional_conviction"],
-        "institutional_priority": market_snapshot["institutional_priority"],
-        "final_decision": market_snapshot["final_decision"],
-        "institutional_consistency": market_snapshot["institutional_consistency"],
+        # institutional_conviction / institutional_priority / final_decision /
+        # institutional_consistency used to be repeated here as a second occurrence of the
+        # same dict key. They now come from _canonical_compat_fields above, so there is
+        # exactly one place that projects them.
     }

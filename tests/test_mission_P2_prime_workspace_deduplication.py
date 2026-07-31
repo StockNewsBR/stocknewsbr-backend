@@ -1,233 +1,210 @@
-"""P2' Workspace Service Deduplication Test
+"""P2' Workspace canonical-source tests.
 
-Tests that workspace data doesn't contain duplicate top-level fields
-that mirror market_snapshot contents.
+The confirmed P2' finding is DIVERGENCE, not duplication: the workspace response
+carried institutional data twice -- once recomputed per request from the (already
+truncated) signal list, and once resolved from the engine-cached snapshot -- so the two
+representations could hold different values for the same field name.
+
+The fix is a single canonical source (market_snapshot) with the historical top-level
+fields kept as derived projections of it. Deleting the top-level fields is NOT the fix:
+they are the literal HTTP response body of /web/workspace/data and /app/workspace/data,
+and apps/web/lib/types.ts still declares them on WorkspaceData.
+
+These tests pin the whole contract: presence, equality, single-source-under-conflict,
+historical consumers, and mutation isolation between the two representations.
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
 
-from app.services.workspace_service import get_workspace_data
+from app.services.workspace_service import _CANONICAL_COMPAT_FIELDS, get_workspace_data
 
 
-class TestP2PrimeWorkspaceDeduplication:
-    """P2': Workspace service - remove duplicate top-level fields
-    that mirror market_snapshot contents."""
+def _install_workspace_mocks(monkeypatch, snapshot, *, observability=None):
+    """Patch every external dependency of get_workspace_data.
 
-    def test_no_top_level_duplicates_of_market_snapshot(self, monkeypatch):
-        """Workspace response should not have top-level fields that duplicate market_snapshot."""
-        # Mock all external dependencies
-        mock_snapshot = {
-            "schema_version": 1,
-            "generated_at": 1234567890.0,
-            "source": "engine_v36",
-            "stale": False,
-            "stats": {"total_signals": 5, "bullish": 3, "bearish": 2},
-            "data_status": {"price": "ok", "volume": "ok"},
-            "market_pulse": {"bias": "NEUTRO"},
-            "auditor": {"status": "healthy"},
-            "signals": [
-                {
-                    "ticker": "PETR4",
-                    "symbol": "PETR4",
-                    "score": 85,
-                    "signal": "compra",
-                    "master_verdict": "COMPRA",
-                    "rsi": 65,
-                    "price": 40.50,
-                    "volume": 1000000,
-                    "change_pct": 2.5,
-                    "support": 39.0,
-                    "resistance": 42.0,
-                }
-            ],
-            "ai_tools": {"institutional_conviction": [], "institutional_priority": []},
-        }
+    The bootstrap mock must be complete: workspace_service reads brand/pricing/
+    launch_roadmap/ai_modules/social_features by direct subscript, so a partial mock
+    raises KeyError before the function returns and masks whatever the test meant to
+    assert.
+    """
+    bootstrap = {
+        "brand": {"name": "StockNewsBR"},
+        "pricing": {"plan": "premium"},
+        "launch_roadmap": [],
+        "ai_modules": [],
+        "social_features": [],
+    }
+    observability = observability or {
+        "snapshot_runtime": {"status": "FRESH"},
+        "go_live": {
+            "go_live_ready": True,
+            "institutional_consistency_score": 80,
+            "contract_coverage": {"coverage_pct": 100.0},
+            "institutional_certified": True,
+            "certification_timestamp": 1234567890.0,
+            "certification_reasons": ["ok"],
+        },
+    }
+    snapshot_info = {
+        "timestamp": 1234567890.0,
+        "signals": 5,
+        "last_good_signals": 5,
+        "last_good_timestamp": 1234567890.0,
+        "last_good_snapshot": {"signals": 5, "timestamp": 1234567890.0},
+        "snapshot_runtime": {"status": "FRESH"},
+    }
 
-        def mock_get_snapshot():
-            return mock_snapshot
+    mocks = {
+        "app.services.workspace_service.get_snapshot": lambda: snapshot,
+        "app.services.workspace_service.get_snapshot_info": lambda: snapshot_info,
+        # workspace_service reads these by direct subscript too.
+        "app.services.workspace_service.get_metrics_snapshot": lambda: {
+            "engine_cycles": 0,
+            "signals_generated": 0,
+            "assets_scanned": 0,
+            "cache_age": 0,
+            "http_requests": 0,
+            "ws_connections": 0,
+            "chat_messages": 0,
+        },
+        "app.services.workspace_service.get_public_bootstrap": lambda: bootstrap,
+        "app.services.workspace_service.get_layout": lambda: {"tabs": []},
+        "app.services.workspace_service.get_ranking": lambda: [],
+        "app.services.workspace_service.get_posts": lambda limit=10: [],
+        "app.services.workspace_service.persist_ai_alert_history": lambda x: x,
+        "app.services.workspace_service.get_help_center_blueprint": lambda: {},
+        "app.services.workspace_service.get_media_status": lambda: {},
+        "app.services.workspace_service.get_push_status": lambda: {},
+        "app.api.routes_system.observability_dashboard": lambda: observability,
+        "app.telegram.telegram_alert_engine.get_telegram_alert_history": lambda limit=30: [],
+        "app.telegram.telegram_alert_engine.get_telegram_health": lambda: {},
+        "app.services.workspace_layout_service.get_user_workspace_layout": lambda uid: {
+            "tabs": [],
+            "pinned_ticker": "PETR4",
+        },
+    }
+    for target, fn in mocks.items():
+        monkeypatch.setattr(target, fn)
 
-        def mock_get_snapshot_info():
-            return {
-                "timestamp": 1234567890.0,
-                "signals": 5,
-                "last_good_signals": 5,
-                "last_good_timestamp": 1234567890.0,
-                "last_good_snapshot": {"signals": 5, "timestamp": 1234567890.0},
-                "snapshot_runtime": {"status": "FRESH"},
+
+def _snapshot(**overrides):
+    base = {
+        "schema_version": 1,
+        "generated_at": 1234567890.0,
+        "source": "engine_v36",
+        "stale": False,
+        "stats": {"total_signals": 5, "bullish": 3, "bearish": 2},
+        "data_status": {"price": "ok", "volume": "ok"},
+        "market_pulse": {"bias": "NEUTRO"},
+        "auditor": {"status": "healthy"},
+        "signals": [
+            {
+                "ticker": "PETR4", "symbol": "PETR4", "score": 85, "signal": "compra",
+                "master_verdict": "COMPRA", "rsi": 65, "price": 40.50, "volume": 1000000,
+                "change_pct": 2.5, "support": 39.0, "resistance": 42.0,
             }
+        ],
+        "ai_tools": {"institutional_conviction": [], "institutional_priority": []},
+    }
+    base.update(overrides)
+    return base
 
-        def mock_get_metrics_snapshot():
-            return {"institutional_metrics": {}}
 
-        def mock_get_public_bootstrap():
-            return {"brand": {"name": "StockNewsBR"}}
-
-        def mock_get_layout():
-            return {"tabs": [{"id": "home", "label": "Home"}]}
-
-        def mock_get_ranking():
-            return []
-
-        def mock_get_posts(limit=10):
-            return []
-
-        def mock_persist_ai_alert_history(ai_outputs):
-            return ai_outputs
-
-        def mock_get_help_center_blueprint():
-            return {}
-
-        def mock_get_media_status():
-            return {}
-
-        def mock_get_push_status():
-            return {}
-
-        def mock_observability_dashboard():
-            return {
-                "snapshot_runtime": {"status": "FRESH"},
-                "go_live": {"go_live_ready": True, "institutional_consistency_score": 80},
-            }
-
-        def mock_get_telegram_alert_history(limit=30):
-            return []
-
-        def mock_get_telegram_health():
-            return {}
-
-        def mock_get_user_workspace_layout(user_id):
-            return {"tabs": [], "pinned_ticker": "PETR4"}
-
-        # Patch all dependencies
-        monkeypatch.setattr("app.services.workspace_service.get_snapshot", mock_get_snapshot)
-        monkeypatch.setattr("app.services.workspace_service.get_snapshot_info", mock_get_snapshot_info)
-        monkeypatch.setattr("app.services.workspace_service.get_metrics_snapshot", mock_get_metrics_snapshot)
-        monkeypatch.setattr("app.services.workspace_service.get_public_bootstrap", mock_get_public_bootstrap)
-        monkeypatch.setattr("app.services.workspace_service.get_layout", mock_get_layout)
-        monkeypatch.setattr("app.services.workspace_service.get_ranking", mock_get_ranking)
-        monkeypatch.setattr("app.services.workspace_service.get_posts", mock_get_posts)
-        monkeypatch.setattr("app.services.workspace_service.persist_ai_alert_history", mock_persist_ai_alert_history)
-        monkeypatch.setattr("app.services.workspace_service.get_help_center_blueprint", mock_get_help_center_blueprint)
-        monkeypatch.setattr("app.services.workspace_service.get_media_status", mock_get_media_status)
-        monkeypatch.setattr("app.services.workspace_service.get_push_status", mock_get_push_status)
-        monkeypatch.setattr("app.api.routes_system.observability_dashboard", mock_observability_dashboard)
-        monkeypatch.setattr("app.telegram.telegram_alert_engine.get_telegram_alert_history", mock_get_telegram_alert_history)
-        monkeypatch.setattr("app.telegram.telegram_alert_engine.get_telegram_health", mock_get_telegram_health)
-        monkeypatch.setattr("app.services.workspace_layout_service.get_user_workspace_layout", mock_get_user_workspace_layout)
-
-        # Call the function under test
+class TestP2PrimeCanonicalSource:
+    def test_compatibility_fields_are_present_at_top_level(self, monkeypatch):
+        """1. Historical consumers still find the fields they read."""
+        _install_workspace_mocks(monkeypatch, _snapshot())
         result = get_workspace_data(user_id=1)
 
-        # Verify response structure
-        assert "market_snapshot" in result
-        assert isinstance(result["market_snapshot"], dict)
+        missing = [f for f in _CANONICAL_COMPAT_FIELDS if f not in result]
+        assert missing == [], f"top-level compatibility fields missing: {missing}"
 
-        # List of fields that SHOULD NOT be at top level (they're inside market_snapshot)
-        duplicate_fields = [
-            "institutional_radar",
-            "institutional_ranking",
-            "historical_confidence",
-            "historical_confidences",
-            "operational_rules",
-            "institutional_convictions",
-            "institutional_conviction",
-            "institutional_priorities",
-            "institutional_priority",
-            "final_decisions",
-            "final_decision",
-            "institutional_consistency",
-        ]
+    def test_top_level_equals_market_snapshot(self, monkeypatch):
+        """2. Each projection equals its canonical counterpart -- no divergence."""
+        _install_workspace_mocks(monkeypatch, _snapshot())
+        result = get_workspace_data(user_id=1)
+        market_snapshot = result["market_snapshot"]
 
-        for field in duplicate_fields:
-            # Either the field doesn't exist at top level, or if it does, it should be
-            # a reference to the same object inside market_snapshot
-            if field in result:
-                # If it exists at top level, it MUST be the exact same object reference
-                # as inside market_snapshot (not a duplicate copy)
-                # P2' mandates these are REMOVED from top level
-                pytest.fail(f"P2' VIOLATION: '{field}' found at top level - should be removed, only in market_snapshot")
+        for field in _CANONICAL_COMPAT_FIELDS:
+            assert field in market_snapshot, f"market_snapshot missing canonical field {field}"
+            assert result[field] == market_snapshot[field], f"divergence on {field}"
 
-        # Verify market_snapshot contains the authoritative data
-        ms = result["market_snapshot"]
-        for field in duplicate_fields:
-            assert field in ms, f"market_snapshot missing required field: {field}"
+    def test_conflicting_snapshot_yields_one_value_not_two(self, monkeypatch):
+        """3. A deliberately conflicting snapshot must not produce two sources.
 
-    def test_market_snapshot_is_single_source_of_truth(self, monkeypatch):
-        """All institutional data should come from market_snapshot only."""
-        mock_snapshot = {
-            "schema_version": 1,
-            "generated_at": 1234567890.0,
-            "source": "engine_v36",
-            "stale": False,
-            "stats": {"total_signals": 3, "bullish": 2, "bearish": 1},
-            "data_status": {},
-            "market_pulse": {},
-            "auditor": {},
-            "signals": [
-                {"ticker": "VALE3", "symbol": "VALE3", "score": 75, "signal": "compra",
-                 "master_verdict": "COMPRA", "rsi": 60, "price": 60.0, "volume": 500000,
-                 "change_pct": 1.0, "support": 58.0, "resistance": 62.0}
-            ],
-            "ai_tools": {},
-        }
+        The engine-cached blocks below disagree with anything the request path would
+        recompute from `signals`. Before the fix the top level showed the recomputed
+        value while market_snapshot showed the cached one; now both must show the
+        canonical (cached) value.
+        """
+        conflicting = _snapshot(
+            institutional_radar=[{"ticker": "CACHED_ONLY", "score": 99.0}],
+            institutional_ranking=[{"ticker": "CACHED_RANK", "score": 98.0}],
+            final_decisions=[{"ticker": "CACHED_DECISION", "score": 97.0}],
+            operational_rules={"source": "engine_cache"},
+            institutional_consistency={"source": "engine_cache"},
+        )
+        _install_workspace_mocks(monkeypatch, conflicting)
+        result = get_workspace_data(user_id=1)
+        market_snapshot = result["market_snapshot"]
 
-        def mock_get_snapshot():
-            return mock_snapshot
+        # The canonical value wins, and the top level mirrors it exactly.
+        assert [row["ticker"] for row in market_snapshot["institutional_radar"]] == ["CACHED_ONLY"]
+        for field in ("institutional_radar", "institutional_ranking", "final_decisions",
+                      "operational_rules", "institutional_consistency"):
+            assert result[field] == market_snapshot[field], f"conflicting snapshot diverged on {field}"
 
-        def mock_get_snapshot_info():
-            return {"timestamp": 1234567890.0, "signals": 3, "last_good_signals": 3,
-                    "last_good_timestamp": 1234567890.0, "last_good_snapshot": {},
-                    "snapshot_runtime": {"status": "FRESH"}}
+        # And PETR4 (what a request-time recomputation would have produced) never leaks in.
+        assert "PETR4" not in [row.get("ticker") for row in result["institutional_radar"]]
 
-        mocks = {
-            "app.services.workspace_service.get_snapshot": mock_get_snapshot,
-            "app.services.workspace_service.get_snapshot_info": mock_get_snapshot_info,
-            "app.services.workspace_service.get_metrics_snapshot": lambda: {},
-            "app.services.workspace_service.get_public_bootstrap": lambda: {"brand": {}},
-            "app.services.workspace_service.get_layout": lambda: {"tabs": []},
-            "app.services.workspace_service.get_ranking": lambda: [],
-            "app.services.workspace_service.get_posts": lambda limit=10: [],
-            "app.services.workspace_service.persist_ai_alert_history": lambda x: x,
-            "app.services.workspace_service.get_help_center_blueprint": lambda: {},
-            "app.services.workspace_service.get_media_status": lambda: {},
-            "app.services.workspace_service.get_push_status": lambda: {},
-            "app.api.routes_system.observability_dashboard": lambda: {"snapshot_runtime": {"status": "FRESH"},
-                                                                       "go_live": {"go_live_ready": True}},
-            "app.telegram.telegram_alert_engine.get_telegram_alert_history": lambda limit=30: [],
-            "app.telegram.telegram_alert_engine.get_telegram_health": lambda: {},
-            "app.services.workspace_layout_service.get_user_workspace_layout": lambda uid: {"tabs": [], "pinned_ticker": "PETR4"},
-        }
-
-        for target, fn in mocks.items():
-            monkeypatch.setattr(target, fn)
-
+    def test_go_live_agrees_across_all_representations(self, monkeypatch):
+        """4. Historical consumers: flat, status.* and market_snapshot.* must agree."""
+        _install_workspace_mocks(monkeypatch, _snapshot())
         result = get_workspace_data(user_id=1)
 
-        # Verify market_snapshot has all institutional data
-        ms = result["market_snapshot"]
-        required_ms_fields = [
-            "institutional_radar", "institutional_ranking",
-            "historical_confidence", "historical_confidences",
-            "operational_rules",
-            "institutional_convictions", "institutional_conviction",
-            "institutional_priorities", "institutional_priority",
-            "final_decisions", "final_decision",
-            "institutional_consistency",
-            "go_live_ready", "go_live",
-            "institutional_consistency_score", "contract_coverage",
-            "institutional_certified", "certification_timestamp",
-            "certification_reasons",
-        ]
+        assert result["go_live_ready"] is True
+        assert result["status"]["go_live_ready"] == result["go_live_ready"]
+        assert result["market_snapshot"]["go_live_ready"] == result["go_live_ready"]
+        assert result["contract_coverage"] == result["market_snapshot"]["contract_coverage"]
 
-        for field in required_ms_fields:
-            assert field in ms, f"market_snapshot missing {field}"
+    def test_mutating_one_representation_does_not_affect_the_other(self, monkeypatch):
+        """5. Projections are equal but not the same container."""
+        _install_workspace_mocks(monkeypatch, _snapshot())
+        result = get_workspace_data(user_id=1)
+        market_snapshot = result["market_snapshot"]
 
-        # Verify response size is reasonable (not bloated with duplicates)
-        # The full payload with duplicates used to be much larger
-        import json
-        response_size = len(json.dumps(result, default=str))
-        assert response_size < 50000, f"Response too large ({response_size} bytes) - likely has duplicates"
+        mutated = []
+        for field in _CANONICAL_COMPAT_FIELDS:
+            value = result[field]
+            if isinstance(value, list):
+                value.append({"ticker": "INJECTED"})
+                mutated.append(field)
+            elif isinstance(value, dict):
+                value["__injected__"] = True
+                mutated.append(field)
+
+        assert mutated, "expected at least one mutable projection to exercise"
+        for field in mutated:
+            canonical = market_snapshot[field]
+            if isinstance(canonical, list):
+                assert {"ticker": "INJECTED"} not in canonical, f"{field} leaked a mutation"
+            else:
+                assert "__injected__" not in canonical, f"{field} leaked a mutation"
+
+    def test_single_projection_site_no_duplicate_dict_keys(self, monkeypatch):
+        """Regression: the fields were once written twice in the same dict literal.
+
+        A repeated key in a dict literal silently keeps the last write, which is what hid
+        the incomplete removal in 4e20ee24. Projecting from one place makes that
+        impossible, and this asserts the projection is what actually reached the caller.
+        """
+        _install_workspace_mocks(monkeypatch, _snapshot())
+        result = get_workspace_data(user_id=1)
+        market_snapshot = result["market_snapshot"]
+
+        for field in ("institutional_conviction", "institutional_priority",
+                      "final_decision", "institutional_consistency"):
+            assert result[field] == market_snapshot[field]
 
 
 if __name__ == "__main__":
