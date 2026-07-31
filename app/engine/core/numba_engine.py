@@ -8,7 +8,13 @@
 import logging
 import numpy as np
 
-from numba import njit
+try:
+    from numba import njit
+except Exception:  # pragma: no cover - optional dependency fallback
+    def njit(*_args, **_kwargs):
+        def decorator(fn):
+            return fn
+        return decorator
 
 logger = logging.getLogger("stocknewsbr.engine.numba")
 
