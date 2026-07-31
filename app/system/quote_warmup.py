@@ -382,25 +382,46 @@ def _warm_requested_quotes(symbols: list[str], key: str, chunk_size: int) -> Non
 
 def _quote_warmup_loop(interval_seconds: int, limit: int, chunk_size: int):
     logger.info("Quote warmup started | interval=%ss | limit=%s", interval_seconds, limit)
-    while not _stop_event.is_set():
-        try:
-            stats = warm_quotes_once(limit=limit, chunk_size=chunk_size)
-            chart_stats = warm_charts_once(limit=DEFAULT_CHART_WARMUP_LIMIT)
-            logger.info(
-                "Quote warmup completed | requested=%s | resolved=%s | failed_chunks=%s | charts=%s/%s",
-                stats.get("requested"),
-                stats.get("resolved"),
-                stats.get("failed_chunks"),
-                chart_stats.get("resolved"),
-                chart_stats.get("requested"),
-            )
-        except Exception:
-            logger.exception("Quote warmup loop error")
+    try:
+        while not _stop_event.is_set():
+            try:
+                stats = warm_quotes_once(limit=limit, chunk_size=chunk_size)
+                chart_stats = warm_charts_once(limit=DEFAULT_CHART_WARMUP_LIMIT)
+                logger.info(
+                    "Quote warmup completed | requested=%s | resolved=%s | failed_chunks=%s | charts=%s/%s",
+                    stats.get("requested"),
+                    stats.get("resolved"),
+                    stats.get("failed_chunks"),
+                    chart_stats.get("resolved"),
+                    chart_stats.get("requested"),
+                )
+            except Exception:
+                logger.exception("Quote warmup loop error")
 
-        if _stop_event.wait(max(30, int(interval_seconds or DEFAULT_QUOTE_WARMUP_INTERVAL_SECONDS))):
-            break
+            # Resource management: prune expired cooldowns to prevent memory leaks
+            now = time.time()
+            with _lock:
+                for k in list(_quote_cooldowns.keys()):
+                    if _quote_cooldowns[k] <= now:
+                        del _quote_cooldowns[k]
+                for k in list(_chart_cooldowns.keys()):
+                    if _chart_cooldowns[k] <= now:
+                        del _chart_cooldowns[k]
+                for k in list(_request_last_at.keys()):
+                    if now - _request_last_at[k] > 3600.0:
+                        del _request_last_at[k]
+                for k in list(_ondemand_last_at.keys()):
+                    if now - _ondemand_last_at[k] > 3600.0:
+                        del _ondemand_last_at[k]
 
-    logger.info("Quote warmup stopped")
+            if _stop_event.wait(max(30, int(interval_seconds or DEFAULT_QUOTE_WARMUP_INTERVAL_SECONDS))):
+                break
+    finally:
+        logger.info("Quote warmup stopped")
+        with _lock:
+            global _thread
+            if _thread is threading.current_thread():
+                _thread = None
 
 
 def start_quote_warmup(
