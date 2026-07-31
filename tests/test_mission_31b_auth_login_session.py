@@ -580,6 +580,50 @@ class ConcurrencyTests(unittest.TestCase):
         finally:
             control.close()
 
+    def test_concurrent_login_code_requests_never_exceed_the_per_email_limit(self):
+        # login_code_rate_limit_state() is a plain check-then-act: it COUNTs
+        # existing login_code_requested audit rows, and only the caller's own
+        # later commit adds a new one. Without a shared lock around the whole
+        # check-then-record span, concurrent requests for the same e-mail can
+        # all read the same pre-commit count and all pass the check before
+        # any of them has recorded its own event, exceeding
+        # LOGIN_CODE_MAX_SENDS_PER_EMAIL. request_login_code() now serializes
+        # that span through LOGIN_CODE_RATE_LIMIT_LOCK.
+        _make_user(self.db, "race-otp@example.com")
+        self.db.commit()
+
+        limit = 2
+        attempts = 6
+        barrier = threading.Barrier(attempts)
+
+        def send():
+            session = self.SessionLocal()
+            try:
+                barrier.wait(timeout=10)
+                result = request_login_code(session, "race-otp@example.com")
+                return result["status"]
+            finally:
+                session.close()
+
+        # Patched once, outside the threads: mock.patch mutates a shared
+        # module attribute, so entering/exiting it per-thread would itself
+        # race and let the real default value leak into a mid-flight thread.
+        with mock.patch(
+            "app.services.auth_session_service.login_code_max_sends_per_email",
+            return_value=limit,
+        ):
+            with ThreadPoolExecutor(max_workers=attempts) as pool:
+                futures = [pool.submit(send) for _ in range(attempts)]
+                results = [future.result(timeout=30) for future in futures]
+
+        accepted = results.count("accepted")
+        self.assertLessEqual(
+            accepted,
+            limit,
+            f"expected the lock to cap accepted sends at {limit}, got {results}",
+        )
+        self.assertEqual(accepted, limit, results)
+
     def test_duplicate_email_is_blocked_by_unique_constraint(self):
         _make_user(self.db, "unique-a@example.com")
         second = _make_user(self.db, "unique-b@example.com")

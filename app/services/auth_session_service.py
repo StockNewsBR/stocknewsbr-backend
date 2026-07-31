@@ -3,6 +3,7 @@ import hmac
 import logging
 import os
 import secrets
+import threading
 from datetime import timedelta
 
 from sqlalchemy import update
@@ -27,6 +28,17 @@ logger = logging.getLogger("stocknewsbr.auth.sessions")
 
 TELEGRAM_LINK_MINUTES = max(1, int(os.getenv("TELEGRAM_LINK_MINUTES", "15")))
 TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
+
+# login_code_rate_limit_state() only counts existing audit rows; the caller's
+# own commit is what makes an attempt count for the next check. Without a
+# lock, concurrent requests for the same e-mail all read the same pre-commit
+# count and all pass. Every caller that checks the limit and then records the
+# outcome must hold this lock for that whole span.
+# ponytail: single process-wide lock, not keyed per e-mail -- OTP sends are
+# low-frequency so global serialization is cheap. Upgrade to a DB-level
+# atomic counter (or per-key locks) if this ever runs across multiple
+# processes/workers, where an in-process lock can't help.
+LOGIN_CODE_RATE_LIMIT_LOCK = threading.Lock()
 
 CHALLENGE_PURPOSE_LOGIN = "LOGIN"
 CHALLENGE_PURPOSE_EMAIL_CHANGE = "EMAIL_CHANGE"
@@ -221,6 +233,30 @@ def request_login_code(
     was created (delivery stays PENDING; caller sends the e-mail outside the
     transaction and then marks delivery).
     """
+    with LOGIN_CODE_RATE_LIMIT_LOCK:
+        return _request_login_code_locked(
+            db,
+            email,
+            channel=channel,
+            device_id=device_id,
+            device_label=device_label,
+            request_ip_hash=request_ip_hash,
+            user_agent=user_agent,
+            correlation_id=correlation_id,
+        )
+
+
+def _request_login_code_locked(
+    db: Session,
+    email: str,
+    *,
+    channel: str,
+    device_id: str | None,
+    device_label: str | None,
+    request_ip_hash: str | None,
+    user_agent: str | None,
+    correlation_id: str | None,
+) -> dict:
     normalized_email = normalize_email(email)
 
     violated = login_code_rate_limit_state(

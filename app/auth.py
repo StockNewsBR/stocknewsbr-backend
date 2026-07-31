@@ -64,6 +64,7 @@ from app.services.auth_session_service import (
     create_telegram_link_token,
     invalidate_open_challenges,
     issue_access_token_for_user,
+    LOGIN_CODE_RATE_LIMIT_LOCK,
     login_code_rate_limit_state,
     mark_challenge_delivery,
     normalize_channel,
@@ -761,56 +762,60 @@ def request_email_change(
         db.commit()
         raise HTTPException(status_code=400, detail="official_email_reserved")
 
-    violated = login_code_rate_limit_state(
-        db,
-        email=new_email,
-        request_ip_hash=_client_ip_hash(request),
-    )
+    # Shares its rate-limit ledger with login-code sends, so the two flows must
+    # hold the same lock across their whole check-then-record span (see
+    # LOGIN_CODE_RATE_LIMIT_LOCK's docstring for why the lock exists at all).
+    with LOGIN_CODE_RATE_LIMIT_LOCK:
+        violated = login_code_rate_limit_state(
+            db,
+            email=new_email,
+            request_ip_hash=_client_ip_hash(request),
+        )
 
-    if violated:
+        if violated:
+            auth_audit.record_auth_event(
+                db,
+                "login_code_rate_limited",
+                user_id=current_user.id,
+                email=new_email,
+                ip_hash_value=_client_ip_hash(request),
+                user_agent=_user_agent(request),
+                reason=f"email_change_{violated}",
+                correlation_id=correlation_id,
+            )
+            db.commit()
+            raise HTTPException(status_code=429, detail=RATE_LIMITED_DETAIL)
+
+        challenge, code = start_login_challenge(
+            db,
+            current_user,
+            channel="web",
+            purpose=CHALLENGE_PURPOSE_EMAIL_CHANGE,
+            target_email=new_email,
+            request_ip_hash=_client_ip_hash(request),
+            correlation_id=correlation_id,
+        )
         auth_audit.record_auth_event(
             db,
-            "login_code_rate_limited",
+            "email_change_requested",
             user_id=current_user.id,
             email=new_email,
             ip_hash_value=_client_ip_hash(request),
             user_agent=_user_agent(request),
-            reason=f"email_change_{violated}",
+            correlation_id=correlation_id,
+        )
+        # Feeds the shared send-rate ledger for the target e-mail.
+        auth_audit.record_auth_event(
+            db,
+            "login_code_requested",
+            user_id=current_user.id,
+            email=new_email,
+            ip_hash_value=_client_ip_hash(request),
+            user_agent=_user_agent(request),
+            status="email_change",
             correlation_id=correlation_id,
         )
         db.commit()
-        raise HTTPException(status_code=429, detail=RATE_LIMITED_DETAIL)
-
-    challenge, code = start_login_challenge(
-        db,
-        current_user,
-        channel="web",
-        purpose=CHALLENGE_PURPOSE_EMAIL_CHANGE,
-        target_email=new_email,
-        request_ip_hash=_client_ip_hash(request),
-        correlation_id=correlation_id,
-    )
-    auth_audit.record_auth_event(
-        db,
-        "email_change_requested",
-        user_id=current_user.id,
-        email=new_email,
-        ip_hash_value=_client_ip_hash(request),
-        user_agent=_user_agent(request),
-        correlation_id=correlation_id,
-    )
-    # Feeds the shared send-rate ledger for the target e-mail.
-    auth_audit.record_auth_event(
-        db,
-        "login_code_requested",
-        user_id=current_user.id,
-        email=new_email,
-        ip_hash_value=_client_ip_hash(request),
-        user_agent=_user_agent(request),
-        status="email_change",
-        correlation_id=correlation_id,
-    )
-    db.commit()
 
     background_tasks.add_task(
         _deliver_challenge_email,
