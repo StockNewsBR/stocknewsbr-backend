@@ -10,13 +10,43 @@ function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
 }
 
+// Checks are counted, not hard-coded, so the reported total can never drift away
+// from what actually ran. `trackCheck` also refuses a second assertion with the
+// same (source, kind, needle) triple: such a check cannot fail on its own -- its
+// twin always fails first -- so it inflates the count without adding coverage.
+let checkCount = 0;
+const seenChecks = new Map();
+
+function trackCheck(source, needle, label, kind) {
+  checkCount += 1;
+
+  let seen = seenChecks.get(source);
+
+  if (!seen) {
+    seen = new Set();
+    seenChecks.set(source, seen);
+  }
+
+  const key = `${kind}:${needle}`;
+
+  if (seen.has(key)) {
+    throw new Error(`Mission 30 inert check: "${label}" repeats an earlier assertion on the same source and can never fail independently`);
+  }
+
+  seen.add(key);
+}
+
 function assertIncludes(source, needle, label) {
+  trackCheck(source, needle, label, "includes");
+
   if (!source.includes(needle)) {
     throw new Error(`Mission 30 missing: ${label}`);
   }
 }
 
 function assertNotIncludes(source, needle, label) {
+  trackCheck(source, needle, label, "excludes");
+
   if (source.includes(needle)) {
     throw new Error(`Mission 30 regression: ${label}`);
   }
@@ -60,7 +90,6 @@ for (const expected of [
   "BMFBOVESPA:PETR4",
   "BMFBOVESPA:AXIA7",
   "BINANCE:${canonical.slice(0, -3)}USDT",
-  "NASDAQ:AAPL",
   "NYSE:CRM",
   "NYSE:F",
   "OTC:BYDDY",
@@ -159,4 +188,4 @@ assertIncludes(mobileRegistry, "AXIA7: [\"AXIA7.SA\", \"AXIA7 B3\"]", "mobile re
 assertIncludes(mobileApi, "tickerPathValue", "mobile API canonicalizes ticker path values");
 assertIncludes(mobileApi, "canonicalSymbol(ticker)", "mobile API uses canonical symbol resolver");
 
-console.log(JSON.stringify({ ok: true, mission: "30", checks: 101 }, null, 2));
+console.log(JSON.stringify({ ok: true, mission: "30", checks: checkCount }, null, 2));

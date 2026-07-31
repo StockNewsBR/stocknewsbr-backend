@@ -10,13 +10,43 @@ function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
 }
 
+// Checks are counted, not hard-coded, so the reported total can never drift away
+// from what actually ran. `trackCheck` also refuses a second assertion with the
+// same (source, kind, needle) triple: such a check cannot fail on its own -- its
+// twin always fails first -- so it inflates the count without adding coverage.
+let checkCount = 0;
+const seenChecks = new Map();
+
+function trackCheck(source, needle, label, kind) {
+  checkCount += 1;
+
+  let seen = seenChecks.get(source);
+
+  if (!seen) {
+    seen = new Set();
+    seenChecks.set(source, seen);
+  }
+
+  const key = `${kind}:${needle}`;
+
+  if (seen.has(key)) {
+    throw new Error(`Mission 28B inert check: "${label}" repeats an earlier assertion on the same source and can never fail independently`);
+  }
+
+  seen.add(key);
+}
+
 function assertIncludes(source, needle, label) {
+  trackCheck(source, needle, label, "includes");
+
   if (!source.includes(needle)) {
     throw new Error(`Mission 28B missing: ${label}`);
   }
 }
 
 function assertNotIncludes(source, needle, label) {
+  trackCheck(source, needle, label, "excludes");
+
   if (source.includes(needle)) {
     throw new Error(`Mission 28B regression: ${label}`);
   }
@@ -52,8 +82,8 @@ assertIncludes(workspaceShell, "CATEGORY_ORDER.reduce((total, category)", "Todos
 assertIncludes(workspaceRails, "activeCountLabel", "left rail shows the active filter name next to its count");
 
 assertIncludes(workspaceShell, "RSI VISÃO", "RSI score is explicit in the top card");
-assertIncludes(tickerChart, "aria-hidden={!(RSI_PANEL_VISIBLE && showRsi)}", "institutional RSI panel can hide without unmounting chart overlays");
-assertIncludes(css, ".snbr-institutional-rsi-panel.hidden", "RSI panel keeps reserved layout space when toggled off");
+assertIncludes(tickerChart, "aria-hidden={!showRsi}", "institutional RSI panel hides via show_rsi without unmounting chart overlays");
+assertIncludes(css, ".snbr-institutional-rsi-panel.hidden", "RSI panel has a CSS off state instead of being unmounted");
 assertIncludes(workspaceShell, "resolveCanonicalChartLevelZones", "support/resistance uses canonical chart zones");
 assertIncludes(workspaceShell, "supportLevel={chartSupportResistanceLevels.support}", "support overlay consumes canonical support value");
 assertIncludes(workspaceShell, "resistanceLevel={chartSupportResistanceLevels.resistance}", "resistance overlay consumes canonical resistance value");
@@ -62,6 +92,7 @@ assertNotIncludes(tickerChart, "<LevelLinesPane", "verified support/resistance p
 assertNotIncludes(workspaceShell, '{ key: "show_support"', "support toggle is not rendered");
 assertNotIncludes(workspaceShell, '{ key: "show_resistance"', "resistance toggle is not rendered");
 assertNotIncludes(workspaceShell, '<div className="snbr-timeframes">', "duplicate timeframe row below RSI is not rendered");
+assertNotIncludes(tickerChart, "RSI@tv-basicstudies", "TradingView RSI stays removed");
 assertNotIncludes(tickerChart, "RSI 14 close", "TradingView RSI legend stays removed");
 assertNotIncludes(tickerChart, "snbr-chart-level-line ${level.key}`}>\n                <span>", "support/resistance lines do not repeat labels");
 assertNotIncludes(css, ".snbr-chart-level-line span", "support/resistance line label CSS removed");
@@ -69,7 +100,15 @@ assertNotIncludes(css, ".snbr-chart-level-line span", "support/resistance line l
 assertIncludes(workspaceShell, '<div className="snbr-sticky-top">', "tabs and ticker tape share one sticky wrapper");
 assertIncludes(css, ".snbr-sticky-top {", "sticky header class exists");
 assertIncludes(css, "position: sticky;\n  top: 0;\n  z-index: 30;", "sticky header keeps the real top without spacer");
-assertIncludes(css, "grid-template-rows: auto auto auto 1fr;", "active list consumes remaining rail height");
+// The previous check here pinned `.snbr-symbol-page`'s grid-template-rows, which
+// belongs to the main content area, not the left rail -- it could never catch a
+// regression in the active list. The real container contract is the shell being a
+// column flex box that can shrink (min-height: 0) and clip (overflow: hidden), so
+// the scroll child below owns the overflow instead of pushing the rail open.
+// Whether the inner list scrolls *independently* of the rail is a rendered
+// behaviour and is verified by the browser suites, not by this static check.
+assertIncludes(css, ".snbr-active-list-shell {\n  display: flex;\n  flex-direction: column;", "active list shell is a column flex container");
+assertIncludes(css, "  min-height: 0;\n  height: 100%;\n  flex: 1 1 auto;\n  overflow: hidden;\n}", "active list shell can shrink and clips its own overflow");
 assertIncludes(css, ".snbr-active-list-scroll {\n  flex: 1 1 auto;\n  min-height: 0;\n  height: 100%;\n  max-height: none;", "active list owns its internal scroll height");
 assertIncludes(workspaceShell, 'return normalizeSymbol(label) === symbol', "watchlist suppresses a duplicated symbol label");
 assertIncludes(workspaceShell, '{itemLabel ? <span>{itemLabel}</span> : null}', "watchlist second line only renders a canonical name");
@@ -154,4 +193,4 @@ for (const forbidden of ["Bullish\" : \"Bullish", "Bearish\" : \"Bearish", "News
 assertNotIncludes(allWebSources, "toggle do gráfico mostra RSI do TradingView", "old Portuguese TradingView RSI text absent");
 assertNotIncludes(allWebSources, "chart toggle shows TradingView RSI", "old English TradingView RSI text absent");
 
-console.log(JSON.stringify({ ok: true, mission: "28B.2", checks: 68 }, null, 2));
+console.log(JSON.stringify({ ok: true, mission: "28B.2", checks: checkCount }, null, 2));

@@ -132,9 +132,14 @@ class Mission28B2RegressionTests(unittest.TestCase):
         ticker_chart = (REPO_ROOT / "apps/web/components/ticker-chart.tsx").read_text(encoding="utf-8")
         css = (REPO_ROOT / "apps/web/app/globals.css").read_text(encoding="utf-8")
 
-        self.assertIn("RSI@tv-basicstudies", ticker_chart)
-        self.assertIn('aria-hidden={!(RSI_PANEL_VISIBLE && showRsi)}', ticker_chart)
-        self.assertIn('className={`snbr-institutional-rsi-panel ${rsiPanelTone} ${RSI_PANEL_VISIBLE && showRsi ? "" : "hidden"}`}', ticker_chart)
+        # `show_rsi` is labelled "RSI painel"/"Panel RSI" and owns the institutional
+        # panel only. Injecting TradingView's own RSI study made that one toggle draw
+        # a second, differently-computed RSI inside the widget, so the study must stay
+        # out and no extra flag may gate the panel behind the toggle.
+        self.assertNotIn("RSI@tv-basicstudies", ticker_chart)
+        self.assertNotIn("RSI_PANEL_VISIBLE", ticker_chart)
+        self.assertIn("aria-hidden={!showRsi}", ticker_chart)
+        self.assertIn('className={`snbr-institutional-rsi-panel ${rsiPanelTone} ${showRsi ? "" : "hidden"}`}', ticker_chart)
         self.assertIn(".snbr-institutional-rsi-panel.hidden", css)
         self.assertIn("supportLevel", ticker_chart)
         self.assertIn("resistanceLevel", ticker_chart)

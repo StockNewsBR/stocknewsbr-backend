@@ -62,11 +62,15 @@ function getTheme() {
   return "dark";
 }
 
-function buildStudies(showVwap: boolean, showMacd: boolean, showRsi: boolean, showSupertrend: boolean) {
+// No RSI study is injected here on purpose: `show_rsi` is labelled "RSI painel"/
+// "Panel RSI" and owns the institutional RSI panel below the chart, which reads
+// the snapshot value the backend computed. Pushing TradingView's own RSI study
+// made a single toggle draw a second, differently-computed RSI inside the widget
+// -- the exact divergence the mission-25d/28b contracts forbid.
+function buildStudies(showVwap: boolean, showMacd: boolean, showSupertrend: boolean) {
   const studies: string[] = [];
   if (showVwap) studies.push("VWAP@tv-basicstudies");
   if (showMacd) studies.push("MACD@tv-basicstudies");
-  if (showRsi) studies.push("RSI@tv-basicstudies");
   // TradingView's built-in Supertrend (not the community "ATR WITH TSL" script,
   // which is a custom Pine indicator and cannot be injected via the embed widget).
   if (showSupertrend) studies.push("STD;Supertrend");
@@ -143,10 +147,6 @@ function buildLevelOverlays(
   }
   return overlays;
 }
-
-// Hidden from the page by owner decision; the value is still computed and used by
-// the AI, and the TradingView RSI study on the chart is unaffected.
-const RSI_PANEL_VISIBLE = false;
 
 const LEVEL_PANE_HEIGHT = 120;
 const LEVEL_PANE_PAD = { top: 12, bottom: 12, left: 8, right: 10 };
@@ -347,7 +347,7 @@ export function TickerChart({
       hotlist: false,
       hide_volume: !showVolume,
       support_host: "https://www.tradingview.com",
-      studies: buildStudies(showVwap, showMacd, showRsi, showSupertrend),
+      studies: buildStudies(showVwap, showMacd, showSupertrend),
       studies_overrides: JSON.stringify({
         // tv.js embed override keys use the lowercase study title + plot id.
         "volume weighted average price.vwap.color": "#f97316",
@@ -386,7 +386,9 @@ export function TickerChart({
     return () => {
       container.innerHTML = "";
     };
-  }, [tradingViewSymbol, sourceSymbol, timeframe.interval, theme, locale, showVwap, showMacd, showRsi, showSupertrend, showVolume]);
+  // `showRsi` is intentionally absent: it no longer feeds the widget, so toggling
+  // the panel must not tear down and rebuild the TradingView iframe.
+  }, [tradingViewSymbol, sourceSymbol, timeframe.interval, theme, locale, showVwap, showMacd, showSupertrend, showVolume]);
 
   return (
     <div
@@ -417,12 +419,13 @@ export function TickerChart({
           </div>
         ) : null}
       </div>
-      {/* Owner decision: this panel is hidden from the page. The RSI value keeps
-          being computed and fed to the AI; the TradingView RSI study on the chart
-          stays visible. Flip PANEL_VISIBLE to true to bring it back. */}
+      {/* `show_rsi` owns this panel and nothing else. Toggling a class instead of
+          unmounting keeps the node in the tree, so switching the panel off never
+          remounts the chart above it. The `.hidden` rule collapses the panel with
+          display:none -- it does not reserve the space. */}
       <section
-        className={`snbr-institutional-rsi-panel ${rsiPanelTone} ${RSI_PANEL_VISIBLE && showRsi ? "" : "hidden"}`}
-        aria-hidden={!(RSI_PANEL_VISIBLE && showRsi)}
+        className={`snbr-institutional-rsi-panel ${rsiPanelTone} ${showRsi ? "" : "hidden"}`}
+        aria-hidden={!showRsi}
         aria-label={locale === "en-US" ? "Institutional RSI panel" : "Painel RSI institucional"}
       >
           <div className="snbr-institutional-rsi-head">
@@ -445,8 +448,8 @@ export function TickerChart({
           {institutionalRsi == null ? (
             <div className="snbr-institutional-rsi-empty">
               {locale === "en-US"
-                ? "The TradingView RSI study stays visible on the chart while this panel waits for data."
-                : "O RSI do TradingView segue visível no gráfico enquanto este painel aguarda dados."}
+                ? "The TradingView RSI study stays disabled; this panel is the only RSI on the chart and is waiting for data."
+                : "O RSI do TradingView continua desativado; este painel é o único RSI do gráfico e aguarda dados."}
             </div>
           ) : (
             <div className="snbr-institutional-rsi-track" style={rsiPanelStyle}>
