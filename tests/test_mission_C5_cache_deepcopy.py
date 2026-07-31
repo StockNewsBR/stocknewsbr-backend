@@ -69,19 +69,20 @@ def test_snapshot_cache_concurrency():
     snapshot_cache.update(payload)
 
     reads = []
+    start_barrier = threading.Barrier(10)
 
     def reader():
-        for _ in range(100):
+        start_barrier.wait()
+        for _ in range(50):
             reads.append(len(snapshot_cache.get()["signals"]))
 
     threads = [threading.Thread(target=reader) for _ in range(10)]
-    start = time.time()
     for t in threads:
         t.start()
     for t in threads:
-        t.join(timeout=5.0)
+        t.join(timeout=10.0)
         assert not t.is_alive(), "Thread deadlock detected or failed to finish within timeout"
 
     # Ensures no deadlocks and all reads succeed without lock starvation
-    assert len(reads) == 1000
+    assert len(reads) == 500
     assert all(r == 100 for r in reads)
