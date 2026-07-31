@@ -131,5 +131,44 @@ class TestB3SnapshotCacheCorruptionResilience:
                 self.cache.update({"signals": [{"symbol": "MGLU3"}], "generated_at": time.time()})
                 mock_metric.assert_called_with(False)
 
+    def test_concurrent_readers_preserve_state_under_load(self):
+        """B3g: Multiple threads calling get() while write happens concurrently."""
+        import threading
+        errors = []
+
+        def writer():
+            try:
+                for i in range(10):
+                    self.cache.update({
+                        "signals": [{"symbol": f"SYM{i}", "score": i}],
+                        "generated_at": time.time(),
+                    })
+                    time.sleep(0.01)
+            except Exception as e:
+                errors.append(("writer", e))
+
+        def reader():
+            try:
+                for _ in range(20):
+                    _ = self.cache.get()
+                    time.sleep(0.005)
+            except Exception as e:
+                errors.append(("reader", e))
+
+        threads = [
+            threading.Thread(target=writer),
+            threading.Thread(target=reader),
+            threading.Thread(target=reader),
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert not errors
+        final = self.cache.get()
+        assert final is not None
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
