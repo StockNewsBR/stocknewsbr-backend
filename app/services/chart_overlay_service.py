@@ -116,6 +116,18 @@ def _trade_side(event_type: str):
 
 
 def _trade_marker_style(event_type: str):
+    if event_type == "BUY":
+        return "circle", "green"
+    if event_type == "SELL":
+        return "circle", "red"
+    if event_type == "SHORT":
+        return "square", "orange"
+    if event_type == "COVER":
+        return "diamond", "blue"
+    return "circle", "gray"
+
+
+def _derived_trade_marker(ticker: str, event_type: str, time_value, price, reason: str, trigger: str, invalidation: str, risk: str):
     side = _trade_side(event_type)
     shape, color = _trade_marker_style(event_type)
     return {
