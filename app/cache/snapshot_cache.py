@@ -20,6 +20,7 @@ from app.services.score_display import canonicalize_master_score_row, master_sco
 from app.services.symbol_registry import canonical_symbol, canonicalize_symbol_row, dedupe_canonical_rows
 from app.system.system_metrics import record_cache_lookup, record_snapshot_write_metric, update_cache_timestamp
 
+logger = logging.getLogger("stocknewsbr.snapshot_cache")
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _TEST_RUNTIME_ROOT: Path | None = None
 _TEST_RUNTIME_CLEANUP_REGISTERED = False
@@ -125,6 +126,21 @@ class SnapshotCache:
         self._disk_write_lock = threading.Lock()
         self._write_epoch = 0
         self._storage_path = _snapshot_runtime_path("SNAPSHOT_CACHE_FILE", "runtime/cache/snapshot.json")
+
+    @staticmethod
+    def _parse_timestamp(val: Any) -> float:
+        if val is None:
+            return 0.0
+        if isinstance(val, (int, float)):
+            return float(val)
+        try:
+            val_str = str(val).strip()
+            if not val_str:
+                return 0.0
+            from datetime import datetime
+            return datetime.fromisoformat(val_str.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return 0.0
 
     def _empty_payload(self) -> Dict[str, Any]:
         return {
@@ -321,6 +337,8 @@ class SnapshotCache:
     def _load_from_disk_if_needed(self):
         try:
             if not self._storage_path.exists():
+                if self._disk_mtime > 0 or self._timestamp > 0:
+                    raise FileNotFoundError(f"Snapshot cache file missing: {self._storage_path}")
                 return
 
             file_mtime = self._storage_path.stat().st_mtime
@@ -334,40 +352,56 @@ class SnapshotCache:
                 self._storage_path,
                 lambda: {},
             )
-            if not isinstance(raw, dict) or "payload" not in raw:
-                with self._lock:
-                    self._disk_mtime = stable_mtime or file_mtime
-                return
-            payload = self._normalize_payload(raw.get("payload"))
-            last_good_payload = self._normalize_payload(raw.get("last_good_payload"))
-            timestamp = float(raw.get("timestamp") or 0.0)
-            last_good_timestamp = float(raw.get("last_good_timestamp") or 0.0)
+            if not isinstance(raw, dict):
+                raise ValueError(f"Invalid snapshot cache schema: expected dict, got {type(raw).__name__}")
+
+            if "payload" in raw:
+                payload_data = raw.get("payload")
+                last_good_data = raw.get("last_good_payload")
+                timestamp = self._parse_timestamp(raw.get("timestamp"))
+                last_good_timestamp = self._parse_timestamp(raw.get("last_good_timestamp"))
+            else:
+                if "signals" not in raw and not any(k in raw for k in ("generated_at", "as_of", "updated_at")):
+                    raise ValueError("Invalid snapshot cache schema: missing envelope or legacy markers")
+                payload_data = raw
+                last_good_data = None
+                timestamp = self._parse_timestamp(raw.get("generated_at") or raw.get("as_of") or raw.get("updated_at"))
+                last_good_timestamp = 0.0
+
+            payload = self._normalize_payload(payload_data)
 
             with self._lock:
-                # Preserve newer in-memory state: only reload from disk if disk is newer
-                if timestamp > self._timestamp:
+                mem_ts = self._parse_timestamp(
+                    (self._payload.get("generated_at") if isinstance(self._payload, dict) else None)
+                    or (self._payload.get("as_of") if isinstance(self._payload, dict) else None)
+                    or self._timestamp
+                )
+                if timestamp > mem_ts or self._timestamp == 0.0:
                     self._payload = payload
-                    self._timestamp = timestamp
-                # For last_good, also only update if disk is newer
-                if last_good_timestamp > self._last_good_timestamp:
-                    self._last_good_payload = last_good_payload
-                    self._last_good_timestamp = last_good_timestamp
+                    self._timestamp = timestamp if timestamp > 0 else (stable_mtime or file_mtime)
+
+                if last_good_data is not None:
+                    last_good_payload = self._normalize_payload(last_good_data)
+                    if last_good_timestamp > self._last_good_timestamp:
+                        self._last_good_payload = last_good_payload
+                        self._last_good_timestamp = last_good_timestamp
+
                 self._disk_mtime = stable_mtime or file_mtime
                 self._last_disk_write_at = stable_mtime or file_mtime
                 self._last_disk_signature = self._payload_signature(self._payload)
-                self._last_good_signature = self._payload_signature(self._last_good_payload)
+                if self._last_good_payload:
+                    self._last_good_signature = self._payload_signature(self._last_good_payload)
         except TimeoutError:
-            # Contention on read - keep in-memory state, will retry on next call
             pass
         except Exception as exc:
-            # B3: Log structured error for corruption vs missing file, increment metric
-            logger = logging.getLogger("stocknewsbr.snapshot_cache")
+            err_msg = f"Corrupt JSON: {exc}" if isinstance(exc, json.JSONDecodeError) else str(exc)
             logger.warning(
                 "Snapshot cache disk load failed | path=%s | error=%s",
-                self._storage_path, exc
+                self._storage_path,
+                exc,
+                extra={"error": err_msg},
             )
             record_snapshot_write_metric(False)
-            # Preserve good in-memory state - DO NOT pass silently
 
     def update(self, data: Any):
         normalized = self._clone_payload(self._normalize_payload(data))
