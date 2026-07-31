@@ -42,10 +42,14 @@ uploads_completed = 0
 push_sends = 0
 
 _lock = threading.RLock()
-_provider_call_source: ContextVar[str] = ContextVar("provider_call_source", default="unknown")
+_provider_call_source: ContextVar[str] = ContextVar(
+    "provider_call_source", default="unknown"
+)
 
 _HTTP_LATENCY_SAMPLE_LIMIT = 1024
 _PROVIDER_FAILURE_LIMIT = 50
+_EXTERNAL_PROVIDER_CALLS_LIMIT = 200
+_EXTERNAL_PROVIDER_SYMBOL_CALLS_LIMIT = 200
 
 _http_endpoint_latency = {}
 _cache_access = {}
@@ -235,7 +239,9 @@ def _cache_metric_entry(cache_name: str):
     )
 
 
-def _provider_metric_key(source: str, provider: str, operation: str, outcome: str) -> tuple[str, str, str, str]:
+def _provider_metric_key(
+    source: str, provider: str, operation: str, outcome: str
+) -> tuple[str, str, str, str]:
     return (
         str(source or "unknown"),
         str(provider or "unknown"),
@@ -244,7 +250,65 @@ def _provider_metric_key(source: str, provider: str, operation: str, outcome: st
     )
 
 
-def _provider_symbol_metric_key(source: str, provider: str, operation: str, outcome: str, symbol: str) -> tuple[str, str, str, str, str]:
+def _sanitize_metric_label(
+    val: str, default: str = "unknown", max_len: int = 48
+) -> str:
+    cleaned = str(val or "").strip()
+    if not cleaned:
+        return default
+    if len(cleaned) > max_len or any(
+        c in cleaned
+        for c in (
+            "?",
+            "=",
+            "&",
+            "/",
+            "\\",
+            "<",
+            ">",
+            '"',
+            "'",
+            "{",
+            "}",
+            "\n",
+            "\r",
+            " ",
+        )
+    ):
+        return "other"
+    return cleaned
+
+
+def _sanitize_symbol_label(val: str) -> str:
+    cleaned = str(val or "").strip().upper()
+    if not cleaned:
+        return ""
+    if len(cleaned) > 16 or any(
+        c in cleaned
+        for c in (
+            "?",
+            "=",
+            "&",
+            "/",
+            "\\",
+            "<",
+            ">",
+            '"',
+            "'",
+            "{",
+            "}",
+            "\n",
+            "\r",
+            " ",
+        )
+    ):
+        return "OTHER"
+    return cleaned
+
+
+def _provider_symbol_metric_key(
+    source: str, provider: str, operation: str, outcome: str, symbol: str
+) -> tuple[str, str, str, str, str]:
     return (
         str(source or "unknown"),
         str(provider or "unknown"),
@@ -270,6 +334,7 @@ def _worker_stage_entry(stage: str):
 # =====================================================
 # ENGINE FUNCTIONS
 # =====================================================
+
 
 def increment_engine_cycles():
     global engine_cycles
@@ -303,6 +368,7 @@ def set_assets_scanned(count):
 # CACHE FUNCTIONS
 # =====================================================
 
+
 def update_cache_timestamp(timestamp=None):
     global cache_last_update
 
@@ -331,7 +397,9 @@ def record_cache_access(cache_name: str, hit: bool, source: str | None = None):
             sources[key] = int(sources.get(key, 0)) + 1
 
 
-def record_cache_lookup(cache_name: str, duration_seconds: float, size: int | None = None):
+def record_cache_lookup(
+    cache_name: str, duration_seconds: float, size: int | None = None
+):
     duration = max(0.0, float(duration_seconds or 0.0))
 
     with _lock:
@@ -341,13 +409,17 @@ def record_cache_lookup(cache_name: str, duration_seconds: float, size: int | No
         entry["lookup_count"] = lookup_count
         entry["total_lookup_seconds"] = total_lookup_seconds
         entry["last_lookup_seconds"] = duration
-        entry["max_lookup_seconds"] = max(float(entry.get("max_lookup_seconds", 0.0)), duration)
+        entry["max_lookup_seconds"] = max(
+            float(entry.get("max_lookup_seconds", 0.0)), duration
+        )
         entry["avg_lookup_seconds"] = total_lookup_seconds / max(1, lookup_count)
         if size is not None:
             entry["last_size"] = max(0, int(size or 0))
 
 
-def record_http_endpoint_latency(route: str, method: str, status_code: int, duration_seconds: float):
+def record_http_endpoint_latency(
+    route: str, method: str, status_code: int, duration_seconds: float
+):
     key = _route_metric_key(method, route)
     status = int(status_code or 0)
     duration = max(0.0, float(duration_seconds or 0.0))
@@ -395,12 +467,33 @@ def record_external_provider_call(
     symbol: str | None = None,
     error: str | None = None,
 ):
-    resolved_source = source or current_provider_call_source()
+    resolved_source = _sanitize_metric_label(
+        source or current_provider_call_source(), default="unknown", max_len=32
+    )
+    resolved_provider = _sanitize_metric_label(provider, default="unknown", max_len=32)
+    resolved_operation = _sanitize_metric_label(
+        operation, default="unknown", max_len=48
+    )
     outcome = "success" if success else "error"
-    key = _provider_metric_key(resolved_source, provider, operation, outcome)
+    key = _provider_metric_key(
+        resolved_source, resolved_provider, resolved_operation, outcome
+    )
     duration = max(0.0, float(duration_seconds or 0.0))
 
     with _lock:
+        if (
+            key not in _external_provider_calls
+            and len(_external_provider_calls) >= _EXTERNAL_PROVIDER_CALLS_LIMIT
+        ):
+            key = _provider_metric_key(resolved_source, "other", "other", outcome)
+            if (
+                key not in _external_provider_calls
+                and len(_external_provider_calls) >= _EXTERNAL_PROVIDER_CALLS_LIMIT
+            ):
+                # Evict oldest entry if at strict capacity
+                oldest_key = next(iter(_external_provider_calls))
+                _external_provider_calls.pop(oldest_key, None)
+
         entry = _external_provider_calls.setdefault(
             key,
             {
@@ -415,9 +508,35 @@ def record_external_provider_call(
         entry["last_seconds"] = duration
         entry["max_seconds"] = max(float(entry.get("max_seconds", 0.0)), duration)
 
-        symbol_key_value = str(symbol or "").upper().strip()
+        symbol_key_value = _sanitize_symbol_label(symbol or "")
         if symbol_key_value:
-            symbol_key = _provider_symbol_metric_key(resolved_source, provider, operation, outcome, symbol_key_value)
+            symbol_key = _provider_symbol_metric_key(
+                resolved_source,
+                resolved_provider,
+                resolved_operation,
+                outcome,
+                symbol_key_value,
+            )
+            if (
+                symbol_key not in _external_provider_symbol_calls
+                and len(_external_provider_symbol_calls)
+                >= _EXTERNAL_PROVIDER_SYMBOL_CALLS_LIMIT
+            ):
+                symbol_key = _provider_symbol_metric_key(
+                    resolved_source,
+                    resolved_provider,
+                    resolved_operation,
+                    outcome,
+                    "OTHER",
+                )
+                if (
+                    symbol_key not in _external_provider_symbol_calls
+                    and len(_external_provider_symbol_calls)
+                    >= _EXTERNAL_PROVIDER_SYMBOL_CALLS_LIMIT
+                ):
+                    oldest_sym_key = next(iter(_external_provider_symbol_calls))
+                    _external_provider_symbol_calls.pop(oldest_sym_key, None)
+
             symbol_entry = _external_provider_symbol_calls.setdefault(
                 symbol_key,
                 {
@@ -430,38 +549,44 @@ def record_external_provider_call(
             symbol_entry["count"] += 1
             symbol_entry["total_seconds"] += duration
             symbol_entry["last_seconds"] = duration
-            symbol_entry["max_seconds"] = max(float(symbol_entry.get("max_seconds", 0.0)), duration)
+            symbol_entry["max_seconds"] = max(
+                float(symbol_entry.get("max_seconds", 0.0)), duration
+            )
 
-        if not success and symbol:
-            failure_key = str(symbol).upper().strip()
+        if not success and symbol_key_value:
+            failure_key = symbol_key_value
             if failure_key:
                 failure = _external_provider_failures.setdefault(
                     failure_key,
                     {
                         "count": 0,
-                        "provider": str(provider or "unknown"),
-                        "operation": str(operation or "unknown"),
-                        "source": str(resolved_source or "unknown"),
+                        "provider": resolved_provider,
+                        "operation": resolved_operation,
+                        "source": resolved_source,
                         "last_error": "",
                         "last_seen": 0.0,
                     },
                 )
                 failure["count"] += 1
-                failure["provider"] = str(provider or "unknown")
-                failure["operation"] = str(operation or "unknown")
-                failure["source"] = str(resolved_source or "unknown")
+                failure["provider"] = resolved_provider
+                failure["operation"] = resolved_operation
+                failure["source"] = resolved_source
                 failure["last_error"] = str(error or "")[:240]
                 failure["last_seen"] = time.time()
 
                 if len(_external_provider_failures) > _PROVIDER_FAILURE_LIMIT:
                     oldest = min(
                         _external_provider_failures,
-                        key=lambda item: float(_external_provider_failures[item].get("last_seen", 0.0)),
+                        key=lambda item: float(
+                            _external_provider_failures[item].get("last_seen", 0.0)
+                        ),
                     )
                     _external_provider_failures.pop(oldest, None)
 
 
-def record_worker_stage_duration(stage: str, duration_seconds: float, success: bool = True):
+def record_worker_stage_duration(
+    stage: str, duration_seconds: float, success: bool = True
+):
     duration = max(0.0, float(duration_seconds or 0.0))
 
     with _lock:
@@ -504,11 +629,29 @@ def _positive_number(value) -> bool:
 def record_signal_quality_coverage(rows, source: str = "signal_cache"):
     safe_rows = [row for row in rows or [] if isinstance(row, dict)]
     total = len(safe_rows)
-    price_count = sum(1 for row in safe_rows if _positive_number(row.get("price") or row.get("close") or row.get("last_price")))
-    volume_count = sum(1 for row in safe_rows if _positive_number(row.get("volume") or row.get("last_volume")))
-    priced_count = sum(1 for row in safe_rows if str(row.get("data_quality") or "").lower() == "priced")
-    score_only_count = sum(1 for row in safe_rows if str(row.get("data_quality") or "").lower() == "score_only")
-    decision_ready_count = sum(1 for row in safe_rows if row.get("decision_ready") is True)
+    price_count = sum(
+        1
+        for row in safe_rows
+        if _positive_number(
+            row.get("price") or row.get("close") or row.get("last_price")
+        )
+    )
+    volume_count = sum(
+        1
+        for row in safe_rows
+        if _positive_number(row.get("volume") or row.get("last_volume"))
+    )
+    priced_count = sum(
+        1 for row in safe_rows if str(row.get("data_quality") or "").lower() == "priced"
+    )
+    score_only_count = sum(
+        1
+        for row in safe_rows
+        if str(row.get("data_quality") or "").lower() == "score_only"
+    )
+    decision_ready_count = sum(
+        1 for row in safe_rows if row.get("decision_ready") is True
+    )
     conflict_count = sum(1 for row in safe_rows if row.get("conflict_detected") is True)
 
     with _lock:
@@ -535,7 +678,9 @@ def record_institutional_auditor_metrics(metrics: dict | None):
                 "approved": int(safe.get("approved", 0) or 0),
                 "caution": int(safe.get("caution", 0) or 0),
                 "blocked": int(safe.get("blocked", 0) or 0),
-                "average_audit_score": round(float(safe.get("avg_audit_score", 0.0) or 0.0), 2),
+                "average_audit_score": round(
+                    float(safe.get("avg_audit_score", 0.0) or 0.0), 2
+                ),
                 "updated_at": time.time(),
             }
         )
@@ -578,7 +723,10 @@ def record_master_score_metrics(rows_or_metrics):
     for row in rows:
         try:
             display_score, warning, _ = resolve_master_score_display_value(row)
-            if display_score is not None and warning in (None, "master_score_normalized_from_raw_100"):
+            if display_score is not None and warning in (
+                None,
+                "master_score_normalized_from_raw_100",
+            ):
                 scores.append(display_score)
         except (TypeError, ValueError):
             pass
@@ -595,7 +743,9 @@ def record_master_score_metrics(rows_or_metrics):
                 "signals": len(rows),
                 **status_counts,
                 **direction_counts,
-                "average_master_score": round(sum(scores) / len(scores), 2) if scores else 0.0,
+                "average_master_score": round(sum(scores) / len(scores), 2)
+                if scores
+                else 0.0,
                 "updated_at": time.time(),
             }
         )
@@ -650,11 +800,23 @@ def record_historical_confidence_metrics(metrics: dict | None):
         _historical_confidence_metrics.update(
             {
                 "signals": int(safe.get("signals", 0) or 0),
-                "average_confidence_score": round(float(safe.get("average_confidence_score", 0.0) or 0.0), 2),
-                "average_sample_size": round(float(safe.get("average_sample_size", 0.0) or 0.0), 2),
-                "signals_without_sample": int(safe.get("signals_without_sample", 0) or 0),
-                "aggregate_win_rate": round(float(safe.get("aggregate_win_rate", 0.0) or 0.0), 2),
-                "by_ticker": dict(safe.get("by_ticker", {}) if isinstance(safe.get("by_ticker"), dict) else {}),
+                "average_confidence_score": round(
+                    float(safe.get("average_confidence_score", 0.0) or 0.0), 2
+                ),
+                "average_sample_size": round(
+                    float(safe.get("average_sample_size", 0.0) or 0.0), 2
+                ),
+                "signals_without_sample": int(
+                    safe.get("signals_without_sample", 0) or 0
+                ),
+                "aggregate_win_rate": round(
+                    float(safe.get("aggregate_win_rate", 0.0) or 0.0), 2
+                ),
+                "by_ticker": dict(
+                    safe.get("by_ticker", {})
+                    if isinstance(safe.get("by_ticker"), dict)
+                    else {}
+                ),
                 "updated_at": time.time(),
             }
         )
@@ -673,8 +835,16 @@ def record_operational_rules_metrics(metrics: dict | None):
                 "ready": int(safe.get("ready", 0) or 0),
                 "caution": int(safe.get("caution", 0) or 0),
                 "blocked": int(safe.get("blocked", 0) or 0),
-                "top_blocks": dict(safe.get("top_blocks", {}) if isinstance(safe.get("top_blocks"), dict) else {}),
-                "top_warnings": dict(safe.get("top_warnings", {}) if isinstance(safe.get("top_warnings"), dict) else {}),
+                "top_blocks": dict(
+                    safe.get("top_blocks", {})
+                    if isinstance(safe.get("top_blocks"), dict)
+                    else {}
+                ),
+                "top_warnings": dict(
+                    safe.get("top_warnings", {})
+                    if isinstance(safe.get("top_warnings"), dict)
+                    else {}
+                ),
                 "updated_at": time.time(),
             }
         )
@@ -691,7 +861,9 @@ def record_institutional_conviction_metrics(metrics: dict | None):
         _institutional_conviction_metrics.update(
             {
                 "signals": int(safe.get("signals", 0) or 0),
-                "average_conviction": round(float(safe.get("average_conviction", 0.0) or 0.0), 2),
+                "average_conviction": round(
+                    float(safe.get("average_conviction", 0.0) or 0.0), 2
+                ),
                 "high_conviction": int(safe.get("high_conviction", 0) or 0),
                 "low_conviction": int(safe.get("low_conviction", 0) or 0),
                 "conflicts_detected": int(safe.get("conflicts_detected", 0) or 0),
@@ -749,9 +921,13 @@ def record_telegram_alert_metric(event: str, alert_level: str | None = None):
     level = str(alert_level or "").strip().lower()
     with _lock:
         if metric in _telegram_alert_metrics:
-            _telegram_alert_metrics[metric] = int(_telegram_alert_metrics.get(metric, 0) or 0) + 1
+            _telegram_alert_metrics[metric] = (
+                int(_telegram_alert_metrics.get(metric, 0) or 0) + 1
+            )
         if metric == "sent" and level in {"critical", "high", "medium"}:
-            _telegram_alert_metrics[level] = int(_telegram_alert_metrics.get(level, 0) or 0) + 1
+            _telegram_alert_metrics[level] = (
+                int(_telegram_alert_metrics.get(level, 0) or 0) + 1
+            )
         _telegram_alert_metrics["updated_at"] = time.time()
 
 
@@ -770,20 +946,38 @@ def record_signal_outcome_metrics(metrics: dict | None):
                 "blocked_signals": int(safe.get("blocked_signals", 0) or 0),
                 "skipped_signals": int(safe.get("skipped_signals", 0) or 0),
                 "insufficient_data": int(safe.get("insufficient_data", 0) or 0),
-                "evaluated_executable_signals": int(safe.get("evaluated_executable_signals", 0) or 0),
+                "evaluated_executable_signals": int(
+                    safe.get("evaluated_executable_signals", 0) or 0
+                ),
                 "winner_signals": int(safe.get("winner_signals", 0) or 0),
                 "loser_signals": int(safe.get("loser_signals", 0) or 0),
                 "neutral_signals": int(safe.get("neutral_signals", 0) or 0),
                 "win_rate": round(float(safe.get("win_rate", 0.0) or 0.0), 2),
-                "average_mfe_pct": round(float(safe.get("average_mfe_pct", 0.0) or 0.0), 4),
-                "average_mae_pct": round(float(safe.get("average_mae_pct", 0.0) or 0.0), 4),
-                "average_payoff": round(float(safe.get("average_payoff", 0.0) or 0.0), 4),
-                "simulated_drawdown_pct": round(float(safe.get("simulated_drawdown_pct", 0.0) or 0.0), 4),
+                "average_mfe_pct": round(
+                    float(safe.get("average_mfe_pct", 0.0) or 0.0), 4
+                ),
+                "average_mae_pct": round(
+                    float(safe.get("average_mae_pct", 0.0) or 0.0), 4
+                ),
+                "average_payoff": round(
+                    float(safe.get("average_payoff", 0.0) or 0.0), 4
+                ),
+                "simulated_drawdown_pct": round(
+                    float(safe.get("simulated_drawdown_pct", 0.0) or 0.0), 4
+                ),
                 "block_rate": round(float(safe.get("block_rate", 0.0) or 0.0), 2),
-                "false_positive_rate": round(float(safe.get("false_positive_rate", 0.0) or 0.0), 2),
-                "false_negative_rate": round(float(safe.get("false_negative_rate", 0.0) or 0.0), 2),
-                "insufficient_data_rate": round(float(safe.get("insufficient_data_rate", 0.0) or 0.0), 2),
-                "blocked_would_have_won": int(safe.get("blocked_would_have_won", 0) or 0),
+                "false_positive_rate": round(
+                    float(safe.get("false_positive_rate", 0.0) or 0.0), 2
+                ),
+                "false_negative_rate": round(
+                    float(safe.get("false_negative_rate", 0.0) or 0.0), 2
+                ),
+                "insufficient_data_rate": round(
+                    float(safe.get("insufficient_data_rate", 0.0) or 0.0), 2
+                ),
+                "blocked_would_have_won": int(
+                    safe.get("blocked_would_have_won", 0) or 0
+                ),
                 "blocked_correctly": int(safe.get("blocked_correctly", 0) or 0),
                 "released_failed": int(safe.get("released_failed", 0) or 0),
                 "released_won": int(safe.get("released_won", 0) or 0),
@@ -799,21 +993,43 @@ def get_signal_outcome_metrics_snapshot():
 
 def record_performance_intelligence_metrics(metrics: dict | None):
     safe = metrics if isinstance(metrics, dict) else {}
-    auditor = safe.get("auditor_efficiency") if isinstance(safe.get("auditor_efficiency"), dict) else {}
+    auditor = (
+        safe.get("auditor_efficiency")
+        if isinstance(safe.get("auditor_efficiency"), dict)
+        else {}
+    )
     with _lock:
         _performance_intelligence_metrics.update(
             {
                 "status": str(safe.get("status") or "IDLE"),
                 "sample_size": int(safe.get("sample_size", 0) or 0),
-                "assets": len(safe.get("by_asset", {}) if isinstance(safe.get("by_asset"), dict) else {}),
-                "regimes": len(safe.get("by_regime", {}) if isinstance(safe.get("by_regime"), dict) else {}),
-                "score_buckets": len(safe.get("by_score_bucket", {}) if isinstance(safe.get("by_score_bucket"), dict) else {}),
+                "assets": len(
+                    safe.get("by_asset", {})
+                    if isinstance(safe.get("by_asset"), dict)
+                    else {}
+                ),
+                "regimes": len(
+                    safe.get("by_regime", {})
+                    if isinstance(safe.get("by_regime"), dict)
+                    else {}
+                ),
+                "score_buckets": len(
+                    safe.get("by_score_bucket", {})
+                    if isinstance(safe.get("by_score_bucket"), dict)
+                    else {}
+                ),
                 "blocked_correctly": int(safe.get("blocked_correctly", 0) or 0),
-                "blocked_would_have_won": int(safe.get("blocked_would_have_won", 0) or 0),
+                "blocked_would_have_won": int(
+                    safe.get("blocked_would_have_won", 0) or 0
+                ),
                 "released_failed": int(safe.get("released_failed", 0) or 0),
                 "released_won": int(safe.get("released_won", 0) or 0),
                 "auditor_efficiency": auditor.get("institutional_auditor_efficiency"),
-                "recommendations": len(safe.get("recommendations", []) if isinstance(safe.get("recommendations"), list) else []),
+                "recommendations": len(
+                    safe.get("recommendations", [])
+                    if isinstance(safe.get("recommendations"), list)
+                    else []
+                ),
                 "updated_at": time.time(),
             }
         )
@@ -832,12 +1048,16 @@ def record_explainability_metrics(metrics: dict | None):
                 "status": str(safe.get("status") or "IDLE"),
                 "explanations": int(safe.get("explanations", 0) or 0),
                 "average_decision_explainability_score": round(
-                    float(safe.get("average_decision_explainability_score", 0.0) or 0.0),
+                    float(
+                        safe.get("average_decision_explainability_score", 0.0) or 0.0
+                    ),
                     2,
                 ),
                 "high_explainability": int(safe.get("high_explainability", 0) or 0),
                 "low_explainability": int(safe.get("low_explainability", 0) or 0),
-                "missing_change_conditions": int(safe.get("missing_change_conditions", 0) or 0),
+                "missing_change_conditions": int(
+                    safe.get("missing_change_conditions", 0) or 0
+                ),
                 "updated_at": time.time(),
             }
         )
@@ -857,15 +1077,25 @@ def record_institutional_consistency_metrics(metrics: dict | None):
                 "issues": int(safe.get("issues", 0) or 0),
                 "direction_conflicts": int(safe.get("direction_conflicts", 0) or 0),
                 "priority_no_trade": int(safe.get("priority_no_trade", 0) or 0),
-                "approved_operational_blocked": int(safe.get("approved_operational_blocked", 0) or 0),
-                "documented_operational_blocks": int(safe.get("documented_operational_blocks", 0) or 0),
+                "approved_operational_blocked": int(
+                    safe.get("approved_operational_blocked", 0) or 0
+                ),
+                "documented_operational_blocks": int(
+                    safe.get("documented_operational_blocks", 0) or 0
+                ),
                 "missing_contracts": int(safe.get("missing_contracts", 0) or 0),
                 "contract_complete": int(safe.get("contract_complete", 0) or 0),
-                "contract_coverage_pct": round(float(safe.get("contract_coverage_pct", 0.0) or 0.0), 2),
-                "go_live_inconsistencies": int(safe.get("go_live_inconsistencies", 0) or 0),
+                "contract_coverage_pct": round(
+                    float(safe.get("contract_coverage_pct", 0.0) or 0.0), 2
+                ),
+                "go_live_inconsistencies": int(
+                    safe.get("go_live_inconsistencies", 0) or 0
+                ),
                 "promotion_violations": int(safe.get("promotion_violations", 0) or 0),
                 "metric_divergences": int(safe.get("metric_divergences", 0) or 0),
-                "consistency_score": round(float(safe.get("consistency_score", 0.0) or 0.0), 2),
+                "consistency_score": round(
+                    float(safe.get("consistency_score", 0.0) or 0.0), 2
+                ),
                 "updated_at": time.time(),
             }
         )
@@ -917,11 +1147,18 @@ def get_performance_metrics_snapshot():
                 "sources": dict(entry.get("sources", {})),
                 "lookup_count": int(entry.get("lookup_count", 0)),
                 "last_size": int(entry.get("last_size", 0)),
-                "last_lookup_seconds": round(float(entry.get("last_lookup_seconds", 0.0)), 6),
-                "max_lookup_seconds": round(float(entry.get("max_lookup_seconds", 0.0)), 6),
-                "avg_lookup_seconds": round(float(entry.get("avg_lookup_seconds", 0.0)), 6),
+                "last_lookup_seconds": round(
+                    float(entry.get("last_lookup_seconds", 0.0)), 6
+                ),
+                "max_lookup_seconds": round(
+                    float(entry.get("max_lookup_seconds", 0.0)), 6
+                ),
+                "avg_lookup_seconds": round(
+                    float(entry.get("avg_lookup_seconds", 0.0)), 6
+                ),
                 "hit_ratio": round(
-                    int(entry.get("hit", 0)) / max(1, int(entry.get("hit", 0)) + int(entry.get("miss", 0))),
+                    int(entry.get("hit", 0))
+                    / max(1, int(entry.get("hit", 0)) + int(entry.get("miss", 0))),
                     4,
                 ),
             }
@@ -929,7 +1166,12 @@ def get_performance_metrics_snapshot():
         }
 
         provider_metrics = {}
-        for (source, provider, operation, outcome), entry in _external_provider_calls.items():
+        for (
+            source,
+            provider,
+            operation,
+            outcome,
+        ), entry in _external_provider_calls.items():
             count = int(entry.get("count", 0))
             provider_metrics[f"{source}:{provider}:{operation}:{outcome}"] = {
                 "source": source,
@@ -940,13 +1182,23 @@ def get_performance_metrics_snapshot():
                 "total_seconds": round(float(entry.get("total_seconds", 0.0)), 6),
                 "last_seconds": round(float(entry.get("last_seconds", 0.0)), 6),
                 "max_seconds": round(float(entry.get("max_seconds", 0.0)), 6),
-                "avg_seconds": round(float(entry.get("total_seconds", 0.0)) / max(1, count), 6),
+                "avg_seconds": round(
+                    float(entry.get("total_seconds", 0.0)) / max(1, count), 6
+                ),
             }
 
         provider_symbol_metrics = {}
-        for (source, provider, operation, outcome, symbol), entry in _external_provider_symbol_calls.items():
+        for (
+            source,
+            provider,
+            operation,
+            outcome,
+            symbol,
+        ), entry in _external_provider_symbol_calls.items():
             count = int(entry.get("count", 0))
-            provider_symbol_metrics[f"{source}:{provider}:{operation}:{outcome}:{symbol}"] = {
+            provider_symbol_metrics[
+                f"{source}:{provider}:{operation}:{outcome}:{symbol}"
+            ] = {
                 "source": source,
                 "provider": provider,
                 "operation": operation,
@@ -956,7 +1208,9 @@ def get_performance_metrics_snapshot():
                 "total_seconds": round(float(entry.get("total_seconds", 0.0)), 6),
                 "last_seconds": round(float(entry.get("last_seconds", 0.0)), 6),
                 "max_seconds": round(float(entry.get("max_seconds", 0.0)), 6),
-                "avg_seconds": round(float(entry.get("total_seconds", 0.0)) / max(1, count), 6),
+                "avg_seconds": round(
+                    float(entry.get("total_seconds", 0.0)) / max(1, count), 6
+                ),
             }
 
         worker_metrics = {
@@ -966,13 +1220,16 @@ def get_performance_metrics_snapshot():
                 "total_seconds": round(float(entry.get("total_seconds", 0.0)), 6),
                 "last_seconds": round(float(entry.get("last_seconds", 0.0)), 6),
                 "max_seconds": round(float(entry.get("max_seconds", 0.0)), 6),
-                "avg_seconds": round(float(entry.get("total_seconds", 0.0)) / max(1, int(entry.get("count", 0))), 6),
+                "avg_seconds": round(
+                    float(entry.get("total_seconds", 0.0))
+                    / max(1, int(entry.get("count", 0))),
+                    6,
+                ),
             }
             for stage, entry in _worker_stage_timings.items()
         }
         signal_quality = {
-            source: dict(entry)
-            for source, entry in _signal_quality_coverage.items()
+            source: dict(entry) for source, entry in _signal_quality_coverage.items()
         }
         institutional_radar = dict(_institutional_radar_metrics)
         institutional_ranking = dict(_institutional_ranking_metrics)
@@ -1059,10 +1316,19 @@ def format_prometheus_metrics() -> str:
 
     for route_key, item in performance.get("http_endpoint_latency_seconds", {}).items():
         method, _, route = route_key.partition(" ")
-        for quantile, value in (("0.50", item.get("p50")), ("0.95", item.get("p95")), ("0.99", item.get("p99"))):
+        for quantile, value in (
+            ("0.50", item.get("p50")),
+            ("0.95", item.get("p95")),
+            ("0.99", item.get("p99")),
+        ):
             lines.append(
                 'http_endpoint_latency_seconds{method="%s",route="%s",quantile="%s"} %s'
-                % (_label_value(method), _label_value(route), quantile, float(value or 0.0))
+                % (
+                    _label_value(method),
+                    _label_value(route),
+                    quantile,
+                    float(value or 0.0),
+                )
             )
         lines.append(
             'http_endpoint_requests_total{method="%s",route="%s"} %s'
@@ -1074,11 +1340,26 @@ def format_prometheus_metrics() -> str:
         )
 
     for cache_name, item in performance.get("cache", {}).items():
-        lines.append('cache_hit_total{cache="%s"} %s' % (_label_value(cache_name), int(item.get("hit", 0))))
-        lines.append('cache_miss_total{cache="%s"} %s' % (_label_value(cache_name), int(item.get("miss", 0))))
-        lines.append('cache_lookup_seconds{cache="%s",stat="last"} %s' % (_label_value(cache_name), float(item.get("last_lookup_seconds", 0.0))))
-        lines.append('cache_lookup_seconds{cache="%s",stat="avg"} %s' % (_label_value(cache_name), float(item.get("avg_lookup_seconds", 0.0))))
-        lines.append('cache_size{cache="%s"} %s' % (_label_value(cache_name), int(item.get("last_size", 0))))
+        lines.append(
+            'cache_hit_total{cache="%s"} %s'
+            % (_label_value(cache_name), int(item.get("hit", 0)))
+        )
+        lines.append(
+            'cache_miss_total{cache="%s"} %s'
+            % (_label_value(cache_name), int(item.get("miss", 0)))
+        )
+        lines.append(
+            'cache_lookup_seconds{cache="%s",stat="last"} %s'
+            % (_label_value(cache_name), float(item.get("last_lookup_seconds", 0.0)))
+        )
+        lines.append(
+            'cache_lookup_seconds{cache="%s",stat="avg"} %s'
+            % (_label_value(cache_name), float(item.get("avg_lookup_seconds", 0.0)))
+        )
+        lines.append(
+            'cache_size{cache="%s"} %s'
+            % (_label_value(cache_name), int(item.get("last_size", 0)))
+        )
 
     for item in performance.get("external_provider_call_total", {}).values():
         lines.append(
@@ -1106,75 +1387,176 @@ def format_prometheus_metrics() -> str:
         )
 
     for stage, item in performance.get("worker_stage_seconds", {}).items():
-        lines.append('worker_stage_seconds{stage="%s",stat="last"} %s' % (_label_value(stage), float(item.get("last_seconds", 0.0))))
-        lines.append('worker_stage_seconds{stage="%s",stat="avg"} %s' % (_label_value(stage), float(item.get("avg_seconds", 0.0))))
-        lines.append('worker_stage_errors_total{stage="%s"} %s' % (_label_value(stage), int(item.get("errors", 0))))
+        lines.append(
+            'worker_stage_seconds{stage="%s",stat="last"} %s'
+            % (_label_value(stage), float(item.get("last_seconds", 0.0)))
+        )
+        lines.append(
+            'worker_stage_seconds{stage="%s",stat="avg"} %s'
+            % (_label_value(stage), float(item.get("avg_seconds", 0.0)))
+        )
+        lines.append(
+            'worker_stage_errors_total{stage="%s"} %s'
+            % (_label_value(stage), int(item.get("errors", 0)))
+        )
 
     worker_runtime = performance.get("worker_runtime", {})
-    for field in ("worker_generation_success", "worker_generation_failure", "snapshot_write_success", "snapshot_write_failure"):
-        lines.append("worker_runtime_%s_total %s" % (_label_value(field), int(worker_runtime.get(field, 0))))
+    for field in (
+        "worker_generation_success",
+        "worker_generation_failure",
+        "snapshot_write_success",
+        "snapshot_write_failure",
+    ):
+        lines.append(
+            "worker_runtime_%s_total %s"
+            % (_label_value(field), int(worker_runtime.get(field, 0)))
+        )
 
     for source, item in performance.get("signal_quality_coverage", {}).items():
-        lines.append('signal_quality_rows_total{source="%s"} %s' % (_label_value(source), int(item.get("total", 0))))
-        lines.append('signal_quality_coverage_ratio{source="%s",field="price"} %s' % (_label_value(source), float(item.get("price_coverage", 0.0))))
-        lines.append('signal_quality_coverage_ratio{source="%s",field="volume"} %s' % (_label_value(source), float(item.get("volume_coverage", 0.0))))
-        lines.append('signal_quality_coverage_ratio{source="%s",field="priced"} %s' % (_label_value(source), float(item.get("priced_coverage", 0.0))))
-        lines.append('signal_quality_score_only_total{source="%s"} %s' % (_label_value(source), int(item.get("score_only", 0))))
-        lines.append('signal_quality_conflict_total{source="%s"} %s' % (_label_value(source), int(item.get("conflict_detected", 0))))
+        lines.append(
+            'signal_quality_rows_total{source="%s"} %s'
+            % (_label_value(source), int(item.get("total", 0)))
+        )
+        lines.append(
+            'signal_quality_coverage_ratio{source="%s",field="price"} %s'
+            % (_label_value(source), float(item.get("price_coverage", 0.0)))
+        )
+        lines.append(
+            'signal_quality_coverage_ratio{source="%s",field="volume"} %s'
+            % (_label_value(source), float(item.get("volume_coverage", 0.0)))
+        )
+        lines.append(
+            'signal_quality_coverage_ratio{source="%s",field="priced"} %s'
+            % (_label_value(source), float(item.get("priced_coverage", 0.0)))
+        )
+        lines.append(
+            'signal_quality_score_only_total{source="%s"} %s'
+            % (_label_value(source), int(item.get("score_only", 0)))
+        )
+        lines.append(
+            'signal_quality_conflict_total{source="%s"} %s'
+            % (_label_value(source), int(item.get("conflict_detected", 0)))
+        )
 
     auditor_metrics = performance.get("institutional_auditor", {})
     for field in ("approved", "caution", "blocked"):
-        lines.append('institutional_auditor_total{status="%s"} %s' % (_label_value(field), int(auditor_metrics.get(field, 0))))
-    lines.append("institutional_auditor_average_score %s" % float(auditor_metrics.get("average_audit_score", 0.0)))
+        lines.append(
+            'institutional_auditor_total{status="%s"} %s'
+            % (_label_value(field), int(auditor_metrics.get(field, 0)))
+        )
+    lines.append(
+        "institutional_auditor_average_score %s"
+        % float(auditor_metrics.get("average_audit_score", 0.0))
+    )
 
     master_metrics = performance.get("master_score", {})
     for field in ("approved", "caution", "blocked"):
-        lines.append('master_score_total{status="%s"} %s' % (_label_value(field), int(master_metrics.get(field, 0))))
+        lines.append(
+            'master_score_total{status="%s"} %s'
+            % (_label_value(field), int(master_metrics.get(field, 0)))
+        )
     for field in ("bullish", "bearish", "neutral"):
-        lines.append('master_score_direction_total{direction="%s"} %s' % (_label_value(field), int(master_metrics.get(field, 0))))
-    lines.append("master_score_average %s" % float(master_metrics.get("average_master_score", 0.0)))
+        lines.append(
+            'master_score_direction_total{direction="%s"} %s'
+            % (_label_value(field), int(master_metrics.get(field, 0)))
+        )
+    lines.append(
+        "master_score_average %s"
+        % float(master_metrics.get("average_master_score", 0.0))
+    )
 
     radar_metrics = performance.get("institutional_radar", {})
     for field in ("generated", "promoted", "discarded", "blocked"):
-        lines.append('institutional_radar_signals_total{state="%s"} %s' % (_label_value(field), int(radar_metrics.get(field, 0))))
+        lines.append(
+            'institutional_radar_signals_total{state="%s"} %s'
+            % (_label_value(field), int(radar_metrics.get(field, 0)))
+        )
 
     ranking_metrics = performance.get("institutional_ranking", {})
     for field in ("eligible", "excluded", "promoted", "top_ranking"):
-        lines.append('institutional_ranking_opportunities_total{state="%s"} %s' % (_label_value(field), int(ranking_metrics.get(field, 0))))
+        lines.append(
+            'institutional_ranking_opportunities_total{state="%s"} %s'
+            % (_label_value(field), int(ranking_metrics.get(field, 0)))
+        )
 
     historical_metrics = performance.get("historical_confidence", {})
-    lines.append("historical_confidence_average_score %s" % float(historical_metrics.get("average_confidence_score", 0.0)))
-    lines.append("historical_confidence_average_sample_size %s" % float(historical_metrics.get("average_sample_size", 0.0)))
-    lines.append("historical_confidence_without_sample_total %s" % int(historical_metrics.get("signals_without_sample", 0)))
-    lines.append("historical_confidence_aggregate_win_rate %s" % float(historical_metrics.get("aggregate_win_rate", 0.0)))
+    lines.append(
+        "historical_confidence_average_score %s"
+        % float(historical_metrics.get("average_confidence_score", 0.0))
+    )
+    lines.append(
+        "historical_confidence_average_sample_size %s"
+        % float(historical_metrics.get("average_sample_size", 0.0))
+    )
+    lines.append(
+        "historical_confidence_without_sample_total %s"
+        % int(historical_metrics.get("signals_without_sample", 0))
+    )
+    lines.append(
+        "historical_confidence_aggregate_win_rate %s"
+        % float(historical_metrics.get("aggregate_win_rate", 0.0))
+    )
 
     operational_metrics = performance.get("operational_rules", {})
     for field in ("ready", "caution", "blocked"):
-        lines.append('operational_rules_signals_total{status="%s"} %s' % (_label_value(field), int(operational_metrics.get(field, 0))))
+        lines.append(
+            'operational_rules_signals_total{status="%s"} %s'
+            % (_label_value(field), int(operational_metrics.get(field, 0)))
+        )
     for reason, count in operational_metrics.get("top_blocks", {}).items():
-        lines.append('operational_rules_reasons_total{kind="block",reason="%s"} %s' % (_label_value(reason), int(count or 0)))
+        lines.append(
+            'operational_rules_reasons_total{kind="block",reason="%s"} %s'
+            % (_label_value(reason), int(count or 0))
+        )
     for reason, count in operational_metrics.get("top_warnings", {}).items():
-        lines.append('operational_rules_reasons_total{kind="warning",reason="%s"} %s' % (_label_value(reason), int(count or 0)))
+        lines.append(
+            'operational_rules_reasons_total{kind="warning",reason="%s"} %s'
+            % (_label_value(reason), int(count or 0))
+        )
 
     conviction_metrics = performance.get("institutional_conviction", {})
-    lines.append("institutional_conviction_average_score %s" % float(conviction_metrics.get("average_conviction", 0.0)))
-    lines.append("institutional_conviction_high_total %s" % int(conviction_metrics.get("high_conviction", 0)))
-    lines.append("institutional_conviction_low_total %s" % int(conviction_metrics.get("low_conviction", 0)))
-    lines.append("institutional_conviction_conflicts_total %s" % int(conviction_metrics.get("conflicts_detected", 0)))
+    lines.append(
+        "institutional_conviction_average_score %s"
+        % float(conviction_metrics.get("average_conviction", 0.0))
+    )
+    lines.append(
+        "institutional_conviction_high_total %s"
+        % int(conviction_metrics.get("high_conviction", 0))
+    )
+    lines.append(
+        "institutional_conviction_low_total %s"
+        % int(conviction_metrics.get("low_conviction", 0))
+    )
+    lines.append(
+        "institutional_conviction_conflicts_total %s"
+        % int(conviction_metrics.get("conflicts_detected", 0))
+    )
 
     priority_metrics = performance.get("institutional_priority", {})
     for field in ("critical", "high", "medium", "low"):
-        lines.append('institutional_priority_total{level="%s"} %s' % (_label_value(field), int(priority_metrics.get(field, 0))))
+        lines.append(
+            'institutional_priority_total{level="%s"} %s'
+            % (_label_value(field), int(priority_metrics.get(field, 0)))
+        )
 
     final_metrics = performance.get("final_decision", {})
     for field in ("confirmed", "forming", "observe", "wait", "no_trade"):
-        lines.append('final_decision_total{decision="%s"} %s' % (_label_value(field), int(final_metrics.get(field, 0))))
+        lines.append(
+            'final_decision_total{decision="%s"} %s'
+            % (_label_value(field), int(final_metrics.get(field, 0)))
+        )
 
     telegram_metrics = performance.get("telegram_alerts", {})
     for field in ("sent", "blocked", "discarded", "deduplicated", "cooldown", "errors"):
-        lines.append('telegram_alert_events_total{event="%s"} %s' % (_label_value(field), int(telegram_metrics.get(field, 0))))
+        lines.append(
+            'telegram_alert_events_total{event="%s"} %s'
+            % (_label_value(field), int(telegram_metrics.get(field, 0)))
+        )
     for field in ("critical", "high", "medium"):
-        lines.append('telegram_alerts_total{level="%s"} %s' % (_label_value(field), int(telegram_metrics.get(field, 0))))
+        lines.append(
+            'telegram_alerts_total{level="%s"} %s'
+            % (_label_value(field), int(telegram_metrics.get(field, 0)))
+        )
 
     consistency_metrics = performance.get("institutional_consistency", {})
     for field in (
@@ -1188,9 +1570,18 @@ def format_prometheus_metrics() -> str:
         "promotion_violations",
         "metric_divergences",
     ):
-        lines.append('institutional_consistency_total{type="%s"} %s' % (_label_value(field), int(consistency_metrics.get(field, 0))))
-    lines.append("institutional_consistency_score %s" % float(consistency_metrics.get("consistency_score", 0.0)))
-    lines.append("institutional_contract_coverage_pct %s" % float(consistency_metrics.get("contract_coverage_pct", 0.0)))
+        lines.append(
+            'institutional_consistency_total{type="%s"} %s'
+            % (_label_value(field), int(consistency_metrics.get(field, 0)))
+        )
+    lines.append(
+        "institutional_consistency_score %s"
+        % float(consistency_metrics.get("consistency_score", 0.0))
+    )
+    lines.append(
+        "institutional_contract_coverage_pct %s"
+        % float(consistency_metrics.get("contract_coverage_pct", 0.0))
+    )
 
     for item in performance.get("provider_symbol_failures", []):
         lines.append(
@@ -1210,6 +1601,7 @@ def format_prometheus_metrics() -> str:
 # =====================================================
 # WORKER FUNCTIONS
 # =====================================================
+
 
 def set_workers(count):
     global workers
@@ -1278,6 +1670,7 @@ def increment_push_sends():
 # ENGINE UPTIME
 # =====================================================
 
+
 def get_engine_uptime():
     return int(time.time() - engine_start_time)
 
@@ -1285,6 +1678,7 @@ def get_engine_uptime():
 # =====================================================
 # PERFORMANCE CALCULATIONS
 # =====================================================
+
 
 def get_signals_per_second():
     with _lock:
@@ -1330,14 +1724,18 @@ def get_metrics_snapshot():
             "master_score": institutional_metrics["master_score"],
             "historical_confidence": institutional_metrics["historical_confidence"],
             "operational_rules": institutional_metrics["operational_rules"],
-            "institutional_conviction": institutional_metrics["institutional_conviction"],
+            "institutional_conviction": institutional_metrics[
+                "institutional_conviction"
+            ],
             "institutional_priority": institutional_metrics["institutional_priority"],
             "institutional_radar": institutional_metrics["institutional_radar"],
             "institutional_ranking": institutional_metrics["institutional_ranking"],
             "final_decision": institutional_metrics["final_decision"],
             "telegram_alerts": institutional_metrics["telegram_alerts"],
             "signal_outcomes": institutional_metrics["signal_outcomes"],
-            "institutional_consistency": institutional_metrics["institutional_consistency"],
+            "institutional_consistency": institutional_metrics[
+                "institutional_consistency"
+            ],
             "worker_runtime": dict(_worker_runtime_metrics),
             "institutional_metrics": institutional_metrics,
         }
