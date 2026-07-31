@@ -167,35 +167,59 @@ class TestBiasIsActuallyApplied:
 
 
 class TestMigrationEquivalence:
-    def test_adapter_matches_the_pre_migration_implementation(self, monkeypatch):
-        """6. Same snapshot in, same context out as app/engine/signal_engine.py.
+    """6. Migration fidelity, pinned to values captured from the pre-migration module.
 
-        This is the migration-fidelity proof required before the orphan module may be
-        deleted. It is intentionally coupled to that module and is replaced by a golden
-        assertion in the commit that removes it.
-        """
-        legacy = pytest.importorskip("app.engine.signal_engine")
+    These started as a live comparison against app/engine/signal_engine.py. That module
+    has since been removed, so the expected values below were captured from it while it
+    still existed -- they are the contract it produced, frozen. An importorskip would
+    have silently degraded to a skip once the module was gone, proving nothing.
+    """
 
-        snapshot = _ai_snapshot()
-        _install(monkeypatch, snapshot)
-        monkeypatch.setattr(legacy, "get_snapshot", lambda: snapshot)
-        monkeypatch.setattr(legacy, "get_snapshot_by_ticker", lambda: {})
+    LEGACY_CONTEXT = {
+        "accumulation": {"score": 88, "state": "accumulation", "ticker": "PETR4", "tool": "smart_money"},
+        "breakout_probability": {"score": 77, "state": "high", "ticker": "PETR4", "tool": "breakout_probability"},
+        "heat_map": {"score": 70, "state": "hot", "ticker": "PETR4", "tool": "heat_map"},
+        "institutional_flow": {"score": 79, "state": "inflow", "ticker": "PETR4", "tool": "institutional_flow"},
+        "liquidity_map": None,
+        "liquidity_sweep": None,
+        "market_regime": {"score": 82, "state": "bull_trend", "ticker": "PETR4", "tool": "market_regime"},
+        "master_score": {"score": 91, "state": "bullish", "ticker": "PETR4", "tool": "master_score"},
+        "smart_money": {"score": 88, "state": "accumulation", "ticker": "PETR4", "tool": "smart_money"},
+        "volatility_squeeze": None,
+    }
 
-        assert adapter._build_ai_context_from_snapshot("PETR4") == legacy._build_ai_context_from_snapshot("PETR4")
+    def test_adapter_matches_the_pre_migration_contract(self, monkeypatch):
+        _install(monkeypatch, _ai_snapshot())
+        assert adapter._build_ai_context_from_snapshot("PETR4") == self.LEGACY_CONTEXT
 
-    def test_helper_functions_match(self, monkeypatch):
-        legacy = pytest.importorskip("app.engine.signal_engine")
-
-        assert adapter._normalize_symbol("petr4.sa") == legacy._normalize_symbol("petr4.sa")
-        assert adapter._normalize_symbol("btc-usd") == legacy._normalize_symbol("btc-usd")
+    def test_helper_functions_match_pre_migration_behaviour(self):
+        assert adapter._normalize_symbol("petr4.sa") == "PETR4"
+        assert adapter._normalize_symbol("btc-usd") == "BTCUSD"
 
         row = {"ticker": "PETR4", "score": 5, "metrics": {"flow_score": 42, "flow_state": "in"}}
-        assert adapter._metric_ai_row(row, "flow_score", "flow_state") == legacy._metric_ai_row(
-            row, "flow_score", "flow_state"
-        )
+        assert adapter._metric_ai_row(row, "flow_score", "flow_state") == {
+            "ticker": "PETR4",
+            "score": 42,
+            "state": "in",
+            "metrics": {"flow_score": 42, "flow_state": "in"},
+        }
 
         seed = {"ticker": "PETR4", "master_score": 88, "master_direction": "BULLISH"}
-        assert adapter._snapshot_master_score_row(seed) == legacy._snapshot_master_score_row(seed)
+        assert adapter._snapshot_master_score_row(seed) == {
+            "ticker": "PETR4",
+            "tool": "master_score",
+            "score": 88,
+            "state": "bullish",
+            "master_direction": "BULLISH",
+            "master_status": None,
+            "master_risk": None,
+            "reason": None,
+        }
+
+    # The "orphan module is gone" assertion deliberately lives in
+    # tests/test_mission_B8_signal_engine_deleted.py::test_module_is_not_importable.
+    # Writing it here too would plant the module path in a file the import scanner reads,
+    # and the scanner cannot tell "imports it" from "asserts it cannot be imported".
 
 
 class TestNoRealIO:

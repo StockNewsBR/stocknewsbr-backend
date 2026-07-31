@@ -42,9 +42,42 @@ class TestB8SignalEngineDeleted:
     """B8: signal_engine.py deleted - verify no imports remain."""
 
     def test_signal_engine_file_deleted(self):
-        """signal_engine.py should not exist."""
-        path = Path("/home/dcima/stocknewsbr-backend/app/engine/signal_engine.py")
-        assert not path.exists(), "signal_engine.py should have been deleted"
+        """app/engine/signal_engine.py should not exist.
+
+        Note this is a different file from app/ai/signal_engine.py, which 9d5b5386
+        deleted. This one survived that commit and stayed tracked with zero importers.
+        """
+        assert not (PROJECT_ROOT / "app" / "engine" / "signal_engine.py").exists(), (
+            "app/engine/signal_engine.py should have been deleted"
+        )
+
+    def test_module_is_not_importable(self):
+        with pytest.raises(ModuleNotFoundError):
+            __import__("app.engine.signal_engine")
+
+    def test_replacement_adapter_still_enriches_ai_context(self):
+        """Deletion is only legitimate because the behaviour was migrated first.
+
+        1e84bab7 removed the last importer but replaced the enrichment with
+        `ai_context={}`, so the module was 'unused' only because the live flow had been
+        silently downgraded. This pins the migrated behaviour so the module can never be
+        re-declared dead by re-introducing that downgrade.
+        """
+        import app.engine.chart_signal_adapter as adapter
+
+        for name in (
+            "_build_ai_context_from_snapshot",
+            "_safe_ai_context",
+            "_find_ai_row",
+            "_metric_ai_row",
+            "_snapshot_master_score_row",
+            "_normalize_symbol",
+        ):
+            assert hasattr(adapter, name), f"adapter lost migrated helper {name}"
+
+        source = (PROJECT_ROOT / "app" / "engine" / "chart_signal_adapter.py").read_text()
+        assert "ai_context={}" not in source, "the empty-context downgrade came back"
+        assert "ai_context=_safe_ai_context(symbol)" in source
 
     def test_no_static_imports_of_signal_engine(self):
         """No .py files should statically import from signal_engine."""
@@ -71,7 +104,7 @@ class TestB8SignalEngineDeleted:
 
     def test_no_entry_points_reference_signal_engine(self):
         """setup.cfg/pyproject.toml entry points should not reference signal_engine."""
-        project_root = Path("/home/dcima/stocknewsbr-backend")
+        project_root = PROJECT_ROOT
 
         for config_file in ["setup.cfg", "pyproject.toml", "setup.py"]:
             path = project_root / config_file
@@ -81,7 +114,7 @@ class TestB8SignalEngineDeleted:
 
     def test_no_scripts_reference_signal_engine(self):
         """No scripts in scripts/ or bin/ should import signal_engine."""
-        project_root = Path("/home/dcima/stocknewsbr-backend")
+        project_root = PROJECT_ROOT
 
         for script_dir in ["scripts", "bin", "tools"]:
             script_path = project_root / script_dir
