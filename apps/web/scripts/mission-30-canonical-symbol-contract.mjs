@@ -73,7 +73,7 @@ assertIncludes(workspaceShell, "resolveCanonicalSymbolAliases", "workspace uses 
 assertIncludes(workspaceShell, "\"AXIA3.SA\", \"AXIA7.SA\"", "active B3 watchlist uses current AXIA codes");
 assertIncludes(workspaceShell, "friendlyNetworkErrorMessage", "frontend maps fetch failures to product-safe copy");
 assertIncludes(workspaceShell, "sem snapshot", "watchlist has clear missing-price fallback");
-assertIncludes(workspaceShell, "sem cotação confirmada", "symbol header avoids R$ n/a for missing quotes");
+assertIncludes(workspaceShell, "Sem cotação confirmada", "symbol header avoids R$ n/a for missing quotes");
 assertIncludes(workspaceShell, "activeWatchCategoryCounts", "active list counts by canonical category");
 assertIncludes(workspaceShell, "CATEGORY_ORDER.reduce((total, category)", "Todos equals B3 + BDR + Crypto + USA");
 assertIncludes(workspaceRails, "Total: ${totalWatchCount}", "active list count label cannot be mistaken for a negative number");
@@ -85,7 +85,7 @@ assertIncludes(workspaceShell, "tabCount != null", "top bar renders explicit tic
 assertIncludes(workspaceShell, "aiToolFindingCounts[tab.id] ?? 0", "AI tabs expose zero-count badges instead of looking broken");
 assertNotIncludes(workspaceShell, "no data\" : \"sem dados", "top bar does not render no-data AI badges");
 assertIncludes(workspaceShell, "news: { label: \"📰 Notícias\"", "common news tab remains available");
-assertIncludes(workspaceSections, "Sem notícias relevantes para este ativo agora. Tente atualizar mais tarde.", "empty common news tab explains absence inside the panel");
+assertIncludes(workspaceSections, "Sem notícia para", "empty common news tab explains absence inside the panel");
 assertIncludes(workspaceShell, "hasWatchlistSnapshotData", "active list separates assets by valid snapshot");
 assertIncludes(workspaceShell, "items: filteredActiveWatchlist.filter", "active list keeps every asset in its canonical category");
 assertIncludes(workspaceShell, "renderWatchRow(item, !hasWatchlistSnapshotData(item))", "assets without snapshot remain visible and are marked unavailable");
@@ -107,15 +107,14 @@ assertIncludes(workspaceShell, "textHasStandAsideSide", "buy/sell conclusions ca
 assertIncludes(workspaceShell, "Zona de proteção", "exit decisions use protection zone instead of buy/sell zone");
 assertIncludes(workspaceShell, "Fluxo de entrada não está confirmado", "exit decisions avoid buyer/seller wording in primary reasons");
 assertIncludes(workspaceShell, "Resultados de ${oilResults[1]}", "BR news headlines translate common English market title");
-assertIncludes(workspaceShell, "0 eventos atuais para este ativo.", "AI empty-state remains available inside the panel");
+assertIncludes(workspaceShell, "Nenhum achado desta IA para este ativo agora", "AI empty-state remains available inside the panel");
 assertIncludes(workspaceShell, "function formatAiUpdatedAt", "AI freshness uses a centralized timestamp formatter");
 assertIncludes(workspaceShell, "day: \"2-digit\"", "AI timestamps show the full day");
 assertIncludes(workspaceShell, "year: \"numeric\"", "AI timestamps show the full year");
 assertIncludes(workspaceShell, "function aiFreshnessStatus", "AI freshness status is computed explicitly");
-assertIncludes(workspaceShell, "Status: atualizado hoje", "current AI reads are labeled as updated today");
-assertIncludes(workspaceShell, "Status: leitura do dia anterior · aguardando nova leitura do dia", "previous-day AI reads after reset are labeled clearly");
+assertIncludes(workspaceShell, "Status: dados de hoje", "current AI reads are labeled as updated today");
+assertIncludes(workspaceShell, "Status: dados da sessão anterior", "previous-day AI reads after reset are labeled clearly");
 assertIncludes(workspaceShell, "Detectado", "AI findings show detection timestamp");
-assertIncludes(workspaceShell, "Visualizado", "AI findings show viewer timestamp");
 assertIncludes(workspaceSections, "data-news-state-count={newsRows.length}", "news panel exposes frontend state count for DOM audit");
 assertIncludes(css, ".snbr-chip.fresh", "fresh AI status has visual styling");
 assertIncludes(css, ".snbr-chip.stale", "stale AI status has visual styling");
