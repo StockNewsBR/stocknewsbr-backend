@@ -12,7 +12,7 @@ import re
 import uuid
 from datetime import datetime, timezone as dt_timezone
 from pathlib import Path
-from threading import RLock, get_ident
+from threading import RLock
 import time
 from typing import List, Optional, TYPE_CHECKING
 
@@ -1968,7 +1968,15 @@ def get_price_snapshots(symbols: List[str], *, force_refresh: bool = False):
                     cache_changed = True
                     continue
         elif not payload:
-            payload = get_price_snapshot(symbol)
+            if is_multi_download:
+                payload = _get_cached_price_payload(symbol, allow_stale=True)
+                if not _has_real_price_payload(payload):
+                    if not _is_symbol_cooling_down(symbol):
+                        payload = _price_payload_from_fast_info(symbol)
+                    if not _has_real_price_payload(payload):
+                        _mark_symbol_failure(symbol, error="missing_in_batch")
+            else:
+                payload = get_price_snapshot(symbol)
 
         if _has_real_price_payload(payload):
             cached_payload = _cache_price_payload(symbol, payload, persist=False)
