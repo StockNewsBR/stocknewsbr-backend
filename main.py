@@ -9,7 +9,6 @@ import sys
 import threading
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Request
@@ -20,7 +19,11 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.ai.ai_market_pulse import market_pulse
-from app.cache.snapshot_cache import get_snapshot, get_snapshot_info, get_snapshot_signals
+from app.cache.snapshot_cache import (
+    get_snapshot,
+    get_snapshot_info,
+    get_snapshot_signals,
+)
 from app.core.csrf import allowed_web_origins, csrf_rejection
 from app.core.settings import (
     is_production_environment,
@@ -46,54 +49,69 @@ logging.basicConfig(
 
 logger = logging.getLogger("stocknewsbr.main")
 
+# (module_path, attribute, critical).
+#
+# critical=True means the product is not servable without it: authentication, the
+# system/health surface, the core signal + snapshot data product, news, the workspace
+# endpoint both clients read, ranking, and the streaming transport. If one of these
+# fails to import the process must not come up at all -- previously it booted with a
+# WARNING and served /ping 200 while, say, app.auth was silently absent.
+#
+# critical=False means a broken import costs that feature and nothing else. These are
+# the presentational app.web.* routes and secondary/social surfaces; taking the whole
+# API down for a broken template route would be a worse outcome than losing it.
 ROUTER_SPECS = [
-    ("app.auth", "router"),
-    ("app.api.routes_opportunity", "router"),
-    ("app.api.routes_system", "router"),
-    ("app.api.routes_snapshot", "router"),
-    ("app.api.routes_signals", "router"),
-    ("app.api.routes_public_meta", "router"),
-    ("app.api.routes_public_market", "router"),
-    ("app.api.routes_public_market_live", "router"),
-    ("app.api.routes_internal", "router"),
-    ("app.api.routes_paper_trading", "router"),
-    ("app.api.routes_performance_intelligence", "router"),
-    ("app.api.routes_explainability", "router"),
-    ("app.api.api_market_routes", "router"),
-    ("app.api.market_routes", "router"),
-    ("app.api.routes_heatmap", "router"),
-    ("app.api.routes_narrative", "router"),
-    ("app.api.routes_radar", "router"),
-    ("app.api.routes_market_bar", "router"),
-    ("app.api.routes_activity", "router"),
-    ("app.api.routes_feed", "router"),
-    ("app.api.routes_likes", "router"),
-    ("app.api.routes_moderation", "router"),
-    ("app.api.routes_moderation_admin", "router"),
-    ("app.api.routes_media", "router"),
-    ("app.api.routes_push", "router"),
-    ("app.api.routes_poll", "router"),
-    ("app.api.routes_sentiment", "router"),
-    ("app.api.routes_social", "router"),
-    ("app.api.routes_chat", "router"),
-    ("app.api.routes_news", "router"),
-    ("app.api.routes_app_workspace", "router"),
-    ("app.api.stripe_webhook", "router"),
-    ("app.api.routes_ticker", "router"),
-    ("app.services.ranking", "router"),
-    ("app.system.stream_router", "router"),
-    ("app.web.routes_chart", "router"),
-    ("app.web.routes_dashboard", "router"),
-    ("app.web.routes_market_pulse", "router"),
-    ("app.web.routes_opportunities", "router"),
-    ("app.web.routes_radar", "router"),
-    ("app.web.routes_search", "router"),
-    ("app.web.routes_terminal", "router"),
-    ("app.web.routes_top_movers", "router"),
-    ("app.web.routes_watchlist", "router"),
-    ("app.web.routes_workspace", "router"),
-    ("app.web.routes_site", "router"),
+    ("app.auth", "router", True),
+    ("app.api.routes_opportunity", "router", False),
+    ("app.api.routes_system", "router", True),
+    ("app.api.routes_snapshot", "router", True),
+    ("app.api.routes_signals", "router", True),
+    ("app.api.routes_public_meta", "router", False),
+    ("app.api.routes_public_market", "router", False),
+    ("app.api.routes_public_market_live", "router", False),
+    ("app.api.routes_internal", "router", True),
+    ("app.api.routes_paper_trading", "router", False),
+    ("app.api.routes_performance_intelligence", "router", False),
+    ("app.api.routes_explainability", "router", False),
+    ("app.api.api_market_routes", "router", False),
+    ("app.api.market_routes", "router", False),
+    ("app.api.routes_heatmap", "router", False),
+    ("app.api.routes_narrative", "router", False),
+    ("app.api.routes_radar", "router", True),
+    ("app.api.routes_market_bar", "router", False),
+    ("app.api.routes_activity", "router", False),
+    ("app.api.routes_feed", "router", True),
+    ("app.api.routes_likes", "router", False),
+    ("app.api.routes_moderation", "router", False),
+    ("app.api.routes_moderation_admin", "router", False),
+    ("app.api.routes_media", "router", False),
+    ("app.api.routes_push", "router", True),
+    ("app.api.routes_poll", "router", False),
+    ("app.api.routes_sentiment", "router", False),
+    ("app.api.routes_social", "router", False),
+    ("app.api.routes_chat", "router", False),
+    ("app.api.routes_news", "router", True),
+    ("app.api.routes_app_workspace", "router", True),
+    ("app.api.stripe_webhook", "router", False),
+    ("app.api.routes_ticker", "router", False),
+    ("app.services.ranking", "router", True),
+    ("app.system.stream_router", "router", True),
+    ("app.web.routes_chart", "router", False),
+    ("app.web.routes_dashboard", "router", False),
+    ("app.web.routes_market_pulse", "router", False),
+    ("app.web.routes_opportunities", "router", False),
+    ("app.web.routes_radar", "router", False),
+    ("app.web.routes_search", "router", False),
+    ("app.web.routes_terminal", "router", False),
+    ("app.web.routes_top_movers", "router", False),
+    ("app.web.routes_watchlist", "router", False),
+    ("app.web.routes_workspace", "router", False),
+    ("app.web.routes_site", "router", False),
 ]
+
+# Optional routers that failed to import, so health can report degradation instead of
+# reporting a healthy process that is quietly missing endpoints.
+DEGRADED_ROUTERS: list[str] = []
 
 BACKGROUND_THREADS = {}
 THREAD_LOCK = threading.RLock()
@@ -174,28 +192,47 @@ def _seed_official_identities_if_needed():
             db.close()
 
 
-def _safe_import_router(module_path: str, attribute: str):
+def _safe_import_router(module_path: str, attribute: str, critical: bool = False):
+    """Import one router. Critical failures are fatal; optional ones degrade.
+
+    Returning None for everything is what let a broken app.auth boot a servable process
+    whose only symptom was a WARNING indistinguishable from every other router's.
+    """
     try:
         module = importlib.import_module(module_path)
         return getattr(module, attribute)
     except Exception as exc:
-        logger.warning("Skipping router %s: %s", module_path, exc)
+        if critical:
+            logger.error("Critical router %s failed to import: %s", module_path, exc)
+            raise RuntimeError(f"Critical router {module_path} failed to import: {exc}") from exc
+        logger.warning("Skipping non-critical router %s: %s", module_path, exc)
         return None
 
 
 def _include_routers(app: FastAPI):
+    """Register every router. A critical failure propagates and aborts startup."""
     included = 0
+    DEGRADED_ROUTERS.clear()
 
-    for module_path, attribute in ROUTER_SPECS:
-        router = _safe_import_router(module_path, attribute)
+    for module_path, attribute, critical in ROUTER_SPECS:
+        router = _safe_import_router(module_path, attribute, critical=critical)
 
         if router is None:
+            DEGRADED_ROUTERS.append(module_path)
             continue
 
         app.include_router(router)
         included += 1
 
-    logger.info("Router bootstrap completed | included=%s", included)
+    if DEGRADED_ROUTERS:
+        logger.warning(
+            "Router bootstrap degraded | missing=%s", ",".join(DEGRADED_ROUTERS)
+        )
+
+    logger.info(
+        "Router bootstrap completed | included=%s/%s", included, len(ROUTER_SPECS)
+    )
+    return included
 
 
 def _start_thread(name: str, target, *args):
@@ -439,7 +476,20 @@ def spotlight():
 
 @app.get("/ping")
 def ping():
-    return {"ping": "pong"}
+    """Liveness plus router-bootstrap honesty.
+
+    This used to return a flat 200 {"ping": "pong"} no matter how many routers had
+    silently failed to import, which is precisely how missing endpoints went unnoticed.
+    Critical routers now abort startup, so anything listed here is an optional router
+    whose feature is unavailable while the rest of the API keeps serving.
+    """
+    degraded = list(DEGRADED_ROUTERS)
+    return {
+        "ping": "pong",
+        "status": "degraded" if degraded else "ok",
+        "routers_expected": len(ROUTER_SPECS),
+        "routers_missing": degraded,
+    }
 
 
 @app.get("/debug/tables")
