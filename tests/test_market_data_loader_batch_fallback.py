@@ -17,16 +17,30 @@ from app.market.market_data_loader import (
 from app.services.symbol_sanitizer import clear_symbol_cooldown
 
 
+_ALL_TEST_SYMBOLS = [
+    s
+    for base in ("PETR4", "VALE3", "ITUB4", "FAKE1", "FAIL1")
+    for s in (base, f"{base}.SA")
+]
+
+
+def _reset_market_loader_globals():
+    with _PRICE_SNAPSHOT_CACHE_LOCK:
+        _PRICE_SNAPSHOT_CACHE.clear()
+        _SYMBOL_FAILURES.clear()
+    for symbol in _ALL_TEST_SYMBOLS:
+        clear_symbol_cooldown(symbol)
+
+
 @pytest.fixture(autouse=True)
 def clean_market_loader_state():
-    """Ensure global cache and failure trackers are clean before and after each test."""
-    with _PRICE_SNAPSHOT_CACHE_LOCK:
-        _PRICE_SNAPSHOT_CACHE.clear()
-        _SYMBOL_FAILURES.clear()
-    yield
-    with _PRICE_SNAPSHOT_CACHE_LOCK:
-        _PRICE_SNAPSHOT_CACHE.clear()
-        _SYMBOL_FAILURES.clear()
+    """Ensure global cache, failure trackers, and symbol-sanitizer cooldowns are
+    clean before and after each test, regardless of test order or outcome."""
+    _reset_market_loader_globals()
+    try:
+        yield
+    finally:
+        _reset_market_loader_globals()
 
 
 def test_batch_multi_symbol_failure_sets_cooldown():
