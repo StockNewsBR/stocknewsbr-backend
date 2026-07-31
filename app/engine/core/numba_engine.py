@@ -10,7 +10,7 @@ import numpy as np
 
 try:
     from numba import njit
-except Exception:  # pragma: no cover - optional dependency fallback
+except (ImportError, ModuleNotFoundError):  # pragma: no cover - optional dependency fallback
     def njit(*_args, **_kwargs):
         def decorator(fn):
             return fn

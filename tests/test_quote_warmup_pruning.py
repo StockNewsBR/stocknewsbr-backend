@@ -1,6 +1,4 @@
-import time
 import unittest
-from unittest.mock import patch
 
 from app.system import quote_warmup
 
