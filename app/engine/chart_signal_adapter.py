@@ -1,8 +1,156 @@
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict
+
+from app.ai.ai_market_regime import run_market_regime
+from app.ai.ai_master_score import run_master_score
+from app.ai.ai_smart_money import run_smart_money
+from app.ai.feature_hub import build_asset_features
+from app.cache.snapshot_cache import get_snapshot, get_snapshot_by_ticker
 from app.engine.trend_breakout_signal_engine import (
     build_trend_breakout_payload,
     resolve_chart_timeframe,
 )
 from app.market.market_data_loader import get_ticker_frame
+
+logger = logging.getLogger("stocknewsbr.chart_signal_adapter")
+
+
+def _normalize_symbol(value: str | None) -> str:
+    return str(value or "").upper().strip().replace(".SA", "").replace("-USD", "USD")
+
+
+def _find_ai_row(tool_rows, symbol: str):
+    normalized = _normalize_symbol(symbol)
+
+    for row in tool_rows or []:
+        if not isinstance(row, dict):
+            continue
+
+        row_symbol = _normalize_symbol(row.get("ticker") or row.get("symbol"))
+
+        if row_symbol == normalized:
+            return dict(row)
+
+    return None
+
+
+def _metric_ai_row(row: Dict[str, Any] | None, score_key: str, state_key: str) -> Dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+
+    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+    output = dict(row)
+    output["score"] = metrics.get(score_key, row.get("score"))
+    output["state"] = metrics.get(state_key, row.get("state"))
+    return output
+
+
+def _snapshot_master_score_row(row: Dict[str, Any] | None) -> Dict[str, Any] | None:
+    if not isinstance(row, dict) or row.get("master_score") in (None, ""):
+        return None
+    direction = str(row.get("master_direction") or "NEUTRAL").lower()
+    return {
+        "ticker": row.get("ticker") or row.get("symbol"),
+        "tool": "master_score",
+        "score": row.get("master_score"),
+        "state": direction,
+        "master_direction": row.get("master_direction"),
+        "master_status": row.get("master_status"),
+        "master_risk": row.get("master_risk"),
+        "reason": row.get("master_summary"),
+    }
+
+
+def _build_ai_context_from_snapshot(symbol: str) -> Dict[str, Any]:
+    """Resolve the per-symbol AI context that biases trend-breakout scoring.
+
+    Migrated verbatim from app/engine/signal_engine.py. Without it every chart signal
+    is scored with an empty context, which zeroes long_bonus/short_bonus, drops the
+    threshold adjustment, and leaves market_regime_state / smart_money_score /
+    institutional_flow_state / master_score empty in the payload.
+    """
+    snapshot = get_snapshot()
+    ai_tools = snapshot.get("ai_tools", {}) if isinstance(snapshot, dict) else {}
+    if not isinstance(ai_tools, dict):
+        ai_tools = {}
+    by_ticker = get_snapshot_by_ticker()
+    if not isinstance(by_ticker, dict):
+        by_ticker = {}
+    normalized = _normalize_symbol(symbol)
+    official_flow = _find_ai_row(ai_tools.get("flow", []), normalized)
+    official_liquidity = _find_ai_row(ai_tools.get("liquidity", []), normalized)
+    official_momentum = _find_ai_row(ai_tools.get("momentum", []), normalized)
+    official_smart_money = _find_ai_row(ai_tools.get("smart_money", []), normalized)
+    official_regime = _find_ai_row(ai_tools.get("regime", []), normalized)
+
+    seed_row = None
+    for key, value in by_ticker.items():
+        if _normalize_symbol(key) == normalized and isinstance(value, dict):
+            seed_row = value
+            break
+
+    context = {
+        "heat_map": _find_ai_row(ai_tools.get("heat_map", []), normalized)
+        or _metric_ai_row(official_momentum, "heat_map_score", "heat_map_state"),
+        "breakout_probability": _find_ai_row(ai_tools.get("breakout_probability", []), normalized)
+        or _metric_ai_row(official_momentum, "breakout_probability_score", "breakout_probability_state"),
+        "institutional_flow": _find_ai_row(ai_tools.get("institutional_flow", []), normalized)
+        or _metric_ai_row(official_flow, "flow_score", "flow_state"),
+        "smart_money": _find_ai_row(ai_tools.get("smart_money", []), normalized),
+        "accumulation": _find_ai_row(ai_tools.get("accumulation", []), normalized)
+        or _metric_ai_row(official_smart_money, "accumulation_score", "accumulation_state"),
+        "volatility_squeeze": _find_ai_row(ai_tools.get("volatility_squeeze", []), normalized),
+        "liquidity_sweep": _find_ai_row(ai_tools.get("liquidity_sweep", []), normalized)
+        or _metric_ai_row(official_liquidity, "liquidity_sweep_score", "liquidity_sweep_state"),
+        "liquidity_map": _find_ai_row(ai_tools.get("liquidity_map", []), normalized)
+        or _metric_ai_row(official_liquidity, "liquidity_map_score", "liquidity_map_state"),
+        "market_regime": _find_ai_row(ai_tools.get("market_regime", []), normalized)
+        or _metric_ai_row(official_regime, "regime_score", "regime_state"),
+        "master_score": _find_ai_row(ai_tools.get("master_score", []), normalized)
+        or _snapshot_master_score_row(seed_row),
+    }
+
+    if context["market_regime"] and context["smart_money"] and context["master_score"]:
+        return context
+
+    if not isinstance(seed_row, dict):
+        return context
+
+    feature_row = build_asset_features(seed_row)
+    fallback_regime = run_market_regime([feature_row], limit=1)
+    fallback_smart_money = run_smart_money([feature_row], limit=1)
+
+    master_input = dict(feature_row)
+
+    if fallback_regime:
+        master_input["market_regime_score"] = fallback_regime[0].get("score", 0)
+
+    if fallback_smart_money:
+        master_input["smart_money_score"] = fallback_smart_money[0].get("score", 0)
+
+    fallback_master_score = run_master_score([master_input], limit=1)
+
+    return {
+        **context,
+        "market_regime": context["market_regime"] or (fallback_regime[0] if fallback_regime else None),
+        "smart_money": context["smart_money"] or (fallback_smart_money[0] if fallback_smart_money else None),
+        "master_score": context["master_score"] or (fallback_master_score[0] if fallback_master_score else None),
+    }
+
+
+def _safe_ai_context(symbol: str) -> Dict[str, Any]:
+    """Never let an enrichment failure take down a chart route.
+
+    A degraded (empty) context costs the AI bias; a raised exception costs the whole
+    response, so the read is deliberately fail-soft and loud in the log.
+    """
+    try:
+        return _build_ai_context_from_snapshot(symbol)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("chart AI context unavailable for %s: %s", symbol, exc)
+        return {}
 
 
 def _frame_to_ohlc(frame):
@@ -11,7 +159,7 @@ def _frame_to_ohlc(frame):
     if frame is None or frame.empty:
         return rows
 
-    # Use tail(240) to match original signal_engine.py logic
+    # tail(240) matches the window the migrated signal engine used.
     for index, row in frame.tail(240).iterrows():
         rows.append(
             {
@@ -28,15 +176,12 @@ def _frame_to_ohlc(frame):
 
 
 def build_chart_signal_payload(symbol: str, ohlc, interval: str = "1D"):
-    """Build chart signal payload using trend breakout engine.
-
-    This function was moved from signal_engine.py (now deleted).
-    """
+    """Build chart signal payload using trend breakout engine."""
     return build_trend_breakout_payload(
         symbol,
         ohlc,
         timeframe=resolve_chart_timeframe(interval),
-        ai_context={},  # ai_context is optional in trend_breakout_signal_engine
+        ai_context=_safe_ai_context(symbol),
     )
 
 
