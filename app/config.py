@@ -5,6 +5,7 @@
 import logging
 import os
 
+from app.core.settings import DATABASE_URL  # noqa: F401  # re-exported for app.config.DATABASE_URL callers
 from app.services.symbol_sanitizer import sanitize_market_symbol
 
 logger = logging.getLogger("stocknewsbr.config")
