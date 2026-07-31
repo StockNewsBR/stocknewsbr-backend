@@ -27,8 +27,13 @@ _OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 _MODEL = os.getenv("CONCLUSION_LLM_MODEL", "qwen3.5:9b")
 _TIMEOUT = float(os.getenv("CONCLUSION_LLM_TIMEOUT", "20"))
 _TTL_SECONDS = float(os.getenv("CONCLUSION_LLM_TTL", "180"))
-# Max concurrent LLM workers - bounds resource usage
-_MAX_WORKERS = min(4, int(os.getenv("CONCLUSION_LLM_MAX_WORKERS", "4")))
+# Max concurrent LLM workers - bounds resource usage. Clamped to [1, 32]: a bad env
+# value must never spawn an unbounded pool, nor a 0-worker pool that strands every task.
+_MAX_WORKERS = max(1, min(32, int(os.getenv("CONCLUSION_LLM_MAX_WORKERS", "4"))))
+# Backpressure. ThreadPoolExecutor's work queue is unbounded, so N distinct symbols would
+# queue N tasks, each pinning its `data` dict. Cap the reserved (in-flight + queued) set
+# instead; past the cap the panel simply keeps its template for this refresh.
+_MAX_PENDING = max(1, int(os.getenv("CONCLUSION_LLM_MAX_PENDING", str(_MAX_WORKERS * 4))))
 
 # Provider selection. Default "ollama" keeps the existing behaviour untouched;
 # set LLM_PROVIDER=omniroute to route the conclusion through the local OmniRoute
@@ -173,8 +178,15 @@ def conclusion_or_template(data: dict[str, Any], template: str) -> str:
 
 
 def _get_executor() -> ThreadPoolExecutor:
-    """Get or create the bounded thread pool executor."""
+    """Get or create the bounded thread pool executor.
+
+    Double-checked: the hot path takes the already-initialised branch and never
+    contends on _EXECUTOR_LOCK.
+    """
     global _EXECUTOR
+    executor = _EXECUTOR
+    if executor is not None:
+        return executor
     with _EXECUTOR_LOCK:
         if _EXECUTOR is None:
             _EXECUTOR = ThreadPoolExecutor(
@@ -184,29 +196,36 @@ def _get_executor() -> ThreadPoolExecutor:
         return _EXECUTOR
 
 
+def shutdown_executor(wait: bool = True, *, cancel_futures: bool = True) -> None:
+    """Tear the worker pool down and release every reserved key.
+
+    Idempotent. The next get_cached_or_schedule() lazily rebuilds the pool, so this is
+    safe for application shutdown and for test teardown alike.
+    """
+    global _EXECUTOR
+    with _EXECUTOR_LOCK:
+        executor, _EXECUTOR = _EXECUTOR, None
+    if executor is not None:
+        executor.shutdown(wait=wait, cancel_futures=cancel_futures)
+    with _SCHED_LOCK:
+        _SCHEDULED.clear()
+
+
 def _evict_expired_cache(now: float | None = None) -> int:
-    """Evict expired entries from _CACHE and stale keys from _SCHEDULED.
-    Returns number of evicted cache entries."""
+    """Evict expired entries from _CACHE. Returns the number of entries removed.
+
+    _SCHEDULED is deliberately NOT purged here. It holds only in-flight keys, which are
+    exactly the keys not yet in _CACHE -- a "stale scheduled" sweep therefore released
+    the live reservations and let concurrent refreshes stack duplicate LLM calls for the
+    same symbol. It is bounded at admission by _MAX_PENDING and always released in
+    _fill()'s finally (or on submit failure), so it never needs a sweep.
+    """
     if now is None:
         now = time.time()
     with _SCHED_LOCK:
-        # Evict expired cache entries
         expired_keys = [k for k, (_, exp) in _CACHE.items() if exp <= now]
         for k in expired_keys:
             _CACHE.pop(k, None)
-        # Also clean _SCHEDULED of keys no longer relevant (expired or done)
-        # Note: _SCHEDULED only tracks in-flight generations, not finished ones
-        scheduled_count_before = len(_SCHEDULED)
-        # We can't easily know which scheduled keys are done; they're removed in _fill()
-        # But we can limit _SCHEDULED size to prevent unbounded growth
-        if scheduled_count_before > _MAX_WORKERS * 2:
-            # If too many pending, clear the oldest (set is unordered, so just clear some)
-            # Actually, since it's a set, we remove entries whose cache entries are expired
-            active_keys = set(_CACHE.keys())
-            # Remove scheduled keys that are no longer in cache (expired or never cached)
-            stale_scheduled = _SCHEDULED - active_keys
-            for k in stale_scheduled:
-                _SCHEDULED.discard(k)
         return len(expired_keys)
 
 
@@ -227,6 +246,12 @@ def get_cached_or_schedule(data: dict[str, Any]) -> str | None:
     with _SCHED_LOCK:
         if key in _SCHEDULED:
             return None
+        if len(_SCHEDULED) >= _MAX_PENDING:
+            logger.debug(
+                "conclusion backlog full (%d pending), skipping %s",
+                len(_SCHEDULED), data.get("symbol"),
+            )
+            return None
         _SCHEDULED.add(key)
 
     def _fill() -> None:
@@ -238,7 +263,13 @@ def get_cached_or_schedule(data: dict[str, Any]) -> str | None:
             with _SCHED_LOCK:
                 _SCHEDULED.discard(key)
 
-    _get_executor().submit(_fill)
+    try:
+        _get_executor().submit(_fill)
+    except Exception as exc:  # noqa: BLE001 -- pool already shut down, OOM, ...
+        # Never leave the key reserved: a stuck key blocks this symbol forever.
+        with _SCHED_LOCK:
+            _SCHEDULED.discard(key)
+        logger.warning("could not schedule conclusion for %s: %s", data.get("symbol"), exc)
     return None
 
 

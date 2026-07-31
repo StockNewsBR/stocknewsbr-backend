@@ -1,206 +1,324 @@
 """B5/B6 Conclusion Generator Tests
 
-Tests for the LLM conclusion generator with bounded worker pool (B5)
-and bounded cache with TTL eviction (B6).
+B5 -- bounded worker pool: one global executor, max_workers respected, dedup by key,
+backpressure, reservation released on every failure path, graceful shutdown, and no raw
+thread per request.
+
+B6 -- bounded cache: TTL eviction, opportunistic cleanup, maxsize, thread safety.
+
+No test here may reach the network. `_no_real_network` replaces the transport with a
+tripwire, so a green run is itself the proof that zero provider calls were made.
 """
 
-import os
-import time
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from unittest.mock import patch, MagicMock
+import time
+from unittest.mock import patch
 
 import pytest
 
+import app.ai.conclusion_generator as cg
 from app.ai.conclusion_generator import (
-    get_cached_or_schedule,
-    generate_conclusion,
-    conclusion_or_template,
     _CACHE,
-    _SCHEDULED,
+    _MAX_PENDING,
+    _MAX_WORKERS,
     _SCHED_LOCK,
+    _SCHEDULED,
+    _cache_key,
     _evict_expired_cache,
     _get_executor,
-    _MAX_WORKERS,
+    conclusion_or_template,
+    get_cached_or_schedule,
+    shutdown_executor,
 )
 
 
+class RealNetworkAttempted(BaseException):
+    """Raised when a test would have hit a real provider.
+
+    Deliberately NOT an Exception subclass: `_call_ollama` / `_call_omniroute` wrap their
+    transport in `except Exception -> return None`, which would silently swallow the
+    tripwire and let the test pass while actually calling Ollama or OmniRoute.
+    """
+
+
+@pytest.fixture(autouse=True)
+def _no_real_network(monkeypatch):
+    """Fail loudly on any real provider call.
+
+    The module binds _OLLAMA_URL / _OMNI_URL at import time, so patching os.environ has
+    no effect whatsoever -- the transport itself is the only reliable guard.
+    """
+
+    def _blocked(url, *args, **kwargs):
+        raise RealNetworkAttempted(f"real network call attempted: {url}")
+
+    monkeypatch.setattr(cg.requests, "post", _blocked)
+
+
+@pytest.fixture(autouse=True)
+def _reset_module_state():
+    """Isolate module globals and never leak pool threads between tests."""
+    shutdown_executor(wait=True)
+    _CACHE.clear()
+    _SCHEDULED.clear()
+    yield
+    shutdown_executor(wait=True)
+    _CACHE.clear()
+    _SCHEDULED.clear()
+
+
+def _asset(symbol: str, **overrides) -> dict:
+    data = {
+        "symbol": symbol,
+        "signal": "compra",
+        "master_verdict": "COMPRA",
+        "rsi": 60.0,
+        "change_pct": 1.0,
+    }
+    data.update(overrides)
+    return data
+
+
+def _wait_until(predicate, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.005)
+    return predicate()
+
+
+class TestNetworkGuard:
+    def test_guard_is_armed(self):
+        """A real transport call fails the test instead of reaching a provider."""
+        with pytest.raises(RealNetworkAttempted):
+            cg.requests.post("http://127.0.0.1:11434/api/generate", json={})
+
+    def test_guard_survives_the_modules_broad_except(self):
+        """_call_ollama's `except Exception` must not swallow the tripwire."""
+        with pytest.raises(RealNetworkAttempted):
+            cg._call_ollama("prompt")
+
+
 class TestB5BoundedWorkerPool:
-    """B5: Bounded ThreadPoolExecutor with max_workers=4 for conclusion generation."""
+    """B5: one bounded global pool instead of a thread per request."""
 
-    def setup_method(self):
-        """Clear module state before each test."""
-        # Clear caches
-        _CACHE.clear()
-        _SCHEDULED.clear()
-        # Reset executor (can't easily reset ThreadPoolExecutor, so we'll just test its config)
-        import app.ai.conclusion_generator as cg
-        cg._EXECUTOR = None
-
-    def test_executor_max_workers_is_4(self):
-        """B5a: ThreadPoolExecutor max_workers is capped at 4."""
+    def test_executor_is_bounded_and_named(self):
         executor = _get_executor()
-        assert executor._max_workers == 4
+        assert executor._max_workers == _MAX_WORKERS
+        assert _MAX_WORKERS == 4  # default; CONCLUSION_LLM_MAX_WORKERS tunes it
         assert executor._thread_name_prefix == "conclusion-llm"
 
     def test_executor_reused_across_calls(self):
-        """B5b: Same executor instance reused across calls."""
-        exec1 = _get_executor()
-        exec2 = _get_executor()
-        assert exec1 is exec2
+        assert _get_executor() is _get_executor()
 
     def test_scheduled_generation_uses_executor(self):
-        """B5c: get_cached_or_schedule submits to executor, doesn't create raw threads."""
-        with patch.object(_get_executor(), 'submit') as mock_submit:
-            data = {"symbol": "TEST3", "signal": "compra", "master_verdict": "COMPRA", "rsi": 60}
-            result = get_cached_or_schedule(data)
-            assert result is None  # First call returns None
+        """Work is submitted to the pool, never to a fresh Thread."""
+        with patch.object(_get_executor(), "submit") as mock_submit:
+            assert get_cached_or_schedule(_asset("TEST3")) is None
             mock_submit.assert_called_once()
 
-    def test_concurrent_calls_same_symbol_deduped(self):
-        """B5d: Concurrent calls for same symbol deduplicate - only one generation scheduled."""
-        data = {"symbol": "TEST4", "signal": "venda", "master_verdict": "VENDA", "rsi": 40}
+    def test_live_threads_never_exceed_max_workers(self):
+        """B5 core: N distinct symbols must not produce N threads."""
+        release = threading.Event()
+        lock = threading.Lock()
+        active = [0]
+        peak = [0]
 
-        call_count = [0]
+        def _blocking_llm(prompt):
+            with lock:
+                active[0] += 1
+                peak[0] = max(peak[0], active[0])
+            release.wait(5)
+            with lock:
+                active[0] -= 1
+            return "conclusao"
 
-        def mock_generate(data):
-            call_count[0] += 1
-            time.sleep(0.1)
+        try:
+            with patch.object(cg, "_call_llm", side_effect=_blocking_llm):
+                for i in range(_MAX_WORKERS * 3):
+                    get_cached_or_schedule(_asset(f"SYM{i}", rsi=50.0 + i))
+
+                assert _wait_until(lambda: peak[0] >= _MAX_WORKERS)
+                pool_threads = [
+                    t for t in threading.enumerate()
+                    if t.name.startswith("conclusion-llm")
+                ]
+                assert len(pool_threads) <= _MAX_WORKERS
+                release.set()
+                shutdown_executor(wait=True, cancel_futures=False)
+        finally:
+            release.set()
+
+        assert peak[0] <= _MAX_WORKERS
+
+    def test_concurrent_calls_same_symbol_generate_once(self):
+        """B5 dedup: 5 concurrent refreshes of one symbol = exactly 1 provider call."""
+        data = _asset("TEST4", signal="venda", master_verdict="VENDA", rsi=40.0)
+        release = threading.Event()
+        lock = threading.Lock()
+        calls = []
+
+        def _blocking_llm(prompt):
+            with lock:
+                calls.append(prompt)
+            release.wait(5)
             return "generated"
 
-        with patch('app.ai.conclusion_generator.generate_conclusion', side_effect=mock_generate):
-            # Simulate concurrent calls
-            threads = [threading.Thread(target=get_cached_or_schedule, args=(data,)) for _ in range(5)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
+        try:
+            with patch.object(cg, "_call_llm", side_effect=_blocking_llm):
+                threads = [
+                    threading.Thread(target=get_cached_or_schedule, args=(data,))
+                    for _ in range(5)
+                ]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
 
-            # Should only generate once due to _SCHEDULED dedup
-            # Note: there's a race in test but _SCHEDULED lock should prevent it
-            assert call_count[0] <= 1
+                # Exactly one reservation, regardless of pool progress.
+                assert len(_SCHEDULED) == 1
+                release.set()
+                shutdown_executor(wait=True, cancel_futures=False)
+        finally:
+            release.set()
+
+        assert len(calls) == 1
+
+    def test_repeated_requests_same_key_submit_once(self):
+        """B5 dedup: a second refresh while the first is in flight submits nothing."""
+        data = _asset("REPEAT3", rsi=52.0)
+
+        with patch.object(_get_executor(), "submit") as mock_submit:
+            assert get_cached_or_schedule(data) is None
+            assert get_cached_or_schedule(data) is None
+            assert get_cached_or_schedule(dict(data)) is None  # equal payload, new dict
+            mock_submit.assert_called_once()
+
+        assert _SCHEDULED == {_cache_key(data)}
+
+    def test_backpressure_drops_when_backlog_is_full(self):
+        """B5: past _MAX_PENDING the refresh is dropped, never queued unboundedly."""
+        with _SCHED_LOCK:
+            for i in range(_MAX_PENDING):
+                _SCHEDULED.add((f"FILLER{i}", "", "", 0.0, 0.0))
+
+        data = _asset("OVERFLOW3", rsi=55.0)
+        with patch.object(_get_executor(), "submit") as mock_submit:
+            assert get_cached_or_schedule(data) is None
+            mock_submit.assert_not_called()
+
+        assert _cache_key(data) not in _SCHEDULED
+
+    def test_provider_exception_releases_reservation(self):
+        """B5: an exploding provider must not strand the key."""
+        data = _asset("BOOM3", rsi=61.0)
+        with patch.object(cg, "_call_llm", side_effect=RuntimeError("provider exploded")):
+            assert get_cached_or_schedule(data) is None
+            # Released by _fill()'s finally -- asserted before any shutdown runs.
+            assert _wait_until(lambda: _cache_key(data) not in _SCHEDULED)
+
+    def test_submit_failure_releases_reservation(self):
+        """B5 regression: a failing submit() must not block the symbol forever."""
+        data = _asset("NOSUBMIT3", rsi=58.0)
+
+        with patch.object(_get_executor(), "submit", side_effect=RuntimeError("pool down")):
+            assert get_cached_or_schedule(data) is None
+
+        assert _cache_key(data) not in _SCHEDULED
+
+        # The symbol must still be schedulable afterwards.
+        with patch.object(_get_executor(), "submit") as retry_submit:
+            assert get_cached_or_schedule(data) is None
+            retry_submit.assert_called_once()
+
+    def test_shutdown_is_graceful_and_idempotent(self):
+        """B5: shutdown drops the pool, clears reservations, and can be repeated."""
+        with _SCHED_LOCK:
+            _SCHEDULED.add(("STUCK3", "", "", 0.0, 0.0))
+        _get_executor()
+        assert cg._EXECUTOR is not None
+
+        shutdown_executor(wait=True)
+        assert cg._EXECUTOR is None
+        assert _SCHEDULED == set()
+
+        shutdown_executor(wait=True)  # idempotent
+        assert _get_executor() is not None  # lazily rebuilt
 
 
 class TestB6BoundedCacheTTLEviction:
-    """B6: Bounded cache with TTL eviction on hot path."""
+    """B6: bounded cache with TTL eviction on the hot path."""
 
-    def setup_method(self):
-        """Clear module state before each test."""
-        _CACHE.clear()
-        _SCHEDULED.clear()
-        import app.ai.conclusion_generator as cg
-        cg._EXECUTOR = None
-
-    def test_cache_stores_with_timestamp(self):
-        """B6a: Cache entries stored with (value, expiry_timestamp)."""
-        key = ("TEST5", "compra", 80, "COMPRA")
-        value = "Test conclusion"
+    def test_cache_stores_value_with_expiry(self):
+        key = _cache_key(_asset("TEST5"))
         expiry = time.time() + 180
-        _CACHE[key] = (value, expiry)
+        _CACHE[key] = ("Test conclusion", expiry)
 
-        hit = _CACHE.get(key)
-        assert hit == (value, expiry)
-        assert hit[1] > time.time()
+        assert _CACHE.get(key) == ("Test conclusion", expiry)
 
     def test_evict_expired_cache_removes_stale_entries(self):
-        """B6b: _evict_expired_cache removes entries past TTL."""
-        # Add expired entry
-        expired_key = ("EXP1", "compra", 50, "COMPRA")
+        expired_key = _cache_key(_asset("EXP1"))
         _CACHE[expired_key] = ("old value", time.time() - 10)
-
-        # Add fresh entry
-        fresh_key = ("FRESH1", "venda", 30, "VENDA")
+        fresh_key = _cache_key(_asset("FRESH1", signal="venda", master_verdict="VENDA"))
         _CACHE[fresh_key] = ("new value", time.time() + 300)
 
-        evicted = _evict_expired_cache()
-
-        assert evicted == 1
+        assert _evict_expired_cache() == 1
         assert expired_key not in _CACHE
         assert fresh_key in _CACHE
 
-    def test_get_cached_or_schedule_calls_eviction_on_hot_path(self):
-        """B6c: get_cached_or_schedule triggers eviction on every access."""
-        with patch('app.ai.conclusion_generator._evict_expired_cache') as mock_evict:
-            data = {"symbol": "TEST6", "signal": "compra", "master_verdict": "COMPRA", "rsi": 70}
-            get_cached_or_schedule(data)
+    def test_get_cached_or_schedule_triggers_eviction(self):
+        with patch.object(_get_executor(), "submit"), \
+                patch.object(cg, "_evict_expired_cache") as mock_evict:
+            get_cached_or_schedule(_asset("TEST6", rsi=70.0))
             mock_evict.assert_called_once()
 
     def test_cache_hit_returns_cached_prose(self):
-        """B6d: Cache hit returns cached prose, no generation."""
-        data = {"symbol": "TEST7", "signal": "compra", "master_verdict": "COMPRA", "rsi": 65, "change_pct": 1.5}
-        key = _cache_key(data)  # Use same key derivation
-        _CACHE[key] = ("cached conclusion", time.time() + 180)
+        data = _asset("TEST7", rsi=65.0, change_pct=1.5)
+        _CACHE[_cache_key(data)] = ("cached conclusion", time.time() + 180)
 
-        result = get_cached_or_schedule(data)
-        assert result == "cached conclusion"
+        assert get_cached_or_schedule(data) == "cached conclusion"
 
-    def test_scheduled_set_cleared_on_completion(self):
-        """B6e: _SCHEDULED set cleared when generation completes."""
-        data = {"symbol": "TEST8", "signal": "venda", "master_verdict": "VENDA", "rsi": 35}
-        key = _cache_key(data)
+    def test_expired_cache_hit_is_not_served(self):
+        data = _asset("TEST7B", rsi=66.0)
+        _CACHE[_cache_key(data)] = ("stale conclusion", time.time() - 1)
 
-        with _SCHED_LOCK:
-            _SCHEDULED.add(key)
-
-        # Simulate generation completion
-        with _SCHED_LOCK:
-            _SCHEDULED.discard(key)
-
-        assert key not in _SCHEDULED
+        with patch.object(_get_executor(), "submit"):
+            assert get_cached_or_schedule(data) is None
 
 
 class TestConclusionGeneratorIntegration:
-    """Integration tests for conclusion generation flow."""
+    """Fallback contract: the panel never breaks, whatever the provider does."""
 
-    def setup_method(self):
-        _CACHE.clear()
-        _SCHEDULED.clear()
-        import app.ai.conclusion_generator as cg
-        cg._EXECUTOR = None
+    def test_returns_template_when_provider_returns_nothing(self):
+        with patch.object(cg, "_call_llm", return_value=None):
+            assert conclusion_or_template(_asset("TEST9"), "TEMPLATE") == "TEMPLATE"
 
-    def test_conclusion_or_template_returns_template_on_llm_failure(self):
-        """Fallback to template when LLM unavailable."""
-        data = {"symbol": "TEST9", "signal": "compra", "master_verdict": "COMPRA", "rsi": 60}
-        template = "TEMPLATE_FALLBACK"
-
-        # Force LLM failure by using bad URL
-        with patch.dict(os.environ, {"OLLAMA_URL": "http://127.0.0.1:1"}):
-            result = conclusion_or_template(data, template)
-            assert result == template
+    def test_returns_template_when_provider_raises(self):
+        with patch.object(cg, "_call_llm", side_effect=RuntimeError("provider down")):
+            assert conclusion_or_template(_asset("TEST9B"), "TEMPLATE") == "TEMPLATE"
 
     def test_different_assets_get_different_conclusions(self):
-        """Rising vs falling assets produce different conclusions when LLM available."""
-        csan = {"symbol": "CSAN3", "trend_bias": "BAIXA", "signal": "baixa", "rsi": 42.7,
-                "change_pct": -2.05, "master_verdict": "AGUARDAR", "support": 3.80, "resistance": 4.10}
-        hype = {"symbol": "HYPE3", "trend_bias": "NEUTRO", "signal": "neutro", "rsi": 57.8,
-                "change_pct": 0.99, "master_verdict": "AGUARDAR", "support": 19.9, "resistance": 20.8}
+        """Rising vs falling assets must not share prose."""
+        csan = _asset("CSAN3", trend_bias="BAIXA", signal="baixa", rsi=42.7,
+                      change_pct=-2.05, master_verdict="AGUARDAR", support=3.80, resistance=4.10)
+        hype = _asset("HYPE3", trend_bias="NEUTRO", signal="neutro", rsi=57.8,
+                      change_pct=0.99, master_verdict="AGUARDAR", support=19.9, resistance=20.8)
 
-        # Both should fall back to template when LLM down
-        with patch.dict(os.environ, {"OLLAMA_URL": "http://127.0.0.1:1"}):
-            SAME = "TEMPLATE_SAME"
-            a = conclusion_or_template(csan, SAME)
-            b = conclusion_or_template(hype, SAME)
-            assert a == SAME and b == SAME
+        def _per_symbol(prompt):
+            return "Tendencia de baixa." if "CSAN3" in prompt else "Tendencia neutra."
+
+        with patch.object(cg, "_call_llm", side_effect=_per_symbol):
+            first = conclusion_or_template(csan, "TEMPLATE")
+            second = conclusion_or_template(hype, "TEMPLATE")
+
+        assert first != second
+        assert "TEMPLATE" not in (first, second)
 
     def test_cache_key_is_deterministic(self):
-        """Same indicator values produce same cache key."""
-        data1 = {"symbol": "PETR4", "signal": "compra", "master_verdict": "COMPRA", "rsi": 70.0, "change_pct": 2.0}
-        data2 = {"symbol": "PETR4", "signal": "compra", "master_verdict": "COMPRA", "rsi": 70.0, "change_pct": 2.0}
+        assert _cache_key(_asset("PETR4", rsi=70.0, change_pct=2.0)) == _cache_key(
+            _asset("PETR4", rsi=70.0, change_pct=2.0)
+        )
 
-        key1 = _cache_key(data1)
-        key2 = _cache_key(data2)
-        assert key1 == key2
-
-
-def _cache_key(data: dict) -> tuple:
-    """Replicate the internal _cache_key logic for testing."""
-    symbol = data.get("symbol") or data.get("ticker") or "UNKNOWN"
-    signal = str(data.get("signal") or "").strip().lower()
-    verdict = str(data.get("master_verdict") or "").strip().upper()
-    rsi = round(float(data.get("rsi") or 50.0), 1)
-    change = round(float(data.get("change_pct") or 0.0), 1)
-    return (symbol, signal, verdict, rsi, change)
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    def test_cache_key_separates_symbols(self):
+        assert _cache_key(_asset("PETR4")) != _cache_key(_asset("VALE3"))
