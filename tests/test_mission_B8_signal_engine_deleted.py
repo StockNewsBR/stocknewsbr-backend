@@ -4,11 +4,38 @@ Verifies that app/engine/signal_engine.py has been fully removed
 and no dynamic imports or references remain.
 """
 
-import ast
-import os
 from pathlib import Path
 
 import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# Third-party trees are not ours to police, and scanning them is slow.
+_EXCLUDED_PARTS = {"__pycache__", "venv", ".venv", "node_modules", ".git", "build", "dist"}
+
+
+def _scan_for(needles: tuple[str, ...]) -> list[str]:
+    """Return repo files containing any needle.
+
+    This scanner must skip itself: the needles it searches for are present in its own
+    source as string literals, so including it guarantees a self-match and the assertion
+    can never pass -- not even once signal_engine is genuinely gone.
+    """
+    this_file = Path(__file__).resolve()
+    violations = []
+
+    for py_file in PROJECT_ROOT.rglob("*.py"):
+        if _EXCLUDED_PARTS & set(py_file.parts):
+            continue
+        if py_file.resolve() == this_file:
+            continue
+        try:
+            content = py_file.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if any(needle in content for needle in needles):
+            violations.append(str(py_file.relative_to(PROJECT_ROOT)))
+
+    return violations
 
 
 class TestB8SignalEngineDeleted:
@@ -21,56 +48,25 @@ class TestB8SignalEngineDeleted:
 
     def test_no_static_imports_of_signal_engine(self):
         """No .py files should statically import from signal_engine."""
-        project_root = Path("/home/dcima/stocknewsbr-backend")
-        violations = []
-
-        for py_file in project_root.rglob("*.py"):
-            if "__pycache__" in str(py_file):
-                continue
-            if "test_" in py_file.name and "test_mission" not in py_file.name:
-                # Skip root test_*.py files (they're untracked scratch files)
-                continue
-
-            try:
-                content = py_file.read_text()
-                if "from app.engine.signal_engine import" in content or \
-                   "import app.engine.signal_engine" in content or \
-                   "from app.engine import signal_engine" in content:
-                    violations.append(str(py_file.relative_to(project_root)))
-            except Exception:
-                pass
-
+        violations = _scan_for(
+            (
+                "from app.engine.signal_engine import",
+                "import app.engine.signal_engine",
+                "from app.engine import signal_engine",
+            )
+        )
         assert not violations, f"Static imports of signal_engine found in: {violations}"
 
     def test_no_dynamic_imports_of_signal_engine(self):
-        """No importlib/__import__/getattr dynamic imports of signal_engine."""
-        project_root = Path("/home/dcima/stocknewsbr-backend")
-        violations = []
-
-        for py_file in project_root.rglob("*.py"):
-            if "__pycache__" in str(py_file):
-                continue
-            if "test_" in py_file.name and "test_mission" not in py_file.name:
-                continue
-
-            try:
-                content = py_file.read_text()
-                # Check for dynamic import patterns
-                patterns = [
-                    'import_module("app.engine.signal_engine',
-                    "import_module('app.engine.signal_engine",
-                    '__import__("app.engine.signal_engine',
-                    "__import__('app.engine.signal_engine",
-                    'getattr(.*signal_engine',
-                    'importlib.import_module.*signal_engine',
-                ]
-                for pattern in patterns:
-                    if pattern in content:
-                        violations.append(str(py_file.relative_to(project_root)))
-                        break
-            except Exception:
-                pass
-
+        """No importlib/__import__ dynamic imports of signal_engine."""
+        violations = _scan_for(
+            (
+                'import_module("app.engine.signal_engine',
+                "import_module('app.engine.signal_engine",
+                '__import__("app.engine.signal_engine',
+                "__import__('app.engine.signal_engine",
+            )
+        )
         assert not violations, f"Dynamic imports of signal_engine found in: {violations}"
 
     def test_no_entry_points_reference_signal_engine(self):
