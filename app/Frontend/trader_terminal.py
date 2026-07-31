@@ -5,7 +5,6 @@ from app.Frontend.layout import get_layout
 
 def get_terminal(focused_tab: str | None = None, token: str | None = None):
     tabs = get_layout()["tabs"]
-    initial_tab = focused_tab or "home"
     embedded_tabs = json.dumps(tabs)
     embedded_token = json.dumps(token or "")
 

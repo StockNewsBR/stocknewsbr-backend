@@ -414,7 +414,6 @@ def get_workspace_data(user_id: int | None = None, channel: str = "web") -> Dict
     push_status = get_push_status()
     observability = routes_system.observability_dashboard()
     observability_dashboard = observability if isinstance(observability, dict) else {}
-    observed_runtime = observability_dashboard.get("snapshot_runtime") if isinstance(observability_dashboard.get("snapshot_runtime"), dict) else snapshot_runtime
     go_live = (
         observability_dashboard.get("go_live")
         if isinstance(observability_dashboard.get("go_live"), dict)

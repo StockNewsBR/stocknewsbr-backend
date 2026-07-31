@@ -337,7 +337,6 @@ def system_health():
     snapshot_payload = get_snapshot()
     polls = get_poll_store_summary()
     status = _derive_health_status(snapshot, ai_worker, ai_tabs, polls)
-    snapshot_runtime = snapshot.get("snapshot_runtime") if isinstance(snapshot.get("snapshot_runtime"), dict) else evaluate_snapshot_runtime_status(snapshot)
     go_live = build_go_live_status(snapshot_payload if isinstance(snapshot_payload, dict) and snapshot_payload.get("signals") else snapshot, institutional_metrics=get_metrics_snapshot().get("institutional_metrics", {}))
     paper_trading = _paper_trading_observability()
 

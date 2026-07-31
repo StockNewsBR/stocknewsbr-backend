@@ -73,8 +73,6 @@ def get_marketing_site():
     pricing = bootstrap.get("pricing", {})
     roadmap = bootstrap.get("launch_roadmap", {})
     help_guides = help_center.get("guides", [])[:3]
-    available_videos = help_center.get("video_status", {}).get("available_videos", 0)
-    planned_videos = help_center.get("video_status", {}).get("planned_videos", 0)
 
     stats = _metric_cards(
         [

@@ -278,7 +278,6 @@ def _marker_is_coherent(marker: dict, ohlc: list, series: list[dict], high_price
 
     ema9_value = series[index].get("ema9") or close
     ema21_value = series[index].get("ema21") or ema9_value
-    ema50_value = series[index].get("ema50") or ema21_value
     trend_side = str(series[index].get("supertrend_side") or "neutral").lower()
     previous_highs = high_prices[max(0, index - 10) : index]
     previous_lows = low_prices[max(0, index - 10) : index]
@@ -300,7 +299,6 @@ def _marker_is_coherent(marker: dict, ohlc: list, series: list[dict], high_price
 
     bullish_break_confirmation = breakout or (close >= resistance - buffer * 0.25 and momentum_3 > 0 and rvol >= 1.05)
     bearish_break_confirmation = breakdown or (close <= support + buffer * 0.25 and momentum_3 < 0 and rvol >= 1.05)
-    future_closes = close_prices[index + 1 : index + 7]
     bullish_follow_through = (
         _future_outcome(index, close, close_prices, buffer, "buy")
     )
@@ -462,7 +460,6 @@ def build_chart_overlays(ticker: str, ohlc: list, signals: list, interval: str =
     derived_marker_limit = 2 if normalized_interval == "1D" else 2
 
     if allow_derived_markers and len(series) >= 12:
-        average_volume = max(sum(volume_values) / max(len(volume_values), 1), 1.0)
         last_marker_index = -8
         for index in range(8, len(series)):
             if index - last_marker_index < 8:

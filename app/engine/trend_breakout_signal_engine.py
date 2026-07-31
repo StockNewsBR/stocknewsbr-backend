@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from app.ai.trade_decision import evaluate_trade_coherence
 from app.market.market_universe import B3_CORE, B3_EXTENDED, BDRS, CRYPTO
