@@ -32,6 +32,7 @@ def override_auth(monkeypatch):
 @pytest.fixture(autouse=True)
 def cleanup_cache_and_state(monkeypatch):
     news_service._NEWS_CACHE.clear()
+    news_service._NEWS_PROVIDER_STATUS.clear()
     news_warmup._async_running.clear()
     news_warmup._async_last_request_at.clear()
     news_warmup._symbol_cooldowns.clear()
