@@ -15,8 +15,11 @@ import { execFileSync } from "node:child_process";
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(moduleDir, "..", "..", "..", "..");
 
-// Interpreter resolved from the repo root — never searched on the system PATH.
-export const PYTHON_PATH = path.resolve(REPO_ROOT, "venv", "bin", "python");
+// Interpreter resolved from the repo root or active conda/venv — never searched blindly on the system PATH.
+export const PYTHON_PATH = process.env.PYTHON_PATH || 
+  (process.env.CONDA_PREFIX ? path.join(process.env.CONDA_PREFIX, "bin", "python") : 
+  (process.env.VIRTUAL_ENV ? path.join(process.env.VIRTUAL_ENV, "bin", "python") : 
+  path.resolve(REPO_ROOT, "venv", "bin", "python")));
 export const TOKEN_TTL_MAX_SECONDS = 600;
 
 const TOKEN_SCRIPT = `
