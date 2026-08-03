@@ -291,11 +291,15 @@ class MarketDataCacheCompatibility:
         global _cache_data
         global _cache_key
         global _last_update
+        global _provider_cooldown_until
+        global _last_provider_failure_log
 
         with _lock:
             _cache_data = None
             _cache_key = tuple()
             _last_update = 0.0
+            _provider_cooldown_until = 0.0
+            _last_provider_failure_log = 0.0
 
 
 market_data_cache = MarketDataCacheCompatibility()

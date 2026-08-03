@@ -37,6 +37,8 @@ class Mission24DSymbolSanitizationTests(unittest.TestCase):
         for symbol in ("=1D", "=1D&LIMIT=8", "INTERVAL=1D", "LIMIT=8", "PETR4", "VALE3", "BTCUSD", "TSLA"):
             clear_symbol_cooldown(symbol)
         market_data_loader._SYMBOL_FAILURES.clear()
+        quote_warmup._quote_cooldowns.clear()
+        quote_warmup._chart_cooldowns.clear()
 
     def test_symbol_sanitizer_rejects_query_strings_before_provider(self):
         self.assertIsNone(sanitize_market_symbol("=1D"))

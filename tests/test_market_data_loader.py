@@ -222,7 +222,7 @@ class MarketDataLoaderTests(unittest.TestCase):
         with patch.object(market_data_loader, "get_cached_price_snapshots", return_value={}), patch.object(
             market_data_loader, "batch_download", return_value=None
         ) as batch_download, patch.object(
-            market_data_loader, "get_price_snapshot", side_effect=snapshot_for
+            market_data_loader, "_price_payload_from_fast_info", side_effect=snapshot_for
         ), patch.object(market_data_loader, "_persist_price_cache"):
             payloads = market_data_loader.get_price_snapshots(requested, force_refresh=True)
 

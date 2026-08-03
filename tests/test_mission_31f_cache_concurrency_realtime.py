@@ -86,6 +86,9 @@ def _telegram_row():
 class Mission31FCacheConcurrencyRealtimeTests(unittest.TestCase):
     def setUp(self):
         reset_telegram_alert_state()
+        from app.services.symbol_sanitizer import clear_symbol_cooldown
+        for symbol in ["PETR4", "VALE3", "PETR4.SA", "VALE3.SA"]:
+            clear_symbol_cooldown(symbol)
 
     def test_atomic_write_uses_restrictive_exclusive_tmp_file(self):
         with tempfile.TemporaryDirectory() as tmp:
