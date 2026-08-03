@@ -16,12 +16,12 @@ RLS_SCOPED_TABLES = {"media_assets", "promo_redemptions"}
 
 EXPECTED_TABLE_GRANTS = {
     "users": {"SELECT", "INSERT", "UPDATE"},
-    "user_sessions": {"SELECT", "INSERT", "UPDATE", "DELETE"},
-    "login_challenges": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+    "user_sessions": {"SELECT", "INSERT", "UPDATE"},
+    "login_challenges": {"SELECT", "INSERT", "UPDATE"},
     "auth_audit_events": {"SELECT", "INSERT"},
     "referrals": {"SELECT", "INSERT", "UPDATE"},
     "referral_stats": {"SELECT", "INSERT", "UPDATE"},
-    "telegram_link_tokens": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+    "telegram_link_tokens": {"SELECT", "INSERT", "UPDATE"},
     "subscription_audit_logs": {"SELECT", "INSERT"},
     "social_posts": {"SELECT", "INSERT", "UPDATE", "DELETE"},
     "social_comments": {"SELECT", "INSERT", "UPDATE", "DELETE"},
