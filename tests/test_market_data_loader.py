@@ -1,4 +1,8 @@
+import json
+import tempfile
+import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -306,6 +310,74 @@ class MarketDataLoaderTests(unittest.TestCase):
 
         self.assertEqual(payload["price"], 190.0)
         cached.assert_called_once_with("AAPL", allow_stale=True)
+
+    def test_validation_kill_switch_blocks_provider_in_worker_context(self):
+        with patch.dict(market_data_loader.os.environ, {"MARKET_PROVIDER_NETWORK_DISABLED": "1"}):
+            with provider_call_context("worker"):
+                self.assertFalse(market_data_loader._network_provider_allowed())
+
+    def test_chart_cache_miss_does_not_reparse_unchanged_file(self):
+        """A miss must not re-parse a chart cache file that has not moved.
+
+        get_cached_chart_data() answered every miss with _load_chart_cache_once(force=True),
+        and force skipped the mtime guard -- so a miss re-read and re-normalised the whole
+        file even though it was byte-identical to what was already resident. Because
+        _persist_chart_cache() merges disk into memory without pruning, that file only ever
+        grows (18.2 MB observed here), which made each wasted parse ~3 s. A miss never
+        becomes a hit, so the cost repeated forever, and /public/market/bundle performs six
+        chart lookups -- pushing the endpoint to 15-28 s, past every loopback client timeout.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            cache_file = Path(directory) / "market_charts.json"
+            resident_key = market_data_loader._chart_cache_key("AAPL", "1D")
+            cache_file.write_text(
+                json.dumps({"charts": {resident_key: {
+                    "timestamp": time.time(),
+                    "rows": [{"time": "2026-08-02 00:00:00+00:00", "close": 190.0, "volume": 1000}],
+                }}}),
+                encoding="utf-8",
+            )
+
+            reads: list[str] = []
+            unpatched_read_text = Path.read_text
+
+            def counting_read_text(self, *args, **kwargs):
+                if self == cache_file:
+                    reads.append(str(self))
+                return unpatched_read_text(self, *args, **kwargs)
+
+            with patch.object(market_data_loader, "_CHART_CACHE_FILE", cache_file), \
+                    patch.object(market_data_loader, "_CHART_CACHE_LOADED", False), \
+                    patch.object(market_data_loader, "_CHART_CACHE_MTIME", 0.0), \
+                    patch.object(Path, "read_text", counting_read_text):
+                # Priming hit: the file is read exactly once to populate the cache.
+                self.assertIsNotNone(
+                    market_data_loader.get_cached_chart_data("AAPL", "1D", allow_stale=True)
+                )
+                self.assertEqual(len(reads), 1)
+
+                # Miss on a symbol that is absent from an unchanged file. Re-reading cannot
+                # produce a different answer, so it must not happen.
+                self.assertIsNone(
+                    market_data_loader.get_cached_chart_data("MSFT", "1D", allow_stale=True)
+                )
+                self.assertEqual(
+                    len(reads), 1,
+                    "cache miss re-parsed a chart cache file that had not changed on disk",
+                )
+
+                # A real writer moving the file must still be picked up.
+                cache_file.write_text(
+                    json.dumps({"charts": {market_data_loader._chart_cache_key("MSFT", "1D"): {
+                        "timestamp": time.time(),
+                        "rows": [{"time": "2026-08-02 00:00:00+00:00", "close": 410.0, "volume": 2000}],
+                    }}}),
+                    encoding="utf-8",
+                )
+                self.assertIsNotNone(
+                    market_data_loader.get_cached_chart_data("MSFT", "1D", allow_stale=True)
+                )
+                self.assertEqual(len(reads), 2)
 
     def test_change_uses_previous_session_close_not_previous_candle(self):
         """PETR4 reported "+0,03 (+0,07%)" while Yahoo showed "+0,52 (+1,27%)".

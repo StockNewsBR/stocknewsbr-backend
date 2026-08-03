@@ -1,6 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
+import {
+  applyEphemeralAuth,
+  countSessions,
+  enableProMode,
+  generateEphemeralSession,
+  revokeEphemeralSession,
+} from "./lib/ephemeral-auth.mjs";
 
 const baseUrl = process.env.SNBR_WEB_URL || "http://127.0.0.1:3000";
 const repoRoot = path.resolve(process.cwd(), "..", "..");
@@ -25,6 +32,60 @@ const helpSections = [
   { label: "9️⃣ Por que escolher StockNewsBR?", id: "por-que-stocknewsbr", title: "Por que escolher StockNewsBR?" },
 ];
 
+/**
+ * Every non-terminal AI panel state, in both locales.
+ *
+ * workspace-shell emits exactly two transients -- "AI loading. / Waiting for the current
+ * payload." and "Calculating analysis..." -- and the smoke previously knew about only the
+ * first. Reading the panel during the second is what produced "precisa exibir horario
+ * real" against a panel that was still computing.
+ */
+const TRANSIENT_AI_STATE = new RegExp(
+  [
+    "AI loading",
+    "IA carregando",
+    "Waiting for the current payload",
+    "Aguardando o payload atual",
+    "Calculating analysis",
+    "Calculando an\\u00e1lise",
+  ].join("|"),
+  "i",
+);
+
+/**
+ * The product's honest terminal "nothing to report" states.
+ *
+ * These are the strings workspace-shell emits when an attempt completed and had no valid
+ * reading to publish. They are not placeholders and not fabricated data -- they are the
+ * correct answer for a cold cache. The smoke previously enumerated only two of them, so a
+ * panel sitting in one of the others read as a missing timestamp. Listing them in one
+ * place keeps the real assertion below intact: when a reading *is* present it must still
+ * carry a time, a Score, a Trigger and an invalidation.
+ */
+const HONEST_EMPTY_AI_STATE = new RegExp(
+  [
+    "No operational read with confirmed price and volume",
+    "Sem leitura operacional com pre\\u00e7o e volume confirmados",
+    "Insufficient current data",
+    "Dados atuais insuficientes",
+    "The pending hydration expired; no current reading was published",
+    "A hidrata\\u00e7\\u00e3o pendente expirou; nenhuma leitura atual foi publicada",
+    "No new read validated today",
+    "Sem nova leitura validada hoje",
+  ].join("|"),
+  "i",
+);
+
+// A panel is terminal when it either published a reading (timestamped) or reported one of
+// the honest empty states above. Kept as a source string so it can cross into the page.
+const TERMINAL_AI_STATE_SOURCE = [
+  "Found:",
+  "Encontrado:",
+  HONEST_EMPTY_AI_STATE.source,
+  "0 current events",
+  "0 eventos atuais",
+].join("|");
+
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -39,10 +100,82 @@ async function waitForPanel(page) {
   await page.waitForTimeout(700);
 }
 
+/**
+ * Wait for the AI panel to reach a terminal state.
+ *
+ * Asserting on a fixed sleep read the panel mid-flight, while it still said "AI loading.
+ * Waiting for the current payload." -- a transient that is neither a reading nor an empty
+ * state. This waits on the condition instead of on the clock: no timeout was raised, and
+ * a panel that never settles still fails.
+ */
+async function waitForSettledAiPanel(page, tabId = "flow") {
+  // Returns the panel text captured AT the moment it was terminal.
+  //
+  // Waiting and then re-reading is a race: the panel oscillates (hydration expires after
+  // the backend's _WORKER_TIMEOUT_SECONDS, the panel republishes, and it re-enters
+  // "Calculating analysis..."), so a separate innerText() call could land back in a
+  // transient and report a settled panel as missing its timestamp. Capturing inside the
+  // predicate removes the gap entirely.
+  const handle = await page
+    .waitForFunction(
+      ({ id, terminal }) => {
+        const panel = document.querySelector(`#panel-${id}`);
+        const panelText = panel?.textContent || "";
+        if (!panelText) return null;
+        return new RegExp(terminal, "i").test(panelText) ? panelText : null;
+      },
+      { id: tabId, terminal: `${TERMINAL_AI_STATE_SOURCE}` },
+      { timeout: 45_000, polling: 400 },
+    )
+    .catch(() => null);
+  if (!handle) return "";
+  const captured = await handle.jsonValue().catch(() => "");
+  return String(captured || "").replace(/\s+/g, " ").trim();
+}
+
 fs.mkdirSync(runtimeDir, { recursive: true });
 
+const VIEWPORT = { width: 1366, height: 768 };
+
+// Phase 1 -- anonymous. This smoke used to open the panel with no session and click
+// "Pro Mode" directly, which the product deliberately refuses: mission68 asserts that
+// "anonymous and non-premium users cannot enter Pro mode". The script predated the
+// access-control work and had simply never been re-run. Rather than drop the anonymous
+// path, it now asserts the refusal, and premium work moves to a real session below.
 const browser = await chromium.launch({ headless: true });
-const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+const anonymousContext = await browser.newContext({ viewport: VIEWPORT });
+const anonymousPage = await anonymousContext.newPage();
+const anonymousEvidence = {};
+try {
+  await anonymousPage.goto(`${baseUrl}/panel/F`, { waitUntil: "domcontentloaded", timeout: 45_000 });
+  await anonymousPage.locator("main").waitFor({ timeout: 30_000 });
+  const toggle = anonymousPage.locator(".snbr-mode-toggle").first();
+  await toggle.waitFor({ timeout: 20_000 });
+  anonymousEvidence.aria_disabled = await toggle.getAttribute("aria-disabled");
+  anonymousEvidence.aria_pressed_before = await toggle.getAttribute("aria-pressed");
+  assert(anonymousEvidence.aria_disabled === "true", "Pro Mode deve estar bloqueado para anonimo (aria-disabled)");
+  assert(anonymousEvidence.aria_pressed_before !== "true", "Pro Mode nao pode estar ativo para anonimo");
+  // A refused control must survive being clicked. force:true bypasses actionability so
+  // this asserts the product's guard rather than Playwright's own precondition check.
+  await toggle.click({ force: true, timeout: 5_000 }).catch(() => undefined);
+  await anonymousPage.waitForTimeout(500);
+  anonymousEvidence.aria_pressed_after = await toggle.getAttribute("aria-pressed");
+  assert(anonymousEvidence.aria_pressed_after !== "true", "clique nao pode conceder Pro Mode a anonimo");
+  const anonymousText = (await anonymousPage.locator("body").innerText()).replace(/\s+/g, " ").trim();
+  assert(!/Leituras da IA|AI Reads/i.test(anonymousText), "anonimo nao pode ver conteudo premium de IA");
+  anonymousEvidence.ok = true;
+} finally {
+  await anonymousContext.close();
+}
+
+// Phase 2 -- authenticated premium through the canonical ephemeral session: a
+// server-issued, TTL-bounded token delivered as the HTTP-only `snb_session` cookie. No
+// password, no hardcoded JWT, and the row is revoked in the finally block below.
+const sessionBaseline = countSessions();
+const ephemeralSession = generateEphemeralSession();
+const context = await browser.newContext({ viewport: VIEWPORT });
+await applyEphemeralAuth(context, ephemeralSession.token);
+const page = await context.newPage();
 const consoleErrors = [];
 const pageErrors = [];
 page.on("console", (message) => {
@@ -140,17 +273,19 @@ try {
   }
 
   if ((await page.getByRole("tab", { name: /Fluxo IA|Flow AI/i }).count()) === 0) {
-    await page.getByRole("button", { name: /Pro Mode|Modo Pro/i }).click();
+    // Entitlement-driven: the authority restores Pro from the stored preference, so this
+    // never forces a control the product would refuse.
+    await enableProMode(page);
   }
   await page.waitForTimeout(400);
   await page.getByRole("tab", { name: /Flow AI/i }).click();
-  await page.waitForTimeout(700);
-  text = await pageText(page);
+  const settledFlowText = await waitForSettledAiPanel(page);
+  text = `${await pageText(page)} ${settledFlowText}`;
   assert(
     (text.includes("Asset Panel") && text.includes("AI Reads"))
-      || text.includes("No operational read with confirmed price and volume")
+      || HONEST_EMPTY_AI_STATE.test(text)
       || (text.includes("0 current events for this asset") && text.includes("Waiting for a new read")),
-    "USA deve traduzir painel de IA",
+    `USA deve traduzir painel de IA -- painel: "${(await page.locator("#panel-flow").innerText().catch(() => "<no #panel-flow>")).replace(/\s+/g, " ").trim().slice(0, 700)}"`,
   );
   assert(!text.includes("Painel do ativo") && !text.includes("Leituras da IA"), "USA nao deve manter labels PT na aba IA");
 
@@ -204,33 +339,27 @@ try {
   text = await pageText(page);
   assert(text.includes("PETR4"), "troca de ticker via UI deve carregar PETR4");
   if ((await page.getByRole("tab", { name: /Fluxo IA|Flow AI/i }).count()) === 0) {
-    await page.getByRole("button", { name: /Modo Pro|Pro Mode/i }).click();
-    await page.waitForTimeout(700);
+    await enableProMode(page);
   }
 
   const tabTexts = new Map();
   for (const tab of aiTabs) {
     await page.getByRole("tab", { name: tab.name }).click();
-    await page.waitForFunction(
-      (tabId) => {
-        const panel = document.querySelector(`#panel-${tabId}`);
-        const panelText = panel?.textContent || "";
-        return panelText.length > 0 && !/IA carregando|AI loading/i.test(panelText);
-      },
-      tab.id,
-      { timeout: 10_000 },
-    );
-    const panel = page.locator(`#panel-${tab.id}`);
-    const panelText = await panel.innerText({ timeout: 10_000 });
-    const normalized = panelText.replace(/\s+/g, " ").trim();
+    // Shares the settle helper rather than an inline 10 s wait. The panel's terminal state
+    // is gated by the backend's own hydration deadline (_WORKER_TIMEOUT_SECONDS = 12 s), so
+    // a 10 s budget could never observe it -- the same shape of defect as a client timing
+    // out before the server's inner timeout. A panel that never settles still fails below.
+    const settledText = await waitForSettledAiPanel(page, tab.id);
+    const normalized = settledText
+      || (await page.locator(`#panel-${tab.id}`).innerText({ timeout: 10_000 })).replace(/\s+/g, " ").trim();
     if (
-      /No operational read with confirmed price and volume|Sem leitura operacional com preço e volume confirmados/i.test(normalized)
+      HONEST_EMPTY_AI_STATE.test(normalized)
       || (/0 (?:current events|eventos atuais)/i.test(normalized) && /Waiting for a new read|Aguardando nova leitura/i.test(normalized))
     ) {
       result.aiTabs.push({ id: tab.id, ok: true, status: "no_operational_findings" });
       continue;
     }
-    assert(/Encontrado:|Found:/i.test(normalized), `${tab.id} precisa exibir horario real`);
+    assert(/Encontrado:|Found:/i.test(normalized), `${tab.id} precisa exibir horario real -- painel: "${normalized.slice(0, 1200)}"`);
     assert(/Score/i.test(normalized), `${tab.id} precisa exibir Score`);
     assert(/Trigger/i.test(normalized), `${tab.id} precisa exibir Trigger`);
     assert(/Invalid|Invalida/i.test(normalized), `${tab.id} precisa exibir invalidacao`);
@@ -248,9 +377,17 @@ try {
     "TradingView nao deve gerar PAGEERROR de studies_overrides",
   );
 
+  result.anonymousPhase = anonymousEvidence;
   const jsonPath = path.join(runtimeDir, "smoke-etapa7-result.json");
   fs.writeFileSync(jsonPath, JSON.stringify(result, null, 2), "utf-8");
   console.log(JSON.stringify({ ok: true, result: jsonPath, screenshots: result.screenshots }, null, 2));
 } finally {
   await browser.close();
+  const sessionRowsRemaining = revokeEphemeralSession(ephemeralSession.sid);
+  const sessionDelta = countSessions() - sessionBaseline;
+  if (sessionRowsRemaining !== 0 || sessionDelta !== 0) {
+    throw new Error(
+      `smoke deixou sessao residual: remaining=${sessionRowsRemaining} delta=${sessionDelta}`,
+    );
+  }
 }

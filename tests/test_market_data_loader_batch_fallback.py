@@ -3,6 +3,7 @@ from unittest.mock import patch, MagicMock
 import pandas as pd
 import pytest
 
+from app.market import market_data_loader
 from app.market.market_data_loader import (
     get_price_snapshots,
     get_price_snapshot,
@@ -41,6 +42,26 @@ def clean_market_loader_state():
         yield
     finally:
         _reset_market_loader_globals()
+
+
+@pytest.fixture
+def isolated_price_cache(tmp_path, monkeypatch):
+    """Point the loader's on-disk quote cache at an empty per-test file.
+
+    get_price_snapshots falls back through _load_price_cache_once(), which reads
+    runtime/cache/market_quotes.json out of the working tree. Tests that assert on which
+    symbols survive therefore inherited whatever the developer's machine had cached.
+    Opt in to this fixture to make that input explicit instead of ambient.
+    """
+    cache_file = tmp_path / "market_quotes.json"
+    # Written empty rather than left missing so the loader takes its ordinary
+    # "file exists, nothing in it" path rather than the not-yet-created branch.
+    cache_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(market_data_loader, "_PRICE_CACHE_FILE", cache_file)
+    monkeypatch.setattr(market_data_loader, "_PRICE_CACHE_LOADED", False)
+    monkeypatch.setattr(market_data_loader, "_PRICE_CACHE_MTIME", 0.0)
+    monkeypatch.setattr(market_data_loader, "_PRICE_CACHE_INCLUDE_STALE", False)
+    return cache_file
 
 
 def test_batch_multi_symbol_failure_sets_cooldown():
@@ -227,9 +248,23 @@ def test_mark_symbol_failure_called_correctly():
         assert _is_symbol_cooling_down(symbol) or _is_symbol_cooling_down(f"{symbol}.SA")
 
 
-def test_result_order_remains_correct():
-    """12. ordem do resultado permanece correta"""
+def test_result_order_remains_correct(isolated_price_cache):
+    """12. ordem do resultado permanece correta
+
+    Seeds its own cache instead of trusting runtime/cache/market_quotes.json. The
+    contract under test is "input order preserved and no symbol dropped when the batch
+    provider returns nothing" -- which only means anything if every symbol has a cached
+    payload to fall back to. Relying on the working tree's cache made this assert on
+    whatever the developer's machine happened to hold.
+    """
     symbols = ["VALE3", "PETR4", "ITUB4"]
+    for index, symbol in enumerate(symbols):
+        _cache_price_payload(
+            symbol,
+            {"symbol": symbol, "price": 10.0 + index, "timestamp": time.time(), "volume": 1000},
+            persist=False,
+        )
+
     with patch("app.market.market_data_loader._get_yfinance") as mock_yf:
         yf_inst = MagicMock()
         mock_yf.return_value = yf_inst
@@ -238,3 +273,4 @@ def test_result_order_remains_correct():
         results = get_price_snapshots(symbols, force_refresh=True)
 
         assert list(results.keys()) == symbols
+        assert [results[s]["price"] for s in symbols] == [10.0, 11.0, 12.0]

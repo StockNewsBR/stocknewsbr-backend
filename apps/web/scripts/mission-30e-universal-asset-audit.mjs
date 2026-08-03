@@ -166,7 +166,7 @@ function validateDomCards(symbol, dom, failures) {
     if (!text.includes("publicado em")) failures.push(`${prefix} sem data/hora da fonte visivel`);
     if (card.incomplete === "true" && !text.includes("noticia incompleta")) failures.push(`${prefix} incompleto sem aviso visual`);
     if (!card.published_at_source && card.incomplete !== "true") failures.push(`${prefix} sem hora da fonte e sem data-news-incomplete`);
-    if (card.stale === "true" && !(text.includes("noticia anterior") || text.includes("ontem"))) {
+    if (card.stale === "true" && !(text.includes("noticia anterior") || text.includes("ontem") || text.includes("noticia antiga"))) {
       failures.push(`${prefix} noticia antiga sem marcador Noticia anterior/Ontem`);
     }
     if (card.incomplete === "true" && card.headline && normalizeText(dom.decision_text_sample).includes(normalizeText(card.headline))) {

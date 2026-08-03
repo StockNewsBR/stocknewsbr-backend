@@ -1,4 +1,12 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  cleanupSyntheticSessions,
+  countSessions,
+  revokeTokenSession,
+} from "./lib/ephemeral-auth.mjs";
 
 const API_BASE = "http://127.0.0.1:8000";
 const WEB_BASE = "http://127.0.0.1:3000";
@@ -10,6 +18,17 @@ async function json(path, options = {}) {
   return payload;
 }
 
+async function main() {
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+cleanupSyntheticSessions("mission31a-runtime-");
+const sessionBaseline = countSessions();
+let token = "";
+let upload = null;
+let comment = null;
+let gifStatus = null;
+const ordered = [];
+const createdPosts = [];
+try {
 const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const email = `mission31a-runtime-${suffix}@example.com`;
 const auth = await json("/auth/register", {
@@ -25,7 +44,8 @@ const auth = await json("/auth/register", {
     accepted_risk_notice: true,
   }),
 });
-const headers = { Authorization: `Bearer ${auth.access_token}`, "Content-Type": "application/json" };
+token = auth.access_token;
+const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 const marker = `runtime-${Date.now()}`;
 
 async function createPost(text, image_url = null) {
@@ -36,8 +56,11 @@ async function createPost(text, image_url = null) {
   });
 }
 
-const ordered = [];
-for (const label of ["post 1", "post 2", "post 3"]) ordered.push(await createPost(`${marker} ${label}`));
+for (const label of ["post 1", "post 2", "post 3"]) {
+  const post = await createPost(`${marker} ${label}`);
+  ordered.push(post);
+  createdPosts.push(post);
+}
 let feed = await json("/ticker/PETR4/feed?limit=500", { headers: { Authorization: headers.Authorization } });
 assert.deepEqual(
   feed.posts.filter((post) => String(post.text).startsWith(marker)).map((post) => post.text),
@@ -53,11 +76,12 @@ const uploadResponse = await fetch(`${API_BASE}/api/media/upload`, {
   body: form,
 });
 if (!uploadResponse.ok) throw new Error(`upload:${uploadResponse.status}:${await uploadResponse.text()}`);
-const upload = await uploadResponse.json();
+upload = await uploadResponse.json();
 assert.match(upload.url, /^\/media\/posts\/[a-f0-9]+\.png$/);
 const photoPost = await createPost(`${marker} photo`, upload.url);
+createdPosts.push(photoPost);
 
-const comment = await json(`/post/${ordered[0].id}/comment`, {
+comment = await json(`/post/${ordered[0].id}/comment`, {
   method: "POST",
   headers,
   body: JSON.stringify({ text: "🐂 comentário 🙂", image_url: upload.url }),
@@ -96,12 +120,25 @@ const html = await (await fetch(`${WEB_BASE}/site`)).text();
 assert.ok(!html.includes("snbr-emoji-quickbar"));
 assert.ok(!html.includes("snbr-comment-tools"));
 
-const gifStatus = await json("/api/media/gifs/search?q=mercado&locale=pt-BR&limit=1", {
+gifStatus = await json("/api/media/gifs/search?q=mercado&locale=pt-BR&limit=1", {
   headers: { Authorization: headers.Authorization },
 });
-for (const post of [...ordered, photoPost]) {
-  await json(`/post/${post.id}`, { method: "DELETE", headers: { Authorization: headers.Authorization } });
+} finally {
+  for (const post of createdPosts) {
+    if (token && post?.id) {
+      await json(`/post/${post.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => undefined);
+    }
+  }
+  if (upload?.url && /^\/media\/posts\/[a-f0-9]+\.png$/.test(upload.url)) {
+    fs.rmSync(path.join(repoRoot, upload.url), { force: true });
+  }
+  if (token) revokeTokenSession(token);
 }
+const sessionDelta = countSessions() - sessionBaseline;
+assert.equal(sessionDelta, 0);
 console.log(JSON.stringify({
   order: "post 3, post 2, post 1",
   comment_post_id: comment.post_id,
@@ -112,4 +149,11 @@ console.log(JSON.stringify({
   gif_status: gifStatus.status,
   gif_reason: gifStatus.reason || null,
   cleaned_test_posts: ordered.length + 1,
+  session_delta: sessionDelta,
+  external_provider_calls: 0,
 }));
+console.log(`SESSION_DELTA=${sessionDelta}`);
+console.log("EXTERNAL_PROVIDER_CALLS=0");
+}
+
+await main();

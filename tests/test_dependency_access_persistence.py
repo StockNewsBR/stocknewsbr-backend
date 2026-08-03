@@ -236,3 +236,4 @@ def test_resolve_premium_entitlement_valid_premium(mock_resolve):
     mock_resolve.return_value = user
     db = _make_mock_db()
     assert resolve_premium_entitlement(token="good_token", db=db) is True
+    db.close.assert_called_once()

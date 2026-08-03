@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-import sys
-
 from app.social.guardian import SocialGuardian
 
 def test_betting_variations():

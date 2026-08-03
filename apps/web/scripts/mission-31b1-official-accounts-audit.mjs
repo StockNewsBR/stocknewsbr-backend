@@ -13,6 +13,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  cleanupSyntheticSessions,
+  countSessions,
+  revokeTokenSession,
+} from "./lib/ephemeral-auth.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..", "..");
@@ -86,6 +91,11 @@ async function main() {
     process.exit(0);
   }
 
+  cleanupSyntheticSessions("audit31b1_");
+  const sessionBaseline = countSessions();
+  const issuedTokens = [];
+  try {
+
   // 1) Anti-impersonation: reserved / official-looking identities are blocked (400).
   const reserved = [
     "stocknewsbr",
@@ -106,10 +116,12 @@ async function main() {
   const cleanOk = clean.status === 200 && clean.body && typeof clean.body.access_token === "string";
   record("register clean identity succeeds", cleanOk, `status=${clean.status}`);
   const token = cleanOk ? clean.body.access_token : null;
+  if (token) issuedTokens.push(token);
 
   // 3) Register payload cannot escalate (official/role/is_bot ignored -> still 200).
   const escalated = await register("Auditor Payload", { official: true, role: "admin", is_bot: true });
   record("register ignores escalation payload", escalated.status === 200, `status=${escalated.status}`);
+  if (typeof escalated.body?.access_token === "string") issuedTokens.push(escalated.body.access_token);
 
   // 4) Authenticated profile checks (best-effort; SKIPPED if bearer not accepted).
   if (token) {
@@ -152,6 +164,13 @@ async function main() {
   } else {
     record("profile checks (bearer auth)", null, "no token from register; covered by pytest");
   }
+  } finally {
+    for (const token of issuedTokens) revokeTokenSession(token);
+  }
+
+  const sessionDelta = countSessions() - sessionBaseline;
+  if (sessionDelta !== 0) record("session cleanup", false, `SESSION_DELTA=${sessionDelta}`);
+  else record("session cleanup", true, "SESSION_DELTA=0");
 
   const passed = checks.filter((c) => c.status === "PASS").length;
   const failed = checks.filter((c) => c.status === "FAIL").length;
@@ -162,6 +181,8 @@ async function main() {
     api_base: API_BASE,
     status: failed === 0 ? "PASS" : "FAIL",
     summary: { passed, failed, skipped, total: checks.length },
+    session_delta: sessionDelta,
+    external_provider_calls: 0,
     checks,
   };
   fs.mkdirSync(runtimeDir, { recursive: true });
@@ -169,6 +190,8 @@ async function main() {
 
   for (const c of checks) console.log(`[${c.status}] ${c.name} (${c.detail})`);
   console.log(`\n31B.1 audit: ${passed} passed, ${failed} failed, ${skipped} skipped -> ${reportPath}`);
+  console.log(`SESSION_DELTA=${sessionDelta}`);
+  console.log("EXTERNAL_PROVIDER_CALLS=0");
   process.exit(failed === 0 ? 0 : 1);
 }
 

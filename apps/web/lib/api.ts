@@ -71,7 +71,12 @@ async function parseJson<T>(response: Response): Promise<T> {
       window.dispatchEvent(new CustomEvent(SESSION_REPLACED_EVENT));
     }
 
-    throw new Error(detail || "request_failed");
+    // Carry the status: without it a 401 (real denial) and a 503/timeout
+    // (transport noise) are indistinguishable at the caller, which is how a
+    // starved request could silently revoke entitlement.
+    const error = new Error(detail || "request_failed") as Error & { status?: number };
+    error.status = response.status;
+    throw error;
   }
 
   return response.json() as Promise<T>;

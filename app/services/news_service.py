@@ -1759,6 +1759,9 @@ def _prepare_raw_items(raw_items: list[dict[str, Any]], limit: int) -> list[dict
 
 
 def _fetch_yfinance_news(ticker: str) -> list[dict[str, Any]]:
+    if str(os.getenv("MARKET_PROVIDER_NETWORK_DISABLED") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        _remember_news_provider_status(ticker, "network_disabled")
+        return []
     yf = _get_yfinance()
     if yf is None:
         _remember_news_provider_status(ticker, "dependency_unavailable", error="dependency_unavailable")

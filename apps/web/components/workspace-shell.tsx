@@ -16,6 +16,27 @@ import {
   WorkspaceRightRail,
 } from "@/components/workspace-rails";
 import {
+  noDataDecisionCopy,
+  resolveNoDataReason,
+  resolveStrategicSide,
+  shouldSkipTradeAlignment,
+  sideBlocksOperationalValues,
+} from "@/lib/decision-state";
+import { CORE_QUOTE_FIELD_IDS } from "@/lib/decision-state";
+import { shouldPersistModeChange } from "@/lib/access-bootstrap";
+import {
+  classifyAccessOutcome,
+  createAccessCounters,
+  createSingleFlight,
+  isRetryableAccessState,
+  isStaleAccessResponse,
+  isTerminalAccessState,
+  resolveAdvancedMode,
+} from "@/lib/access-authority";
+import type { AccessState } from "@/lib/access-authority";
+import { aiPanelKey, createDeadlineRegistry, isAiLoadingStatus } from "@/lib/ai-panel-lifecycle";
+import type { OperationalReasonCode, StrategicDecisionSide } from "@/lib/decision-state";
+import {
   COOKIE_SESSION_TOKEN,
   SESSION_REPLACED_EVENT,
   blockUser,
@@ -382,6 +403,13 @@ const SIMPLE_TOP_TAB_IDS = new Set([
   "education",
 ]);
 const INTERNAL_AI_TAB_IDS = new Set(["risk", "news-ia", "macro", "regime"]);
+// Ceiling for a pending AI hydration before the UI stops claiming it is still
+// calculating. Backend PENDING_EXPIRED still wins when it arrives first.
+const AI_PENDING_CLIENT_TIMEOUT_MS = 8000;
+// Entitlement bootstrap retries: a starved or aborted /auth/access is a
+// transport failure, not a denial.
+const ACCESS_BOOTSTRAP_MAX_ATTEMPTS = 4;
+const ACCESS_BOOTSTRAP_RETRY_BASE_MS = 500;
 const WORKSPACE_MODE_STORAGE_KEY = "stocknewsbr.workspace_mode";
 const WATCHLIST_STATE_STORAGE_KEY = "stocknewsbr.watchlist_state.v1";
 const STRATEGIC_PANEL_STORAGE_KEY = "stocknewsbr.strategic_panel.open.v1";
@@ -2593,8 +2621,21 @@ function reconcileStatsWithDecision<T extends { label: string; value: string; hi
   price: number | null,
   vwap: number | null,
   locale: AppLocale,
+  side: StrategicDecisionSide = "wait",
 ): T[] {
   const isEnglish = locale === "en-US";
+  // Canonical no-data state: a stale price, change, volume or VWAP from the
+  // previous symbol must never be presented as current operational data.
+  if (sideBlocksOperationalValues(side)) {
+    const staleHint = isEnglish
+      ? "No confirmed snapshot — value unavailable until the provider returns real data."
+      : "Sem snapshot confirmado — valor indisponível até o provider retornar dados reais.";
+    return stats.map((item) => {
+      const label = normalizeUiText(item.label);
+      const isOperationalValue = /variacao|change|volume|vwap|preco|price/.test(label);
+      return isOperationalValue ? { ...item, value: "—", hint: staleHint } : item;
+    });
+  }
   const waiting = /AGUARDAR|WAIT/i.test(String(decisionAction || ""));
   const belowVwap = price != null && vwap != null && price < vwap;
   return stats.map((item) => {
@@ -3830,6 +3871,9 @@ function operationalDecisionFromPanel(panel: StrategicPanel, locale: AppLocale):
   return {
     action,
     tone,
+    // Reached only downstream of the canonical core-data gate, which is the
+    // single authority for the no-data state.
+    reasonCode: null,
     // The percentage MUST come from the same quantity the word is derived from.
     // This printed the Master Score with a "%" sign next to a label computed from
     // master_confidence_pct — two unrelated numbers, so "8%" could read "Alta".
@@ -3975,6 +4019,9 @@ function operationalDecisionFromSymbolContext(view: SymbolOperationalView, local
   return {
     action: view.decision === "WAIT" || view.decision === "AGUARDAR" ? (isEnglish ? "WAIT" : "AGUARDAR") : view.decision,
     tone: view.decision === "WAIT" || view.decision === "AGUARDAR" ? "watch" : decisionToneFromText(view.decision),
+    // The symbol-context path never carries a no-data state of its own: the
+    // core-data gate runs before this function is ever reached.
+    reasonCode: null,
     confidence: firstFiniteNumber(view.confidence),
     confidenceLabel: view.confidence_status === "READY" ? (isEnglish ? "Confirmed" : "Confirmada") : (isEnglish ? "Not confirmed" : "Não confirmada"),
     bias,
@@ -4019,9 +4066,10 @@ type OperationalDecision = {
   risk: string;
   reasons: string[];
   levels: OperationalDecisionLevel[];
+  // Canonical domain state. `action` above is localized presentation copy and
+  // must never be used as a logical authority — see lib/decision-state.ts.
+  reasonCode: OperationalReasonCode | null;
 };
-
-type StrategicDecisionSide = "buy" | "sell" | "wait" | "exit" | "no_data";
 
 type StrategicDecisionContract = {
   side: StrategicDecisionSide;
@@ -4190,8 +4238,8 @@ function buildOperationalDecision(input: {
   missingFields?: string[];
 }): OperationalDecision {
   const isEnglish = input.locale === "en-US";
-  const [scoreCard, directionCard, tradeCard, regimeCard, flowCard, liquidityCard, riskCard] = input.cards;
-  const score = numericScoreFromDecisionCard(scoreCard);
+  const [, directionCard, tradeCard, regimeCard, flowCard, liquidityCard, riskCard] = input.cards;
+  const score = numericScoreFromDecisionCard(scoreDecisionCard(input.cards));
   const suggestedSide = tradeActionSide(tradeCard?.value);
   const forceWait = suggestedSide === "wait" || tradeCard?.tone === "watch";
   const directionTone = forceWait ? "neutral" : decisionToneFromText(directionCard?.value, tradeCard?.value);
@@ -4219,7 +4267,9 @@ function buildOperationalDecision(input: {
         : (isEnglish ? "Low confidence" : "Confiança baixa");
   const riskText = riskCard?.value || (isEnglish ? "No read" : "Sem leitura");
   const biasText = regimeCard?.value || directionCard?.value || (isEnglish ? "No read" : "Sem leitura");
-  const incomplete = !input.hasCoreData || score == null;
+  // Single canonical completeness predicate — see lib/decision-state.ts.
+  const noDataReason = resolveNoDataReason({ hasCoreData: input.hasCoreData, score });
+  const incomplete = noDataReason != null;
 
   let action = isEnglish ? "WAIT FOR CONFIRMATION" : "AGUARDAR CONFIRMAÇÃO";
   let tone: DecisionTone = "watch";
@@ -4283,6 +4333,7 @@ function buildOperationalDecision(input: {
     return {
       action,
       tone,
+      reasonCode: noDataReason,
       confidence: null,
       confidenceLabel,
       bias: isEnglish ? "Monitoring" : "Monitorando",
@@ -4328,6 +4379,7 @@ function buildOperationalDecision(input: {
   return {
     action,
     tone,
+    reasonCode: null,
     confidence,
     confidenceLabel,
     bias: biasText,
@@ -5488,6 +5540,9 @@ function alignStrategicBasisWithTrade(items: string[], action: string, locale: A
 }
 
 function alignOperationalDecisionWithTrade(decision: OperationalDecision, locale: AppLocale): OperationalDecision {
+  // A canonical no-data decision passes through untouched. Rewriting its action
+  // is exactly what used to demote no_data back to a plain "wait".
+  if (shouldSkipTradeAlignment(decision.reasonCode)) return decision;
   const side = tradeActionSide(decision.action);
   const combined = [
     decision.action,
@@ -5523,6 +5578,15 @@ function decisionCardByLabel(cards: EssentialDecisionCard[], pattern: RegExp) {
   return cards.find((card) => pattern.test(normalizeUiText(card.label)));
 }
 
+/**
+ * Canonical Master Score card lookup. Matched by label first — the score gate is
+ * a documented contract (ESSENTIAL_ANALYSIS_FIELD_IDS), not an accident of card
+ * order. The positional fallback only covers legacy card builders.
+ */
+function scoreDecisionCard(cards: EssentialDecisionCard[]) {
+  return decisionCardByLabel(cards, /score mestre|master score/) || cards[0];
+}
+
 function decisionSideFromCards(cards: EssentialDecisionCard[], fallbackAction: string): StrategicDecisionSide {
   const tradeCard =
     decisionCardByLabel(cards, /trade sugerido|suggested trade|acao recomendada|recommended action/) ||
@@ -5538,7 +5602,7 @@ function strategicDecisionLabels(side: StrategicDecisionSide, locale: AppLocale)
   const isEnglish = locale === "en-US";
   if (side === "no_data") {
     return {
-      decisionNow: isEnglish ? "WAIT FOR REAL DATA" : "AGUARDAR DADOS REAIS",
+      decisionNow: noDataDecisionCopy(locale),
       tradeSuggested: isEnglish ? "Wait" : "Aguardar",
       direction: isEnglish ? "Range" : "Lateral",
       regime: isEnglish ? "Monitoring" : "Monitorando",
@@ -5787,11 +5851,13 @@ function buildStrategicDecisionContract(input: {
   pendingComponents?: string[];
   symbolContext?: SymbolOperationalView | null;
 }): StrategicDecisionContract {
-  const side = input.executionReady === false
-    ? "wait"
-    : input.hasCoreData
-    ? decisionSideFromCards(input.cards, input.operationalDecision.action)
-    : "no_data";
+  // Canonical priority: no_data > wait > cards. Never derived from localized copy.
+  const side = resolveStrategicSide({
+    reasonCode: input.operationalDecision.reasonCode,
+    hasCoreData: input.hasCoreData,
+    executionReady: input.executionReady,
+    resolveSide: () => decisionSideFromCards(input.cards, input.operationalDecision.action),
+  });
   const labels = strategicDecisionLabels(side, input.locale);
   const contextTechnicalBias = currentTechnicalBias(input.symbolContext?.technical_context.technical_bias);
   const contextBias = contextTechnicalBias != null
@@ -5799,6 +5865,11 @@ function buildStrategicDecisionContract(input: {
     : input.cards.find((card) => /tendencia d1|d1 trend/.test(normalizeUiText(card.label)))?.value;
   const risk = input.operationalDecision.risk || (input.locale === "en-US" ? "No read" : "Sem leitura");
   const reasons = (() => {
+    if (side === "no_data") {
+      return input.locale === "en-US"
+        ? ["Price, volume or Master Score are not complete", "Operational trade remains blocked", "Wait for the next confirmed snapshot"]
+        : ["Preço, volume ou Score Mestre ainda não estão completos", "Trade operacional permanece bloqueado", "Aguardar o próximo snapshot confirmado"];
+    }
     if (input.symbolContext) return input.operationalDecision.reasons;
     if (input.executionReady === false) {
       const pending = input.pendingComponents || [];
@@ -5806,11 +5877,6 @@ function buildStrategicDecisionContract(input: {
       return input.locale === "en-US"
         ? ["Technical context remains visible", `Execution blocked: ${listed || "required components"} not confirmed`]
         : ["Contexto técnico permanece visível", `Execução bloqueada: ${listed || "componentes obrigatórios"} ainda não confirmados.`];
-    }
-    if (side === "no_data") {
-      return input.locale === "en-US"
-        ? ["Price, volume or Master Score are not complete", "Operational trade remains blocked", "Wait for the next confirmed snapshot"]
-        : ["Preço, volume ou Score Mestre ainda não estão completos", "Trade operacional permanece bloqueado", "Aguardar o próximo snapshot confirmado"];
     }
     if (side === "buy") {
       return input.locale === "en-US"
@@ -5869,6 +5935,7 @@ function operationalDecisionFromStrategicContract(contract: StrategicDecisionCon
   return {
     action: contract.decisionNow,
     tone: contract.tone,
+    reasonCode: contract.side === "no_data" ? "NO_CORE_DATA" : null,
     confidence: contract.confidence,
     confidenceLabel: contract.confidenceLabel,
     bias: contract.bias,
@@ -7082,6 +7149,14 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [otpCode, setOtpCode] = useState("");
   const [pendingLoginToken, setPendingLoginToken] = useState("");
   const [loginError, setLoginError] = useState("");
+  // Login modal for the panel route. promptLogin() used to focus a login card
+  // that /panel/[slug] never renders (the ref was always null) and then fire a
+  // window.alert pointing at a "Acesso a plataforma" block that is not on this
+  // route — so a blocked visitor got "Faça login para publicar" with no way to
+  // actually log in.
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const loginDialogEmailRef = useRef<HTMLInputElement | null>(null);
+  const loginDialogReturnRef = useRef<HTMLElement | null>(null);
   const [loginNotice, setLoginNotice] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
   const [resendCooldownUntil, setResendCooldownUntil] = useState(0);
@@ -7098,6 +7173,10 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const [publicAiTools, setPublicAiTools] = useState<PublicAiToolsPayload | null>(null);
   const [publicAiCatalog, setPublicAiCatalog] = useState<PublicAiToolsPayload | null>(null);
   const [access, setAccess] = useState<UserAccess | null>(null);
+  const [accessState, setAccessState] = useState<AccessState>("UNINITIALIZED");
+  const accessGenerationRef = useRef(0);
+  const accessFlightRef = useRef(createSingleFlight<UserAccess>());
+  const accessCountersRef = useRef(createAccessCounters());
   const [chart, setChart] = useState<any>(null);
   const [publicChart, setPublicChart] = useState<any>(null);
   const [feed, setFeed] = useState<FeedPayload | null>(null);
@@ -7265,15 +7344,15 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       .filter((symbol) => symbol && !removed.has(symbol))));
   }, [canonicalUniverse, customWatchItems, removedWatchSymbols]);
   const [advancedMode, setAdvancedMode] = useState(false);
+  const [aiTimedOutKey, setAiTimedOutKey] = useState<string | null>(null);
+  const aiDeadlineRegistryRef = useRef(createDeadlineRegistry(AI_PENDING_CLIENT_TIMEOUT_MS));
+  const proPreferenceRef = useRef<boolean | null>(null);
+  const [modeBootstrapped, setModeBootstrapped] = useState(false);
   const normalizedAccessPlan = String(access?.plan || "").toLowerCase();
   const normalizedAccessStatus = String(access?.plan_status || "").toLowerCase();
-  const proModeAllowed = Boolean(
-    token &&
-      access &&
-      ["trial", "premium", "enterprise"].includes(normalizedAccessPlan) &&
-      !["expired", "inactive", "cancelled", "canceled", "trial_expired"].includes(normalizedAccessStatus),
-  );
+  const proModeAllowed = accessState === "ALLOWED";
   const proModeLocked = !proModeAllowed;
+
   // ponytail: Stock Flow is frontend-only local state today, so admin is a client email gate.
   // When Stock Flow gets a backend, replace with a server-enforced role/is_admin claim (a client
   // check secures nothing on its own).
@@ -7466,6 +7545,28 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const composerFileInputRef = useRef<HTMLInputElement | null>(null);
   const profileFileInputRef = useRef<HTMLInputElement | null>(null);
   const loginEmailInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!loginModalOpen) return undefined;
+    const timer = window.setTimeout(() => loginDialogEmailRef.current?.focus(), 40);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        closeLoginDialog();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [loginModalOpen]);
+
+  useEffect(() => {
+    // Authenticated: the dialog has done its job. The composer draft is left
+    // untouched on purpose — the user re-confirms the post themselves.
+    if (loginModalOpen && token) closeLoginDialog();
+  }, [loginModalOpen, token]);
   const pollCommentInputRef = useRef<HTMLTextAreaElement | null>(null);
   const composerCardRef = useRef<HTMLDivElement | null>(null);
   const leftRailRef = useRef<HTMLElement | null>(null);
@@ -7505,15 +7606,60 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
 
     let cancelled = false;
 
-    getAccess(COOKIE_SESSION_TOKEN)
-      .then((payload) => {
-        if (cancelled) return;
-        startTransition(() => {
-          setToken(COOKIE_SESSION_TOKEN);
-          setAccess(payload);
+    // Sole owner of entitlement. Single-flight per generation, stale-guarded,
+    // and deliberately independent of any market-data request.
+    const generation = accessGenerationRef.current + 1;
+    accessGenerationRef.current = generation;
+    const counters = accessCountersRef.current;
+    counters.logicalRequests += 1;
+    setAccessState("PENDING");
+
+    let attempt = 0;
+    const settle = (state: AccessState, payload: UserAccess | null) => {
+      if (cancelled) {
+        counters.aborts += 1;
+        return;
+      }
+      if (isStaleAccessResponse(generation, accessGenerationRef.current)) {
+        counters.staleIgnored += 1;
+        return;
+      }
+      if (state === "ALLOWED") counters.allowed += 1;
+      else if (state === "DENIED") counters.denied += 1;
+      startTransition(() => {
+        setAccessState(state);
+        setAccess(payload);
+        setToken(payload ? COOKIE_SESSION_TOKEN : "");
+      });
+    };
+
+    const runAccess = () => {
+      counters.networkRequests += 1;
+      accessFlightRef.current
+        .run(`${COOKIE_SESSION_TOKEN}:${generation}:${attempt}`, () => getAccess(COOKIE_SESSION_TOKEN))
+        .then((payload) => settle(classifyAccessOutcome({ kind: "response", payload }), payload))
+        .catch((error: unknown) => {
+          const status = (error as { status?: number } | null)?.status;
+          const state = classifyAccessOutcome({ kind: "error", status });
+          if (cancelled) {
+            counters.aborts += 1;
+            return;
+          }
+          if (isRetryableAccessState(state)) {
+            counters.transientError += 1;
+            attempt += 1;
+            if (attempt < ACCESS_BOOTSTRAP_MAX_ATTEMPTS) {
+              window.setTimeout(runAccess, ACCESS_BOOTSTRAP_RETRY_BASE_MS * attempt);
+              return;
+            }
+            // Retries exhausted: hold the preference, never claim a denial.
+            if (!isStaleAccessResponse(generation, accessGenerationRef.current)) setAccessState("TRANSIENT_ERROR");
+            return;
+          }
+          settle(state, null);
         });
-      })
-      .catch(() => undefined);
+    };
+    runAccess();
 
     return () => {
       cancelled = true;
@@ -7603,18 +7749,44 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     writeStorageValue(STRATEGIC_PANEL_STORAGE_KEY, strategicPanelOpen ? "open" : "closed");
   }, [strategicPanelHydrated, strategicPanelOpen]);
 
+  // Read-only capture. This effect must never write: the old persistence effect
+  // ran on the first commit with advancedMode still false and overwrote the
+  // saved "pro" preference before anything could act on it.
   useEffect(() => {
-    const storedMode = readStorageValue(WORKSPACE_MODE_STORAGE_KEY);
-    setAdvancedMode(storedMode === "pro");
+    if (proPreferenceRef.current === null) {
+      proPreferenceRef.current = readStorageValue(WORKSPACE_MODE_STORAGE_KEY) === "pro";
+    }
   }, []);
 
+  // Single authority for the bootstrap — see lib/access-bootstrap.ts.
   useEffect(() => {
-    writeStorageValue(WORKSPACE_MODE_STORAGE_KEY, advancedMode ? "pro" : "simple");
-  }, [advancedMode]);
+    const decision = resolveAdvancedMode({
+      state: accessState,
+      preferPro: proPreferenceRef.current === true,
+      current: advancedMode,
+    });
+    if (decision.advancedMode !== null && decision.advancedMode !== advancedMode) setAdvancedMode(decision.advancedMode);
+    if (decision.persist) writeStorageValue(WORKSPACE_MODE_STORAGE_KEY, decision.persist);
+    if (isTerminalAccessState(accessState) && !modeBootstrapped) setModeBootstrapped(true);
+  }, [accessState, advancedMode, modeBootstrapped]);
+
+  // Persist only real, post-bootstrap changes. Hydration, symbol switches and
+  // re-renders can no longer rewrite the preference.
+  // Test-only observability: lets the audit assert one logical access request
+  // per page instead of inferring it from timing.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    (window as unknown as Record<string, unknown>).__snbrAccess = {
+      state: accessState,
+      ...accessCountersRef.current,
+    };
+  }, [accessState]);
+
 
   useEffect(() => {
-    if (proModeLocked && advancedMode) setAdvancedMode(false);
-  }, [advancedMode, proModeLocked]);
+    if (!shouldPersistModeChange(modeBootstrapped)) return;
+    writeStorageValue(WORKSPACE_MODE_STORAGE_KEY, advancedMode ? "pro" : "simple");
+  }, [advancedMode, modeBootstrapped]);
 
   useEffect(() => {
     setPredictionSymbol(selectedTicker);
@@ -7957,56 +8129,62 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     setLoading(true);
     setError("");
 
-    Promise.all([
-      getAccess(token),
-      getWorkspace(token),
-      getWorkspaceTickerBundle(token, deferredTicker, chartInterval, appLocale, controller.signal),
-      getPublicMarketBundle(deferredTicker, chartInterval, appLocale, controller.signal, false, token),
-    ])
-      .then(([nextAccess, nextWorkspace, nextTickerBundle, publicBundle]) => {
+    // getAccess deliberately removed: entitlement has a single owner and must
+    // not wait on chart/news bundles that routinely lose the connection pool.
+    getWorkspace(token)
+      .then((nextWorkspace) => {
         if (cancelled) return;
+        const nextTabs = buildTabs(nextWorkspace.tabs);
+        setWorkspace(nextWorkspace);
+        setPushStatus(nextWorkspace.push as Record<string, unknown>);
+        setMediaStatus(nextWorkspace.media as Record<string, unknown>);
+        setTabs(nextTabs);
+        if (!focusedTab) {
+          setActiveTab((current) => (
+            TAB_ORDER.includes(current as (typeof TAB_ORDER)[number])
+              ? current
+              : nextTabs[0]?.id || "grafico"
+          ));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspace(null);
+      });
 
-        startTransition(() => {
-          const nextTabs = buildTabs(nextWorkspace.tabs);
-          setAccess(nextAccess);
-          setWorkspace(nextWorkspace);
-          setChart(nextTickerBundle.chart || null);
-          const publicBundleInsight = publicBundle?.insight || null;
-          setPublicInsight(
-            sameSymbol(publicBundleInsight?.symbol, deferredTicker)
-              ? { ...publicBundleInsight, market_metrics: publicBundle?.market_metrics || null, symbol: deferredTicker }
-              : null,
-          );
-          setPublicMarketMetrics(
-            publicBundle?.market_metrics && sameSymbol(publicBundle.market_metrics.canonical_symbol, deferredTicker)
-              ? publicBundle.market_metrics
-              : null,
-          );
-          setPublicChart(sameChartRequest(publicBundle?.chart, deferredTicker, chartInterval) ? { ...publicBundle.chart, ticker: deferredTicker } : null);
-          setPublicDataStatus(publicBundle?.data_status || {});
-          setPublicAiTools(publicBundle?.ai_tools || null);
-          setFeed(nextTickerBundle.feed || null);
-          setNews((current) => {
-            const nextNews = nextTickerBundle.news || null;
-            const currentCount = Number(current?.count ?? current?.items?.length ?? 0);
-            const nextCount = Number(nextNews?.count ?? nextNews?.items?.length ?? 0);
-            if (sameSymbol(current?.symbol, deferredTicker) && currentCount > 0 && nextCount <= 0) return current;
-            return nextNews;
-          });
-          setRoom(nextTickerBundle.room || null);
-          setQuote(nextTickerBundle.quote || null);
-          setPushStatus(nextWorkspace.push as Record<string, unknown>);
-          setMediaStatus(nextWorkspace.media as Record<string, unknown>);
-          setTabs(nextTabs);
-
-          if (!focusedTab) {
-            setActiveTab((current) => (
-              TAB_ORDER.includes(current as (typeof TAB_ORDER)[number])
-                ? current
-                : nextTabs[0]?.id || "grafico"
-            ));
-          }
+    getWorkspaceTickerBundle(token, deferredTicker, chartInterval, appLocale, controller.signal)
+      .then((nextTickerBundle) => {
+        if (cancelled) return;
+        setChart(nextTickerBundle.chart || null);
+        setFeed(nextTickerBundle.feed || null);
+        setNews((current) => {
+          const nextNews = nextTickerBundle.news || null;
+          const currentCount = Number(current?.count ?? current?.items?.length ?? 0);
+          const nextCount = Number(nextNews?.count ?? nextNews?.items?.length ?? 0);
+          if (sameSymbol(current?.symbol, deferredTicker) && currentCount > 0 && nextCount <= 0) return current;
+          return nextNews;
         });
+        setRoom(nextTickerBundle.room || null);
+      })
+      .catch(() => undefined);
+
+    getPublicMarketBundle(deferredTicker, chartInterval, appLocale, controller.signal, false, token)
+      .then((publicBundle) => {
+        if (cancelled) return;
+        const publicBundleInsight = publicBundle?.insight || null;
+        setPublicInsight(
+          sameSymbol(publicBundleInsight?.symbol, deferredTicker)
+            ? { ...publicBundleInsight, market_metrics: publicBundle?.market_metrics || null, symbol: deferredTicker }
+            : null,
+        );
+        setPublicMarketMetrics(
+          publicBundle?.market_metrics && sameSymbol(publicBundle.market_metrics.canonical_symbol, deferredTicker)
+            ? publicBundle.market_metrics
+            : null,
+        );
+        setPublicChart(sameChartRequest(publicBundle?.chart, deferredTicker, chartInterval) ? { ...publicBundle.chart, ticker: deferredTicker } : null);
+        setPublicDataStatus(publicBundle?.data_status || {});
+        setPublicAiTools(publicBundle?.ai_tools || null);
+        setQuote(publicBundle?.quote || null);
       })
       .catch((requestError: Error) => {
         if (!cancelled) setError(friendlyNetworkErrorMessage(requestError, appLocale));
@@ -8019,7 +8197,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       cancelled = true;
       controller.abort();
     };
-  }, [token, deferredTicker, chartInterval, appLocale, focusedTab, priorityPublicWatchKey, publicTickerTapeKey, publicWatchKey]);
+  }, [token, deferredTicker, chartInterval, appLocale, focusedTab]);
 
   useEffect(() => {
     if (!publicHydrationPending) return;
@@ -8732,14 +8910,19 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     const message = `Faça login para ${actionLabel}.`;
     setLoginError(message);
     setError(message);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-    leftRailRef.current?.scrollTo({ top: 0, left: 0, behavior: "smooth" });
-    window.setTimeout(() => {
-      loginEmailInputRef.current?.focus();
-    }, 180);
-    window.setTimeout(() => {
-      window.alert(`${message} Use o bloco "Acesso a plataforma" na coluna esquerda.`);
-    }, 0);
+    // Remember what opened the dialog so focus can be handed back on close.
+    if (typeof document !== "undefined") {
+      loginDialogReturnRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+    setLoginModalOpen(true);
+  }
+
+  function closeLoginDialog() {
+    setLoginModalOpen(false);
+    setLoginNotice("");
+    const target = loginDialogReturnRef.current;
+    loginDialogReturnRef.current = null;
+    window.setTimeout(() => target?.focus?.(), 0);
   }
 
   async function handleCreatePost() {
@@ -9598,10 +9781,18 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   const priceMovementValue = firstFiniteNumber(displayQuote?.change) ?? null;
   const priceMovementPercent = firstFiniteNumber(displayQuote?.change_pct) ?? null;
   const headerVolume = firstPositiveFiniteNumber(displayQuote?.volume);
-  const backendMissingFields = useMemo(
-    () => quoteMissingFieldsForUi(displayQuote),
-    [displayQuote],
-  );
+  const backendMissingFields = useMemo(() => {
+    const reported = quoteMissingFieldsForUi(displayQuote);
+    if (reported.length > 0) return reported;
+    // A panel that says "no data" without naming a single missing field explains
+    // nothing. When the backend returns no diagnostics at all (empty or timed-out
+    // payload) derive them from the canonical core fields so the contract
+    // "core_data=false => campos faltantes" always holds.
+    if (displayQuoteHasCoreData) return reported;
+    return CORE_QUOTE_FIELD_IDS.filter(
+      (field) => firstFiniteNumber((displayQuote as any)?.[field]) == null,
+    );
+  }, [displayQuote, displayQuoteHasCoreData]);
   const backendMissingFieldLabels = useMemo(
     () => backendMissingFields.map((field) => quoteMissingFieldLabel(field, appLocale)),
     [appLocale, backendMissingFields],
@@ -10497,9 +10688,49 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     ? "PREMIUM_LOCKED"
     : String(aiRequestState.status || "").toUpperCase();
   const normalizedAiRequestReason = String(aiRequestState.reason || "").toLowerCase();
+  // The backend can stay in LOADING/PENDING indefinitely (no signals published,
+  // hydration worker down). Without a client-side ceiling the panel sits on
+  // "Calculando análise…" forever — a loading state impersonating a reading.
+  // Past the ceiling we fall through to the honest terminal state the product
+  // already defines for an expired hydration.
+  const aiPendingKey = aiPanelKey(selectedTicker, currentAiKey ?? "");
+  const aiPendingIsLoadingStatus = isAiLoadingStatus(normalizedAiRequestStatus);
+  useEffect(() => {
+    const registry = aiDeadlineRegistryRef.current;
+    // Deliberately NOT cleared when the status leaves the loading family: the
+    // backend dips out of LOADING/PENDING/REFRESHING between polls, and
+    // clearing there let the next poll mint a fresh deadline — the very restart
+    // this registry exists to prevent.
+    if (!aiPendingIsLoadingStatus) return undefined;
+    // Created once per lens. Re-running this effect (status oscillation, a
+    // re-render, Strict Mode) returns the ORIGINAL deadline, so the ceiling can
+    // never be pushed out — which is what left `momentum` loading forever.
+    registry.ensure(aiPendingKey, Date.now());
+    const key = aiPendingKey;
+    const timer = setTimeout(() => setAiTimedOutKey(key), registry.remaining(key, Date.now()));
+    return () => clearTimeout(timer);
+  }, [aiPendingKey, aiPendingIsLoadingStatus]);
   const aiRequestLocked = normalizedAiRequestStatus === "PREMIUM_LOCKED";
-  const aiRequestPendingExpired = normalizedAiRequestStatus === "PENDING_EXPIRED" || (normalizedAiRequestStatus === "PENDING" && /expired|timeout|ttl/.test(normalizedAiRequestReason));
+  const aiRequestPendingExpired = normalizedAiRequestStatus === "PENDING_EXPIRED"
+    || (normalizedAiRequestStatus === "PENDING" && /expired|timeout|ttl/.test(normalizedAiRequestReason))
+    // Expiry is scoped to the exact lens that timed out, and only while it is
+    // still loading — a payload that lands late still wins.
+    // Scoped to the exact lens and only while it is genuinely still loading.
+    // No row-count guard here: currentAiRows carries catalog/history entries, so
+    // gating on it suppressed expiry for lenses that legitimately have history
+    // (smart-money, flow) and left them loading forever.
+    || (aiTimedOutKey === aiPendingKey && aiPendingIsLoadingStatus);
   const aiRequestUnsupported = normalizedAiRequestStatus === "UNSUPPORTED" || normalizedAiRequestReason.includes("unsupported");
+  // Test-only: lets the audit assert that no lens deadline outlives its panel.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    (window as unknown as Record<string, unknown>).__snbrAiPanel = {
+      key: aiPendingKey,
+      loading: aiPendingIsLoadingStatus,
+      expired: aiRequestPendingExpired,
+      liveDeadlines: aiDeadlineRegistryRef.current.size(),
+    };
+  }, [aiPendingKey, aiPendingIsLoadingStatus, aiRequestPendingExpired]);
   const aiRequestFailed = normalizedAiRequestStatus === "ERROR" || normalizedAiRequestStatus === "PROVIDER_ERROR";
   const aiRequestTerminal = aiRequestLocked || aiRequestPendingExpired || aiRequestUnsupported || aiRequestFailed || normalizedAiRequestStatus === "INSUFFICIENT_DATA";
   // Same precedence as aiToolFindingCounts below (own rows, else catalog), so the
@@ -10566,16 +10797,16 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
               : "Entre com seu e-mail e ative o acesso Trial ou Premium para usar estas lentes de IA."),
       };
     }
-    if (loading) {
-      return {
-        title: isUsLocale ? "AI loading." : "IA carregando.",
-        body: isUsLocale ? "Waiting for the current payload." : "Aguardando o payload atual.",
-      };
-    }
     if (aiRequestPendingExpired) {
       return {
         title: isUsLocale ? "Analysis did not finish in time." : "A análise não ficou pronta a tempo.",
         body: isUsLocale ? "The pending hydration expired; no current reading was published." : "A hidratação pendente expirou; nenhuma leitura atual foi publicada.",
+      };
+    }
+    if (loading) {
+      return {
+        title: isUsLocale ? "AI loading." : "IA carregando.",
+        body: isUsLocale ? "Waiting for the current payload." : "Aguardando o payload atual.",
       };
     }
     if (aiRequestUnsupported) {
@@ -10923,6 +11154,22 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
   ]);
   const hasStrategicCoreData = Boolean(displayQuoteHasCoreData && displayQuote?.price != null && headerVolume != null && headerVolume > 0);
   const rawOperationalDecision = useMemo(() => {
+    // Canonical core-data gate. Runs before any decision source is chosen so a
+    // truthy symbolOperationalView can never escape it.
+    const score = numericScoreFromDecisionCard(scoreDecisionCard(essentialDecisionCards));
+    const noDataReason = resolveNoDataReason({ hasCoreData: hasStrategicCoreData, score });
+
+    if (noDataReason != null) {
+      return buildOperationalDecision({
+        locale: appLocale,
+        cards: essentialDecisionCards,
+        conclusion: strategicConclusion,
+        chart: chartForOperationalLevels,
+        hasCoreData: false,
+        missingFields: backendMissingFieldLabels,
+      });
+    }
+
     if (symbolOperationalView) {
       return operationalDecisionFromSymbolContext(symbolOperationalView, appLocale);
     }
@@ -10934,7 +11181,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       cards: essentialDecisionCards,
       conclusion: strategicConclusion,
       chart: chartForOperationalLevels,
-      hasCoreData: hasStrategicCoreData,
+      hasCoreData: true,
       missingFields: backendMissingFieldLabels,
     });
   }, [
@@ -10978,8 +11225,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
       firstFiniteNumber(displayQuote?.price),
       firstFiniteNumber((displayQuote as any)?.vwap),
       appLocale,
+      strategicDecisionContract.side,
     ),
-    [appLocale, displayStats, operationalDecision.action, displayQuote],
+    [appLocale, displayStats, operationalDecision.action, displayQuote, strategicDecisionContract.side],
   );
   const decisionCardsForRender = useMemo(
     () => alignDecisionCardsWithStrategicContract(essentialDecisionCards, strategicDecisionContract, appLocale),
@@ -13574,6 +13822,75 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
           {renderCenterPanel()}
         </div>
         {renderReportDialog()}
+      {renderLoginDialog()}
+      </div>
+    );
+  }
+
+  function renderLoginDialog() {
+    if (!loginModalOpen) return null;
+    const busyLabel = isUsLocale ? "Working..." : "Processando...";
+    return (
+      <div className="snbr-modal-backdrop" onClick={() => closeLoginDialog()}>
+        <div
+          className="snbr-modal snbr-login-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="snbr-login-dialog-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <h3 id="snbr-login-dialog-title">{isUsLocale ? "Sign in" : "Entrar"}</h3>
+          <p>
+            {isUsLocale
+              ? "Enter your e-mail to receive a secure access code."
+              : "Informe seu e-mail para receber um código de acesso seguro."}
+          </p>
+          {pendingLoginToken ? (
+            <label className="snbr-profile-field">
+              <span>{isUsLocale ? "Access code" : "Código de acesso"}</span>
+              <input
+                className="snbr-input"
+                value={otpCode}
+                onChange={(event) => setOtpCode(event.target.value)}
+                placeholder={isUsLocale ? "Access code" : "Código de acesso"}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+              />
+            </label>
+          ) : (
+            <label className="snbr-profile-field">
+              <span>E-mail</span>
+              <input
+                className="snbr-input"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="E-mail"
+                type="email"
+                autoComplete="email"
+                ref={loginDialogEmailRef}
+              />
+            </label>
+          )}
+          {loginNotice ? <div className="snbr-empty">{loginNotice}</div> : null}
+          {loginError ? <div className="snbr-empty" role="alert">{loginError}</div> : null}
+          <div className="snbr-modal-actions">
+            <button
+              className="snbr-button primary"
+              type="button"
+              disabled={loginBusy || (!pendingLoginToken && resendCooldownUntil > Date.now())}
+              onClick={() => void (pendingLoginToken ? handleVerifyOtp() : handleRequestCode())}
+            >
+              {loginBusy
+                ? busyLabel
+                : pendingLoginToken
+                  ? (isUsLocale ? "Sign in" : "Entrar")
+                  : (isUsLocale ? "Send code" : "Enviar código")}
+            </button>
+            <button className="snbr-button secondary" type="button" onClick={() => closeLoginDialog()}>
+              {isUsLocale ? "Cancel" : "Cancelar"}
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -13582,6 +13899,7 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
     <div className={cx("snbr-app", darkMode && "theme-dark")}>
       <a className="snbr-skip-link" href="#snbr-main-content">{isUsLocale ? "Skip to main content" : "Pular para o conteúdo principal"}</a>
       {renderReportDialog()}
+      {renderLoginDialog()}
       <WorkspaceLeftRail
           locale={appLocale}
           railRef={leftRailRef}
@@ -13611,6 +13929,9 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
         />
 
       <main className="snbr-symbol-page" id="snbr-main-content">
+        {loginError === "Sua sessão foi encerrada porque houve login em outro dispositivo." ? (
+          <div className="snbr-empty" role="status">{loginError}</div>
+        ) : null}
         <div className="snbr-sticky-top">
         <nav className="snbr-symbol-tabs snbr-top-tabs" aria-label={isUsLocale ? "Symbol tabs" : "Tabs do símbolo"} role="tablist">
           <div className="snbr-tab-list">
@@ -13848,8 +14169,11 @@ export function WorkspaceShell({ focusedTab, initialTicker }: Props) {
             <section
               className="snbr-decision-panel"
               aria-label={isUsLocale ? "Strategic Analysis Panel" : "Painel de Análise Estratégica"}
-              data-core-data={displayQuoteHasCoreData ? "true" : "false"}
+              data-core-data={hasStrategicCoreData ? "true" : "false"}
               data-missing-fields={backendMissingFields.join(",")}
+              data-master-score-value={effectiveAiScore ?? ""}
+              data-rsi-value={panelRsiValue ?? ""}
+              data-bias-value={strategicDecisionContract.side}
               data-decision-now={operationalDecision.action}
               data-decision-side={strategicDecisionContract.side}
               data-selected-symbol={selectedTicker}

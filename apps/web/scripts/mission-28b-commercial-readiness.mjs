@@ -52,6 +52,28 @@ function assertNotIncludes(source, needle, label) {
   }
 }
 
+function countOccurrences(source, needle) {
+  let total = 0;
+  let index = source.indexOf(needle);
+  while (index !== -1) {
+    total += 1;
+    index = source.indexOf(needle, index + needle.length);
+  }
+  return total;
+}
+
+// "Present" is a weaker claim than "present exactly once". Duplicate panes and duplicate
+// colour authorities are precisely the regressions this mission has to catch, and
+// includes() cannot see them.
+function assertCountEquals(source, needle, expected, label) {
+  trackCheck(source, needle, label, `count=${expected}`);
+
+  const actual = countOccurrences(source, needle);
+  if (actual !== expected) {
+    throw new Error(`Mission 28B regression: ${label} (expected ${expected}, found ${actual})`);
+  }
+}
+
 const workspaceShell = read("apps/web/components/workspace-shell.tsx");
 const tickerChart = read("apps/web/components/ticker-chart.tsx");
 const workspaceSections = read("apps/web/components/workspace-sections.tsx");
@@ -88,7 +110,33 @@ assertIncludes(workspaceShell, "resolveCanonicalChartLevelZones", "support/resis
 assertIncludes(workspaceShell, "supportLevel={chartSupportResistanceLevels.support}", "support overlay consumes canonical support value");
 assertIncludes(workspaceShell, "resistanceLevel={chartSupportResistanceLevels.resistance}", "resistance overlay consumes canonical resistance value");
 assertNotIncludes(tickerChart, '<div className="snbr-chart-top-overlays"', "RSI/support/resistance badges are not rendered over chart");
-assertNotIncludes(tickerChart, "<LevelLinesPane", "verified support/resistance pane is not rendered");
+// --- MISSION28B_CONTRACT_MIGRATION -------------------------------------------------
+// Replaced: assertNotIncludes(tickerChart, "<LevelLinesPane", "verified support/resistance
+// pane is not rendered").
+//
+// That assertion and the H2 overlay contract cannot both hold: H2 requires the verified
+// level pane to render with real support/resistance, and the old check required it to be
+// absent. The old one is the obsolete side -- note that the two assertions immediately
+// above already require supportLevel/resistanceLevel to be wired into the chart, so this
+// mission never objected to the levels existing, only to where they were drawn. The
+// negative check is therefore replaced, not deleted, by a stronger positive contract that
+// pins down identity, uniqueness, gating and provenance.
+assertIncludes(tickerChart, "function LevelLinesPane({", "verified level pane component exists");
+assertIncludes(tickerChart, "<LevelLinesPane", "verified level pane is actually rendered");
+assertCountEquals(tickerChart, "<LevelLinesPane", 1, "verified level pane is mounted exactly once");
+assertCountEquals(tickerChart, 'className="snbr-chart-level-lines"', 1, "exactly one level pane element exists (no duplicate pane)");
+assertIncludes(tickerChart, "{showLevelPane ? (", "level pane render is gated, never unconditional");
+assertIncludes(tickerChart, "const showLevelPane = hasPaneScale && levelOverlays.length > 0", "level pane stays hidden when there is no real price scale or no overlay");
+assertIncludes(tickerChart, "closes={paneCloses}", "level pane plots real closes rather than literals");
+assertIncludes(tickerChart, "overlays={levelOverlays}", "level pane consumes derived overlays rather than literals");
+assertIncludes(tickerChart, 'data-level-symbol={levelMetadata?.symbol || ""}', "level pane publishes the symbol it belongs to");
+assertIncludes(tickerChart, 'data-level-timeframe={levelMetadata?.timeframe || ""}', "level pane publishes its timeframe");
+assertIncludes(tickerChart, "const support = firstFiniteNumber(input.supportLevel)", "support overlay requires a finite number");
+assertIncludes(tickerChart, "const resistance = firstFiniteNumber(input.resistanceLevel)", "resistance overlay requires a finite number");
+assertIncludes(tickerChart, 'const VWAP_COLOR = "#f59e0b"', "VWAP keeps the canonical colour");
+assertCountEquals(tickerChart, '"#f59e0b"', 1, "VWAP colour has exactly one authority in the chart component");
+assertIncludes(tickerChart, '"volume weighted average price.vwap.linewidth": 4', "VWAP keeps linewidth 4 on the long study id");
+assertIncludes(tickerChart, '"vwap.vwap.linewidth": 4', "VWAP keeps linewidth 4 on the short study id");
 assertNotIncludes(workspaceShell, '{ key: "show_support"', "support toggle is not rendered");
 assertNotIncludes(workspaceShell, '{ key: "show_resistance"', "resistance toggle is not rendered");
 assertNotIncludes(workspaceShell, '<div className="snbr-timeframes">', "duplicate timeframe row below RSI is not rendered");

@@ -1,4 +1,8 @@
+import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from app.api import routes_public_market_live
@@ -9,6 +13,21 @@ from app.system import chart_warmup, news_warmup, symbol_hydration
 
 
 class OnDemandHydrationTests(unittest.TestCase):
+    def test_persisted_cleanup_invalidates_loaded_hydration_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache_path = Path(directory) / "symbol_analysis.json"
+            cache_path.write_text(json.dumps({"items": {"AVGO:1D": {"status": "READY"}}}), encoding="utf-8")
+            with patch.object(symbol_hydration, "_cache_path", return_value=cache_path), patch.object(
+                symbol_hydration, "_CACHE", {}
+            ), patch.object(symbol_hydration, "_LOADED", False), patch.object(
+                symbol_hydration, "_CACHE_MTIME_NS", -1
+            ):
+                self.assertEqual(symbol_hydration.get_symbol_analysis("AVGO")["status"], "READY")
+                previous_mtime = cache_path.stat().st_mtime_ns
+                cache_path.write_text('{"items":{}}', encoding="utf-8")
+                os.utime(cache_path, ns=(previous_mtime + 1_000_000, previous_mtime + 1_000_000))
+                self.assertEqual(symbol_hydration.get_symbol_analysis("AVGO"), {})
+
     def test_stale_news_cache_is_refetched_by_request_worker(self):
         with patch.object(news_warmup, "get_cached_symbol_news", return_value=[{"ticker": "ASAI3"}]), patch.object(
             news_warmup, "get_news_cache_info", return_value={"age_seconds": NEWS_CACHE_TTL_SECONDS}

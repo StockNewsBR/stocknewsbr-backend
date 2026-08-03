@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import median
+from threading import RLock
 
 from app.engine.indicators.vector_indicator_engine import RSI_PERIOD, compute_latest_rsi
 from app.market.market_data_loader import (
@@ -43,15 +44,68 @@ INDEX_SPARK_INTERVAL = "3M"
 INDEX_SPARK_MAX_POINTS = 60
 
 
+_JSON_CACHE_LOCK = RLock()
+# path -> ((mtime_ns, size), parsed). Bounded by the number of distinct cache files the
+# service reads (two), so this never grows with traffic.
+_JSON_CACHE: dict[str, tuple[tuple[int, int], dict]] = {}
+
+
+def _reset_json_cache() -> None:
+    """Drop every memoised parse. Exists so tests are not stuck with process state."""
+    with _JSON_CACHE_LOCK:
+        _JSON_CACHE.clear()
+
+
 def _read_json_cache(path: Path) -> dict:
+    """Parse a cache file, reusing the previous parse while the file has not moved.
+
+    This used to json.loads() the whole file on every call. load_public_chart_rows()
+    invokes _direct_cached_chart_data() once per alias, so a symbol with ten aliases paid
+    ten full parses of an 18 MB file -- a cost linear in alias count, and the reason
+    BTCUSD (10 aliases, ~1.44 s) ran ~2.5x slower than PETR4 (4 aliases, ~0.57 s).
+
+    The returned dict is shared, not copied: copying 18 MB per call would reintroduce the
+    very cost being removed. Consumers must copy what they hand out -- both call sites do
+    (`dict(payload)` for quotes, `[dict(row) for row in rows]` for chart rows).
+    """
+    key = str(path)
+    try:
+        stat = path.stat()
+        signature = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        with _JSON_CACHE_LOCK:
+            _JSON_CACHE.pop(key, None)
+        return {}
+
+    with _JSON_CACHE_LOCK:
+        memoised = _JSON_CACHE.get(key)
+        if memoised is not None and memoised[0] == signature:
+            return memoised[1]
+
+    parsed: dict | None = None
     for attempt in range(3):
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            parsed = loaded if isinstance(loaded, dict) else {}
+            break
         except PermissionError:
             time.sleep(0.025 * (attempt + 1))
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return {}
-    return {}
+    if parsed is None:
+        return {}
+
+    with _JSON_CACHE_LOCK:
+        # Re-stat before memoising: an os.replace() that landed while this parse was in
+        # flight must not be cached under the pre-swap signature, or the next caller would
+        # be served content that is already superseded.
+        try:
+            after = path.stat()
+        except OSError:
+            return parsed
+        if (after.st_mtime_ns, after.st_size) == signature:
+            _JSON_CACHE[key] = (signature, parsed)
+    return parsed
 
 
 def _finite_positive(value) -> float | None:
@@ -633,7 +687,11 @@ def _validated_cache_symbols(symbols: list[str]) -> list[str]:
 
 
 def _direct_cached_chart_data(alias: str, interval: str, allow_stale: bool) -> list[dict]:
-    raw_cache = _read_json_cache(_CHART_CACHE_FILE)
+    return _direct_cached_chart_data_from(_CHART_CACHE_FILE, alias, interval, allow_stale)
+
+
+def _direct_cached_chart_data_from(cache_path: Path, alias: str, interval: str, allow_stale: bool) -> list[dict]:
+    raw_cache = _read_json_cache(cache_path)
     charts = raw_cache.get("charts") if isinstance(raw_cache, dict) else None
     if not isinstance(charts, dict):
         return []
@@ -644,7 +702,10 @@ def _direct_cached_chart_data(alias: str, interval: str, allow_stale: bool) -> l
             continue
         rows = entry.get("rows")
         if isinstance(rows, list) and rows:
-            return rows
+            # Copied out of the memoised structure: _read_json_cache now shares its parse
+            # between callers, so handing back the live list would let one consumer's
+            # mutation corrupt every later read.
+            return [dict(row) if isinstance(row, dict) else row for row in rows]
     return []
 
 

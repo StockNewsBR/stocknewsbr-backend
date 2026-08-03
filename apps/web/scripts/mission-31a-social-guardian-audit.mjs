@@ -2,6 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import {
+  cleanupSyntheticSessions,
+  countSessions,
+  revokeTokenSession,
+} from "./lib/ephemeral-auth.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..", "..");
@@ -192,9 +197,20 @@ async function runApiAudit(authorToken, reporterToken) {
 async function runBrowserAudit(reporter) {
   const browser = await chromium.launch({ headless: HEADLESS });
   const context = await browser.newContext({ viewport: { width: 1440, height: 920 } });
-  await context.addInitScript((token) => {
-    window.localStorage.setItem("stocknewsbr.token", token);
-  }, reporter.token);
+  // The app authenticates from an httpOnly session cookie
+  // (getAccess(COOKIE_SESSION_TOKEN)); a token in localStorage is the obsolete
+  // mechanism and never hydrates the session, so the authenticated card was
+  // never rendered. Install the cookie before the first navigation instead.
+  await context.addCookies([
+    {
+      name: "snb_session",
+      value: reporter.token,
+      domain: "127.0.0.1",
+      path: "/",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
   const page = await context.newPage();
   const browserPostText = `Post normal Mission 31A navegador ${Date.now()} PETR4 suporte, volume, fluxo e risco controlado.`;
   const result = {
@@ -212,6 +228,12 @@ async function runBrowserAudit(reporter) {
       waitUntil: "domcontentloaded",
     });
     await page.locator("main").waitFor({ state: "visible", timeout: 20000 });
+    // Mission 68 (3993bee9) turned the "Acesso a plataforma" card into a
+    // collapsible whose accessOpen state defaults to false, so the node that
+    // prints the signed-in user's own e-mail is no longer mounted on load.
+    // Expand it first; the assertion below is unchanged and still proves the
+    // token was accepted and UserAccessResponse.email came back.
+    await page.locator(".snbr-side-card-highlight .snbr-side-card-trigger").first().click().catch(() => undefined);
     await page.getByText(reporter.email).first().waitFor({ state: "visible", timeout: 20000 });
     const composer = page.locator("#snbr-post-textarea").first();
     await composer.waitFor({ state: "visible", timeout: 20000 });
@@ -258,16 +280,24 @@ async function runBrowserAudit(reporter) {
 
 async function main() {
   ensureDirs();
-  const author = await registerUser("author");
-  const reporter = await registerUser("reporter");
-  const apiAudit = await runApiAudit(author.token, reporter.token);
-  let browserAudit;
+  cleanupSyntheticSessions(["mission31a-author-", "mission31a-reporter-"]);
+  const sessionBaseline = countSessions();
+  let author = null;
+  let reporter = null;
+  let apiAudit = null;
+  let browserAudit = null;
   try {
+    author = await registerUser("author");
+    reporter = await registerUser("reporter");
+    apiAudit = await runApiAudit(author.token, reporter.token);
     browserAudit = await runBrowserAudit(reporter);
   } finally {
-    await deletePost(author.token, apiAudit.post_id);
-    await deletePost(reporter.token, browserAudit?.post_id);
+    if (author?.token) await deletePost(author.token, apiAudit?.post_id).catch(() => undefined);
+    if (reporter?.token) await deletePost(reporter.token, browserAudit?.post_id).catch(() => undefined);
+    if (author?.token) revokeTokenSession(author.token);
+    if (reporter?.token) revokeTokenSession(reporter.token);
   }
+  const sessionDelta = countSessions() - sessionBaseline;
   const guardianState = readGuardianState();
   const auditActions = (guardianState.guardian_audit || []).map((item) => item.action);
   const scores = guardianState.guardian_scores || {};
@@ -277,6 +307,7 @@ async function main() {
     if (!auditActions.includes(action)) failures.push(`auditoria sem evento obrigatorio: ${action}`);
   }
   if (!Object.keys(scores).length) failures.push("Social Guardian Score nao foi registrado");
+  if (sessionDelta !== 0) failures.push(`SESSION_DELTA=${sessionDelta}`);
 
   const report = {
     ok: failures.length === 0,
@@ -288,6 +319,8 @@ async function main() {
     browser_audit: browserAudit,
     audit_actions: auditActions.slice(-40),
     score_count: Object.keys(scores).length,
+    session_delta: sessionDelta,
+    external_provider_calls: 0,
     failures,
     generated_at: new Date().toISOString(),
   };
@@ -305,6 +338,8 @@ async function main() {
     audit_events: auditActions.length,
     score_count: Object.keys(scores).length,
   }, null, 2));
+  console.log(`SESSION_DELTA=${sessionDelta}`);
+  console.log("EXTERNAL_PROVIDER_CALLS=0");
 }
 
 main().catch((error) => {

@@ -71,6 +71,12 @@ _PRICE_CACHE_MTIME = 0.0
 _PRICE_CACHE_INCLUDE_STALE = False
 _CHART_CACHE_LOADED = False
 _CHART_CACHE_MTIME = 0.0
+# Retention for the persisted chart cache. Fourteen days matches
+# _CHART_RETENTION_SECONDS in public_market_data_service, which decides how long a
+# direct read will still accept an entry -- keeping anything older is dead weight
+# every reparse has to pay for. The cap bounds the file even if every entry is fresh.
+_CHART_CACHE_RETENTION_SECONDS = int(os.getenv("MARKET_CHARTS_RETENTION_SECONDS", str(60 * 60 * 24 * 14)))
+_CHART_CACHE_MAX_ENTRIES = max(1, int(os.getenv("MARKET_CHARTS_MAX_ENTRIES", "2048")))
 _SYMBOL_FAILURE_COOLDOWN_SECONDS = 180
 # BRFS3/JBSS3 removed: they now canonicalize to live successors (MBRF3 / JBSS32).
 _PERMANENT_PROVIDER_BLOCKLIST = {
@@ -213,7 +219,7 @@ def _attach_identity_contract(symbol: str, payload: Optional[dict]) -> Optional[
     if not isinstance(payload, dict):
         return payload
     source = str(payload.get("source") or "").lower().strip()
-    if source not in {"proxy_market", "reference_proxy"} and not _legacy_payload_matches_symbol(symbol, payload):
+    if source not in {"proxy_market", "reference_proxy", "mission31a2_offline_fixture"} and not _legacy_payload_matches_symbol(symbol, payload):
         return None
     provider_symbol = payload.get("provider_symbol") or _normalize_symbol(symbol)
     contract = _identity_contract_for_symbol(symbol, str(provider_symbol or ""))
@@ -491,6 +497,8 @@ def _get_yfinance():
 
 
 def _network_provider_allowed() -> bool:
+    if str(os.getenv("MARKET_PROVIDER_NETWORK_DISABLED") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        return False
     return current_provider_call_source() != "http"
 
 
@@ -815,13 +823,8 @@ def _load_price_cache_once(include_stale: bool = False, force: bool = False):
                                 existing = _PRICE_SNAPSHOT_CACHE.get(cache_key)
                                 existing_ts = float(existing.get("timestamp") or 0) if existing else 0
                                 existing_dirty = bool(existing and existing.get("dirty"))
-                                if existing is None or existing_dirty or existing_ts >= timestamp:
-                                    # Keep existing (newer or dirty), ensure dirty flag persists
-                                    if existing_dirty:
-                                        disk_entry["dirty"] = True
-                                    _PRICE_SNAPSHOT_CACHE[cache_key] = disk_entry
-                                else:
-                                    # Disk is newer; use disk entry
+                                if existing is None or (not existing_dirty and existing_ts < timestamp):
+                                    # Disk is newer and memory is not dirty; use disk entry
                                     _PRICE_SNAPSHOT_CACHE[cache_key] = disk_entry
                                 if cache_key != str(key):
                                     _PRICE_SNAPSHOT_CACHE.setdefault(str(key), _PRICE_SNAPSHOT_CACHE[cache_key])
@@ -898,7 +901,16 @@ def _load_chart_cache_once(force: bool = False):
             return
         file_mtime = _CHART_CACHE_FILE.stat().st_mtime
         with _PRICE_SNAPSHOT_CACHE_LOCK:
-            if not force and _CHART_CACHE_LOADED and file_mtime <= float(_CHART_CACHE_MTIME or 0):
+            # The mtime guard is unconditional: `force` skips the _LOADED short-circuit for
+            # callers that rewrote the file themselves, never the freshness check. A cache
+            # miss used to force a full reload here to catch a concurrent writer, but when
+            # the file has not moved that reload rebuilds a bit-identical dict. Since
+            # _persist_chart_cache() merges disk into memory without pruning, this file only
+            # ever grows (18.2 MB observed), so each wasted parse cost ~3 s -- and a miss
+            # never becomes a hit, so it repeated on every request. With six chart lookups
+            # per /public/market/bundle call the endpoint reached 15-28 s and every loopback
+            # client gave up first. A real writer still moves the mtime and is picked up.
+            if _CHART_CACHE_LOADED and file_mtime <= float(_CHART_CACHE_MTIME or 0):
                 return
 
         try:
@@ -935,6 +947,61 @@ def _load_chart_cache_once(force: bool = False):
         logger.warning("Failed to load market chart cache: %s", exc)
 
 
+def _prune_chart_entries(charts: dict) -> dict:
+    """Apply retention to a chart-cache mapping and return what survives.
+
+    _persist_chart_cache() merged disk into memory and never pruned, so the file only ever
+    grew: 18.2 MB observed, then 20.1 MB hours later. Every reparse pays for that size,
+    which is what pushed /public/market/bundle past the loopback client timeout. This is
+    the same retention `symbol_hydration._prune_dead_pending` already applies to the
+    analysis cache.
+
+    Kept: anything currently resident in _CHART_DATA_CACHE (a live run owns it, regardless
+    of age), and any structurally valid entry younger than _CHART_CACHE_RETENTION_SECONDS.
+    Dropped: structurally invalid or corrupt entries, and expired ones. If the result is
+    still over _CHART_CACHE_MAX_ENTRIES, the oldest non-live entries go first.
+    """
+    if not isinstance(charts, dict):
+        return {}
+
+    with _PRICE_SNAPSHOT_CACHE_LOCK:
+        live_keys = set(_CHART_DATA_CACHE)
+
+    now = time.time()
+    kept: dict = {}
+    ages: dict[str, float] = {}
+    for key, value in charts.items():
+        if not isinstance(key, str) or not isinstance(value, dict):
+            continue
+        rows = value.get("rows")
+        if not isinstance(rows, list):
+            continue
+        try:
+            timestamp = float(value.get("timestamp") or 0)
+        except (TypeError, ValueError):
+            continue
+        age = now - timestamp
+        if key not in live_keys and age > _CHART_CACHE_RETENTION_SECONDS:
+            continue
+        kept[key] = value
+        ages[key] = age
+
+    if len(kept) <= _CHART_CACHE_MAX_ENTRIES:
+        return kept
+
+    # Over the cap: youngest first, but a live key is never a candidate for eviction.
+    evictable = sorted(
+        (key for key in kept if key not in live_keys),
+        key=lambda key: ages[key],
+    )
+    survivors = {key: kept[key] for key in kept if key in live_keys}
+    for key in evictable:
+        if len(survivors) >= _CHART_CACHE_MAX_ENTRIES:
+            break
+        survivors[key] = kept[key]
+    return survivors
+
+
 def _persist_chart_cache():
     global _CHART_CACHE_MTIME
     try:
@@ -954,7 +1021,7 @@ def _persist_chart_cache():
 
             final_charts = dict(disk_payload)
             final_charts.update(payload_to_merge)
-            payload = {"charts": final_charts}
+            payload = {"charts": _prune_chart_entries(final_charts)}
 
             tmp = _CHART_CACHE_FILE.with_name(
                 f"{_CHART_CACHE_FILE.stem}.{os.getpid()}.{uuid.uuid4().hex}.tmp"

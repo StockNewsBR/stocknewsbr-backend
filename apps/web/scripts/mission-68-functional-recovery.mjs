@@ -14,6 +14,7 @@ const rails = read("components/workspace-rails.tsx");
 const chart = read("components/ticker-chart.tsx");
 const sections = read("components/workspace-sections.tsx");
 const api = read("lib/api.ts");
+const accessAuthority = read("lib/access-authority.ts");
 const types = read("lib/types.ts");
 const symbolContextSections = shell.slice(
   shell.indexOf("function symbolContextStrategicSections"),
@@ -182,8 +183,20 @@ expect(
     && /getPublicMarketBundle\(deferredTicker, chartInterval, appLocale, controller\.signal, false, token\)/.test(shell),
 );
 expect(
+  // The plan/status rule moved out of the shell into the canonical entitlement
+  // authority (lib/access-authority.ts) when access got a single owner. The
+  // property is unchanged and now stricter, so this asserts it at BOTH ends:
+  // the authority still gates on the plan list, and the shell still derives
+  // proModeAllowed only from that authority's ALLOWED state — never from
+  // localStorage, which can express a preference but can never grant Pro.
   "anonymous and non-premium users cannot enter Pro mode",
-  /const proModeAllowed = Boolean\([\s\S]{0,360}\["trial", "premium", "enterprise"\]\.includes\(normalizedAccessPlan\)/.test(shell)
+  /export const PRO_PLANS = \["trial", "premium", "enterprise"\]/.test(accessAuthority)
+    && /export function isProEntitled\(/.test(accessAuthority)
+    && /PRO_PLANS as readonly string\[\]\)\.includes\(plan\)/.test(accessAuthority)
+    && /DEAD_PLAN_STATUSES as readonly string\[\]\)\.includes\(status\)/.test(accessAuthority)
+    && /return isProEntitled\(outcome\.payload\) \? "ALLOWED" : "DENIED"/.test(accessAuthority)
+    && /case "DENIED":\s*\n\s*return \{ advancedMode: false/.test(accessAuthority)
+    && /const proModeAllowed = accessState === "ALLOWED";/.test(shell)
     && /const proModeLocked = !proModeAllowed/.test(shell),
 );
 expect(

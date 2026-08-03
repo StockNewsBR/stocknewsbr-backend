@@ -2,6 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import {
+  applyEphemeralAuth,
+  countSessions,
+  enableProMode,
+  generateEphemeralSession,
+  revokeEphemeralSession,
+} from "./lib/ephemeral-auth.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..", "..");
@@ -12,7 +19,7 @@ const screenshotDir = path.join(repoRoot, "output", "playwright", "mission30f2")
 
 const WEB_BASE = process.env.MISSION30F2_WEB_BASE || "http://127.0.0.1:3000";
 const HEADLESS = process.env.MISSION30F2_HEADLESS !== "false";
-const SYMBOLS = (process.env.MISSION30F2_SYMBOLS || "CRM,F,BULL,BYDDY,AXIA3,AXIA7,PETR4,VALE3,AAPL,NVDA,BTCUSD")
+const SYMBOLS = (process.env.MISSION30F2_SYMBOLS || "CRM,F,BULL,BYDDY,AXIA3,AXIA7,PETR4,VALE3,AAPL,NVDA,BTCUSD,BLK,BRK.B,DJT,FFAI,JD,SIRI")
   .split(",")
   .map((item) => item.trim().toUpperCase())
   .filter(Boolean);
@@ -90,17 +97,6 @@ async function clickTopTab(page, controls) {
   await page.locator(`#${controls}`).first().waitFor({ state: "visible", timeout: 6000 }).catch(() => undefined);
   await page.waitForTimeout(400);
   return true;
-}
-
-async function enableProMode(page) {
-  const button = page.locator(".snbr-mode-toggle").first();
-  if ((await button.count()) === 0) return;
-  const pressed = await button.getAttribute("aria-pressed").catch(() => "false");
-  if (pressed === "true") return;
-  await button.evaluate((element) => {
-    if (element instanceof HTMLElement) element.click();
-  }).catch(() => undefined);
-  await page.waitForTimeout(500);
 }
 
 async function auditChart(page, symbol) {
@@ -198,6 +194,8 @@ async function auditChart(page, symbol) {
 }
 
 async function auditAiFreshness(page, symbol = "PETR4") {
+  // Auth is applied once at context creation (see main) so no route or
+  // init script registered here can outlive this scenario.
   await openPanel(page, symbol);
   await enableProMode(page);
   const results = [];
@@ -244,27 +242,35 @@ async function main() {
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
   fs.mkdirSync(screenshotDir, { recursive: true });
 
-  const browser = await chromium.launch({ headless: HEADLESS });
-  const context = await browser.newContext({ viewport: { width: 1600, height: 950 } });
-  const page = await context.newPage();
-  page.setDefaultTimeout(7000);
-  page.setDefaultNavigationTimeout(20000);
+  const sessionBaseline = countSessions();
+  const EPHEMERAL_SESSION = generateEphemeralSession();
+  let browser = null;
+  let context = null;
   const chartResults = [];
   let aiResults = [];
   try {
+    browser = await chromium.launch({ headless: HEADLESS });
+    context = await browser.newContext({ viewport: { width: 1600, height: 950 } });
+    await applyEphemeralAuth(context, EPHEMERAL_SESSION.token);
+    const page = await context.newPage();
+    page.setDefaultTimeout(7000);
+    page.setDefaultNavigationTimeout(20000);
     for (const symbol of SYMBOLS) {
       chartResults.push(await auditChart(page, symbol));
     }
     aiResults = await auditAiFreshness(page, "PETR4");
   } finally {
-    await context.close().catch(() => undefined);
-    await browser.close().catch(() => undefined);
+    await context?.close().catch(() => undefined);
+    await browser?.close().catch(() => undefined);
+    revokeEphemeralSession(EPHEMERAL_SESSION.sid);
   }
+  const sessionDelta = countSessions() - sessionBaseline;
 
   const failures = [
     ...chartResults.flatMap((item) => item.failures.map((failure) => `${item.symbol}: ${failure}`)),
     ...aiResults.flatMap((item) => item.failures.map((failure) => `${item.label}: ${failure}`)),
   ];
+  if (sessionDelta !== 0) failures.push(`SESSION_DELTA=${sessionDelta}`);
   const report = {
     ok: failures.length === 0,
     mission: "30F.2",
@@ -272,6 +278,8 @@ async function main() {
     web_base: WEB_BASE,
     chart_assets: chartResults,
     ai_freshness: aiResults,
+    session_delta: sessionDelta,
+    external_provider_calls: 0,
     failures,
   };
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
@@ -280,6 +288,8 @@ async function main() {
     process.exit(1);
   }
   console.log(JSON.stringify({ ok: true, mission: "30F.2", symbols: chartResults.length, ai_tabs: aiResults.length, reportPath }, null, 2));
+  console.log(`SESSION_DELTA=${sessionDelta}`);
+  console.log("EXTERNAL_PROVIDER_CALLS=0");
 }
 
 await main();

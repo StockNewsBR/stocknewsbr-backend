@@ -150,6 +150,7 @@ function buildLevelOverlays(
 
 const LEVEL_PANE_HEIGHT = 120;
 const LEVEL_PANE_PAD = { top: 12, bottom: 12, left: 8, right: 10 };
+const VWAP_COLOR = "#f59e0b";
 
 function LevelLinesPane({
   closes,
@@ -350,9 +351,9 @@ export function TickerChart({
       studies: buildStudies(showVwap, showMacd, showSupertrend),
       studies_overrides: JSON.stringify({
         // tv.js embed override keys use the lowercase study title + plot id.
-        "volume weighted average price.vwap.color": "#f97316",
+        "volume weighted average price.vwap.color": VWAP_COLOR,
         "volume weighted average price.vwap.linewidth": 4,
-        "vwap.vwap.color": "#f97316",
+        "vwap.vwap.color": VWAP_COLOR,
         "vwap.vwap.linewidth": 4,
       }),
       // No width/height here on purpose: autosize (set above) is what makes the
@@ -402,7 +403,7 @@ export function TickerChart({
       data-resistance-anchor-mode={resistanceOverlayStatus}
       data-support-overlay-status={supportOverlayStatus}
       data-resistance-overlay-status={resistanceOverlayStatus}
-      data-vwap-color="#f97316"
+      data-vwap-color={VWAP_COLOR}
       data-vwap-width="4"
       data-level-symbol={levelMetadata?.symbol || ""}
       data-level-timeframe={levelMetadata?.timeframe || ""}
@@ -419,6 +420,14 @@ export function TickerChart({
           </div>
         ) : null}
       </div>
+      {showLevelPane ? (
+        <LevelLinesPane
+          closes={paneCloses}
+          overlays={levelOverlays}
+          currencyPrefix={currencyPrefix}
+          locale={locale}
+        />
+      ) : null}
       {/* `show_rsi` owns this panel and nothing else. Toggling a class instead of
           unmounting keeps the node in the tree, so switching the panel off never
           remounts the chart above it. The `.hidden` rule collapses the panel with

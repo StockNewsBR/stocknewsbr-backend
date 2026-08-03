@@ -94,8 +94,28 @@ def _cache_key(data: dict[str, Any]) -> tuple:
     return (symbol, signal, verdict, rsi, change)
 
 
+_OFFLINE_FLAGS = ("CONCLUSION_LLM_DISABLED", "CODEX_SANDBOX_NETWORK_DISABLED")
+
+
+def llm_offline() -> bool:
+    """True when this process must not originate an LLM call at all.
+
+    Read per call rather than captured at import so a restart is not required to change
+    posture, and so tests can toggle it. In a controlled-offline run the provider is
+    either unreachable or unable to answer inside CONCLUSION_LLM_TIMEOUT, so every attempt
+    is a worker held for the full timeout and a warning in the log -- 71 in one H2 session.
+    Refusing up front keeps the panel on its honest template instead.
+    """
+    return any(
+        str(os.getenv(flag) or "").strip().lower() in {"1", "true", "yes", "on"}
+        for flag in _OFFLINE_FLAGS
+    )
+
+
 def _call_llm(prompt: str) -> str | None:
     """Call the configured LLM provider and return the generated text, or None on failure."""
+    if llm_offline():
+        return None
     if _PROVIDER == "omniroute":
         return _call_omniroute(prompt)
     return _call_ollama(prompt)
@@ -306,6 +326,11 @@ def get_cached_or_schedule(data: dict[str, Any]) -> str | None:
     hit = _cache_get(key)
     if hit and hit[1] > time.time():
         return hit[0]
+    if llm_offline():
+        # Cached prose above is still served; beyond that the honest answer is "absent".
+        # Returning here means no worker pool is created and no daemon thread is parked on
+        # a call that cannot complete.
+        return None
     with _SCHED_LOCK:
         if key in _SCHEDULED:
             return None

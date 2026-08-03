@@ -144,6 +144,10 @@ def resolve_premium_entitlement(
         if exc.status_code == 401:
             return False
         raise
+    finally:
+        # Public market routes can outlive this lookup while hydrating AI/news.
+        # Return the connection before that work instead of pinning the pool.
+        db.close()
 
 
 def require_channel_access(channel: str):

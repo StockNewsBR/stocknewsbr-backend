@@ -24,11 +24,20 @@ logger = logging.getLogger("stocknewsbr.symbol_hydration")
 _CACHE_PATH = Path(os.getenv("SYMBOL_ANALYSIS_CACHE_FILE") or Path(__file__).resolve().parents[2] / "runtime" / "cache" / "symbol_analysis.json")
 _TTL_SECONDS = 120
 _WORKER_TIMEOUT_SECONDS = 12
+# How long a settled analysis stays in the persisted warm-start cache.
+_PERSIST_RETENTION_SECONDS = 900
 _TERMINAL_STATUSES = {"INSUFFICIENT_DATA", "UNSUPPORTED", "PROVIDER_ERROR", "ERROR"}
 _LOCK = RLock()
 _RUNNING: set[str] = set()
 _CACHE: dict[str, dict[str, Any]] = {}
 _LOADED = False
+_CACHE_MTIME_NS = -1
+
+
+def _cache_path() -> Path:
+    if os.getenv("PYTEST_CURRENT_TEST") or "pytest" in " ".join(os.sys.argv).lower():
+        return Path("/tmp") / f"stocknewsbr-symbol-analysis-{os.getpid()}.json"
+    return _CACHE_PATH
 
 
 def _now() -> str:
@@ -51,32 +60,91 @@ def _key(symbol: str, timeframe: str = "1D") -> str:
 
 
 def _load() -> None:
-    global _LOADED
+    global _LOADED, _CACHE_MTIME_NS
     with _LOCK:
-        if _LOADED:
+        cache_path = _cache_path()
+        try:
+            mtime_ns = cache_path.stat().st_mtime_ns
+        except OSError:
+            mtime_ns = 0
+        if _LOADED and (_CACHE_MTIME_NS < 0 or mtime_ns == _CACHE_MTIME_NS):
             return
-        # Tests must not inherit an on-demand result created by a previous run.
-        cache_path = _CACHE_PATH
-        if os.getenv("PYTEST_CURRENT_TEST") or "pytest" in " ".join(os.sys.argv).lower():
-            cache_path = Path("/tmp") / f"stocknewsbr-symbol-analysis-{os.getpid()}.json"
+        items: dict[str, Any] = {}
         try:
             data = json.loads(cache_path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                _CACHE.update({key: value for key, value in data.get("items", data).items() if isinstance(value, dict)})
+                raw_items = data.get("items", data)
+                if isinstance(raw_items, dict):
+                    items = {key: value for key, value in raw_items.items() if isinstance(value, dict)}
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             pass
+        _CACHE.clear()
+        _CACHE.update(items)
+        _CACHE_MTIME_NS = mtime_ns
         _LOADED = True
 
 
+def _prune_dead_pending() -> None:
+    """Drop PENDING entries whose deadline has passed.
+
+    Such an entry can never complete: the worker thread that owned it is gone.
+    Keeping them made every _store() rewrite a file that only ever grew (873
+    entries / 3.6 MB observed after one session), and that full rewrite happens
+    under the same lock that serves reads — so hydration latency climbed with
+    every run until the UI could no longer settle within the audit window.
+    """
+    now = datetime.now(timezone.utc)
+    dead: list[str] = []
+    for key, entry in _CACHE.items():
+        if key in _RUNNING:
+            continue
+        if str(entry.get("status") or "").upper() != "PENDING":
+            continue
+        raw = entry.get("deadline_at")
+        if not raw:
+            dead.append(key)
+            continue
+        try:
+            deadline = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            dead.append(key)
+            continue
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        if (now - deadline).total_seconds() > _TTL_SECONDS:
+            dead.append(key)
+    # Settled entries carry the full ai_tools payload (~90 KB each). They are
+    # only reusable for _TTL_SECONDS, so anything far past that is dead weight
+    # that every later write has to re-serialize — which is what made the last
+    # symbols of a run slower than the first.
+    for key, entry in _CACHE.items():
+        if key in _RUNNING or key in dead:
+            continue
+        if str(entry.get("status") or "").upper() == "PENDING":
+            continue
+        try:
+            updated = datetime.fromisoformat(str(entry.get("updated_at") or "").replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            continue
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+        if (now - updated).total_seconds() > _PERSIST_RETENTION_SECONDS:
+            dead.append(key)
+    for key in dead:
+        _CACHE.pop(key, None)
+
+
 def _persist() -> None:
+    global _CACHE_MTIME_NS
     try:
-        cache_path = _CACHE_PATH
-        if os.getenv("PYTEST_CURRENT_TEST") or "pytest" in " ".join(os.sys.argv).lower():
-            cache_path = Path("/tmp") / f"stocknewsbr-symbol-analysis-{os.getpid()}.json"
+        with _LOCK:
+            _prune_dead_pending()
+        cache_path = _cache_path()
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = cache_path.with_suffix(".tmp")
         temporary.write_text(json.dumps({"items": _CACHE}, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         temporary.replace(cache_path)
+        _CACHE_MTIME_NS = cache_path.stat().st_mtime_ns
     except OSError:
         logger.exception("Failed to persist on-demand symbol analysis")
 

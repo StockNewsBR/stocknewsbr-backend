@@ -421,6 +421,13 @@ class NewsServiceTests(unittest.TestCase):
         self.assertEqual(cache["provider_error"], "dependency_unavailable")
         self.assertEqual(cache["attempted_candidates"], ["ZZZZ"])
 
+    def test_validation_kill_switch_blocks_news_provider(self):
+        with patch.dict(os.environ, {"MARKET_PROVIDER_NETWORK_DISABLED": "1"}), patch.object(
+            news_service, "_get_yfinance", side_effect=AssertionError("provider must not load")
+        ):
+            self.assertEqual(news_service._fetch_yfinance_news("DTC"), [])
+        self.assertEqual(news_service._NEWS_PROVIDER_STATUS["DTC"]["status"], "network_disabled")
+
     def test_get_symbol_news_tries_b3_symbol_variants(self):
         with patch(
             "app.services.news_service._fetch_yfinance_news",
