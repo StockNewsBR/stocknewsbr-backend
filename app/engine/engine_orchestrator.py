@@ -15,12 +15,26 @@ from app.engine.matrix.build_market_matrices import build_market_matrices
 from app.engine.matrix.feature_matrix_engine import feature_matrix_engine
 from app.engine.ranking.ranking_engine_v2 import build_ranking
 from app.system.observability_engine import record_cycle
-from app.system.system_metrics import record_worker_stage_duration
+from app.system.system_metrics import record_signal_quality_coverage, record_worker_stage_duration
 
 logger = logging.getLogger("stocknewsbr.engine.orchestrator")
 
 ENGINE_MODE = os.getenv("ENGINE_MODE", "AUTO").upper()
-EVENT_SCAN_SYMBOLS = max(20, int(os.getenv("EVENT_SCAN_SYMBOLS", "80")))
+def _env_int(name: str, default: int, minimum: int) -> int:
+    """Parse an int env var, falling back to default on missing/invalid values.
+
+    Prevents a bad env var from raising at module import time and killing the
+    worker before it can start.
+    """
+    raw = os.getenv(name)
+    try:
+        value = int(raw) if raw not in (None, "") else default
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, value)
+
+
+EVENT_SCAN_SYMBOLS = _env_int("EVENT_SCAN_SYMBOLS", 80, 20)
 MARKET_POOL_SOURCE = "warm_market_pool"
 
 
@@ -65,6 +79,18 @@ def _run_legacy(pool):
     return _safe_run(build_ranking, signals) or []
 
 
+def _normalize_ticker(value):
+    ticker = str(value or "").upper().strip()
+
+    if ticker.endswith(".SA"):
+        ticker = ticker[:-3]
+
+    if ticker.endswith("-USD"):
+        ticker = ticker[:-4] + "USD"
+
+    return ticker
+
+
 def _attach_events(ranked, events):
     if not ranked:
         return []
@@ -74,22 +100,11 @@ def _attach_events(ranked, events):
 
     events_by_ticker = {}
 
-    def normalize_ticker(value):
-        ticker = str(value or "").upper().strip()
-
-        if ticker.endswith(".SA"):
-            ticker = ticker[:-3]
-
-        if ticker.endswith("-USD"):
-            ticker = ticker[:-4] + "USD"
-
-        return ticker
-
     for event in events:
         if not isinstance(event, dict):
             continue
 
-        ticker = normalize_ticker(event.get("ticker") or event.get("symbol"))
+        ticker = _normalize_ticker(event.get("ticker") or event.get("symbol"))
 
         if not ticker:
             continue
@@ -105,7 +120,7 @@ def _attach_events(ranked, events):
         item = dict(row)
         ticker = item.get("ticker") or item.get("symbol")
         row_events = list(item.get("events", []))
-        normalized_ticker = normalize_ticker(ticker)
+        normalized_ticker = _normalize_ticker(ticker)
 
         if ticker:
             item["ticker"] = ticker
@@ -120,18 +135,6 @@ def _attach_events(ranked, events):
         annotated.append(item)
 
     return annotated
-
-
-def _normalize_ticker(value):
-    ticker = str(value or "").upper().strip()
-
-    if ticker.endswith(".SA"):
-        ticker = ticker[:-3]
-
-    if ticker.endswith("-USD"):
-        ticker = ticker[:-4] + "USD"
-
-    return ticker
 
 
 def _pool_lookup(pool):
@@ -236,7 +239,7 @@ def _enrich_row_with_market_data(row, frame):
     price = _frame_value(latest, "Close")
     volume = _frame_value(latest, "Volume")
 
-    if price is None or price <= 0 or volume is None or volume < 0:
+    if price is None or price <= 0 or volume is None or volume <= 0:
         item.setdefault("data_quality", "score_only")
         return item
 
@@ -252,6 +255,8 @@ def _enrich_row_with_market_data(row, frame):
     rel_volume = (volume / avg_volume) if avg_volume and avg_volume > 0 else 0.0
     change_pct = ((price - prev_close) / prev_close * 100.0) if prev_close else 0.0
 
+    frame_attrs = getattr(data, "attrs", {})
+    market_source = frame_attrs.get("market_data_source", MARKET_POOL_SOURCE)
     market_fields = {
         "price": round(price, 6),
         "close": round(price, 6),
@@ -261,8 +266,8 @@ def _enrich_row_with_market_data(row, frame):
         "rel_volume": round(rel_volume, 4),
         "change_pct": round(change_pct, 4),
         "data_quality": "priced",
-        "price_source": MARKET_POOL_SOURCE,
-        "volume_source": MARKET_POOL_SOURCE,
+        "price_source": market_source,
+        "volume_source": market_source,
         "market_data_points": int(len(data)),
         "market_data_updated_at": _market_stamp(getattr(latest, "name", None)),
     }
@@ -343,10 +348,16 @@ def run_engine():
             return []
 
         event_start = time.perf_counter()
-        events = _safe_run(detect_price_events, pool, ranked, EVENT_SCAN_SYMBOLS) or []
-        record_worker_stage_duration("event_detection", time.perf_counter() - event_start, success=True)
-        ranked = _attach_events(ranked, events)
-        ranked = _enrich_ranked_with_market_data(ranked, pool)
+        events_result = _safe_run(detect_price_events, pool, ranked, EVENT_SCAN_SYMBOLS)
+        events = events_result if events_result is not None else []
+        record_worker_stage_duration("event_detection", time.perf_counter() - event_start, success=events_result is not None)
+        attached = _safe_run(_attach_events, ranked, events)
+        if attached is not None:
+            ranked = attached
+        enriched = _safe_run(_enrich_ranked_with_market_data, ranked, pool)
+        if enriched is not None:
+            ranked = enriched
+        _safe_run(record_signal_quality_coverage, ranked, source="signal_cache")
         _safe_run(update_signals, ranked)
 
         elapsed = time.perf_counter() - start
@@ -362,5 +373,5 @@ def run_engine():
 
     except Exception as exc:
         logger.exception("Engine orchestrator crash: %s", exc)
-        record_cycle(time.time() - start, 0)
+        record_cycle(time.perf_counter() - start, 0)
         return []

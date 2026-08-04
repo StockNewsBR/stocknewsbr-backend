@@ -7,7 +7,13 @@
 
 import numpy as np
 import logging
-from numba import njit
+try:
+    from numba import njit
+except (ImportError, ModuleNotFoundError):  # pragma: no cover - optional dependency fallback
+    def njit(*_args, **_kwargs):
+        def decorator(fn):
+            return fn
+        return decorator
 
 logger = logging.getLogger("stocknewsbr.engine.numba_columnar")
 

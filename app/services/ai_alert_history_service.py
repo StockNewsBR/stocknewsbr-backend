@@ -8,25 +8,18 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 from zoneinfo import ZoneInfo
 
+from app.ai.ai_specialists import OFFICIAL_AI_TOOL_KEYS
+
 
 AI_ALERT_HISTORY_PATH = Path("runtime/ai_alerts/history.json")
 AI_ALERT_MAX_ROWS_PER_TOOL = 20
 AI_ALERT_RESET_HOUR = 7
-AI_ALERT_TZ = ZoneInfo("America/Sao_Paulo")
+try:
+    AI_ALERT_TZ = ZoneInfo("America/Sao_Paulo")
+except Exception:
+    AI_ALERT_TZ = timezone(timedelta(hours=-3), "America/Sao_Paulo")
 
-AI_TOOL_KEYS = (
-    "heat_map",
-    "radar",
-    "breakout_probability",
-    "institutional_flow",
-    "smart_money",
-    "accumulation",
-    "volatility_squeeze",
-    "liquidity_sweep",
-    "liquidity_map",
-    "market_regime",
-    "master_score",
-)
+AI_TOOL_KEYS = OFFICIAL_AI_TOOL_KEYS
 
 _history_lock = threading.RLock()
 
@@ -42,6 +35,12 @@ def _iso_from_datetime(value: datetime) -> str:
 
 
 def _parse_datetime(value: Any) -> datetime | None:
+    if isinstance(value, (int, float)) and value > 0:
+        seconds = float(value) / 1000.0 if value > 10_000_000_000 else float(value)
+        try:
+            return datetime.fromtimestamp(seconds, tz=timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
     if not isinstance(value, str) or not value.strip():
         return None
     raw = value.strip()
@@ -56,9 +55,58 @@ def _parse_datetime(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _coerce_iso(value: Any, fallback: datetime) -> str:
+def _coerce_iso_or_none(value: Any) -> str | None:
     parsed = _parse_datetime(value)
-    return _iso_from_datetime(parsed or fallback)
+    return _iso_from_datetime(parsed) if parsed else None
+
+
+def _first_real_iso(row: Dict[str, Any], keys: Iterable[str]) -> str | None:
+    for key in keys:
+        parsed = _coerce_iso_or_none(row.get(key))
+        if parsed:
+            return parsed
+    return None
+
+
+def _row_found_iso(row: Dict[str, Any]) -> str | None:
+    return _first_real_iso(
+        row,
+        (
+            "found_at",
+            "first_seen_at",
+            "deal_detected_at",
+            "market_data_updated_at",
+            "quote_time",
+            "provider_timestamp",
+            "last_bar_at",
+            "bar_time",
+            "time",
+            "timestamp",
+            "detected_at",
+            "created_at",
+        ),
+    )
+
+
+def _row_seen_iso(row: Dict[str, Any], fallback: datetime) -> str:
+    return (
+        _first_real_iso(
+            row,
+            (
+                "last_seen_at",
+                "updated_at",
+                "market_data_updated_at",
+                "quote_time",
+                "provider_timestamp",
+                "last_bar_at",
+                "bar_time",
+                "time",
+                "timestamp",
+                "detected_at",
+            ),
+        )
+        or _iso_from_datetime(fallback)
+    )
 
 
 def get_ai_alert_reset_key(now: datetime | None = None) -> str:
@@ -123,14 +171,16 @@ def _fresh_store(reset_key: str, now_iso: str) -> Dict[str, Any]:
 def _sort_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def sort_key(row: Dict[str, Any]) -> str:
         return str(
-            row.get("market_data_updated_at")
+            row.get("last_seen_at")
+            or row.get("updated_at")
+            or row.get("market_data_updated_at")
             or row.get("last_bar_at")
             or row.get("bar_time")
             or row.get("time")
             or row.get("timestamp")
-            or row.get("last_seen_at")
+            or row.get("found_at")
+            or row.get("first_seen_at")
             or row.get("detected_at")
-            or row.get("updated_at")
             or ""
         )
 
@@ -167,42 +217,47 @@ def persist_ai_alert_history(
 
             for raw_row in _safe_rows(ai_outputs.get(tool)):
                 key = _alert_identity(tool, raw_row)
-                detected_iso = _coerce_iso(
-                    raw_row.get("market_data_updated_at")
-                    or raw_row.get("last_bar_at")
-                    or raw_row.get("bar_time")
-                    or raw_row.get("time")
-                    or raw_row.get("timestamp")
-                    or raw_row.get("detected_at")
-                    or raw_row.get("updated_at"),
-                    current,
-                )
-                seen_iso = _coerce_iso(
-                    raw_row.get("market_data_updated_at")
-                    or raw_row.get("last_bar_at")
-                    or raw_row.get("bar_time")
-                    or raw_row.get("time")
-                    or raw_row.get("timestamp")
-                    or raw_row.get("updated_at")
-                    or raw_row.get("detected_at"),
-                    current,
-                )
+                detected_iso = _row_found_iso(raw_row)
+                seen_iso = _row_seen_iso(raw_row, current)
 
                 if key in by_key:
-                    preserved_detected = detected_iso
-                    preserved_updated = by_key[key].get("updated_at") or preserved_detected
+                    existing_detected = (
+                        by_key[key].get("found_at")
+                        or by_key[key].get("first_seen_at")
+                        or by_key[key].get("detected_at")
+                    )
+                    existing_seen = by_key[key].get("last_seen_at") or by_key[key].get("updated_at")
+                    preserved_detected = (
+                        detected_iso
+                        if detected_iso and existing_detected and existing_detected == existing_seen
+                        else existing_detected or detected_iso
+                    )
                     merged = {**by_key[key], **raw_row}
                     merged["_alert_key"] = key
-                    merged["detected_at"] = preserved_detected
-                    merged["updated_at"] = preserved_updated
+                    if preserved_detected:
+                        merged["found_at"] = preserved_detected
+                        merged["first_seen_at"] = preserved_detected
+                        merged["detected_at"] = preserved_detected
+                    else:
+                        merged.pop("found_at", None)
+                        merged.pop("first_seen_at", None)
+                        merged.pop("detected_at", None)
+                    merged["updated_at"] = by_key[key].get("updated_at") or preserved_detected or seen_iso
                     merged["last_seen_at"] = seen_iso
                     merged["active"] = True
                     by_key[key] = merged
                 else:
                     new_row = dict(raw_row)
                     new_row["_alert_key"] = key
-                    new_row["detected_at"] = detected_iso
-                    new_row["updated_at"] = detected_iso
+                    if detected_iso:
+                        new_row["found_at"] = detected_iso
+                        new_row["first_seen_at"] = detected_iso
+                        new_row["detected_at"] = detected_iso
+                    else:
+                        new_row.pop("found_at", None)
+                        new_row.pop("first_seen_at", None)
+                        new_row.pop("detected_at", None)
+                    new_row["updated_at"] = seen_iso
                     new_row["last_seen_at"] = seen_iso
                     new_row["active"] = True
                     by_key[key] = new_row

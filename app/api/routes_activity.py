@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 
 from app.dependencies import require_any_channel_access
 from app.models import User
+from app.services.symbol_registry import canonical_symbol
 from app.social.comments import count_comments
 from app.social.moderation import get_blocked_users
 from app.social.posts import get_posts
@@ -14,7 +15,7 @@ def activity(
     symbol: str,
     current_user: User = Depends(require_any_channel_access("app", "web")),
 ):
-    symbol = symbol.upper()
+    symbol = canonical_symbol(symbol)
     blocked_users = get_blocked_users(current_user.id)
     posts = get_posts(symbol, limit=500, blocked_users=blocked_users)
     post_ids = [post["id"] for post in posts]

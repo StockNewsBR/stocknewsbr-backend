@@ -1,15 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.dependencies import require_any_channel_access
-from app.market.market_data_loader import get_price_snapshot
+from app.services.quote_service import get_cached_quote_payload
+from app.services.symbol_registry import canonical_symbol
 
 router = APIRouter(dependencies=[Depends(require_any_channel_access("app", "web"))])
 
 @router.get("/ticker/{symbol}")
 def ticker(symbol: str):
 
-    symbol = symbol.upper().strip()
+    symbol = canonical_symbol(symbol)
 
-    data = get_price_snapshot(symbol)
+    data = get_cached_quote_payload(symbol)
 
     if not data:
         raise HTTPException(
@@ -26,5 +27,8 @@ def ticker(symbol: str):
         "pre_market": data.get("pre_market"),
         "volume": data.get("volume"),
         "high": data.get("high"),
-        "low": data.get("low")
+        "low": data.get("low"),
+        "previous_close": data.get("previous_close"),
+        "quote_time": data.get("quote_time"),
+        "market_state": data.get("market_state"),
     }

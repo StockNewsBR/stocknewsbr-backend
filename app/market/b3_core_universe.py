@@ -20,8 +20,6 @@ B3_CORE: Tuple[str, ...] = (
     "PRIO3.SA",
     "SUZB3.SA",
 
-    "JBSS3.SA",
-    "ELET3.SA",
     "RADL3.SA",
     "HAPV3.SA",
     "RAIL3.SA",

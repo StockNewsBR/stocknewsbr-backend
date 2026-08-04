@@ -3,6 +3,9 @@
 # Ultra Fast
 # =====================================================
 
+import math
+
+
 def rank_signals(signals):
 
     if not signals or not isinstance(signals, list):
@@ -19,7 +22,7 @@ def rank_signals(signals):
 
             change = s.get("change", 0)
 
-            if not isinstance(change, (int, float)):
+            if not isinstance(change, (int, float)) or not math.isfinite(change):
                 change = 0
 
             s["_sort"] = abs(change)

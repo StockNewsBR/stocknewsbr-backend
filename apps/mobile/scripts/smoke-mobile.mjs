@@ -69,6 +69,7 @@ const requiredFiles = [
   "components/mobile-price-chart.tsx",
   "lib/api.ts",
   "lib/session.tsx",
+  "lib/i18n.tsx",
   "eas.json",
 ];
 
@@ -83,6 +84,7 @@ const chartComponent = read("components/mobile-price-chart.tsx");
 const api = read("lib/api.ts");
 const loginScreen = read("app/index.tsx");
 const profileScreen = read("app/(tabs)/profile.tsx");
+const i18n = read("lib/i18n.tsx");
 
 addCheck("android package", appJson.expo?.android?.package === "com.stocknewsbr.mobile", appJson.expo?.android?.package);
 addCheck("android versionCode", Number.isInteger(appJson.expo?.android?.versionCode) && appJson.expo.android.versionCode >= 1);
@@ -90,14 +92,27 @@ addCheck("google play app bundle profile", easJson.build?.production?.android?.b
 addCheck("google play submit internal track", easJson.submit?.production?.android?.track === "internal");
 addCheck("billing products configured", Boolean(appJson.expo?.extra?.billingProducts?.brMonthly && appJson.expo?.extra?.billingProducts?.usaMonthly));
 
-addCheck("ticker route opens asset", tickerScreen.includes("Painel mobile do ativo") && tickerScreen.includes("router.back()"));
+addCheck("ticker route opens asset", i18n.includes("Painel mobile do ativo") && tickerScreen.includes("router.back()"));
 addCheck("ticker ranges", ["1D", "1W", "1M", "3M", "1Y"].every((range) => tickerScreen.includes(`"${range}"`)));
 addCheck("ticker chart uses active range", tickerScreen.includes("getChart(token, ticker, activeRange)"));
-addCheck("mobile chart renders candles", chartComponent.includes("mobile-price-chart") && chartComponent.includes("candleSlot") && chartComponent.includes("Grafico indisponivel"));
-addCheck("chart marker risk contract", chartComponent.includes("Trigger:") && chartComponent.includes("Invalidacao:") && chartComponent.includes("Risco:"));
+addCheck("mobile chart renders candles", chartComponent.includes("mobile-price-chart") && chartComponent.includes("candleSlot") && i18n.includes("Grafico indisponivel"));
+addCheck(
+  "chart marker risk contract",
+  i18n.includes("Trigger:") && i18n.includes("Invalidacao:") && i18n.includes("Risco:") && i18n.includes("Invalidation:") && i18n.includes("Risk:"),
+);
 addCheck("billing pricing api", api.includes("getBillingPricing") && api.includes("/billing/pricing"));
-addCheck("login plan BR USA", loginScreen.includes("Trial BR") && loginScreen.includes("USA mensal") && loginScreen.includes("refund"));
-addCheck("profile plan and google play", profileScreen.includes("Google Play") && profileScreen.includes("BR mensal") && profileScreen.includes("USA anual"));
+addCheck(
+  "login plan BR USA",
+  i18n.includes("Trial BR") && i18n.includes("USA mensal") && i18n.includes("USA monthly") && i18n.includes("Refund"),
+);
+addCheck(
+  "profile plan and google play",
+  i18n.includes("Google Play") && i18n.includes("BR mensal") && i18n.includes("USA anual") && i18n.includes("BR monthly") && i18n.includes("USA annual"),
+);
+addCheck(
+  "language toggle pt/en flags",
+  i18n.includes("LanguageToggle") && i18n.includes("1F1E7") && i18n.includes("1F1FA") && loginScreen.includes("LanguageToggle") && profileScreen.includes("LanguageToggle"),
+);
 
 const expoConfig = run("npx", ["expo", "config", "--type", "public"]);
 addCheck("expo config", expoConfig.ok, expoConfig.ok ? "ok" : `${expoConfig.stderr}\n${expoConfig.stdout}`.trim());

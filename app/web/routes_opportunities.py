@@ -6,8 +6,7 @@ from fastapi import APIRouter, Depends
 import logging
 
 from app.dependencies import require_channel_access
-from app.cache.signal_cache import signal_cache
-from app.engine.ranking.sorting import sort_signals
+from app.services.ranking import get_ranking
 
 router = APIRouter(
     prefix="/web",
@@ -27,17 +26,10 @@ def get_opportunities():
 
     try:
 
-        signals = signal_cache.get_all()
-
-        if not signals:
-            return []
-
-        ranked = sort_signals(signals, key="score", limit=25)
-
-        return ranked
+        return get_ranking()[:25]
 
     except Exception as e:
 
-        logger.error(f"Opportunities route error: {e}")
+        logger.error("Opportunities route error: %s", e)
 
         return []

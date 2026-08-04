@@ -5,7 +5,6 @@ from app.Frontend.layout import get_layout
 
 def get_terminal(focused_tab: str | None = None, token: str | None = None):
     tabs = get_layout()["tabs"]
-    initial_tab = focused_tab or "home"
     embedded_tabs = json.dumps(tabs)
     embedded_token = json.dumps(token or "")
 
@@ -314,7 +313,7 @@ button.secondary {{
 </div>
 <script>
 const FALLBACK_TABS = {embedded_tabs};
-const FOCUSED_TAB = {json.dumps(initial_tab)};
+const FOCUSED_TAB = {json.dumps(focused_tab)};
 const AUTH_TOKEN = {embedded_token};
 const IS_POPOUT = Boolean(FOCUSED_TAB);
 let WORKSPACE = null;
@@ -323,6 +322,7 @@ let ACTIVE_TAB = FOCUSED_TAB || "home";
 let ACTIVE_TICKER = "PETR4";
 let ROOM_MESSAGES = [];
 let ROOM_SOCKET = null;
+let ROOM_SOCKET_TICKER = null;
 let OPENED_POPOUTS = [];
 let DRAG_INDEX = null;
 
@@ -366,14 +366,30 @@ async function apiFetch(url, options = {{}}) {{
   return response;
 }}
 
-function openDetached(tabId) {{
+async function openDetached(tabId) {{
   if (!OPENED_POPOUTS.includes(tabId)) {{
     OPENED_POPOUTS.push(tabId);
     persistLayout();
   }}
-  const tokenQuery = AUTH_TOKEN ? `?token=${{encodeURIComponent(AUTH_TOKEN)}}` : "";
-  const url = `/web/terminal/popout/${{tabId}}${{tokenQuery}}`;
-  window.open(url, `stocknewsbr_${{tabId}}`, "width=1480,height=920,resizable=yes,scrollbars=yes");
+  const response = await apiFetch("/web/terminal/ticket", {{
+    method: "POST",
+    body: JSON.stringify({{ scope: "popout", target: tabId }}),
+  }});
+  const {{ ticket }} = await response.json();
+  const windowName = `stocknewsbr_${{tabId}}`;
+  window.open("", windowName, "width=1480,height=920,resizable=yes,scrollbars=yes");
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = `/web/terminal/popout/${{encodeURIComponent(tabId)}}`;
+  form.target = windowName;
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.name = "ticket";
+  input.value = ticket;
+  form.appendChild(input);
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
 }}
 
 function setActiveTab(tabId) {{
@@ -450,7 +466,7 @@ function renderHome() {{
           <h2>Lancamento principal Android + Web + Telegram</h2>
           <p class="muted">O ecossistema premium ja nasce orientado a workspace profissional, social por ticker, videos de ajuda e IA aplicada ao fluxo.</p>
           <div class="metric-grid">
-            <div class="metric"><span class="muted">Trial</span><b>${{pricing.trial_days || 90}} dias</b><span class="muted">Acesso inicial ao ecossistema</span></div>
+            <div class="metric"><span class="muted">Trial</span><b>${{pricing.trial_days || 30}} dias</b><span class="muted">Acesso inicial ao ecossistema</span></div>
             <div class="metric"><span class="muted">Premium mensal</span><b>R$ ${{pricing.premium_monthly?.price_brl || 49}}</b><span class="muted">App + Web + Telegram</span></div>
             <div class="metric"><span class="muted">Premium anual</span><b>R$ ${{pricing.premium_annual?.price_brl || 500}}</b><span class="muted">Google app primeiro, Apple depois</span></div>
           </div>
@@ -764,7 +780,13 @@ async function updateTicker(focusRoom = false) {{
   renderWorkspace();
 }}
 
-function connectChatSocket() {{
+async function connectChatSocket() {{
+  if (
+    ROOM_SOCKET &&
+    ROOM_SOCKET_TICKER === ACTIVE_TICKER &&
+    (ROOM_SOCKET.readyState === WebSocket.OPEN || ROOM_SOCKET.readyState === WebSocket.CONNECTING)
+  ) return;
+
   if (ROOM_SOCKET) {{
     try {{
       ROOM_SOCKET.close();
@@ -773,11 +795,16 @@ function connectChatSocket() {{
     }}
   }}
 
-  if (!AUTH_TOKEN) return;
-
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const response = await apiFetch("/web/terminal/ticket", {{
+    method: "POST",
+    body: JSON.stringify({{ scope: "chat", target: ACTIVE_TICKER }}),
+  }});
+  const {{ ticket }} = await response.json();
+  ROOM_SOCKET_TICKER = ACTIVE_TICKER;
   ROOM_SOCKET = new WebSocket(
-    `${{protocol}}://${{window.location.host}}/ws/chat/${{encodeURIComponent(ACTIVE_TICKER)}}?token=${{encodeURIComponent(AUTH_TOKEN)}}`
+    `${{protocol}}://${{window.location.host}}/ws/chat/${{encodeURIComponent(ACTIVE_TICKER)}}`,
+    ["stocknewsbr-ticket", ticket]
   );
 
   ROOM_SOCKET.onmessage = event => {{
@@ -836,17 +863,16 @@ function renderWorkspace() {{
 
   const panels = {{
     "home": renderHome(),
-    "heatmap": renderAiToolList("IA Heat Map", WORKSPACE?.ai_tools?.heat_map || [], "Mapa de calor institucional por ativo e setor."),
+    "flow": renderAiToolList("Fluxo IA", WORKSPACE?.ai_tools?.flow || [], "Fluxo institucional, agressao e pressao compradora/vendedora."),
     "radar": renderHome(),
-    "breakout-probability": renderAiToolList("IA Breakout Probability", WORKSPACE?.ai_tools?.breakout_probability || [], "Scanner para rompimentos com contexto de fluxo e score."),
-    "volatility-squeeze": renderAiToolList("IA Volatility Squeeze", WORKSPACE?.ai_tools?.volatility_squeeze || [], "Busca compressoes antes de expansao direcional."),
-    "institutional-flow": renderAiToolList("IA Institutional Flow", WORKSPACE?.ai_tools?.institutional_flow || [], "Leitura de pressao institucional, smart money e acumulacao."),
+    "liquidity": renderAiToolList("Liquidez IA", WORKSPACE?.ai_tools?.liquidity || [], "Zonas de liquidez, sweeps, traps e invalidacao."),
+    "trend": renderAiToolList("Tendência IA", WORKSPACE?.ai_tools?.trend || [], "Direcao predominante e estrutura de mercado."),
+    "momentum": renderAiToolList("Momento IA", WORKSPACE?.ai_tools?.momentum || [], "Aceleracao, forca e exaustao."),
     "smart-money": renderAiToolList("IA Smart Money", WORKSPACE?.ai_tools?.smart_money || [], "Rastreamento de volume anormal e presenca de player forte."),
-    "accumulation": renderAiToolList("IA Accumulation", WORKSPACE?.ai_tools?.accumulation || [], "Base para identificar absorcao e construcao de posicao."),
-    "liquidity-sweep": renderAiToolList("IA Liquidity Sweep", WORKSPACE?.ai_tools?.liquidity_sweep || [], "Mapeia varredura de liquidez e possiveis traps."),
-    "liquidity-map": renderAiToolList("IA Liquidity Map", WORKSPACE?.ai_tools?.liquidity_map || [], "Zonas de liquidez para decisao de trade e gerenciamento."),
-    "market-regime": renderAiToolList("IA Market Regime", WORKSPACE?.ai_tools?.market_regime || [], "Define se o mercado esta em momentum, rotacao ou defesa."),
-    "master-score": renderAiToolList("IA Master Score", WORKSPACE?.ai_tools?.master_score || [], "Ranking consolidado do ecossistema institucional da plataforma."),
+    "risk": renderAiToolList("Risco IA", WORKSPACE?.ai_tools?.risk || [], "Risco operacional, bloqueios, Can Trade e No Trade Reason."),
+    "news-ia": renderAiToolList("Notícias IA", WORKSPACE?.ai_tools?.news || [], "Estado da noticia, relevancia, confianca, impacto e provider status."),
+    "macro": renderAiToolList("Macro IA", WORKSPACE?.ai_tools?.macro || [], "Macro real separado de macro derivado de noticia."),
+    "regime": renderAiToolList("Regime IA", WORKSPACE?.ai_tools?.regime || [], "Contexto de mercado, lateralidade e volatilidade."),
     "grafico": renderChartPanel(),
     "ticker-rooms": renderTickerRoom(),
     "education": renderHelp(),

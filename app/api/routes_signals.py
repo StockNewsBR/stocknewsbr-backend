@@ -6,8 +6,8 @@ import logging
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from app.cache.snapshot_cache import get_snapshot_info, get_snapshot_signals
 from app.dependencies import require_channel_access
-from app.engine.signal_cache import signal_cache
 
 router = APIRouter(dependencies=[Depends(require_channel_access("app"))])
 
@@ -23,8 +23,8 @@ def get_signals():
 
     try:
 
-        signals = signal_cache.get()
-        cache_info = signal_cache.info()
+        signals = get_snapshot_signals()
+        cache_info = get_snapshot_info()
 
         return {
 
@@ -42,14 +42,14 @@ def get_signals():
 
         }
 
-    except Exception as e:
+    except Exception:
 
-        logger.error(f"Signals route error: {e}")
+        logger.exception("Signals route failed")
 
         return JSONResponse(
             status_code=500,
             content={
                 "status": "error",
-                "message": str(e)
+                "message": "signals_unavailable"
             }
         )

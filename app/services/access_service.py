@@ -12,7 +12,7 @@ logger = logging.getLogger("stocknewsbr.access")
 SAAS_LAUNCH_DATE = date.fromisoformat(os.getenv("SAAS_LAUNCH_DATE", "2026-05-14"))
 TRIAL_SHORTEN_AFTER_DAYS = max(1, int(os.getenv("TRIAL_SHORTEN_AFTER_DAYS", "30")))
 INITIAL_TRIAL_DAYS = max(1, int(os.getenv("INITIAL_TRIAL_DAYS", "30")))
-POST_LAUNCH_TRIAL_DAYS = max(1, int(os.getenv("POST_LAUNCH_TRIAL_DAYS", "14")))
+POST_LAUNCH_TRIAL_DAYS = max(1, int(os.getenv("POST_LAUNCH_TRIAL_DAYS", "30")))
 DEFAULT_TRIAL_DAYS = INITIAL_TRIAL_DAYS
 REFUND_WINDOW_DAYS = max(1, int(os.getenv("REFUND_WINDOW_DAYS", "7")))
 MONTHLY_PLAN_DAYS = 31
@@ -29,7 +29,7 @@ PRICING_CATALOG = {
         "annual_amount": 500,
         "monthly_product_id": "premium_br_monthly",
         "annual_product_id": "premium_br_annual",
-        "payment_note": "Assinatura Brasil: R$49/mes ou R$500 a vista por 12 meses.",
+        "payment_note": "Preco, pagamentos, mudanca de planos, cancelamentos e reembolsos ficam somente no Google Play.",
     },
     "USA": {
         "currency": "USD",
@@ -37,7 +37,7 @@ PRICING_CATALOG = {
         "annual_amount": 500,
         "monthly_product_id": "premium_usa_monthly",
         "annual_product_id": "premium_usa_annual",
-        "payment_note": "International account: USA subscription. Premium is $49/month or $500 upfront for 12 months.",
+        "payment_note": "Price, payments, plan changes, cancellation and refunds are handled only in Google Play.",
     },
 }
 
@@ -224,9 +224,10 @@ def expire_access(user: User, reason: str = "expired"):
     return user
 
 
-def refresh_user_access(user: User):
+def refresh_user_access(user: User, touch_last_access: bool = False):
     now = utcnow()
-    user.last_access_at = now
+    if touch_last_access:
+        user.last_access_at = now
 
     if not user.is_active:
         return expire_access(user, reason="inactive")
@@ -238,27 +239,45 @@ def refresh_user_access(user: User):
         return downgrade_to_free(user, reason="premium_expired")
 
     if user.plan in PAID_PLANS:
-        user.plan_status = "active"
-        user.access_app = True
-        user.access_web = True
-        user.access_telegram = True
-        user.updated_at = now
+        if (
+            user.plan_status != "active"
+            or not user.access_app
+            or not user.access_web
+            or not user.access_telegram
+        ):
+            user.plan_status = "active"
+            user.access_app = True
+            user.access_web = True
+            user.access_telegram = True
+            user.updated_at = now
         return user
 
     if user.plan == TRIAL_PLAN:
-        user.plan_status = "trialing"
-        user.access_app = True
-        user.access_web = True
-        user.access_telegram = True
-        user.updated_at = now
+        if (
+            user.plan_status != "trialing"
+            or not user.access_app
+            or not user.access_web
+            or not user.access_telegram
+        ):
+            user.plan_status = "trialing"
+            user.access_app = True
+            user.access_web = True
+            user.access_telegram = True
+            user.updated_at = now
         return user
 
     if user.plan == FREE_PLAN:
-        user.plan_status = "active"
-        user.access_app = True
-        user.access_web = False
-        user.access_telegram = False
-        user.updated_at = now
+        if (
+            user.plan_status != "active"
+            or not user.access_app
+            or user.access_web
+            or user.access_telegram
+        ):
+            user.plan_status = "active"
+            user.access_app = True
+            user.access_web = False
+            user.access_telegram = False
+            user.updated_at = now
         return user
 
     return user
@@ -304,10 +323,12 @@ def log_subscription_event(
     external_subscription_id: str | None = None,
     status: str | None = None,
     payload_excerpt: str | None = None,
+    provider_event_id: str | None = None,
 ):
     event = SubscriptionAuditLog(
         user_id=user.id if user else None,
         provider=provider,
+        provider_event_id=provider_event_id,
         event_type=event_type,
         product_id=product_id,
         origin=origin,
@@ -328,6 +349,11 @@ def serialize_user_access(user: User):
         "display_name": user.display_name,
         "phone": user.phone,
         "avatar_url": user.avatar_url,
+        # Mission 31B.1: badge flags come from trusted backend columns only.
+        "official": bool(getattr(user, "official", False)),
+        "verified": bool(getattr(user, "is_verified", False)),
+        "role": (getattr(user, "role", None) or "user"),
+        "is_bot": bool(getattr(user, "is_bot", False)),
         "plan": user.plan,
         "plan_status": user.plan_status,
         "subscription_provider": user.subscription_provider,
@@ -342,7 +368,7 @@ def serialize_user_access(user: User):
         "accepted_terms_at": user.accepted_terms_at,
         "accepted_privacy_at": user.accepted_privacy_at,
         "accepted_risk_notice_at": user.accepted_risk_notice_at,
-        "session_policy": "single_per_channel" if str(user.plan).lower() in PAID_PLANS else "shared",
+        "session_policy": "single",
         "otp_required_on_login": str(user.plan).lower() in PAID_PLANS,
         "access": {
             "app": bool(user.access_app),

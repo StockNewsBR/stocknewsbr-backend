@@ -18,6 +18,5 @@ CRYPTO: Tuple[str, ...] = (
     "AVAX-USD",
     "DOGE-USD",
     "LINK-USD",
-    "MATIC-USD",
 
 )

@@ -67,7 +67,7 @@ Checklist antes de enviar para producao:
   - `premium_usa_monthly`
   - `premium_usa_annual`
 - Checkout/assinatura deve respeitar 7 dias de cancelamento/refund.
-- Conta internacional usa assinatura USA: `$49/month` ou `$500 upfront`.
+- Conta internacional usa assinatura gerenciada pelo Google Play; preco final aparece no checkout da loja.
 - Build de envio:
 
 ```powershell

@@ -3,30 +3,52 @@ import type {
   ChartPayload,
   ChatHistoryPayload,
   FeedPayload,
+  FeedComment,
+  GifSearchPayload,
+  LoginCodeRequestResponse,
   NewsPayload,
   PollPayload,
   PublicAiToolsPayload,
   PublicBootstrap,
+  PublicMarketBundlePayload,
   QuotePayload,
   TelegramLinkSessionResponse,
   UploadResponse,
   UserAccess,
   WorkspaceData,
   WorkspaceLayout,
+  WorkspaceTickerBundlePayload,
 } from "./types";
 
 export function resolveApiBase() {
   return (process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000").replace(/\/$/, "");
 }
 
+export function resolveMediaUrl(value?: string | null) {
+  const url = String(value || "").trim();
+  return url.startsWith("/media/") ? `${resolveApiBase()}${url}` : url;
+}
+
 function buildUrl(path: string) {
   return `${resolveApiBase()}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+type ApiRequestOptions = RequestInit & { token?: string; cacheTtlMs?: number };
+
+// Mission 31B: web sessions live in an httpOnly cookie. This sentinel marks
+// "authenticated via cookie" UI state without holding any real token in JS.
+export const COOKIE_SESSION_TOKEN = "cookie-session";
+export const SESSION_REPLACED_EVENT = "snb:session-replaced";
+export const SESSION_REPLACED_DETAIL = "session_replaced";
+
+const GET_REQUEST_CACHE_LIMIT = 160;
+const getRequestCache = new Map<string, { expiresAt: number; promise: Promise<unknown>; lastValue?: unknown }>();
+
 function buildHeaders(token?: string, base?: HeadersInit) {
+  const useBearer = Boolean(token) && token !== COOKIE_SESSION_TOKEN;
   return {
     ...(base || {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(useBearer ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
 
@@ -41,28 +63,107 @@ async function parseJson<T>(response: Response): Promise<T> {
       detail = response.statusText;
     }
 
-    throw new Error(detail || "request_failed");
+    if (
+      response.status === 401 &&
+      detail === SESSION_REPLACED_DETAIL &&
+      typeof window !== "undefined"
+    ) {
+      window.dispatchEvent(new CustomEvent(SESSION_REPLACED_EVENT));
+    }
+
+    // Carry the status: without it a 401 (real denial) and a 503/timeout
+    // (transport noise) are indistinguishable at the caller, which is how a
+    // starved request could silently revoke entitlement.
+    const error = new Error(detail || "request_failed") as Error & { status?: number };
+    error.status = response.status;
+    throw error;
   }
 
   return response.json() as Promise<T>;
 }
 
-async function request<T>(path: string, options?: RequestInit & { token?: string }) {
-  const headers = buildHeaders(options?.token, options?.headers);
-  const controller = options?.signal ? null : new AbortController();
+function pruneGetRequestCache() {
+  if (getRequestCache.size <= GET_REQUEST_CACHE_LIMIT) return;
+  const now = Date.now();
+  for (const [key, entry] of getRequestCache.entries()) {
+    if (entry.expiresAt <= now || getRequestCache.size > GET_REQUEST_CACHE_LIMIT) {
+      getRequestCache.delete(key);
+    }
+  }
+}
+
+function invalidateFeedRequestCache() {
+  for (const key of getRequestCache.keys()) {
+    if (key.includes(":GET:/ticker/") && key.includes("/feed?")) getRequestCache.delete(key);
+  }
+}
+
+function isSocialMutation(path: string, method: string) {
+  return method !== "GET" && /^(?:\/ticker\/[^/]+\/post|\/post\/\d+|\/(?:block|mute|report)|\/social\/users\/\d+\/follow)(?:[/?]|$)/.test(path);
+}
+
+async function request<T>(path: string, options?: ApiRequestOptions) {
+  const { token, cacheTtlMs, ...fetchOptions } = options || {};
+  const method = String(fetchOptions.method || "GET").toUpperCase();
+  const canUseClientCache = method === "GET" && !fetchOptions.signal && Number(cacheTtlMs || 0) > 0;
+  const cacheKey = canUseClientCache ? `${token ? "auth" : "public"}:${method}:${path}` : "";
+  const now = Date.now();
+
+  if (cacheKey) {
+    const cached = getRequestCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.promise as Promise<T>;
+    }
+  }
+
+  const headers = buildHeaders(token, fetchOptions.headers);
+  const controller = fetchOptions.signal ? null : new AbortController();
   const timeout = controller
     ? setTimeout(() => controller.abort(), 15000)
     : undefined;
 
-  try {
+  const previous = cacheKey ? getRequestCache.get(cacheKey) : undefined;
+  const promise = (async () => {
     const response = await fetch(buildUrl(path), {
       cache: "no-store",
-      ...options,
+      // Mission 31B: always send the httpOnly session cookie.
+      credentials: "include",
+      ...fetchOptions,
       headers,
-      signal: options?.signal || controller?.signal,
+      signal: fetchOptions.signal || controller?.signal,
     });
 
-    return parseJson<T>(response);
+    const payload = await parseJson<T>(response);
+    if (isSocialMutation(path, method)) invalidateFeedRequestCache();
+    if (cacheKey) {
+      const current = getRequestCache.get(cacheKey);
+      if (current) current.lastValue = payload;
+    }
+    return payload;
+  })();
+
+  if (cacheKey) {
+    getRequestCache.set(cacheKey, {
+      expiresAt: now + Number(cacheTtlMs || 0),
+      promise,
+      lastValue: previous?.lastValue,
+    });
+    pruneGetRequestCache();
+  }
+
+  try {
+    return await promise;
+  } catch (error) {
+    if (cacheKey && previous?.lastValue !== undefined) {
+      getRequestCache.set(cacheKey, {
+        expiresAt: now + Math.max(1000, Math.floor(Number(cacheTtlMs || 0) / 2)),
+        promise: Promise.resolve(previous.lastValue),
+        lastValue: previous.lastValue,
+      });
+      return previous.lastValue as T;
+    }
+    if (cacheKey) getRequestCache.delete(cacheKey);
+    throw error;
   } finally {
     if (timeout) clearTimeout(timeout);
   }
@@ -90,11 +191,22 @@ export function loginJson(
   });
 }
 
+export function requestLoginCode(
+  email: string,
+  options?: { channel?: string; device_id?: string; device_label?: string },
+) {
+  return request<LoginCodeRequestResponse>("/auth/request-code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, channel: "web", ...(options || {}) }),
+  });
+}
+
 export function verifyLoginOtp(login_token: string, code: string) {
   return request<AuthFlowResponse>("/auth/login/verify-otp", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ login_token, code }),
+    body: JSON.stringify({ login_token, code, channel: "web" }),
   });
 }
 
@@ -105,13 +217,38 @@ export function logoutAuth(token: string) {
   });
 }
 
+export function logoutAllAuth(token: string) {
+  return request<{ ok: boolean; revoked_sessions?: number | null }>("/auth/logout-all", {
+    method: "POST",
+    token,
+  });
+}
+
+export function requestEmailChange(token: string, new_email: string) {
+  return request<LoginCodeRequestResponse>("/auth/email-change/request", {
+    method: "POST",
+    token,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ new_email }),
+  });
+}
+
+export function verifyEmailChange(token: string, login_token: string, code: string) {
+  return request<UserAccess>("/auth/email-change/verify", {
+    method: "POST",
+    token,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ login_token, code }),
+  });
+}
+
 export function getAccess(token: string) {
   return request<UserAccess>("/auth/access", { token });
 }
 
 export function updateProfile(
   token: string,
-  payload: { display_name?: string | null; email?: string | null; avatar_url?: string | null },
+  payload: { display_name?: string | null; avatar_url?: string | null; phone?: string | null },
 ) {
   return request<UserAccess>("/auth/profile", {
     method: "PATCH",
@@ -131,7 +268,7 @@ export function requestTelegramLink(token: string, origin_channel = "web") {
 }
 
 export function getWorkspace(token: string) {
-  return request<WorkspaceData>("/web/workspace/data", { token });
+  return request<WorkspaceData>("/web/workspace/data", { token, cacheTtlMs: 15000 });
 }
 
 export function searchAssets(token: string, query: string) {
@@ -148,36 +285,88 @@ export function saveWorkspaceLayout(token: string, payload: WorkspaceLayout) {
 }
 
 export function getChart(token: string, ticker: string, interval = "1D") {
-  return request<ChartPayload>(`/web/chart/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}`, { token });
+  return request<ChartPayload>(`/web/chart/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}`, { token, cacheTtlMs: 12000 });
 }
 
 export function getPublicChart(ticker: string, interval = "1D") {
-  return request<ChartPayload>(`/public/market/chart/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}`);
+  return request<ChartPayload>(`/public/market/chart/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}`, { cacheTtlMs: 12000 });
 }
 
 export function getFeed(token: string, ticker: string) {
-  return request<FeedPayload>(`/ticker/${encodeURIComponent(ticker)}/feed?limit=500`, { token });
+  return request<FeedPayload>(`/ticker/${encodeURIComponent(ticker)}/feed?limit=500`, { token, cacheTtlMs: 15000 });
 }
 
-export function getNews(token: string | null | undefined, ticker: string) {
-  const route = token ? `/news/${encodeURIComponent(ticker)}?limit=6` : `/public/market/news/${encodeURIComponent(ticker)}?limit=6`;
-  return request<NewsPayload>(route, token ? { token } : undefined);
+export function getNews(
+  token: string | null | undefined,
+  ticker: string,
+  locale: "pt-BR" | "en-US" = "pt-BR",
+  refresh = false,
+  signal?: AbortSignal,
+) {
+  const refreshParam = refresh ? "&refresh=true" : "";
+  const localeParam = `&locale=${encodeURIComponent(locale)}`;
+  const route = token
+    ? `/news/${encodeURIComponent(ticker)}?limit=6${localeParam}${refreshParam}`
+    : `/public/market/news/${encodeURIComponent(ticker)}?limit=6${localeParam}${refreshParam}`;
+  return request<NewsPayload>(route, token
+    ? { token, signal, cacheTtlMs: refresh ? 0 : 30000 }
+    : { signal, cacheTtlMs: refresh ? 0 : 30000 });
 }
 
-export function getPublicQuote(ticker: string) {
-  return request<QuotePayload>(`/public/market/quote/${encodeURIComponent(ticker)}`);
+export function getPublicQuote(ticker: string, options?: { refresh?: boolean }) {
+  const suffix = options?.refresh ? `?refresh=${Date.now()}` : "";
+  return request<QuotePayload>(`/public/market/quote/${encodeURIComponent(ticker)}${suffix}`, { cacheTtlMs: options?.refresh ? 0 : 5000 });
 }
 
 export function getPublicQuotes(symbols: string[]) {
   const params = encodeURIComponent(symbols.join(","));
-  return request<{ items: QuotePayload[]; count: number }>(`/public/market/quotes?symbols=${params}`);
+  return request<{ items: QuotePayload[]; count: number }>(`/public/market/quotes?symbols=${params}`, { cacheTtlMs: 8000 });
 }
 
-export function getPublicAiTools() {
-  return request<PublicAiToolsPayload>("/public/market/ai-tools");
+export function getPublicAiTools(
+  symbol?: string,
+  tool?: string,
+  timeframe?: string,
+  signal?: AbortSignal,
+  token?: string,
+) {
+  const query = new URLSearchParams();
+  if (symbol) query.set("symbol", symbol);
+  if (tool) query.set("tool", tool);
+  if (timeframe) query.set("timeframe", timeframe);
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return request<PublicAiToolsPayload>(`/public/market/ai-tools${suffix}`, { token, signal, cacheTtlMs: 15000 });
 }
 
-export async function getPublicQuotesChunked(symbols: string[], chunkSize = 16) {
+export function getPublicMarketBundle(
+  ticker: string,
+  interval = "1D",
+  locale: "pt-BR" | "en-US" = "pt-BR",
+  signal?: AbortSignal,
+  force = false,
+  token?: string,
+) {
+  const refresh = force ? `&refresh=${Date.now()}` : "";
+  return request<PublicMarketBundlePayload>(
+    `/public/market/bundle/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}&limit=6&locale=${encodeURIComponent(locale)}${refresh}`,
+    { token, signal, cacheTtlMs: force ? 0 : 10000 },
+  );
+}
+
+export function getWorkspaceTickerBundle(
+  token: string,
+  ticker: string,
+  interval = "1D",
+  locale: "pt-BR" | "en-US" = "pt-BR",
+  signal?: AbortSignal,
+) {
+  return request<WorkspaceTickerBundlePayload>(
+    `/web/workspace/ticker/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}&limit=6&locale=${encodeURIComponent(locale)}`,
+    { token, signal, cacheTtlMs: 10000 },
+  );
+}
+
+export async function getPublicQuotesChunked(symbols: string[], chunkSize = 32) {
   const uniqueSymbols = Array.from(new Set(symbols.filter(Boolean)));
   const chunks = Array.from({ length: Math.ceil(uniqueSymbols.length / chunkSize) }, (_, index) =>
     uniqueSymbols.slice(index * chunkSize, (index + 1) * chunkSize),
@@ -195,7 +384,16 @@ function hasMarketQuoteValue(quote?: QuotePayload | null): quote is QuotePayload
   if (!quote) return false;
   const source = String((quote as any).source || "").toLowerCase();
   const status = String((quote as any).quote_status || "").toLowerCase();
-  if (source === "empty" || status === "empty" || status === "partial") return false;
+  if (
+    source === "empty" ||
+    status === "empty" ||
+    status === "partial" ||
+    source.includes("no_price") ||
+    source.includes("no-price") ||
+    source.includes("empty")
+  ) {
+    return false;
+  }
   const price = Number(quote.price);
   return Number.isFinite(price) && price > 0;
 }
@@ -226,9 +424,17 @@ function quoteSymbolAliases(symbol?: string | null) {
 }
 
 function storeQuoteAliases(bySymbol: Map<string, QuotePayload>, item: QuotePayload, requestedSymbol?: string) {
+  const normalizedItemSymbol = normalizeQuoteSymbol(item.symbol || "");
+  const normalizedRequestedSymbol = normalizeQuoteSymbol(requestedSymbol || "");
   const normalized = normalizeQuoteSymbol(item.symbol || requestedSymbol || "");
   const normalizedItem = { ...item, symbol: normalized || item.symbol };
-  const aliases = [...quoteSymbolAliases(item.symbol), ...quoteSymbolAliases(requestedSymbol)];
+  const itemAliases = quoteSymbolAliases(item.symbol || requestedSymbol);
+  const requestedAliases = quoteSymbolAliases(requestedSymbol);
+  const requestMatchesItem =
+    !normalizedItemSymbol ||
+    !normalizedRequestedSymbol ||
+    requestedAliases.map(normalizeQuoteSymbol).includes(normalizedItemSymbol);
+  const aliases = requestMatchesItem ? [...itemAliases, ...requestedAliases] : itemAliases;
   for (const alias of aliases) {
     if (!alias) continue;
     const normalizedAlias = normalizeQuoteSymbol(alias);
@@ -248,7 +454,7 @@ function getQuoteAlias(bySymbol: Map<string, QuotePayload>, symbol: string) {
   return null;
 }
 
-async function getPublicQuotesIndividually(symbols: string[], concurrency = 4) {
+async function getPublicQuotesIndividually(symbols: string[], concurrency = 4, refresh = true) {
   const uniqueSymbols = Array.from(new Set(symbols.map(normalizeQuoteSymbol).filter(Boolean)));
   const items: QuotePayload[] = [];
   let cursor = 0;
@@ -258,7 +464,7 @@ async function getPublicQuotesIndividually(symbols: string[], concurrency = 4) {
       const symbol = uniqueSymbols[cursor];
       cursor += 1;
       try {
-        items.push(await getPublicQuote(symbol));
+        items.push(await getPublicQuote(symbol, { refresh }));
       } catch {
         // Partial market-provider failures should not block the whole board.
       }
@@ -269,7 +475,7 @@ async function getPublicQuotesIndividually(symbols: string[], concurrency = 4) {
   return items;
 }
 
-export async function getPublicQuotesRobust(symbols: string[], chunkSize = 12, fallbackConcurrency = 0) {
+export async function getPublicQuotesRobust(symbols: string[], chunkSize = 32, fallbackConcurrency = 0, refreshFallback = true) {
   const uniqueSymbols = Array.from(new Set(symbols.map(normalizeQuoteSymbol).filter(Boolean)));
   const bulk = await getPublicQuotesChunked(uniqueSymbols, chunkSize);
   const bySymbol = new Map<string, QuotePayload>();
@@ -282,7 +488,7 @@ export async function getPublicQuotesRobust(symbols: string[], chunkSize = 12, f
   const missingOrEmpty = uniqueSymbols.filter((symbol) => !hasMarketQuoteValue(getQuoteAlias(bySymbol, symbol)));
 
   if (missingOrEmpty.length && fallbackConcurrency > 0) {
-    const fallbackItems = await getPublicQuotesIndividually(missingOrEmpty, fallbackConcurrency);
+    const fallbackItems = await getPublicQuotesIndividually(missingOrEmpty, fallbackConcurrency, refreshFallback);
     for (const item of fallbackItems) {
       if (!item?.symbol) continue;
       storeQuoteAliases(bySymbol, item, item.symbol);
@@ -304,7 +510,7 @@ export function getPublicInsight(ticker: string, interval = "1D") {
     trend_bias?: string | null;
     signal?: string | null;
     summary?: Record<string, unknown>;
-  }>(`/public/market/insight/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}`);
+  }>(`/public/market/insight/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}`, { cacheTtlMs: 12000 });
 }
 
 export function createPost(
@@ -325,7 +531,7 @@ export function commentOnPost(
   postId: number,
   payload: { text: string; image_url?: string | null },
 ) {
-  return request(`/post/${postId}/comment`, {
+  return request<FeedComment>(`/post/${postId}/comment`, {
     method: "POST",
     token,
     headers: { "Content-Type": "application/json" },
@@ -385,12 +591,12 @@ export function muteUser(token: string, target: number) {
   });
 }
 
-export function reportPost(token: string, post_id: number, reason = "community") {
+export function reportPost(token: string, post_id: number, reason = "community", note?: string | null) {
   return request<{ status: string }>("/report", {
     method: "POST",
     token,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ post_id, reason }),
+    body: JSON.stringify({ post_id, reason, note }),
   });
 }
 
@@ -415,8 +621,12 @@ export function deletePost(token: string, postId: number) {
   });
 }
 
-export function getPoll(ticker: string) {
-  return request<PollPayload>(`/poll/${encodeURIComponent(ticker)}`);
+export function getPoll(
+  ticker: string,
+  locale: "pt-BR" | "en-US" = "pt-BR",
+  signal?: AbortSignal,
+) {
+  return request<PollPayload>(`/poll/${encodeURIComponent(ticker)}?locale=${encodeURIComponent(locale)}`, { signal });
 }
 
 export function getQuote(token: string | null | undefined, ticker: string) {
@@ -456,12 +666,24 @@ export function getMediaStatus(token: string) {
   return request("/api/media/status", { token });
 }
 
+export function searchGifs(
+  token: string,
+  query: string,
+  locale: "pt-BR" | "en-US" = "pt-BR",
+  signal?: AbortSignal,
+) {
+  const params = new URLSearchParams({ q: query, locale, limit: "12" });
+  return request<GifSearchPayload>(`/api/media/gifs/search?${params.toString()}`, { token, signal });
+}
+
 export async function uploadMedia(token: string, file: File) {
   const body = new FormData();
   body.append("file", file);
 
   const response = await fetch(buildUrl("/api/media/upload"), {
     method: "POST",
+    // Mission 31B: cookie-session uploads must carry the httpOnly cookie.
+    credentials: "include",
     headers: buildHeaders(token),
     body,
   });

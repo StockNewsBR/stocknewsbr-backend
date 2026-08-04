@@ -53,6 +53,33 @@ class EngineOrchestratorSignalEnrichmentTests(unittest.TestCase):
         self.assertNotIn("price", row)
         self.assertNotIn("volume", row)
 
+    def test_enrich_ranked_blocks_zero_volume_as_score_only(self):
+        frame = _market_frame()
+        frame.loc[frame.index[-1], "Volume"] = 0
+        enriched = engine_orchestrator._enrich_ranked_with_market_data(
+            [{"ticker": "PETR4.SA", "symbol": "PETR4.SA", "score": 82.0}],
+            {"PETR4.SA": frame},
+        )
+
+        row = enriched[0]
+
+        self.assertEqual(row["data_quality"], "score_only")
+        self.assertNotIn("price", row)
+        self.assertNotIn("volume", row)
+
+    def test_enrich_ranked_preserves_persistent_chart_cache_source(self):
+        frame = _market_frame()
+        frame.attrs["market_data_source"] = "persistent_chart_cache"
+
+        row = engine_orchestrator._enrich_ranked_with_market_data(
+            [{"ticker": "PETR4.SA", "symbol": "PETR4.SA", "score": 0.0}],
+            {"PETR4.SA": frame},
+        )[0]
+
+        self.assertEqual(row["score"], 0.0)
+        self.assertEqual(row["price_source"], "persistent_chart_cache")
+        self.assertEqual(row["volume_source"], "persistent_chart_cache")
+
     def test_run_engine_updates_signal_cache_with_enriched_rows(self):
         pool = {"PETR4.SA": _market_frame()}
         ranked = [{"ticker": "PETR4.SA", "symbol": "PETR4.SA", "score": 82.0}]

@@ -8,6 +8,7 @@ from app.market.b3_core_universe import B3_CORE
 from app.market.b3_extended_universe import B3_EXTENDED
 from app.market.bdr_universe import BDRS
 from app.market.crypto_universe import CRYPTO
+from app.services.symbol_sanitizer import sanitize_market_symbol
 
 
 # =====================================================
@@ -53,8 +54,9 @@ def get_all_tickers() -> List[str]:
     result = []
 
     for ticker in universe:
+        ticker = sanitize_market_symbol(ticker, allow_provider_symbols=True)
 
-        if ticker not in seen:
+        if ticker and ticker not in seen:
 
             seen.add(ticker)
             result.append(ticker)

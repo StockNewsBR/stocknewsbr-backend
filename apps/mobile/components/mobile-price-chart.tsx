@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { LayoutChangeEvent, StyleSheet, Text, View } from "react-native";
 
 import { formatPlainNumber, formatTickerCurrency, formatTimestamp } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import { Pill, theme } from "@/components/ui";
 
 type ChartRow = {
@@ -102,6 +103,7 @@ export function MobilePriceChart({
   markers?: MarkerRow[];
   zones?: ZoneRow[];
 }) {
+  const { t, tf } = useI18n();
   const [width, setWidth] = useState(320);
   const candles = useMemo(() => normalizeRows(rows, series), [rows, series]);
   const visibleCandles = candles.slice(-90);
@@ -139,9 +141,9 @@ export function MobilePriceChart({
   if (!visibleCandles.length || !Number.isFinite(minPrice) || !Number.isFinite(maxPrice)) {
     return (
       <View testID="mobile-price-chart-empty" style={styles.emptyChart}>
-        <Text style={styles.emptyTitle}>Grafico indisponivel</Text>
+        <Text style={styles.emptyTitle}>{t("chartEmptyTitle")}</Text>
         <Text style={styles.emptyText}>
-          Faltam candles com preco real para {ticker}. Atualize quando o cache do worker entregar OHLC valido.
+          {tf("chartEmptyText", { ticker })}
         </Text>
       </View>
     );
@@ -170,7 +172,7 @@ export function MobilePriceChart({
             const top = yForPrice(zone.price);
             return (
               <View key={`${zone.label || "zone"}-${zone.price}`} style={[styles.zoneLine, { top }]}>
-                <Text style={styles.zoneLabel}>{zone.label || "zona"} {formatTickerCurrency(ticker, zone.price)}</Text>
+                <Text style={styles.zoneLabel}>{zone.label || t("zoneFallback")} {formatTickerCurrency(ticker, zone.price)}</Text>
               </View>
             );
           })}
@@ -220,10 +222,10 @@ export function MobilePriceChart({
 
       {latestMarker ? (
         <View style={styles.markerDetail}>
-          <Text style={styles.markerTitle}>Ultimo marcador: {labelForMarker(latestMarker)}</Text>
-          <Text style={styles.markerLine}>Trigger: {latestMarker.trigger || "aguardar confirmacao de preco/volume"}</Text>
-          <Text style={styles.markerLine}>Invalidacao: {latestMarker.invalidation || latestMarker.invalidacao || "perda do nivel/fluxo contrario"}</Text>
-          <Text style={styles.markerLine}>Risco: {latestMarker.risk || "monitorar liquidez, spread e regime"}</Text>
+          <Text style={styles.markerTitle}>{t("lastMarkerPrefix")} {labelForMarker(latestMarker)}</Text>
+          <Text style={styles.markerLine}>{t("triggerLabel")} {latestMarker.trigger || t("triggerFallback")}</Text>
+          <Text style={styles.markerLine}>{t("invalidationLabel")} {latestMarker.invalidation || latestMarker.invalidacao || t("invalidationFallback")}</Text>
+          <Text style={styles.markerLine}>{t("riskLabel")} {latestMarker.risk || t("riskFallback")}</Text>
         </View>
       ) : null}
     </View>

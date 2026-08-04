@@ -1,20 +1,48 @@
 import logging
+import os
 import threading
 import time
 from typing import Iterable, Optional, Tuple
 
-import yfinance as yf
-
 from app.config import SYMBOLS
+from app.services.symbol_sanitizer import (
+    crypto_provider_symbol,
+    is_permanently_blocked_symbol,
+    is_symbol_on_cooldown,
+    mark_symbol_cooldown,
+    sanitize_market_symbol,
+)
+from app.system.system_metrics import current_provider_call_source, record_external_provider_call, record_worker_stage_duration
 
 logger = logging.getLogger("stocknewsbr.market_cache")
+_YFINANCE = None
 
 CACHE_TTL = 60
+PROVIDER_FAILURE_COOLDOWN_SECONDS = 180
+
+try:
+    MAX_CACHE_SYMBOLS = max(1, int(os.getenv("MARKET_DATA_MAX_CACHE_SYMBOLS", "250")))
+except (TypeError, ValueError):
+    MAX_CACHE_SYMBOLS = 250
 
 _cache_data = None
 _cache_key: Tuple[str, ...] = tuple()
 _last_update = 0.0
+_provider_cooldown_until = 0.0
+_last_provider_failure_log = 0.0
 _lock = threading.RLock()
+# Serializes provider refreshes so concurrent cache misses trigger a single
+# provider call (Mission 31F).
+_refresh_lock = threading.RLock()
+
+
+def _get_yfinance():
+    global _YFINANCE
+    if _YFINANCE is None:
+        import yfinance as yf_module
+
+        _YFINANCE = yf_module
+    return _YFINANCE
 
 
 def _normalize_tickers(tickers: Optional[Iterable[str]]) -> Tuple[str, ...]:
@@ -25,13 +53,44 @@ def _normalize_tickers(tickers: Optional[Iterable[str]]) -> Tuple[str, ...]:
     seen = set()
 
     for ticker in tickers:
-        if not ticker or ticker in seen:
+        normalized_ticker = sanitize_market_symbol(ticker, allow_provider_symbols=True)
+        if not normalized_ticker:
+            mark_symbol_cooldown(ticker, "invalid_symbol")
+            continue
+        provider_ticker = crypto_provider_symbol(normalized_ticker) or normalized_ticker
+        if (
+            is_permanently_blocked_symbol(normalized_ticker)
+            or is_permanently_blocked_symbol(provider_ticker)
+            or is_symbol_on_cooldown(normalized_ticker)
+            or is_symbol_on_cooldown(provider_ticker)
+        ):
+            mark_symbol_cooldown(normalized_ticker, "blocked_symbol")
+            continue
+        if provider_ticker in seen:
             continue
 
-        seen.add(ticker)
-        normalized.append(str(ticker).upper())
+        seen.add(provider_ticker)
+        normalized.append(provider_ticker)
 
     return tuple(normalized)
+
+
+def _available_symbols(data) -> Optional[Tuple[str, ...]]:
+    """Symbols actually present in a provider payload.
+
+    Returns a tuple for MultiIndex frames, or None when the payload has
+    single-level columns (symbol identity unknown from the frame itself).
+    """
+    columns = getattr(data, "columns", None)
+    if columns is None:
+        return tuple()
+    if hasattr(columns, "levels"):
+        seen = []
+        for symbol in columns.get_level_values(0):
+            if symbol not in seen:
+                seen.append(symbol)
+        return tuple(seen)
+    return None
 
 
 def _extract_subset(data, tickers: Tuple[str, ...]):
@@ -50,9 +109,8 @@ def _extract_subset(data, tickers: Tuple[str, ...]):
         if not selected:
             return None
 
-        if len(selected) == 1:
-            return data[selected[0]]
-
+        # Preserve the MultiIndex shape even for a single selected symbol so
+        # downstream consumers can always rely on columns.get_level_values(0).
         return data.loc[:, data.columns.get_level_values(0).isin(selected)]
 
     if len(tickers) == 1:
@@ -71,35 +129,119 @@ def _cache_satisfies(requested_key: Tuple[str, ...], now: float) -> bool:
     return set(requested_key).issubset(set(_cache_key))
 
 
+def _store_cache_locked(data, requested_key: Tuple[str, ...], now: float) -> None:
+    """Stores a provider payload without poisoning coverage.
+
+    _cache_key must contain only the symbols actually present in the cached
+    payload: a partial provider response must never mark missing symbols as
+    covered (Mission 31F).
+    """
+    global _cache_data
+    global _cache_key
+    global _last_update
+
+    available = _available_symbols(data)
+
+    if available is None:
+        # Single-level columns: only trustworthy when a single symbol was requested.
+        present = requested_key if len(requested_key) == 1 else tuple()
+    else:
+        requested_set = set(requested_key)
+        present = tuple(symbol for symbol in available if symbol in requested_set)
+
+    if not present:
+        return
+
+    if len(present) > MAX_CACHE_SYMBOLS:
+        capped = present[:MAX_CACHE_SYMBOLS]
+        capped_data = _extract_subset(data, capped)
+        if capped_data is None:
+            return
+        _cache_data = capped_data
+        _cache_key = capped
+    else:
+        _cache_data = data
+        _cache_key = present
+
+    _last_update = now
+
+
+def _provider_in_cooldown(now: float) -> bool:
+    return now < _provider_cooldown_until
+
+
+def _mark_provider_cooldown(reason: str):
+    global _provider_cooldown_until
+    global _last_provider_failure_log
+
+    now = time.time()
+    _provider_cooldown_until = max(_provider_cooldown_until, now + PROVIDER_FAILURE_COOLDOWN_SECONDS)
+    if now - _last_provider_failure_log >= PROVIDER_FAILURE_COOLDOWN_SECONDS:
+        logger.warning(
+            "Market provider cooldown active for %ss after %s",
+            PROVIDER_FAILURE_COOLDOWN_SECONDS,
+            reason,
+        )
+        _last_provider_failure_log = now
+
+
 def fetch_market_data(tickers: Tuple[str, ...]):
+    start = time.perf_counter()
+    now = time.time()
+    if current_provider_call_source() == "http":
+        for ticker in tickers:
+            record_external_provider_call(
+                "yfinance",
+                "market_cache_download_blocked_http",
+                duration_seconds=0.0,
+                success=False,
+                symbol=ticker,
+                error="http_provider_blocked",
+            )
+        return None
+
+    if _provider_in_cooldown(now):
+        record_worker_stage_duration("market_download_cooldown", 0.0, success=False)
+        return None
+
     try:
+        yf = _get_yfinance()
         data = yf.download(
             tickers=list(tickers),
             period="1d",
             interval="5m",
             group_by="ticker",
-            threads=True,
+            threads=False,
             progress=False,
             auto_adjust=True,
             prepost=True,
+            timeout=8,
         )
 
         if data is None or len(data) == 0:
-            logger.warning("Market download returned empty")
+            duration = time.perf_counter() - start
+            for ticker in tickers:
+                record_external_provider_call("yfinance", "market_cache_download", duration_seconds=duration, success=False, symbol=ticker, error="empty_data")
+            record_worker_stage_duration("market_download", duration, success=False)
+            _mark_provider_cooldown("empty_data")
             return None
 
+        duration = time.perf_counter() - start
+        for ticker in tickers:
+            record_external_provider_call("yfinance", "market_cache_download", duration_seconds=duration, success=True, symbol=ticker)
+        record_worker_stage_duration("market_download", duration, success=True)
         return data
 
     except Exception as exc:
-        logger.error("Market download error: %s", exc)
+        duration = time.perf_counter() - start
+        for ticker in tickers:
+            record_external_provider_call("yfinance", "market_cache_download", duration_seconds=duration, success=False, symbol=ticker, error=str(exc))
+        record_worker_stage_duration("market_download", duration, success=False)
+        _mark_provider_cooldown(str(exc) or "exception")
         return None
 
 
 def get_market_data(tickers=None):
-    global _cache_data
-    global _cache_key
-    global _last_update
-
     requested_key = _normalize_tickers(tickers)
 
     if not requested_key:
@@ -111,20 +253,28 @@ def get_market_data(tickers=None):
         if _cache_satisfies(requested_key, now):
             return _extract_subset(_cache_data, requested_key)
 
-    data = fetch_market_data(requested_key)
-
-    if data is None:
+    with _refresh_lock:
+        # Another thread may have refreshed the cache while this one was
+        # waiting for the refresh lock.
+        now = time.time()
         with _lock:
             if _cache_satisfies(requested_key, now):
                 return _extract_subset(_cache_data, requested_key)
 
-        return None
+        data = fetch_market_data(requested_key)
 
-    with _lock:
-        _cache_data = data
-        _cache_key = requested_key
-        _last_update = now
-        return _extract_subset(_cache_data, requested_key)
+        if data is None:
+            with _lock:
+                if _cache_satisfies(requested_key, now):
+                    return _extract_subset(_cache_data, requested_key)
+
+            return None
+
+        with _lock:
+            _store_cache_locked(data, requested_key, now)
+            # Always answer from the full provider payload so a capped cache
+            # never truncates the caller's response.
+            return _extract_subset(data, requested_key)
 
 
 class MarketDataCacheCompatibility:
@@ -141,11 +291,15 @@ class MarketDataCacheCompatibility:
         global _cache_data
         global _cache_key
         global _last_update
+        global _provider_cooldown_until
+        global _last_provider_failure_log
 
         with _lock:
             _cache_data = None
             _cache_key = tuple()
             _last_update = 0.0
+            _provider_cooldown_until = 0.0
+            _last_provider_failure_log = 0.0
 
 
 market_data_cache = MarketDataCacheCompatibility()

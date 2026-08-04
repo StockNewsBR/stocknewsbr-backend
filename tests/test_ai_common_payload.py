@@ -12,7 +12,7 @@ class AiCommonPayloadTests(unittest.TestCase):
                 "market_data_updated_at": "2026-05-18T08:05:00-04:00",
                 "updated_at": "2026-05-18T15:23:00+00:00",
             },
-            "heat_map",
+            "flow",
             7.2,
             "premarket_strength",
             "Forca relativa no pre-market.",

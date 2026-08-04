@@ -4,7 +4,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class UserBase(BaseModel):
@@ -12,16 +12,17 @@ class UserBase(BaseModel):
 
 
 class UserRegister(UserBase):
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
     display_name: str | None = Field(default=None, max_length=120)
     phone: str | None = Field(default=None, max_length=32)
     referral_code: str | None = Field(default=None, max_length=32)
     channel: str | None = Field(default="app", max_length=32)
     device_id: str | None = Field(default=None, max_length=120)
     device_label: str | None = Field(default=None, max_length=120)
-    accepted_terms: bool = True
-    accepted_privacy: bool = True
-    accepted_risk_notice: bool = True
+    # Mission 31B: consents must be explicit — no default True.
+    accepted_terms: bool
+    accepted_privacy: bool
+    accepted_risk_notice: bool
 
 
 class UserLogin(UserBase):
@@ -52,6 +53,11 @@ class UserAccessResponse(BaseModel):
     display_name: str | None = None
     phone: str | None = None
     avatar_url: str | None = None
+    # Mission 31B.1: forge-proof identity flags — the ONLY badge source.
+    official: bool = False
+    verified: bool = False
+    role: str = "user"
+    is_bot: bool = False
     plan: str
     plan_status: str
     subscription_provider: str | None = None
@@ -108,6 +114,20 @@ class LegalAcceptanceRequest(BaseModel):
 class LoginOtpVerifyRequest(BaseModel):
     login_token: str = Field(..., min_length=8, max_length=128)
     code: str = Field(..., min_length=4, max_length=12)
+    channel: str | None = Field(default=None, max_length=32)
+
+
+class LoginCodeRequest(BaseModel):
+    email: EmailStr
+    channel: str | None = Field(default="web", max_length=32)
+    device_id: str | None = Field(default=None, max_length=120)
+    device_label: str | None = Field(default=None, max_length=120)
+
+
+class LoginCodeRequestResponse(BaseModel):
+    detail: str = "Se o e-mail estiver apto, enviaremos um código de acesso."
+    login_token: str | None = None
+    otp_expires_at: datetime | None = None
 
 
 class AuthFlowResponse(BaseModel):
@@ -116,17 +136,36 @@ class AuthFlowResponse(BaseModel):
     otp_required: bool = False
     login_token: str | None = None
     otp_expires_at: datetime | None = None
-    debug_otp_code: str | None = None
     session_policy: str | None = None
     channel: str | None = None
     detail: str | None = None
 
 
 class UserProfileUpdateRequest(BaseModel):
+    # Mission 31B mass-assignment allowlist: any field outside this model
+    # (email, role, plan, premium, verified, session fields...) is rejected.
+    model_config = ConfigDict(extra="forbid")
+
     display_name: str | None = Field(default=None, max_length=120)
-    email: EmailStr | None = None
     avatar_url: str | None = Field(default=None, max_length=2048)
+    phone: str | None = Field(default=None, max_length=32)
+
+
+class EmailChangeRequest(BaseModel):
+    new_email: EmailStr
+
+
+class EmailChangeRequestResponse(BaseModel):
+    detail: str = "Se o e-mail informado estiver apto, enviaremos um código de confirmação."
+    login_token: str | None = None
+    otp_expires_at: datetime | None = None
+
+
+class EmailChangeVerifyRequest(BaseModel):
+    login_token: str = Field(..., min_length=8, max_length=128)
+    code: str = Field(..., min_length=4, max_length=12)
 
 
 class LogoutResponse(BaseModel):
     ok: bool = True
+    revoked_sessions: int | None = None

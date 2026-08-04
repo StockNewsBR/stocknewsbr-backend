@@ -2,6 +2,9 @@ class OpportunityEngine:
 
     def detect(self, signals, limit=10):
 
+        if limit < 0:
+            raise ValueError("limit must be non-negative")
+
         if not signals:
             return []
 

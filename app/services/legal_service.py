@@ -1,4 +1,5 @@
 from app.services.access_service import pricing_catalog
+from app.market.universe_registry import universe_registry
 
 
 LEGAL_NOTICE_TEXT = (
@@ -22,10 +23,11 @@ DISCLOSURE_TEXT = (
 
 SUBSCRIPTION_TERMS_TEXT = (
     "O acesso a plataforma e pessoal, individual e intransferivel. O lancamento "
-    "principal acontece no app Google Play. A assinatura Premium ativa libera o "
-    "ecossistema da marca, incluindo app Android, website profissional e canal "
-    "oficial do Telegram. A versao Apple ficara preparada para a proxima etapa "
-    "de lancamento."
+    "principal acontece no app Google Play. Preco, pagamentos, mudanca de planos, "
+    "cancelamentos e reembolsos ficam no Google Play. A assinatura Trial ou Premium "
+    "libera o ecossistema da marca, incluindo app Android, website profissional com "
+    "login e senha e canal oficial do Telegram. A versao Apple ficara preparada para "
+    "a proxima etapa de lancamento."
 )
 
 GOOGLE_PLAY_DESCRIPTION = (
@@ -42,7 +44,7 @@ EDUCATION_DESCRIPTION = (
 
 PRICING = {
     "trial_days": 30,
-    "trial_policy": "Trial inicial de 30 dias. Depois de 30 dias do lancamento, novos trials passam para 14 dias e migram automaticamente para Basico ao vencer.",
+    "trial_policy": "Trial inicial de 30 dias. Ao vencer, a conta migra automaticamente para Basico se nao houver Premium ativo.",
     "refund_window_days": 7,
     "refund_policy": "Cancelamento com reembolso em ate 7 dias para contas Brasil e internacionais. Apos 7 dias nao ha reembolso.",
     "free_plan": {
@@ -83,39 +85,80 @@ LAUNCH_ROADMAP = {
 }
 
 AI_MODULES = [
-    "IA Heat Map",
-    "IA Radar",
-    "IA Breakout Probability",
-    "IA Volatility Squeeze",
-    "IA Institutional Flow",
-    "IA Smart Money",
-    "IA Accumulation",
-    "IA Liquidity Sweep",
-    "IA Liquidity Map",
-    "IA Market Regime",
-    "IA Momentum Acceleration",
-    "IA Multi-Timeframe Alignment",
-    "IA Liquidity Zones",
-    "IA Trap Detector",
-    "IA Momentum Shift",
-    "IA Market Breadth",
-    "IA Master Score",
+    "Fluxo IA",
+    "Liquidez IA",
+    "Tendência IA",
+    "Momento IA",
+    "Smart Money IA",
+    "Risco IA",
+    "Notícias IA",
+    "Macro IA",
+    "Regime IA",
     "IA Grafico",
 ]
 
 HELP_CENTER_MODULES = [
     {
-        "slug": "heat-map",
-        "title": "IA Heat Map",
-        "description": "Mostra os ativos mais fortes e mais fracos do momento.",
-        "example": "PETR4 forte em verde pode indicar pressao compradora relevante.",
+        "slug": "flow",
+        "title": "Fluxo IA",
+        "description": "Le fluxo institucional, agressao e pressao compradora ou vendedora.",
+        "example": "Fluxo forte em PETR4 reforca interesse institucional, mas nao libera trade sozinho.",
         "demo_video_url": None,
     },
     {
-        "slug": "radar",
-        "title": "IA Radar",
-        "description": "Detecta movimentos que comecaram a acelerar no pre-mercado e no pregao.",
-        "example": "VALE3 dispara no radar quando rompe faixa com volume acima da media.",
+        "slug": "liquidity",
+        "title": "Liquidez IA",
+        "description": "Consolida zonas de liquidez, sweeps, traps e invalidacao.",
+        "example": "Uma varredura de stops em VALE3 vira apenas contexto ate haver confirmacao.",
+        "demo_video_url": None,
+    },
+    {
+        "slug": "trend",
+        "title": "Tendência IA",
+        "description": "Avalia direcao predominante e estrutura de tendencia.",
+        "example": "Tendencia de alta sem volume suficiente continua como watchlist.",
+        "demo_video_url": None,
+    },
+    {
+        "slug": "momentum",
+        "title": "Momento IA",
+        "description": "Consolida radar, breakout e heat map em uma leitura de aceleracao.",
+        "example": "Momentum em expansao indica que o ativo entrou no radar, nao que a entrada esta liberada.",
+        "demo_video_url": None,
+    },
+    {
+        "slug": "smart-money",
+        "title": "Smart Money IA",
+        "description": "Le atuacao institucional combinando flow, acumulacao e absorcao.",
+        "example": "Defesa institucional em suporte pode indicar acumulacao ou absorcao.",
+        "demo_video_url": None,
+    },
+    {
+        "slug": "risk",
+        "title": "Risco IA",
+        "description": "Mostra risco operacional, bloqueios, can trade e motivo de nao operar.",
+        "example": "Score alto com baixa liquidez vira NAO OPERAR AGORA.",
+        "demo_video_url": None,
+    },
+    {
+        "slug": "news-ia",
+        "title": "Notícias IA",
+        "description": "Mostra estado da noticia, relevancia, confianca, impacto e provider status.",
+        "example": "Noticia relevante vira contexto, nao gatilho isolado de compra.",
+        "demo_video_url": None,
+    },
+    {
+        "slug": "macro",
+        "title": "Macro IA",
+        "description": "Separa macro real de macro derivado apenas de noticias.",
+        "example": "Macro-news nao e apresentado como macro quantitativo.",
+        "demo_video_url": None,
+    },
+    {
+        "slug": "regime",
+        "title": "Regime IA",
+        "description": "Classifica contexto de mercado: tendencia, lateralidade e volatilidade.",
+        "example": "Regime favoravel ajuda o contexto, mas nao substitui decisao operacional.",
         "demo_video_url": None,
     },
     {
@@ -204,4 +247,5 @@ def get_public_bootstrap():
         "social_features": SOCIAL_FEATURES,
         "weekly_ai_polls": WEEKLY_AI_POLLS,
         "official_channels": OFFICIAL_CHANNELS,
+        "market_universe": universe_registry.get_public_payload(),
     }

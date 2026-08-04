@@ -5,10 +5,10 @@
 import importlib
 import logging
 import os
+import sys
 import threading
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Request
@@ -19,13 +19,28 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.ai.ai_market_pulse import market_pulse
-from app.cache.snapshot_cache import get_snapshot, get_snapshot_info, get_snapshot_signals
-from app.database import Base, SessionLocal, engine
-from app.database_schema import ensure_runtime_schema
+from app.cache.snapshot_cache import (
+    get_snapshot,
+    get_snapshot_info,
+    get_snapshot_signals,
+)
+from app.core.csrf import allowed_web_origins, csrf_rejection
+from app.core.settings import (
+    is_production_environment,
+    validate_database_configuration,
+    validate_runtime_security_settings,
+)
+from app.database import DATABASE_URL, Base, SessionLocal, engine
+from app.database_schema import ensure_runtime_schema, validate_production_schema
 from app.dependencies import require_internal_token
 from app.services.media_service import ensure_media_root
 from app.services.referrals import validate_referrals
-from app.system.system_metrics import increment_http_errors, increment_http_requests
+from app.system.system_metrics import (
+    increment_http_errors,
+    increment_http_requests,
+    provider_call_context,
+    record_http_endpoint_latency,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,48 +49,69 @@ logging.basicConfig(
 
 logger = logging.getLogger("stocknewsbr.main")
 
+# (module_path, attribute, critical).
+#
+# critical=True means the product is not servable without it: authentication, the
+# system/health surface, the core signal + snapshot data product, news, the workspace
+# endpoint both clients read, ranking, and the streaming transport. If one of these
+# fails to import the process must not come up at all -- previously it booted with a
+# WARNING and served /ping 200 while, say, app.auth was silently absent.
+#
+# critical=False means a broken import costs that feature and nothing else. These are
+# the presentational app.web.* routes and secondary/social surfaces; taking the whole
+# API down for a broken template route would be a worse outcome than losing it.
 ROUTER_SPECS = [
-    ("app.auth", "router"),
-    ("app.api.routes_opportunity", "router"),
-    ("app.api.routes_system", "router"),
-    ("app.api.routes_snapshot", "router"),
-    ("app.api.routes_signals", "router"),
-    ("app.api.routes_public_meta", "router"),
-    ("app.api.routes_internal", "router"),
-    ("app.api.api_market_routes", "router"),
-    ("app.api.market_routes", "router"),
-    ("app.api.routes_heatmap", "router"),
-    ("app.api.routes_narrative", "router"),
-    ("app.api.routes_radar", "router"),
-    ("app.api.routes_market_bar", "router"),
-    ("app.api.routes_activity", "router"),
-    ("app.api.routes_feed", "router"),
-    ("app.api.routes_likes", "router"),
-    ("app.api.routes_moderation", "router"),
-    ("app.api.routes_moderation_admin", "router"),
-    ("app.api.routes_media", "router"),
-    ("app.api.routes_push", "router"),
-    ("app.api.routes_poll", "router"),
-    ("app.api.routes_sentiment", "router"),
-    ("app.api.routes_social", "router"),
-    ("app.api.routes_chat", "router"),
-    ("app.api.routes_app_workspace", "router"),
-    ("app.api.stripe_webhook", "router"),
-    ("app.api.routes_ticker", "router"),
-    ("app.services.ranking", "router"),
-    ("app.system.stream_router", "router"),
-    ("app.web.routes_chart", "router"),
-    ("app.web.routes_dashboard", "router"),
-    ("app.web.routes_market_pulse", "router"),
-    ("app.web.routes_opportunities", "router"),
-    ("app.web.routes_radar", "router"),
-    ("app.web.routes_search", "router"),
-    ("app.web.routes_terminal", "router"),
-    ("app.web.routes_top_movers", "router"),
-    ("app.web.routes_watchlist", "router"),
-    ("app.web.routes_workspace", "router"),
-    ("app.web.routes_site", "router"),
+    ("app.auth", "router", True),
+    ("app.api.routes_opportunity", "router", False),
+    ("app.api.routes_system", "router", True),
+    ("app.api.routes_snapshot", "router", True),
+    ("app.api.routes_signals", "router", True),
+    ("app.api.routes_public_meta", "router", False),
+    ("app.api.routes_public_market", "router", False),
+    ("app.api.routes_public_market_live", "router", False),
+    ("app.api.routes_internal", "router", True),
+    ("app.api.routes_paper_trading", "router", False),
+    ("app.api.routes_performance_intelligence", "router", False),
+    ("app.api.routes_explainability", "router", False),
+    ("app.api.api_market_routes", "router", False),
+    ("app.api.market_routes", "router", False),
+    ("app.api.routes_heatmap", "router", False),
+    ("app.api.routes_narrative", "router", False),
+    ("app.api.routes_radar", "router", True),
+    ("app.api.routes_market_bar", "router", False),
+    ("app.api.routes_activity", "router", False),
+    ("app.api.routes_feed", "router", True),
+    ("app.api.routes_likes", "router", False),
+    ("app.api.routes_moderation", "router", False),
+    ("app.api.routes_moderation_admin", "router", False),
+    ("app.api.routes_media", "router", False),
+    ("app.api.routes_push", "router", True),
+    ("app.api.routes_poll", "router", False),
+    ("app.api.routes_sentiment", "router", False),
+    ("app.api.routes_social", "router", False),
+    ("app.api.routes_chat", "router", False),
+    ("app.api.routes_news", "router", True),
+    ("app.api.routes_app_workspace", "router", True),
+    ("app.api.stripe_webhook", "router", False),
+    ("app.api.routes_ticker", "router", False),
+    ("app.services.ranking", "router", True),
+    ("app.system.stream_router", "router", True),
+    ("app.web.routes_chart", "router", False),
+    ("app.web.routes_dashboard", "router", False),
+    ("app.web.routes_market_pulse", "router", False),
+    ("app.web.routes_opportunities", "router", False),
+    ("app.web.routes_radar", "router", False),
+    ("app.web.routes_search", "router", False),
+    ("app.web.routes_terminal", "router", False),
+    ("app.web.routes_top_movers", "router", False),
+    ("app.web.routes_watchlist", "router", False),
+    ("app.web.routes_workspace", "router", False),
+    ("app.web.routes_site", "router", False),
 ]
+
+# Optional routers that failed to import, so health can report degradation instead of
+# reporting a healthy process that is quietly missing endpoints.
+DEGRADED_ROUTERS: list[str] = []
 
 BACKGROUND_THREADS = {}
 THREAD_LOCK = threading.RLock()
@@ -93,52 +129,110 @@ def _env_flag(name: str, default: bool) -> bool:
     return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _default_start_background_workers() -> bool:
+    """Keep local API/web snappy; production can opt in explicitly."""
+    return is_production_environment()
+
+
 def _cors_origins():
-    raw_value = os.getenv(
-        "CORS_ALLOWED_ORIGINS",
-        "https://www.stocknewsbr.com,https://stocknewsbr.com,http://localhost:3000,http://127.0.0.1:3000",
-    )
-    origins = [item.strip() for item in raw_value.split(",") if item.strip()]
-    return origins or ["*"]
+    # Mission 31B: cookies ride on credentialed CORS, so a wildcard origin is
+    # forbidden — the shared helper enforces exact origins.
+    return allowed_web_origins()
 
 
 def _create_tables_if_needed():
-    environment = os.getenv("ENV", "development").lower()
-
     try:
         import app.models  # noqa: F401
 
-        if environment != "production" or engine.url.drivername.startswith("sqlite"):
+        if is_production_environment():
+            validate_production_schema(engine)
+        else:
             Base.metadata.create_all(bind=engine)
-
-        ensure_runtime_schema(engine)
+            ensure_runtime_schema(engine)
     except Exception:
         logger.exception("Database bootstrap failed")
         raise
 
 
-def _safe_import_router(module_path: str, attribute: str):
+def _seed_official_identities_if_needed():
+    """Mission 31B.1: provision the canonical official account + bot at boot.
+
+    Controlled startup path only — no public route, no Telegram/Push, the bot
+    publishes nothing here. Fail-closed: if a non-canonical user already holds
+    an official service email the seed raises a conflict, which we log and skip
+    (a public account is NEVER promoted). Idempotent; safe on every boot.
+    """
+    if not _env_flag("SEED_OFFICIAL_IDENTITIES", True):
+        return
+
+    from app.services.official_identity_service import (
+        OfficialIdentityConflictError,
+        ensure_official_identities,
+    )
+
+    db = None
+    try:
+        db = SessionLocal()
+        ensure_official_identities(db)
+        logger.info("Official identities ensured")
+    except OfficialIdentityConflictError:
+        logger.error(
+            "Official identity seed conflict — promotion skipped (fail-closed)"
+        )
+        if db is not None:
+            db.rollback()
+    except Exception:
+        logger.exception(
+            "Official identity seed failed — continuing without seeded identities"
+        )
+        if db is not None:
+            db.rollback()
+    finally:
+        if db is not None:
+            db.close()
+
+
+def _safe_import_router(module_path: str, attribute: str, critical: bool = False):
+    """Import one router. Critical failures are fatal; optional ones degrade.
+
+    Returning None for everything is what let a broken app.auth boot a servable process
+    whose only symptom was a WARNING indistinguishable from every other router's.
+    """
     try:
         module = importlib.import_module(module_path)
         return getattr(module, attribute)
     except Exception as exc:
-        logger.warning("Skipping router %s: %s", module_path, exc)
+        if critical:
+            logger.error("Critical router %s failed to import: %s", module_path, exc)
+            raise RuntimeError(f"Critical router {module_path} failed to import: {exc}") from exc
+        logger.warning("Skipping non-critical router %s: %s", module_path, exc)
         return None
 
 
 def _include_routers(app: FastAPI):
+    """Register every router. A critical failure propagates and aborts startup."""
     included = 0
+    DEGRADED_ROUTERS.clear()
 
-    for module_path, attribute in ROUTER_SPECS:
-        router = _safe_import_router(module_path, attribute)
+    for module_path, attribute, critical in ROUTER_SPECS:
+        router = _safe_import_router(module_path, attribute, critical=critical)
 
         if router is None:
+            DEGRADED_ROUTERS.append(module_path)
             continue
 
         app.include_router(router)
         included += 1
 
-    logger.info("Router bootstrap completed | included=%s", included)
+    if DEGRADED_ROUTERS:
+        logger.warning(
+            "Router bootstrap degraded | missing=%s", ",".join(DEGRADED_ROUTERS)
+        )
+
+    logger.info(
+        "Router bootstrap completed | included=%s/%s", included, len(ROUTER_SPECS)
+    )
+    return included
 
 
 def _start_thread(name: str, target, *args):
@@ -180,13 +274,37 @@ async def lifespan(app: FastAPI):
     del app
 
     global WORKERS_STARTED
+    snapshot_worker_started = False
+    quote_warmup_started = False
 
     STOP_EVENT.clear()
+    logger.info(
+        "Runtime bootstrap | python_executable=%s | python_version=%s",
+        sys.executable,
+        sys.version.replace("\n", " "),
+    )
+    if sys.version_info[:2] != (3, 11):
+        logger.warning(
+            "Runtime version mismatch | expected=3.11.x | current=%s.%s",
+            sys.version_info.major,
+            sys.version_info.minor,
+        )
+    validate_runtime_security_settings()
+    logger.info("Security settings validated")
+    validate_database_configuration(database_url=DATABASE_URL)
+    logger.info("Database configuration validated")
     _create_tables_if_needed()
+    _seed_official_identities_if_needed()
 
     with WORKERS_LOCK:
         if not WORKERS_STARTED:
-            if _env_flag("START_ENGINE_WORKER", True):
+            default_background_workers = _default_start_background_workers()
+            engine_worker_enabled = _env_flag("START_ENGINE_WORKER", default_background_workers)
+            # API-only/local processes still need a current global snapshot.
+            # The engine remains the sole writer when it is enabled.
+            snapshot_worker_enabled = _env_flag("START_SNAPSHOT_WORKER", not engine_worker_enabled)
+
+            if engine_worker_enabled:
                 from worker import start_worker
 
                 started = _start_thread("stocknewsbr-engine-worker", start_worker, STOP_EVENT)
@@ -196,16 +314,24 @@ async def lifespan(app: FastAPI):
                 started = _start_thread("stocknewsbr-referral-worker", referral_worker, STOP_EVENT)
                 logger.info("Referral worker thread started=%s", started)
 
-            if _env_flag("START_SNAPSHOT_WORKER", False):
+            if _env_flag("START_QUOTE_WARMUP", True):
+                from app.system.quote_warmup import start_quote_warmup
+
+                quote_warmup_started = bool(start_quote_warmup())
+                logger.info("Quote warmup bootstrap requested | started=%s", quote_warmup_started)
+
+            if snapshot_worker_enabled and not engine_worker_enabled:
                 from app.system.snapshot_worker import start_snapshot_worker
 
-                start_snapshot_worker()
-                logger.info("Snapshot worker bootstrap requested")
+                snapshot_worker_started = bool(start_snapshot_worker())
+                logger.info("Snapshot worker bootstrap requested | started=%s", snapshot_worker_started)
+            elif snapshot_worker_enabled and engine_worker_enabled:
+                logger.info("Snapshot worker bootstrap skipped because engine worker is the active snapshot writer")
 
-            if _env_flag("START_AI_WORKER", True):
+            if _env_flag("START_AI_WORKER", default_background_workers):
                 from app.system.ai_worker import start_ai_worker
 
-                started = _start_thread("stocknewsbr-ai-worker", start_ai_worker)
+                started = _start_thread("stocknewsbr-ai-worker", start_ai_worker, STOP_EVENT)
                 logger.info("AI worker thread started=%s", started)
 
             WORKERS_STARTED = True
@@ -214,6 +340,20 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         STOP_EVENT.set()
+        if snapshot_worker_started:
+            try:
+                from app.system.snapshot_worker import stop_snapshot_worker
+
+                stop_snapshot_worker()
+            except Exception:
+                logger.exception("Snapshot worker shutdown failed")
+        if quote_warmup_started:
+            try:
+                from app.system.quote_warmup import stop_quote_warmup
+
+                stop_quote_warmup()
+            except Exception:
+                logger.exception("Quote warmup shutdown failed")
 
         with WORKERS_LOCK:
             WORKERS_STARTED = False
@@ -225,14 +365,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins(),
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 app.add_middleware(GZipMiddleware, minimum_size=512)
+
+@app.middleware("http")
+async def csrf_origin_guard(request: Request, call_next):
+    """Mission 31B CSRF protection (SameSite cookie + Origin/Referer check)."""
+    rejection = csrf_rejection(request, _cors_origins())
+
+    if rejection is not None:
+        return rejection
+
+    return await call_next(request)
+
 app.mount(
     "/media",
     StaticFiles(directory=str(ensure_media_root())),
@@ -245,9 +389,11 @@ async def add_process_time_header(request: Request, call_next):
     start = time.perf_counter()
     request_id = uuid4().hex
     increment_http_requests()
+    response = None
 
     try:
-        response = await call_next(request)
+        with provider_call_context("http"):
+            response = await call_next(request)
     except Exception:
         logger.exception("Unhandled request error on %s", request.url.path)
         increment_http_errors()
@@ -261,6 +407,10 @@ async def add_process_time_header(request: Request, call_next):
         )
         response.headers["X-Process-Time-Ms"] = f"{duration_ms:.2f}"
         response.headers["X-Request-Id"] = request_id
+        route_match = request.scope.get("route")
+        route = getattr(route_match, "path", None) if route_match is not None else None
+        endpoint_key = route or "unmatched"
+        record_http_endpoint_latency(endpoint_key, request.method, response.status_code, duration_ms / 1000)
         return response
 
     duration_ms = (time.perf_counter() - start) * 1000
@@ -270,8 +420,24 @@ async def add_process_time_header(request: Request, call_next):
     if response.status_code >= 500:
         increment_http_errors()
 
+    route_match = request.scope.get("route")
+    route = getattr(route_match, "path", None) if route_match is not None else None
+    endpoint_key = route or "unmatched"
+    record_http_endpoint_latency(endpoint_key, request.method, response.status_code, duration_ms / 1000)
+
     return response
 
+
+# Mission 31B: CORS is registered LAST so it wraps the whole middleware
+# stack (outermost) and error responses from csrf_origin_guard / exception
+# paths still carry Access-Control-Allow-Origin + credentials headers.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _include_routers(app)
 
@@ -310,7 +476,20 @@ def spotlight():
 
 @app.get("/ping")
 def ping():
-    return {"ping": "pong"}
+    """Liveness plus router-bootstrap honesty.
+
+    This used to return a flat 200 {"ping": "pong"} no matter how many routers had
+    silently failed to import, which is precisely how missing endpoints went unnoticed.
+    Critical routers now abort startup, so anything listed here is an optional router
+    whose feature is unavailable while the rest of the API keeps serving.
+    """
+    degraded = list(DEGRADED_ROUTERS)
+    return {
+        "ping": "pong",
+        "status": "degraded" if degraded else "ok",
+        "routers_expected": len(ROUTER_SPECS),
+        "routers_missing": degraded,
+    }
 
 
 @app.get("/debug/tables")

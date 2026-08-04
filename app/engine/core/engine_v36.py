@@ -2,12 +2,14 @@
 # STOCKNEWSBR ENGINE V36 (INSTITUTIONAL ENGINE)
 # =====================================================
 
-import numpy as np
 import logging
+from typing import Dict
+
+import numpy as np
 
 try:
     from numba import njit
-except Exception:  # pragma: no cover - optional dependency fallback
+except (ImportError, ModuleNotFoundError):  # pragma: no cover - optional dependency fallback
     def njit(*_args, **_kwargs):
         def decorator(fn):
             return fn
@@ -19,6 +21,46 @@ from app.market.warm_data_pool import get_market_pool
 logger = logging.getLogger("stocknewsbr.engine.v36")
 
 EPS = 1e-9
+
+
+def _safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _int_if_whole(value):
+    numeric = _safe_float(value, 0.0)
+    return int(numeric) if numeric.is_integer() else numeric
+
+
+def _market_fields_from_matrices(price_row, volume_row):
+    price = _safe_float(price_row[-1], 0.0) if len(price_row) else 0.0
+    prev_close = _safe_float(price_row[-2], price) if len(price_row) >= 2 else price
+    volume = _safe_float(volume_row[-1], 0.0) if len(volume_row) else 0.0
+    volume_window = volume_row[-20:] if len(volume_row) >= 20 else volume_row
+    price_window = price_row[-20:] if len(price_row) >= 20 else price_row
+    avg_volume = _safe_float(np.mean(volume_window), 0.0) if len(volume_window) else 0.0
+    volume_sum = _safe_float(np.sum(volume_window), 0.0) if len(volume_window) else 0.0
+    rel_volume = (volume / avg_volume) if avg_volume > 0 else 0.0
+    change_pct = ((price - prev_close) / prev_close * 100.0) if prev_close > 0 else 0.0
+    vwap = _safe_float(np.sum(price_window * volume_window) / volume_sum, price) if volume_sum > 0 and len(price_window) == len(volume_window) else price
+    data_quality = "priced" if price > 0 and volume > 0 else "score_only"
+
+    return {
+        "price": round(price, 6),
+        "close": round(price, 6),
+        "prev_close": round(prev_close, 6),
+        "volume": _int_if_whole(volume),
+        "avg_volume": int(avg_volume) if avg_volume > 0 else 0,
+        "rel_volume": round(rel_volume, 4),
+        "vwap": round(vwap, 6),
+        "change_pct": round(change_pct, 4),
+        "data_quality": data_quality,
+        "price_source": "engine_v36_matrix",
+        "volume_source": "engine_v36_matrix",
+    }
 
 
 # =====================================================
@@ -132,6 +174,42 @@ def compute_core(price_matrix, volume_matrix):
 # MATRIX BUILDER
 # =====================================================
 
+def _sanitize_array(arr: np.ndarray, name: str, ticker: str) -> np.ndarray:
+    """Replace NaN/Inf with linear interpolation or forward/backward fill. Returns finite array."""
+    finite_mask = np.isfinite(arr)
+    if np.all(finite_mask):
+        return arr
+
+    bad_count = int(np.sum(~finite_mask))
+    logger.warning("Sanitizing %s for %s: %d non-finite values", name, ticker, bad_count)
+
+    if bad_count >= len(arr):
+        logger.error("All values non-finite for %s (%s), using safe fallback", name, ticker)
+        return np.full_like(arr, EPS, dtype=np.float32)
+
+    if not finite_mask[0]:
+        first_finite_idx = np.argmax(finite_mask)
+        if finite_mask[first_finite_idx]:
+            arr[:first_finite_idx] = arr[first_finite_idx]
+
+    if not finite_mask[-1]:
+        last_finite_idx = len(arr) - 1 - np.argmax(finite_mask[::-1])
+        if finite_mask[last_finite_idx]:
+            arr[last_finite_idx + 1:] = arr[last_finite_idx]
+
+    finite_indices = np.where(finite_mask)[0]
+    for i in range(1, len(finite_indices)):
+        prev_idx = finite_indices[i - 1]
+        curr_idx = finite_indices[i]
+        if curr_idx - prev_idx > 1:
+            gap = curr_idx - prev_idx
+            for j in range(prev_idx + 1, curr_idx):
+                weight = (j - prev_idx) / gap
+                arr[j] = arr[prev_idx] * (1.0 - weight) + arr[curr_idx] * weight
+
+    return arr
+
+
 def build_matrices(pool):
 
     tickers = []
@@ -148,6 +226,9 @@ def build_matrices(pool):
 
             if len(close) < 120:
                 continue
+
+            close = _sanitize_array(close.astype(np.float32), "price", ticker)
+            volume = _sanitize_array(volume.astype(np.float32), "volume", ticker)
 
             tickers.append(ticker)
             prices.append(close)
@@ -173,11 +254,11 @@ def build_matrices(pool):
 # ENGINE RUNNER
 # =====================================================
 
-def run_engine():
+def run_engine(pool: Dict[str, object] | None = None):
 
     try:
-
-        pool = get_market_pool()
+        if pool is None:
+            pool = get_market_pool()
 
         if not pool:
             return []
@@ -204,16 +285,19 @@ def run_engine():
         results = []
 
         for i in top_idx:
+            market_fields = _market_fields_from_matrices(price_matrix[i], volume_matrix[i])
 
             results.append({
 
                 "ticker": tickers[i],
+                "symbol": tickers[i],
                 "score": float(scores[i]),
                 "momentum": float(momentum[i]),
                 "trend": float(trend[i]),
                 "volatility": float(volatility[i]),
                 "smart_money": bool(smart_money[i]),
-                "breakout": bool(breakout[i])
+                "breakout": bool(breakout[i]),
+                **market_fields,
 
             })
 

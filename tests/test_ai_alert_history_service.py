@@ -16,12 +16,12 @@ class AiAlertHistoryServiceTests(unittest.TestCase):
             path = self._path(tmp)
             first = persist_ai_alert_history(
                 {
-                    "radar": [
+                    "momentum": [
                         {
                             "ticker": "PETR4",
-                            "tool": "radar",
+                            "tool": "momentum",
                             "signal": "BUY",
-                            "state": "radar_initial",
+                            "state": "momentum_watch",
                             "price": 45.0,
                             "market_data_updated_at": "2026-05-12T13:00:00+00:00",
                             "updated_at": "2026-05-12T13:00:00+00:00",
@@ -33,12 +33,12 @@ class AiAlertHistoryServiceTests(unittest.TestCase):
             )
             second = persist_ai_alert_history(
                 {
-                    "radar": [
+                    "momentum": [
                         {
                             "ticker": "PETR4",
-                            "tool": "radar",
+                            "tool": "momentum",
                             "signal": "BUY",
-                            "state": "radar_initial",
+                            "state": "momentum_watch",
                             "price": 45.9,
                             "market_data_updated_at": "2026-05-12T14:00:00+00:00",
                             "updated_at": "2026-05-12T14:00:00+00:00",
@@ -49,24 +49,24 @@ class AiAlertHistoryServiceTests(unittest.TestCase):
                 path=path,
             )
 
-        self.assertEqual(len(first["radar"]), 1)
-        self.assertEqual(len(second["radar"]), 1)
-        self.assertEqual(second["radar"][0]["detected_at"], "2026-05-12T14:00:00+00:00")
-        self.assertEqual(second["radar"][0]["updated_at"], "2026-05-12T13:00:00+00:00")
-        self.assertEqual(second["radar"][0]["last_seen_at"], "2026-05-12T14:00:00+00:00")
-        self.assertEqual(second["radar"][0]["price"], 45.9)
-        self.assertTrue(second["radar"][0]["active"])
+        self.assertEqual(len(first["momentum"]), 1)
+        self.assertEqual(len(second["momentum"]), 1)
+        self.assertEqual(second["momentum"][0]["detected_at"], "2026-05-12T14:00:00+00:00")
+        self.assertEqual(second["momentum"][0]["updated_at"], "2026-05-12T13:00:00+00:00")
+        self.assertEqual(second["momentum"][0]["last_seen_at"], "2026-05-12T14:00:00+00:00")
+        self.assertEqual(second["momentum"][0]["price"], 45.9)
+        self.assertTrue(second["momentum"][0]["active"])
 
     def test_keeps_twenty_visible_alerts_newest_first(self):
         with TemporaryDirectory() as tmp:
             path = self._path(tmp)
             payload = {
-                "heat_map": [
+                "flow": [
                     {
                         "ticker": f"TST{i:02d}",
-                        "tool": "heat_map",
+                        "tool": "flow",
                         "signal": "BUY",
-                        "state": "strong_buying",
+                        "state": "institutional_buying",
                         "updated_at": f"2026-05-12T13:{i:02d}:00+00:00",
                     }
                     for i in range(22)
@@ -78,20 +78,20 @@ class AiAlertHistoryServiceTests(unittest.TestCase):
                 path=path,
             )
 
-        self.assertEqual(len(result["heat_map"]), 20)
-        self.assertEqual(result["heat_map"][0]["ticker"], "TST21")
-        self.assertEqual(result["heat_map"][-1]["ticker"], "TST02")
+        self.assertEqual(len(result["flow"]), 20)
+        self.assertEqual(result["flow"][0]["ticker"], "TST21")
+        self.assertEqual(result["flow"][-1]["ticker"], "TST02")
 
     def test_market_timestamp_drives_detected_time(self):
         with TemporaryDirectory() as tmp:
             result = persist_ai_alert_history(
                 {
-                    "heat_map": [
+                    "flow": [
                         {
                             "ticker": "F",
-                            "tool": "heat_map",
+                            "tool": "flow",
                             "signal": "BUY",
-                            "state": "premarket_strength",
+                            "state": "institutional_buying",
                             "detected_at": "2026-05-18T15:23:00+00:00",
                             "market_data_updated_at": "2026-05-18T11:35:00+00:00",
                         }
@@ -101,7 +101,7 @@ class AiAlertHistoryServiceTests(unittest.TestCase):
                 path=self._path(tmp),
             )
 
-        self.assertEqual(result["heat_map"][0]["detected_at"], "2026-05-18T11:35:00+00:00")
+        self.assertEqual(result["flow"][0]["detected_at"], "2026-05-18T11:35:00+00:00")
 
     def test_resets_history_after_daily_7am_cutoff(self):
         with TemporaryDirectory() as tmp:
@@ -144,12 +144,12 @@ class AiAlertHistoryServiceTests(unittest.TestCase):
             path = self._path(tmp)
             persist_ai_alert_history(
                 {
-                    "heat_map": [
+                    "flow": [
                         {
                             "ticker": f"TST{i:02d}",
-                            "tool": "heat_map",
+                            "tool": "flow",
                             "signal": "BUY",
-                            "state": "strong_buying",
+                            "state": "institutional_buying",
                             "market_data_updated_at": f"2026-05-18T13:{i:02d}:00+00:00",
                         }
                         for i in range(22)
@@ -164,7 +164,7 @@ class AiAlertHistoryServiceTests(unittest.TestCase):
                 path=path,
             )
 
-        rows = snapshot["tools"]["heat_map"]
+        rows = snapshot["tools"]["flow"]
         self.assertEqual(snapshot["max_rows_per_tool"], 20)
         self.assertEqual(len(rows), 20)
         self.assertEqual(rows[0]["ticker"], "TST21")

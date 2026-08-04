@@ -3,11 +3,14 @@ import { RefreshControl, ScrollView, Text, View } from "react-native";
 
 import { getPoll, getPollHistory, votePoll } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
+import { canonicalSymbol } from "@/lib/symbolRegistry";
 import { Button, Card, EmptyState, Field, Pill, SectionHeader, theme } from "@/components/ui";
+import { useI18n } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 
 export default function PollsTab() {
   const { token } = useSession();
+  const { t } = useI18n();
   const [ticker, setTicker] = useState("PETR4");
   const [poll, setPoll] = useState<Record<string, any> | null>(null);
   const [history, setHistory] = useState<Record<string, any>[]>([]);
@@ -22,8 +25,8 @@ export default function PollsTab() {
     setLoading(true);
     try {
       const [nextPoll, nextHistory] = await Promise.all([
-        getPoll(ticker.trim().toUpperCase()).catch(() => null),
-        getPollHistory(ticker.trim().toUpperCase()).catch(() => ({ history: [] })),
+        getPoll(canonicalSymbol(ticker) || "PETR4").catch(() => null),
+        getPollHistory(canonicalSymbol(ticker) || "PETR4").catch(() => ({ history: [] })),
       ]);
       setPoll(nextPoll);
       setHistory(Array.isArray(nextHistory?.history) ? nextHistory.history : []);
@@ -38,14 +41,14 @@ export default function PollsTab() {
 
   async function handleVote(option: string) {
     if (!token) {
-      setStatus("Faça login para votar.");
+      setStatus(t("loginToVote"));
       return;
     }
 
     try {
-      const nextPoll = await votePoll(token, ticker.trim().toUpperCase(), option);
+      const nextPoll = await votePoll(token, canonicalSymbol(ticker) || "PETR4", option);
       setPoll(nextPoll);
-      setStatus("Voto registrado.");
+      setStatus(t("voteOk"));
       await loadPoll();
     } catch (requestError) {
       setStatus(requestError instanceof Error ? requestError.message : "vote_failed");
@@ -61,38 +64,38 @@ export default function PollsTab() {
       refreshControl={<RefreshControl refreshing={loading} onRefresh={loadPoll} tintColor={theme.colors.accent} />}
     >
       <View style={{ gap: 8, paddingTop: 10 }}>
-        <Pill label="Polls IA" tone="warning" />
+        <Pill label={t("pollsPill")} tone="warning" />
         <Text style={{ color: theme.colors.text, fontSize: 30, fontWeight: "800", lineHeight: 34 }}>
-          Enquetes semanais por ticker.
+          {t("pollsTitle")}
         </Text>
         <Text style={{ color: theme.colors.muted, fontSize: 14, lineHeight: 21 }}>
-          Leitura simples, votacao rapida e historico para comparar a evolucao da tese.
+          {t("pollsSubtitle")}
         </Text>
       </View>
 
       <Card>
-        <SectionHeader title="Ticker" subtitle="Troque o papel para ver a enquete ativa e o historico." />
+        <SectionHeader title={t("tickerCardTitle")} subtitle={t("pollsTickerSubtitle")} />
         <Field value={ticker} onChangeText={(value) => setTicker(value.toUpperCase())} placeholder="PETR4" />
-        <Button label="Atualizar poll" onPress={loadPoll} variant="secondary" />
+        <Button label={t("updatePoll")} onPress={loadPoll} variant="secondary" />
       </Card>
 
       <Card>
-        <SectionHeader title="Enquete atual" subtitle={poll?.question || "Nenhuma enquete carregada."} />
+        <SectionHeader title={t("currentPollTitle")} subtitle={poll?.question || t("currentPollNone")} />
         {options.length ? (
           options.map((option: any) => (
             <View key={option.key} style={{ gap: 8, marginTop: 4 }}>
               <Button label={`${option.key} | ${option.label}`} onPress={() => handleVote(option.key)} loading={loading} />
-              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{Number(option.votes || 0)} votos</Text>
+              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{Number(option.votes || 0)} {t("votesSuffix")}</Text>
             </View>
           ))
         ) : (
-          <EmptyState title="Sem opcoes" description="O backend ainda nao retornou opcoes para esta enquete." />
+          <EmptyState title={t("noOptionsTitle")} description={t("noOptionsDesc")} />
         )}
         {status ? <Text style={{ color: theme.colors.muted, fontSize: 13 }}>{status}</Text> : null}
       </Card>
 
       <Card>
-        <SectionHeader title="Historico" subtitle="As ultimas enquetes do ativo." />
+        <SectionHeader title={t("historyTitle")} subtitle={t("historySubtitle")} />
         {history.length ? (
           history.map((item: any) => (
             <View key={item.id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: theme.colors.line, gap: 4 }}>
@@ -101,7 +104,7 @@ export default function PollsTab() {
             </View>
           ))
         ) : (
-          <EmptyState title="Sem historico" description="Nenhuma enquete antiga encontrada para esse ticker." />
+          <EmptyState title={t("historyEmptyTitle")} description={t("historyEmptyDesc")} />
         )}
       </Card>
     </ScrollView>

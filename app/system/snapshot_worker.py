@@ -3,12 +3,14 @@
 # Ultra Fast + Crash Safe
 # =====================================================
 
+import os
 import time
 import logging
 import threading
 
-from app.core.settings import settings
+from app.cache.signal_cache import get_all_signals
 from app.engine.market_snapshot_engine import generate_market_snapshot
+from app.system.system_metrics import provider_call_context, record_worker_stage_duration
 
 
 logger = logging.getLogger("stocknewsbr.snapshot_worker")
@@ -35,25 +37,34 @@ def _snapshot_loop():
 
     try:
 
-        interval = max(1, int(settings.SCAN_INTERVAL))
+        interval = max(30, int(os.getenv("GLOBAL_SNAPSHOT_INTERVAL_SECONDS", "300")))
 
     except Exception:
 
-        interval = 60
+        interval = 300
 
     while not _stop_event.is_set():
 
         start = time.time()
 
+        success = False
         try:
+            with provider_call_context("worker"):
+                cached_signals = get_all_signals()
 
-            generate_market_snapshot()
+                if cached_signals:
+                    generate_market_snapshot(cached_signals, reuse_last_good_on_empty=True)
+                else:
+                    # Preserve cold-start/self-heal behavior when the shared signal cache is empty.
+                    generate_market_snapshot()
+                success = True
 
         except Exception as e:
 
-            logger.exception(f"Snapshot worker error: {e}")
+            logger.exception("Snapshot worker error: %s", e)
 
         duration = time.time() - start
+        record_worker_stage_duration("snapshot_worker_cycle", duration, success=success)
 
         # prevent drift
         sleep_time = max(1, interval - duration)
@@ -101,7 +112,7 @@ def start_snapshot_worker():
 
         except Exception as e:
 
-            logger.exception(f"Snapshot worker start failed: {e}")
+            logger.exception("Snapshot worker start failed: %s", e)
 
             return False
 
@@ -130,4 +141,4 @@ def stop_snapshot_worker():
 
     except Exception as e:
 
-        logger.error(f"Snapshot worker stop error: {e}")
+        logger.error("Snapshot worker stop error: %s", e)

@@ -15,8 +15,8 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "StockNewsBR – Inteligencia de Mercado com IA",
-  description: "StockNewsBR – Inteligencia de Mercado com IA. Workspace premium integrado a engine, ranking, chat, grafico e social."
+  title: "StockNewsBR – Inteligência de Mercado com IA",
+  description: "StockNewsBR – Inteligência de Mercado com IA. Workspace premium integrado a engine, ranking, chat, gráfico e social."
 };
 
 export default function RootLayout({

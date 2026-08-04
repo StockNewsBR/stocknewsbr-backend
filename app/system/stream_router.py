@@ -43,7 +43,7 @@ async def market_stream(websocket: WebSocket):
 
             except Exception as e:
 
-                logger.warning(f"WebSocket message error: {e}")
+                logger.warning("WebSocket message error: %s", e)
 
                 break
 

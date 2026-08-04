@@ -5,7 +5,15 @@
 import time
 import logging
 import threading
-from typing import Dict
+from collections import deque, Counter
+from typing import Dict, Any, Iterable
+
+from app.services.snapshot_runtime_status import (
+    SNAPSHOT_RUNTIME_CRITICAL,
+    SNAPSHOT_RUNTIME_DEGRADED,
+    evaluate_snapshot_runtime_status,
+)
+from app.services.go_live_status_service import build_go_live_status
 
 try:
     import psutil
@@ -22,6 +30,7 @@ _last_signal_count = 0
 
 _peak_signals = 0
 _total_signals = 0
+_recent_events = deque(maxlen=50)
 
 _lock = threading.RLock()
 
@@ -53,6 +62,23 @@ def record_cycle(scan_time: float = 0.0, signals: int = 0):
 
     except Exception as e:
         logger.exception("Observability record failure: %s", e)
+
+
+def record_observability_event(kind: str, message: str, severity: str = "warning", source: str | None = None, details: Dict[str, Any] | None = None) -> None:
+    try:
+        with _lock:
+            _recent_events.appendleft(
+                {
+                    "kind": str(kind or "unknown"),
+                    "message": str(message or "")[:240],
+                    "severity": str(severity or "warning"),
+                    "source": str(source or "system"),
+                    "details": dict(details or {}),
+                    "timestamp": time.time(),
+                }
+            )
+    except Exception as e:  # pragma: no cover - observability should never break runtime
+        logger.exception("Observability event failure: %s", e)
 
 
 # =====================================================
@@ -127,3 +153,191 @@ def get_metrics() -> Dict:
             "cpu_percent": 0,
             "memory_percent": 0
         }
+
+
+def _health_status_from_ratio(value: float, healthy_threshold: float = 0.7, degraded_threshold: float = 0.4) -> str:
+    if value >= healthy_threshold:
+        return "HEALTHY"
+    if value >= degraded_threshold:
+        return "DEGRADED"
+    return "CRITICAL"
+
+
+def _count_status(items: Iterable[Dict[str, Any]], key: str = "status") -> Counter:
+    counter: Counter = Counter()
+    for item in items:
+        status = str((item or {}).get(key) or "").upper() or "UNKNOWN"
+        counter[status] += 1
+    return counter
+
+
+def build_observability_dashboard(
+    *,
+    snapshot: Dict[str, Any] | None = None,
+    ai_worker: Dict[str, Any] | None = None,
+    ai_tabs: Dict[str, Any] | None = None,
+    polls: Dict[str, Any] | None = None,
+    providers: Dict[str, Any] | None = None,
+    ranking: Dict[str, Any] | None = None,
+    radar: Dict[str, Any] | None = None,
+    telegram: Dict[str, Any] | None = None,
+    institutional_metrics: Dict[str, Any] | None = None,
+    system_status: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    snapshot = snapshot or {}
+    ai_worker = ai_worker or {}
+    ai_tabs = ai_tabs or {}
+    polls = polls or {}
+    providers = providers or {}
+    ranking = ranking or {}
+    radar = radar or {}
+    telegram = telegram or {}
+    institutional_metrics = institutional_metrics or {}
+    system_status = system_status or {}
+
+    provider_rows = providers.get("items") if isinstance(providers.get("items"), list) else []
+    provider_status_counts = _count_status(provider_rows)
+    provider_ok = provider_status_counts.get("HEALTHY", 0)
+    provider_total = sum(provider_status_counts.values()) or 1
+    provider_health = _health_status_from_ratio(provider_ok / provider_total, healthy_threshold=0.66, degraded_threshold=0.33)
+
+    snapshot_runtime = evaluate_snapshot_runtime_status(snapshot)
+    snapshot_health = {
+        "signals_generated": snapshot_runtime.get("signals", 0),
+        "invalid": snapshot.get("invalid", 0),
+        "discarded": snapshot.get("discarded", 0),
+        "blocked": snapshot.get("blocked", 0),
+        "source": snapshot_runtime.get("source"),
+        "stale": bool(snapshot_runtime.get("stale")),
+        "fallback_active": bool(snapshot_runtime.get("fallback_active")),
+        "age_seconds": snapshot_runtime.get("age_seconds"),
+        "timestamp": snapshot_runtime.get("timestamp") or snapshot.get("timestamp"),
+        "last_good_signals": snapshot.get("last_good_signals", snapshot_runtime.get("last_good_signals", 0)),
+        "last_good_timestamp": snapshot.get("last_good_timestamp", snapshot_runtime.get("last_good_timestamp")),
+        "reasons": list(snapshot_runtime.get("reasons") or []),
+        "status": snapshot_runtime["status"],
+    }
+    auditor_counts = _count_status([{"status": ai_tabs.get("overall_status")}])
+    score_counts = Counter(str(item.get("direction") or "NEUTRAL").upper() for item in (snapshot.get("master_scores") or []) if isinstance(item, dict))
+    radar_counts = _count_status([{"status": radar.get("status")}])
+    ranking_counts = _count_status([{"status": ranking.get("status")}])
+    telegram_counts = _count_status([{"status": telegram.get("status")}])
+
+    recent_errors = list(_recent_events)
+    if not recent_errors and isinstance(system_status.get("recent_errors"), list):
+        recent_errors = [item for item in system_status.get("recent_errors", []) if isinstance(item, dict)]
+
+    error_groups = Counter(str(item.get("kind") or "unknown") for item in recent_errors)
+    system_status_value = str(system_status.get("status") or "HEALTHY").upper()
+    if provider_health == "CRITICAL" or snapshot_health["status"] == SNAPSHOT_RUNTIME_CRITICAL or (
+        snapshot_health["status"] == SNAPSHOT_RUNTIME_DEGRADED
+        and int(snapshot.get("blocked", 0) or 0) > int(snapshot_runtime.get("signals", 0) or 0)
+    ):
+        system_status_value = "CRITICAL"
+    elif provider_health == "DEGRADED" or snapshot_health["status"] == SNAPSHOT_RUNTIME_DEGRADED or str(ai_worker.get("status") or "").lower() == "warning":
+        system_status_value = "DEGRADED"
+
+    go_live = build_go_live_status(snapshot, institutional_metrics=institutional_metrics)
+    contract_coverage = go_live.get("contract_coverage", {})
+
+    return {
+        "system_status": system_status_value,
+        "providers": {
+            "status": provider_health,
+            "items": provider_rows[:12],
+            "counts": dict(provider_status_counts),
+        },
+        "snapshot_health": snapshot_health,
+        "snapshot_runtime_status": snapshot_runtime["status"],
+        "snapshot_runtime": snapshot_runtime,
+        "fallback_active": bool(snapshot_runtime.get("fallback_active")),
+        "go_live_ready": bool(go_live.get("go_live_ready")),
+        "go_live": go_live,
+        "institutional_consistency_score": go_live.get("institutional_consistency_score"),
+        "contract_coverage": contract_coverage,
+        "institutional_certified": bool(go_live.get("institutional_certified")),
+        "certification_timestamp": go_live.get("certification_timestamp"),
+        "certification_reasons": list(go_live.get("certification_reasons") or []),
+        "operational_dashboard": {
+            "snapshot_status": snapshot_runtime["status"],
+            "worker_status": ai_worker.get("status", "idle"),
+            "go_live_ready": bool(go_live.get("go_live_ready")),
+            "consistency_score": go_live.get("institutional_consistency_score"),
+            "consistency_issues": len(go_live.get("consistency_issues") or []),
+            "contract_coverage": contract_coverage,
+            "snapshot_coverage": contract_coverage,
+            "operational_blocks": int(
+                (institutional_metrics.get("operational_rules", {}) if isinstance(institutional_metrics.get("operational_rules"), dict) else {}).get("blocked", 0)
+                or (snapshot.get("data_status", {}) if isinstance(snapshot.get("data_status"), dict) else {}).get("operational_blocked", 0)
+                or 0
+            ),
+            "institutional_certified": bool(go_live.get("institutional_certified")),
+            "certification_reasons": list(go_live.get("certification_reasons") or []),
+            "last_good_snapshot": snapshot.get("last_good_snapshot")
+            if isinstance(snapshot.get("last_good_snapshot"), dict)
+            else {
+                "signals": snapshot.get("last_good_signals", 0),
+                "timestamp": snapshot.get("last_good_timestamp"),
+                "available": int(snapshot.get("last_good_signals", 0) or 0) > 0,
+            },
+            "last_good_timestamp": snapshot.get("last_good_timestamp"),
+            "signals_generated": snapshot_runtime.get("signals", 0),
+            "fallback_active": bool(snapshot_runtime.get("fallback_active")),
+        },
+        "auditor_health": {
+            "status": str(ai_tabs.get("overall_status") or "IDLE").upper(),
+            "counts": dict(auditor_counts),
+            "blocked_ratio": round(
+                int((ai_tabs.get("batch_summary") or {}).get("blocked_tools", 0) or 0)
+                / max(1, int((ai_tabs.get("batch_summary") or {}).get("approved_tools", 0) or 0) + int((ai_tabs.get("batch_summary") or {}).get("blocked_tools", 0) or 0)),
+                4,
+            ),
+        },
+        "score_health": {
+            "distribution": dict(score_counts),
+            "status": "HEALTHY" if len(score_counts) > 1 else "DEGRADED",
+        },
+        "radar_health": {
+            "status": str(radar.get("status") or "IDLE").upper(),
+            "generated": int(radar.get("generated", 0) or 0),
+            "filtered": int(radar.get("filtered", 0) or 0),
+            "blocked": int(radar.get("blocked", 0) or 0),
+            "counts": dict(radar_counts),
+        },
+        "ranking_health": {
+            "status": str(ranking.get("status") or "IDLE").upper(),
+            "eligible": int(ranking.get("eligible", 0) or 0),
+            "discarded": int(ranking.get("discarded", 0) or 0),
+            "blocked": int(ranking.get("blocked", 0) or 0),
+            "counts": dict(ranking_counts),
+        },
+        "telegram_health": {
+            "status": str(telegram.get("status") or "IDLE").upper(),
+            "sent": int(telegram.get("sent", 0) or 0),
+            "blocked": int(telegram.get("blocked", 0) or 0),
+            "discarded": int(telegram.get("discarded", 0) or 0),
+            "deduplicated": int(telegram.get("deduplicated", 0) or 0),
+            "cooldown": int(telegram.get("cooldown", 0) or 0),
+            "errors": int(telegram.get("errors", 0) or 0),
+            "critical": int(telegram.get("critical", 0) or 0),
+            "high": int(telegram.get("high", 0) or 0),
+            "medium": int(telegram.get("medium", 0) or 0),
+            "counts": dict(telegram_counts),
+        },
+        "institutional_metrics": institutional_metrics,
+        "institutional_consistency": institutional_metrics.get("institutional_consistency", {}),
+        "recent_errors": recent_errors[:12],
+        "error_center": {
+            "total": len(recent_errors),
+            "groups": dict(error_groups),
+        },
+        "alerts": [
+            {"kind": "provider", "message": "provider degradado", "severity": "warning"} if provider_health == "DEGRADED" else None,
+            {"kind": "provider", "message": "provider crítico", "severity": "critical"} if provider_health == "CRITICAL" else None,
+            {"kind": "radar", "message": "radar sem sinais", "severity": "warning"} if int(radar.get("generated", 0) or 0) == 0 else None,
+            {"kind": "ranking", "message": "ranking vazio", "severity": "warning"} if int(ranking.get("eligible", 0) or 0) == 0 else None,
+            {"kind": "telegram", "message": "telegram parado", "severity": "warning"} if int(telegram.get("sent", 0) or 0) == 0 else None,
+            {"kind": "snapshot", "message": "snapshot crítico", "severity": "critical"} if snapshot_health["status"] == SNAPSHOT_RUNTIME_CRITICAL else None,
+            {"kind": "snapshot", "message": "snapshot degradado", "severity": "warning"} if snapshot_health["status"] == SNAPSHOT_RUNTIME_DEGRADED else None,
+        ],
+    }

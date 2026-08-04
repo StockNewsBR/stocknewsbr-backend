@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends
 
 from app.dependencies import require_internal_token
-from app.social.moderation import get_moderation_summary, get_review_queue, review_report
+from app.social.moderation import get_guardian_audit, get_moderation_summary, get_review_queue, review_report
 
 
 class ReviewReportRequest(BaseModel):
@@ -35,3 +35,8 @@ def moderation_review(payload: ReviewReportRequest):
 @router.get("/summary")
 def moderation_summary():
     return get_moderation_summary()
+
+
+@router.get("/social-guardian-audit")
+def social_guardian_audit(limit: int = 100):
+    return {"items": get_guardian_audit(limit=limit)}

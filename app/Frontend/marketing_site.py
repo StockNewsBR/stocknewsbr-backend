@@ -3,6 +3,63 @@ from app.services.legal_service import get_public_bootstrap
 from app.services.media_service import get_media_status
 from app.services.push_service import get_push_status
 from app.services.storage_service import get_storage_status
+from app.system.system_metrics import get_metrics_snapshot
+
+
+def _join(items):
+    return "".join(items)
+
+
+def _metric_cards(metrics):
+    return _join(
+        f"""
+        <article class="stat">
+          <span>{label}</span>
+          <strong>{value}</strong>
+          <p>{description}</p>
+        </article>
+        """
+        for label, value, description in metrics
+    )
+
+
+def _feature_cards():
+    cards = [
+        ("Score Mestre", "Resumo operacional", "Transforma 9 IAs e o Auditor em uma leitura única para decidir mais rápido."),
+        ("Auditor Institucional", "Filtro obrigatório", "Bloqueia conflitos e reduz o ruído antes que o cenário chegue ao trader."),
+        ("Ranking", "Onde olhar", "Mostra as melhores oportunidades por leitura institucional, risco e contexto."),
+        ("Radar", "O que vem antes", "Ajuda a perceber compressão, gatilho e preparação sem disparar trade sozinho."),
+        ("Telegram", "Alerta direto", "Entrega o resumo do mercado no canal certo sem exigir abrir várias telas."),
+    ]
+    return _join(
+        f"""
+        <article class="feature">
+          <div class="icon">{index + 1:02d}</div>
+          <h3>{title}</h3>
+          <strong>{headline}</strong>
+          <p>{body}</p>
+        </article>
+        """
+        for index, (title, headline, body) in enumerate(cards)
+    )
+
+
+def _faq_cards():
+    faqs = [
+        ("O que e o Score Mestre?", "E a sintese institucional do produto. Ele resume contexto, direcao, conviccao e risco em uma leitura unica."),
+        ("O que e o Auditor?", "E a camada de protecao que impede conflito institucional e sinal ruim de virar decisao operacional."),
+        ("O que significa NAO OPERAR AGORA?", "Significa que a leitura ainda nao tem contexto suficiente ou esta bloqueada por risco, qualidade de dados ou conflito."),
+        ("Como funciona o Telegram?", "Ele recebe o resumo do mercado e os alertas institucionais sem depender de varias telas abertas."),
+    ]
+    return _join(
+        f"""
+        <details class="faq">
+          <summary>{question}</summary>
+          <p>{answer}</p>
+        </details>
+        """
+        for question, answer in faqs
+    )
 
 
 def get_marketing_site():
@@ -11,48 +68,48 @@ def get_marketing_site():
     media = get_media_status()
     push = get_push_status()
     storage = get_storage_status()
+    metrics = get_metrics_snapshot()
 
-    ai_modules = bootstrap.get("ai_modules", [])
-    social_features = bootstrap.get("social_features", {})
-    guides = help_center.get("guides", [])[:4]
     pricing = bootstrap.get("pricing", {})
-    social_items = [
-        key.replace("_", " ").title()
-        for key, enabled in social_features.items()
-        if enabled
-    ]
+    roadmap = bootstrap.get("launch_roadmap", {})
+    help_guides = help_center.get("guides", [])[:3]
 
-    feature_cards = "".join(
-        f"""
-        <article class="feature-card">
-          <span class="eyebrow">IA</span>
-          <h3>{module}</h3>
-          <p>Scanner institucional ligado ao ranking, grafico, feed e alertas.</p>
-        </article>
-        """
-        for module in ai_modules[:8]
+    stats = _metric_cards(
+        [
+            ("Sinais gerados", f"{metrics.get('signals_generated', 0)}", "Volume operacional do motor e do snapshot."),
+            ("Ciclos executados", f"{metrics.get('engine_cycles', 0)}", "Ritmo de processamento do sistema."),
+            ("Uptime", f"{round((metrics.get('uptime_seconds', 0) or 0) / 3600, 1)}h", "Tempo online da infraestrutura."),
+            ("Scan médio", f"{metrics.get('scan_time', 0)}s", "Leitura média por ciclo do backend."),
+        ]
     )
 
-    social_cards = "".join(
+    feature_cards = _feature_cards()
+    faq_cards = _faq_cards()
+    help_cards = _join(
         f"""
-        <article class="mini-card">
-          <h3>{item}</h3>
-          <p>Construido para manter o trader operando dentro do ecossistema.</p>
+        <article class="help-card">
+          <span>Ajuda</span>
+          <h3>{guide.get('title', '')}</h3>
+          <p>{guide.get('tagline', '') or guide.get('description', '')}</p>
         </article>
         """
-        for item in social_items[:6]
+        for guide in help_guides
     )
 
-    guide_cards = "".join(
+    plan_cards = _join(
         f"""
-        <article class="guide-card">
-          <span class="eyebrow">Ajuda</span>
-          <h3>{guide['title']}</h3>
-          <p>{guide.get('tagline', '')}</p>
-          <a href="{guide.get('demo_video_url', '#')}">Ver demo</a>
+        <article class="plan {class_name}">
+          <span>{label}</span>
+          <h3>{title}</h3>
+          <strong>{price}</strong>
+          <p>{description}</p>
         </article>
         """
-        for guide in guides
+        for class_name, label, title, price, description in [
+            ("free", "Gratuito", "Gratuito", f"{pricing.get('trial_days', 30)} dias", "Entrada para conhecer a leitura institucional e o fluxo do produto."),
+            ("pro", "Pro", "Pro", "Premium", "Para quem quer workspace completo, Telegram e continuidade diária."),
+            ("institutional", "Institucional", "Institucional", "Futuro", "Estrutura preparada para times e uso avançado."),
+        ]
     )
 
     return f"""
@@ -64,204 +121,296 @@ def get_marketing_site():
 <title>StockNewsBR</title>
 <style>
 :root {{
-  --bg:#061018;
-  --bg-2:#0d1b28;
-  --panel:rgba(16,31,46,.86);
-  --line:rgba(255,255,255,.09);
-  --text:#edf4fb;
-  --muted:#95a9bd;
-  --green:#1fd38a;
-  --gold:#f4b942;
-  --red:#ff6b6b;
-  --cyan:#68d6ff;
+  --bg:#071119;
+  --bg-soft:#0d1822;
+  --panel:#101f2d;
+  --line:rgba(255,255,255,.08);
+  --text:#edf5fb;
+  --muted:#95a8ba;
+  --green:#24d18a;
+  --gold:#f0b84f;
+  --cyan:#69c6ff;
+  --red:#ff6f6f;
 }}
 * {{ box-sizing:border-box; }}
+html {{ scroll-behavior:smooth; }}
 body {{
   margin:0;
-  font-family:Segoe UI, Arial, sans-serif;
   color:var(--text);
   background:
-    radial-gradient(circle at 0% 0%, rgba(31,211,138,.16), transparent 26%),
-    radial-gradient(circle at 100% 0%, rgba(244,185,66,.14), transparent 24%),
-    linear-gradient(180deg, #060f17 0%, #091421 100%);
+    radial-gradient(circle at 15% 10%, rgba(36,209,138,.14), transparent 24%),
+    radial-gradient(circle at 92% 0%, rgba(105,198,255,.12), transparent 22%),
+    linear-gradient(180deg, #061019 0%, #08131e 100%);
+  font-family: Inter, Segoe UI, Arial, sans-serif;
 }}
 a {{ color:inherit; text-decoration:none; }}
-.shell {{ width:min(1320px, calc(100vw - 32px)); margin:0 auto; }}
-.nav {{
-  display:flex; justify-content:space-between; align-items:center; gap:16px;
-  padding:18px 0; position:sticky; top:0; z-index:5;
-  backdrop-filter:blur(18px);
+.shell {{ width:min(1220px, calc(100vw - 32px)); margin:0 auto; }}
+.topbar {{
+  position:sticky; top:0; z-index:5;
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  padding:18px 0; backdrop-filter:blur(18px);
 }}
-.nav-links {{ display:flex; gap:14px; flex-wrap:wrap; }}
-.nav-links a {{
-  padding:10px 14px; border-radius:999px; background:rgba(255,255,255,.04); color:var(--muted);
+.brand {{
+  display:flex; flex-direction:column; gap:4px;
+}}
+.brand strong {{ font-size:18px; letter-spacing:.02em; }}
+.brand span {{ color:var(--muted); font-size:13px; }}
+.nav {{ display:flex; flex-wrap:wrap; gap:10px; }}
+.nav a {{
+  padding:10px 14px;
+  border-radius:999px;
+  background:rgba(255,255,255,.04);
+  border:1px solid var(--line);
+  color:var(--muted);
 }}
 .hero {{
-  padding:34px 0 24px;
-  display:grid; grid-template-columns:1.3fr .9fr; gap:22px;
+  padding:24px 0 18px;
+  display:grid;
+  grid-template-columns:1.35fr .95fr;
+  gap:18px;
 }}
-.hero-card,.panel {{
+.panel {{
   border:1px solid var(--line);
-  background:linear-gradient(180deg, rgba(17,32,47,.9), rgba(10,22,34,.88));
-  border-radius:28px;
-  box-shadow:0 24px 80px rgba(0,0,0,.34);
+  background:linear-gradient(180deg, rgba(17,33,48,.94), rgba(10,22,34,.94));
+  border-radius:26px;
+  box-shadow:0 24px 70px rgba(0,0,0,.28);
 }}
-.hero-main {{ padding:30px; }}
-.hero-main h1 {{ margin:0; font-size:58px; line-height:1.02; letter-spacing:-.03em; }}
-.hero-main p {{ font-size:18px; color:var(--muted); max-width:720px; }}
+.hero-main {{ padding:32px; }}
 .eyebrow {{
   display:inline-flex; align-items:center; gap:8px;
-  padding:8px 12px; border-radius:999px; background:rgba(31,211,138,.12); color:var(--green); font-size:12px;
-  text-transform:uppercase; letter-spacing:.08em;
+  padding:8px 12px; border-radius:999px;
+  background:rgba(36,209,138,.12);
+  color:var(--green); font-size:12px; text-transform:uppercase; letter-spacing:.08em;
 }}
-.cta-row {{ display:flex; gap:12px; flex-wrap:wrap; margin-top:18px; }}
+.hero-main h1 {{
+  margin:16px 0 12px;
+  font-size:clamp(42px, 5vw, 68px);
+  line-height:1.02;
+  letter-spacing:-.03em;
+}}
+.hero-main p {{
+  margin:0;
+  color:var(--muted);
+  font-size:18px;
+  line-height:1.6;
+  max-width:760px;
+}}
+.cta-row {{ display:flex; flex-wrap:wrap; gap:12px; margin-top:22px; }}
 .cta {{
   display:inline-flex; align-items:center; justify-content:center;
-  min-height:48px; padding:0 18px; border-radius:16px; font-weight:700;
+  min-height:50px; padding:0 18px;
+  border-radius:16px; font-weight:700;
+  border:1px solid var(--line);
 }}
-.cta.primary {{ background:linear-gradient(90deg, var(--green), #70ebb8); color:#041017; }}
-.cta.secondary {{ background:rgba(255,255,255,.06); border:1px solid var(--line); }}
-.hero-side {{ padding:24px; display:grid; gap:14px; }}
-.metric-grid, .feature-grid, .social-grid, .guides-grid, .ops-grid {{
-  display:grid; gap:14px;
-}}
-.metric-grid {{ grid-template-columns:repeat(3, 1fr); }}
-.feature-grid {{ grid-template-columns:repeat(4, 1fr); }}
-.social-grid, .guides-grid, .ops-grid {{ grid-template-columns:repeat(3, 1fr); }}
-.metric, .feature-card, .mini-card, .guide-card, .ops-card {{
-  border:1px solid rgba(255,255,255,.06);
+.cta.primary {{ background:linear-gradient(90deg, var(--green), #71edbc); color:#041017; }}
+.cta.secondary {{ background:rgba(255,255,255,.04); }}
+.hero-side {{ padding:22px; display:grid; gap:12px; }}
+.hero-side .stat strong {{ font-size:28px; }}
+.section {{ padding:14px 0 18px; }}
+.section h2 {{ margin:0 0 8px; font-size:34px; line-height:1.08; }}
+.section p.lead {{ margin:0 0 18px; color:var(--muted); line-height:1.6; max-width:860px; }}
+.grid {{ display:grid; gap:14px; }}
+.stats {{ grid-template-columns:repeat(4, minmax(0,1fr)); }}
+.features {{ grid-template-columns:repeat(5, minmax(0,1fr)); }}
+.plans {{ grid-template-columns:repeat(3, minmax(0,1fr)); }}
+.help {{ grid-template-columns:repeat(3, minmax(0,1fr)); }}
+.stat, .feature, .plan, .help-card, .faq, .proof, .flow {{
   background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.06);
   border-radius:22px;
   padding:18px;
 }}
-.metric strong {{ display:block; font-size:30px; margin:6px 0; }}
-.metric span, .feature-card p, .mini-card p, .guide-card p, .ops-card p {{ color:var(--muted); line-height:1.45; }}
-.section {{ padding:12px 0 18px; }}
-.section h2 {{ margin:0 0 8px; font-size:34px; }}
-.section p.lead {{ margin:0 0 18px; color:var(--muted); max-width:840px; }}
-.feature-card h3, .mini-card h3, .guide-card h3, .ops-card h3 {{ margin:12px 0 8px; font-size:18px; }}
-.workspace-preview {{
-  display:grid; grid-template-columns:220px 1fr 320px; gap:14px; padding:18px;
+.stat span, .feature p, .plan p, .help-card p, .proof p, .flow p, .faq p {{
+  color:var(--muted);
+  line-height:1.5;
 }}
-.rail, .center, .right {{
-  border:1px solid rgba(255,255,255,.06);
-  background:rgba(255,255,255,.03);
-  border-radius:22px;
-  padding:16px;
+.stat strong {{
+  display:block;
+  font-size:28px;
+  margin:6px 0;
 }}
-.chip {{ display:inline-flex; padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.06); color:var(--muted); margin:0 8px 8px 0; }}
-.list-item {{
-  display:flex; justify-content:space-between; gap:12px; padding:12px 0; border-bottom:1px solid rgba(255,255,255,.06);
+.feature .icon {{
+  width:38px; height:38px; border-radius:12px;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(36,209,138,.12); color:var(--green); font-weight:800;
 }}
-.list-item:last-child {{ border-bottom:none; }}
-.score-up {{ color:var(--green); }}
-.score-mid {{ color:var(--gold); }}
-.ops-grid .ops-card strong {{ display:block; font-size:24px; margin:8px 0; }}
+.feature h3, .plan h3, .help-card h3 {{
+  margin:12px 0 8px;
+  font-size:18px;
+}}
+.feature strong {{
+  display:block;
+  color:var(--text);
+  font-size:15px;
+  margin-bottom:8px;
+  line-height:1.35;
+}}
+.flow-wrap {{
+  display:grid;
+  grid-template-columns:1fr auto 1fr;
+  gap:12px;
+  align-items:center;
+}}
+.flow {{
+  text-align:center;
+}}
+.arrow {{
+  font-size:28px;
+  color:var(--muted);
+  text-align:center;
+}}
+.proof-grid {{
+  display:grid;
+  grid-template-columns:repeat(4, minmax(0,1fr));
+  gap:14px;
+}}
+.faq-wrap {{
+  display:grid;
+  gap:12px;
+}}
+.faq summary {{
+  cursor:pointer;
+  font-weight:700;
+  list-style:none;
+}}
+.faq summary::-webkit-details-marker {{ display:none; }}
 .footer {{
-  padding:24px 0 44px; color:var(--muted); display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap;
+  padding:26px 0 40px;
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:space-between;
+  gap:14px;
+  color:var(--muted);
 }}
-@media (max-width: 1080px) {{
-  .hero, .workspace-preview, .feature-grid, .metric-grid, .social-grid, .guides-grid, .ops-grid {{
+@media (max-width: 1060px) {{
+  .hero, .stats, .features, .plans, .help, .proof-grid, .flow-wrap {{
     grid-template-columns:1fr;
   }}
-  .hero-main h1 {{ font-size:42px; }}
+  .hero-main h1 {{ font-size:40px; }}
 }}
 </style>
 </head>
 <body>
   <div class="shell">
-    <nav class="nav">
-      <div>
-        <span class="eyebrow">StockNewsBR</span>
+    <header class="topbar">
+      <div class="brand">
+        <strong>StockNewsBR</strong>
+        <span>Transforme complexidade institucional em decisao simples.</span>
       </div>
-      <div class="nav-links">
-        <a href="/public/pricing">Precos</a>
-        <a href="/public/help-center">Ajuda</a>
-        <a href="/public/disclosure">Disclosure</a>
+      <nav class="nav" aria-label="Navegacao principal">
+        <a href="#diferenciais">Diferenciais</a>
+        <a href="#como-funciona">Como funciona</a>
+        <a href="#planos">Planos</a>
+        <a href="#faq">FAQ</a>
         <a href="/web/terminal/ui">Workspace</a>
-      </div>
-    </nav>
+      </nav>
+    </header>
 
     <section class="hero">
-      <div class="hero-card hero-main">
-        <span class="eyebrow">Google App + Web + Telegram</span>
-        <h1>Ferramenta institucional para traders que querem IA, comunidade e execucao no mesmo lugar.</h1>
-        <p>StockNewsBR junta radar, heat map, ticker rooms, grafico com overlays de compra e venda, polls semanais, feed social e alertas em um ecossistema premium desenhado para o trader brasileiro.</p>
+      <div class="panel hero-main">
+        <span class="eyebrow">Produto institucional para trader profissional</span>
+        <h1>Transforme complexidade institucional em decisao simples.</h1>
+        <p>Fluxo, liquidez, smart money, noticias e contexto de mercado analisados para voce, com Score Mestre, Auditor Institucional, Radar e Ranking unidos em uma leitura que cabe em poucos segundos.</p>
         <div class="cta-row">
-          <a class="cta primary" href="/public/pricing">Assinar Premium</a>
-          <a class="cta secondary" href="/site/workspace">Explorar o website</a>
+          <a class="cta primary" href="/web/terminal/ui">Testar Gratuitamente</a>
+          <a class="cta secondary" href="/web/terminal/ui#rankings">Ver Oportunidades</a>
+          <a class="cta secondary" href="/web/terminal/ui#ticker-rooms">Entrar no Telegram</a>
         </div>
-        <div class="metric-grid" style="margin-top:22px;">
-          <div class="metric"><span>Trial inicial</span><strong>{pricing.get('trial_days', 90)} dias</strong><span>Depois vai automaticamente para a conta basica/free.</span></div>
-          <div class="metric"><span>Mensal Premium</span><strong>R$ {pricing.get('premium_monthly', {}).get('price_brl', 49)}</strong><span>App Google + website + Telegram.</span></div>
-          <div class="metric"><span>Anual Premium</span><strong>R$ {pricing.get('premium_annual', {}).get('price_brl', 500)}</strong><span>Desenhado para retention e uso diario.</span></div>
+        <div class="grid stats" style="margin-top:22px;">
+          {stats}
         </div>
       </div>
-      <aside class="hero-card hero-side">
-        <div class="metric"><span>Roadmap atual</span><strong>{bootstrap.get('launch_roadmap', {}).get('current', 'google_app')}</strong><span>{bootstrap.get('launch_roadmap', {}).get('summary', 'Android primeiro, Apple depois.')}</span></div>
-        <div class="metric"><span>Videos de ajuda</span><strong>{help_center.get('video_status', {}).get('available_videos', 0)}/{help_center.get('video_status', {}).get('planned_videos', 0)}</strong><span>{help_center.get('video_status', {}).get('next_step', '')}</span></div>
-        <div class="metric"><span>Infra</span><strong>{storage.get('provider', 'local').upper()}</strong><span>Upload/CDN: {'pronto' if media.get('cdn_ready') else 'em configuracao'} | Push Android: {'pronto' if push.get('android_ready') else 'pendente'}</span></div>
+      <aside class="panel hero-side">
+        <div class="stat">
+          <span>Trial no lancamento</span>
+          <strong>30 dias</strong>
+          <p>Oferta inicial para a primeira onda de usuarios.</p>
+        </div>
+        <div class="stat">
+          <span>Trial para novos usuarios</span>
+          <strong>15 dias</strong>
+          <p>Concede uma entrada rapida para novos cadastros apos o lancamento.</p>
+        </div>
+        <div class="stat">
+          <span>Plano atual</span>
+          <strong>{roadmap.get('current', 'google_app')}</strong>
+          <p>{roadmap.get('summary', 'App, web e Telegram prontos para consumo.')}</p>
+        </div>
       </aside>
     </section>
 
-    <section class="section">
-      <h2>Mais util que Stocktwits porque a conversa nao vive separada da execucao.</h2>
-      <p class="lead">Aqui o feed conversa com o ranking, o ranking conversa com o grafico, o grafico conversa com os alerts e a comunidade opera em ticker rooms com IA e contexto institucional.</p>
-      <div class="workspace-preview panel">
-        <div class="rail">
-          <span class="eyebrow">Modulos</span>
-          <div style="margin-top:12px;">
-            <div class="chip">IA Heat Map</div>
-            <div class="chip">IA Radar</div>
-            <div class="chip">Master Score</div>
-            <div class="chip">Grafico IA</div>
-            <div class="chip">Ticker Rooms</div>
-            <div class="chip">Ajuda Friendly</div>
-          </div>
-        </div>
-        <div class="center">
-          <div class="list-item"><div><strong>Workspace multi-monitor</strong><div style="color:var(--muted);">Arraste abas, desacople paines e salve seu layout.</div></div><div class="score-up">AO VIVO</div></div>
-          <div class="list-item"><div><strong>Grafico com overlay</strong><div style="color:var(--muted);">Zonas, marcadores BUY/SELL e bias operacional.</div></div><div class="score-mid">PRONTO</div></div>
-          <div class="list-item"><div><strong>Ticker room realtime</strong><div style="color:var(--muted);">Mensagens, imagem, like e comunidade por ativo.</div></div><div class="score-up">ATIVO</div></div>
-        </div>
-        <div class="right">
-          <span class="eyebrow">Diferencial</span>
-          <p style="color:var(--muted); margin-top:12px;">Nao e uma rede social vazia. E uma mesa operacional acessivel para todos, com IA, scan institucional e jornada completa de descoberta, estudo e execucao.</p>
-        </div>
+    <section class="section" id="diferenciais">
+      <h2>Diferenciais que ajudam a vender o produto sem vender promessa vazia.</h2>
+      <p class="lead">O visitante entende rapido o que e, para quem serve, qual problema resolve e por que o fluxo institucional e mais confiavel do que uma colecao de cards soltos.</p>
+      <div class="grid features">
+        {feature_cards}
+      </div>
+    </section>
+
+    <section class="section" id="como-funciona">
+      <h2>Como funciona</h2>
+      <p class="lead">O fluxo visual deixa claro que a decisao nasce de leitura institucional e nao de indicadores isolados.</p>
+      <div class="flow-wrap">
+        <div class="flow"><strong>Mercado</strong><p>Preco, volume, contexto e noticia entram primeiro.</p></div>
+        <div class="arrow">↓</div>
+        <div class="flow"><strong>9 IAs + Auditor + Score Mestre + Painel</strong><p>O sistema sintetiza, bloqueia conflito e simplifica a leitura.</p></div>
+        <div class="arrow">↓</div>
+        <div class="flow"><strong>Radar / Ranking / Telegram</strong><p>O trader recebe o resumo do que merece atencao agora.</p></div>
+      </div>
+    </section>
+
+    <section class="section" id="planos">
+      <h2>Planos</h2>
+      <p class="lead">Estrutura preparada para lancamento, sem cobrar aqui e sem esconder a hierarquia de acesso.</p>
+      <div class="grid plans">
+        {plan_cards}
       </div>
     </section>
 
     <section class="section">
-      <h2>Motor de IA institucional</h2>
-      <p class="lead">Arquitetura pronta para mercado, eventos, fluxo, probabilidade de breakout, regime, liquidez e score mestre.</p>
-      <div class="feature-grid">{feature_cards}</div>
+      <h2>Prova social sem inventar numero</h2>
+      <p class="lead">A vitrine pode usar metrica real do sistema quando existir. Se nao houver, o layout continua limpo e honesto.</p>
+      <div class="grid proof-grid">
+        <article class="proof"><span>Metrica real</span><strong>{metrics.get('signals_generated', 0)}</strong><p>Sinais gerados pelo motor.</p></article>
+        <article class="proof"><span>Metrica real</span><strong>{metrics.get('engine_cycles', 0)}</strong><p>Ciclos executados pelo worker.</p></article>
+        <article class="proof"><span>Metrica real</span><strong>{metrics.get('assets_scanned', 0)}</strong><p>Ativos processados no pipeline.</p></article>
+        <article class="proof"><span>Metrica real</span><strong>{metrics.get('http_requests', 0)}</strong><p>Uso real da interface web.</p></article>
+      </div>
     </section>
 
     <section class="section">
-      <h2>Social que segura o trader dentro do produto</h2>
-      <p class="lead">Comentarios por ticker, likes, bloqueio, moderacao, upload de imagem, polls semanais e rooms em tempo real.</p>
-      <div class="social-grid">{social_cards}</div>
+      <h2>Ajuda e onboarding</h2>
+      <p class="lead">Glossario, filosofia oficial e Help Center entram como apoio direto ao produto.</p>
+      <div class="grid help">
+        {help_cards}
+      </div>
+    </section>
+
+    <section class="section" id="faq">
+      <h2>FAQ</h2>
+      <p class="lead">Respostas diretas para reduzir atrito na primeira visita.</p>
+      <div class="faq-wrap">
+        {faq_cards}
+      </div>
     </section>
 
     <section class="section">
-      <h2>Ajuda amigavel com exemplos e videos</h2>
-      <p class="lead">A plataforma nasce com onboarding em portugues, explicando cada ferramenta com passo a passo simples para o trader entender rapido.</p>
-      <div class="guides-grid">{guide_cards}</div>
-    </section>
-
-    <section class="section">
-      <h2>Operacao pronta para escala</h2>
-      <p class="lead">Upload/CDN, push mobile, observabilidade, websocket e moderacao entram como parte do produto, nao como remendo.</p>
-      <div class="ops-grid">
-        <article class="ops-card"><span class="eyebrow">Upload</span><h3>Storage + CDN</h3><strong>{storage.get('provider', 'local').upper()}</strong><p>{media.get('next_step', '')}</p></article>
-        <article class="ops-card"><span class="eyebrow">Push</span><h3>Android / Apple</h3><strong>{'Android pronto' if push.get('android_ready') else 'Configurar Firebase'}</strong><p>{push.get('next_step', '')}</p></article>
-        <article class="ops-card"><span class="eyebrow">Ajuda</span><h3>Biblioteca de videos</h3><strong>{help_center.get('video_status', {}).get('available_videos', 0)} videos</strong><p>{help_center.get('video_status', {}).get('next_step', '')}</p></article>
+      <div class="panel" style="padding:22px; display:grid; gap:12px;">
+        <span class="eyebrow">CTA</span>
+        <h2 style="margin:0;">Pronto para testar o produto?</h2>
+        <p class="lead" style="margin:0;">Entre pelo workspace, veja oportunidades e use o Telegram como extensao da mesa de decisao.</p>
+        <div class="cta-row">
+          <a class="cta primary" href="/web/terminal/ui">Testar Gratuitamente</a>
+          <a class="cta secondary" href="/web/terminal/ui#rankings">Ver Oportunidades</a>
+          <a class="cta secondary" href="/web/terminal/ui#ticker-rooms">Entrar no Telegram</a>
+        </div>
       </div>
     </section>
 
     <footer class="footer">
       <span>www.stocknewsbr.com</span>
-      <span>StockNewsBR 2026 | Android-first, Apple em seguida</span>
+      <span>Web, app e Telegram com leitura institucional pronta para lancamento</span>
+      <span>Upload: {storage.get('provider', 'local')} | Push: {'pronto' if push.get('android_ready') else 'pendente'} | CDN: {'pronta' if media.get('cdn_ready') else 'pendente'}</span>
     </footer>
   </div>
 </body>

@@ -2,15 +2,15 @@ import logging
 
 from fastapi import APIRouter, Depends
 
-from app.cache.signal_cache import signal_cache
+from app.cache.snapshot_cache import get_snapshot_signals
 from app.dependencies import require_any_channel_access
-from app.engine.trend_breakout_signal_engine import (
-    build_trend_breakout_payload,
-    resolve_chart_timeframe,
-)
-from app.market.market_data_loader import get_chart_data
+from app.engine.chart_signal_adapter import build_chart_signal_payload
+from app.market.market_data_loader import get_cached_chart_data
 from app.models import User
 from app.services.chart_overlay_service import build_chart_overlays
+from app.services.snapshot_contract import snapshot_surface_row
+from app.api.routes_public_market_live import _load_chart_data_fast as load_chart_data_cache_first
+from app.system.system_metrics import record_cache_access
 
 
 router = APIRouter(tags=["App Chart"])
@@ -21,6 +21,12 @@ def _normalize_chart_ticker(value: str) -> str:
     return str(value or "").upper().strip().replace(".SA", "").replace("-USD", "USD")
 
 
+def _load_chart_data_fast(ticker: str, interval: str):
+    cached = get_cached_chart_data(ticker, interval) or load_chart_data_cache_first(ticker, interval)
+    record_cache_access("chart", bool(cached), "app_chart")
+    return cached or []
+
+
 @router.get("/chart/{symbol}")
 def chart(
     symbol: str,
@@ -29,7 +35,7 @@ def chart(
 ):
     try:
         ticker = symbol.upper()
-        data = get_chart_data(ticker, interval)
+        data = _load_chart_data_fast(ticker, interval)
 
         if not data:
             return {
@@ -49,34 +55,22 @@ def chart(
         signals = []
 
         try:
-            for row in signal_cache.get_all():
+            for row in get_snapshot_signals():
                 source_ticker = _normalize_chart_ticker(row.get("ticker") or row.get("symbol"))
 
                 if source_ticker != requested:
                     continue
 
-                signals.append(
-                    {
-                        "score": row.get("score"),
-                        "trend": row.get("trend"),
-                        "breakout": row.get("breakout"),
-                        "signal": row.get("signal"),
-                        "events": row.get("events", []),
-                    }
-                )
+                signals.append(snapshot_surface_row(row))
         except Exception:
-            logger.exception("App chart failed to read signal cache")
+            logger.exception("App chart failed to read snapshot cache")
 
-        chart_signal = build_trend_breakout_payload(
-            ticker,
-            data,
-            timeframe=resolve_chart_timeframe(interval),
-        )
+        chart_signal = build_chart_signal_payload(ticker, data, interval=interval)
 
         if chart_signal:
             signals.append(chart_signal)
 
-        overlays = build_chart_overlays(ticker, data, signals)
+        overlays = build_chart_overlays(ticker, data, signals, interval=interval)
 
         return {
             "symbol": ticker,

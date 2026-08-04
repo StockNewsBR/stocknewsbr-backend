@@ -17,6 +17,7 @@ from app.services.legal_service import (
     get_public_bootstrap,
 )
 from app.services.video_library_service import get_help_video_library
+from app.market.universe_registry import universe_registry
 
 router = APIRouter(prefix="/public", tags=["Public"])
 
@@ -24,6 +25,11 @@ router = APIRouter(prefix="/public", tags=["Public"])
 @router.get("/bootstrap")
 def bootstrap():
     return get_public_bootstrap()
+
+
+@router.get("/market-universe")
+def market_universe():
+    return universe_registry.get_public_payload()
 
 
 @router.get("/legal-notice")

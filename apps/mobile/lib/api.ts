@@ -1,3 +1,5 @@
+import { canonicalSymbol } from "@/lib/symbolRegistry";
+
 const API_BASE = (process.env.EXPO_PUBLIC_API_BASE || "http://127.0.0.1:8000").replace(/\/$/, "");
 const DEFAULT_TIMEOUT_MS = 12000;
 
@@ -22,11 +24,19 @@ function buildUrl(path: string, query?: Record<string, QueryValue>) {
   return url.toString();
 }
 
+function tickerPathValue(ticker: string) {
+  const symbol = canonicalSymbol(ticker);
+  if (!symbol) throw new Error("invalid_ticker");
+  return symbol;
+}
+
 async function readErrorDetail(response: Response) {
   const fallback = response.statusText || "request_failed";
+  let text = "";
 
   try {
-    const payload = await response.json();
+    text = await response.text();
+    const payload = JSON.parse(text);
     if (typeof payload === "string") {
       return payload;
     }
@@ -34,16 +44,19 @@ async function readErrorDetail(response: Response) {
       if (typeof payload.detail === "string") {
         return payload.detail;
       }
+      if (Array.isArray(payload.detail)) {
+        const messages = payload.detail
+          .map((item: any) => (item && typeof item === "object" ? item.msg || item.message || "" : String(item || "")))
+          .filter(Boolean);
+        if (messages.length) {
+          return messages.join(" | ");
+        }
+      }
       return JSON.stringify(payload);
     }
   } catch {}
 
-  try {
-    const text = await response.text();
-    if (text) {
-      return text;
-    }
-  } catch {}
+  if (text) return text;
 
   return fallback;
 }
@@ -77,7 +90,8 @@ async function requestJson<T>(
 
     return (await response.json()) as T;
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
+    // Hermes does not expose a global DOMException, so detect aborts by name.
+    if ((error as { name?: string } | null)?.name === "AbortError") {
       throw new Error("request_timeout");
     }
     throw error;
@@ -105,6 +119,20 @@ export async function loginJson(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, ...(options || {}) }),
+    },
+  );
+}
+
+export async function requestLoginCode(
+  email: string,
+  options?: { channel?: string; device_id?: string; device_label?: string },
+) {
+  return requestJson<Record<string, any>>(
+    "/auth/request-code",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, ...(options || {}) }),
     },
   );
 }
@@ -188,8 +216,9 @@ export async function getWorkspace(token: string) {
 }
 
 export async function getChart(token: string, ticker: string, interval = "1D") {
+  const symbol = tickerPathValue(ticker);
   return requestJson<Record<string, any>>(
-    `/chart/${encodeURIComponent(ticker)}`,
+    `/web/chart/${encodeURIComponent(symbol)}`,
     {
       headers: { Authorization: `Bearer ${token}` },
     },
@@ -198,14 +227,16 @@ export async function getChart(token: string, ticker: string, interval = "1D") {
 }
 
 export async function getTickerSnapshot(token: string, ticker: string) {
-  return requestJson<Record<string, any>>(`/ticker/${encodeURIComponent(ticker)}`, {
+  const symbol = tickerPathValue(ticker);
+  return requestJson<Record<string, any>>(`/ticker/${encodeURIComponent(symbol)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 }
 
 export async function getNews(token: string, ticker: string, limit = 8) {
+  const symbol = tickerPathValue(ticker);
   return requestJson<Record<string, any>>(
-    `/news/${encodeURIComponent(ticker)}`,
+    `/news/${encodeURIComponent(symbol)}`,
     {
       headers: { Authorization: `Bearer ${token}` },
     },
@@ -214,8 +245,9 @@ export async function getNews(token: string, ticker: string, limit = 8) {
 }
 
 export async function getTickerFeed(token: string, ticker: string, limit = 24) {
+  const symbol = tickerPathValue(ticker);
   return requestJson<Record<string, any>>(
-    `/ticker/${encodeURIComponent(ticker)}/feed`,
+    `/ticker/${encodeURIComponent(symbol)}/feed`,
     {
       headers: { Authorization: `Bearer ${token}` },
     },
@@ -228,8 +260,9 @@ export async function createTickerPost(
   ticker: string,
   payload: { text: string; image_url?: string | null; sentiment?: string | null },
 ) {
+  const symbol = tickerPathValue(ticker);
   return requestJson<Record<string, any>>(
-    `/ticker/${encodeURIComponent(ticker)}/post`,
+    `/ticker/${encodeURIComponent(symbol)}/post`,
     {
       method: "POST",
       headers: {
@@ -353,20 +386,23 @@ export async function getTopMovers(token: string) {
 }
 
 export async function getPoll(ticker: string) {
-  return requestJson<Record<string, any>>(`/poll/${encodeURIComponent(ticker)}`);
+  const symbol = tickerPathValue(ticker);
+  return requestJson<Record<string, any>>(`/poll/${encodeURIComponent(symbol)}`);
 }
 
 export async function getPollHistory(ticker: string, limit = 8) {
+  const symbol = tickerPathValue(ticker);
   return requestJson<Record<string, any>>(
-    `/poll/${encodeURIComponent(ticker)}/history`,
+    `/poll/${encodeURIComponent(symbol)}/history`,
     {},
     { limit },
   );
 }
 
 export async function votePoll(token: string, ticker: string, option: string) {
+  const symbol = tickerPathValue(ticker);
   return requestJson<Record<string, any>>(
-    `/poll/${encodeURIComponent(ticker)}/vote`,
+    `/poll/${encodeURIComponent(symbol)}/vote`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },

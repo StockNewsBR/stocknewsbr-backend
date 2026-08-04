@@ -1,13 +1,16 @@
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
 
+from app.core.csrf import allowed_web_origins, origin_from_header
+from app.core.settings import session_cookie_name
 from app.database import SessionLocal
 from app.dependencies import require_active_plan
 from app.models import User
 from app.security import resolve_token_user
 from app.services.access_service import has_channel_access, refresh_user_access
+from app.services.browser_ticket_service import consume_browser_ticket
+from app.services.symbol_registry import canonical_symbol
 from app.services.ticker_room_service import append_room_message, list_room_messages
-from app.social.moderation import can_publish
 from app.system.room_websocket_manager import room_ws_manager
 
 
@@ -50,7 +53,7 @@ def chat_history(
     current_user: User = Depends(require_active_plan),
 ):
     del current_user
-    symbol = symbol.upper()
+    symbol = canonical_symbol(symbol)
     return {
         "symbol": symbol,
         "items": list_room_messages(symbol, limit=limit),
@@ -63,12 +66,7 @@ async def chat_message(
     payload: ChatMessageRequest,
     current_user: User = Depends(require_active_plan),
 ):
-    symbol = symbol.upper()
-    allowed, reason = can_publish(current_user.id, payload.text)
-
-    if not allowed:
-        raise HTTPException(status_code=429, detail=reason)
-
+    symbol = canonical_symbol(symbol)
     item = append_room_message(
         symbol=symbol,
         user_id=current_user.id,
@@ -79,6 +77,8 @@ async def chat_message(
 
     if item is None:
         raise HTTPException(status_code=400, detail="chat_message_failed")
+    if isinstance(item, dict) and item.get("error"):
+        raise HTTPException(status_code=429, detail=item.get("reason", "chat_message_blocked"))
 
     await room_ws_manager.broadcast(
         symbol,
@@ -90,11 +90,42 @@ async def chat_message(
     return item
 
 
+def _cookie_websocket_origin_allowed(websocket: WebSocket) -> bool:
+    """CSWSH guard: cookie-authenticated handshakes need an allowed Origin."""
+    origin = origin_from_header(websocket.headers.get("origin"))
+    return origin in set(allowed_web_origins())
+
+
 @router.websocket("/ws/chat/{symbol}")
 async def websocket_chat(websocket: WebSocket, symbol: str):
-    symbol = symbol.upper()
+    symbol = canonical_symbol(symbol)
+    # Mission 31B: browser clients authenticate via the httpOnly session
+    # cookie; the query-param token remains for bearer clients (mobile app).
     token = websocket.query_params.get("token")
-    user = _resolve_user_from_token(token)
+    protocols = [value.strip() for value in websocket.headers.get("sec-websocket-protocol", "").split(",")]
+    browser_ticket = protocols[1] if len(protocols) == 2 and protocols[0] == "stocknewsbr-ticket" else None
+
+    if browser_ticket:
+        ticket_user = consume_browser_ticket(browser_ticket, scope="chat", target=symbol)
+        user = (
+            {"id": ticket_user["user_id"], "display_name": ticket_user["display_name"]}
+            if ticket_user
+            else None
+        )
+    else:
+        user = None
+
+    if not token:
+        cookie_token = websocket.cookies.get(session_cookie_name())
+
+        if cookie_token and not _cookie_websocket_origin_allowed(websocket):
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
+        token = cookie_token
+
+    if user is None:
+        user = _resolve_user_from_token(token)
 
     if user is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -120,11 +151,6 @@ async def websocket_chat(websocket: WebSocket, symbol: str):
 
             text = str(payload.get("text") or "").strip()
             image_url = payload.get("image_url")
-            allowed, reason = can_publish(user["id"], text)
-
-            if not allowed:
-                await websocket.send_json({"type": "error", "detail": reason})
-                continue
 
             item = append_room_message(
                 symbol=symbol,
@@ -136,6 +162,9 @@ async def websocket_chat(websocket: WebSocket, symbol: str):
 
             if item is None:
                 await websocket.send_json({"type": "error", "detail": "chat_message_failed"})
+                continue
+            if isinstance(item, dict) and item.get("error"):
+                await websocket.send_json({"type": "error", "detail": item.get("reason", "chat_message_blocked")})
                 continue
 
             await room_ws_manager.broadcast(

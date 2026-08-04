@@ -11,33 +11,36 @@ def _score_row(source: Dict[str, object]) -> Dict[str, object]:
     institutional_bias = float(row.get("institutional_bias", 0.0))
     accumulation_bias = float(row.get("accumulation_bias", 0.0))
     change_pct = float(row.get("change_pct", 0.0))
+    absorption_score = float(row.get("absorption_score", 0.0))
+    defended_level = str(row.get("defended_level") or "range_mid")
 
     score = max(
         0.0,
         min(
             100.0,
             institutional_bias * 0.45
-            + accumulation_bias * 0.25
+            + accumulation_bias * 0.20
+            + absorption_score * 0.20
             + max(rel_volume - 1.0, 0.0) * 18.0
-            + max(change_pct, -2.0) * 6.0,
+            + max(change_pct, -2.0) * 4.0,
         ),
     )
 
     if score >= 72:
         state = "smart_money_active"
-        comment = f"{row['ticker']} apresenta assinatura de smart money com fluxo e volume acima do normal."
-        trigger = "Persistencia de volume e defesa acima da VWAP."
-        invalidation = "Fluxo some e o ativo volta para baixo da VWAP."
+        comment = f"{row['ticker']} mostra smart money ativo: absorção {absorption_score:.1f}, defesa em {defended_level}, RVOL {rel_volume:.2f}."
+        trigger = f"Confirmar defesa de {defended_level} com volume persistente e preço sem perder a zona."
+        invalidation = "Fluxo some, preço perde a zona defendida ou volume vendedor domina o próximo candle."
     elif score >= 50:
         state = "smart_money_interest"
-        comment = f"{row['ticker']} mostra interesse parcial de player forte, ainda pedindo confirmacao."
-        trigger = "Novo aumento de volume ou candle de continuidade."
-        invalidation = "Falha de continuidade e perda da estrutura."
+        comment = f"{row['ticker']} tem interesse parcial de player forte: posicionamento {institutional_bias:.1f}, absorção {absorption_score:.1f}."
+        trigger = "Novo aumento de volume, candle de continuidade e defesa clara do nível."
+        invalidation = "Falha de continuidade, perda da estrutura ou ausência de defesa no nível-chave."
     else:
         state = "retail_noise"
-        comment = f"{row['ticker']} ainda parece dominado por ruido de varejo, sem leitura forte de smart money."
-        trigger = "Volume relativo saltar acima da media."
-        invalidation = "Mercado permanecer sem fluxo."
+        comment = f"{row['ticker']} ainda parece ruído de varejo: absorção {absorption_score:.1f}, RVOL {rel_volume:.2f}."
+        trigger = "Volume relativo saltar acima da média junto com defesa objetiva de VWAP/suporte."
+        invalidation = "Mercado permanecer sem fluxo ou perder o nível antes de mostrar defesa."
 
     return build_payload(
         row=row,
@@ -50,6 +53,8 @@ def _score_row(source: Dict[str, object]) -> Dict[str, object]:
         metrics={
             "institutional_bias": round(institutional_bias, 1),
             "accumulation_bias": round(accumulation_bias, 1),
+            "absorption_score": round(absorption_score, 1),
+            "defended_level": defended_level,
             "rel_volume": round(rel_volume, 2),
             "change_pct": round(change_pct, 2),
         },

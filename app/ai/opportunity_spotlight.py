@@ -3,14 +3,15 @@
 # Fast + Crash Safe
 # =====================================================
 
-from app.cache.signal_cache import signal_cache
+from app.cache.snapshot_cache import get_snapshot_signals
+from app.services.snapshot_contract import is_actionable_snapshot_row
 
 
 def get_best_opportunity():
 
     try:
 
-        signals = signal_cache.get()
+        signals = get_snapshot_signals()
 
         if not signals or not isinstance(signals, list):
             return None
@@ -21,6 +22,9 @@ def get_best_opportunity():
         for s in signals:
 
             if not isinstance(s, dict):
+                continue
+
+            if not is_actionable_snapshot_row(s):
                 continue
 
             score = s.get("score")

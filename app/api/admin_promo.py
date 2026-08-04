@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 
@@ -28,6 +28,9 @@ def create_promo(
     _internal=Depends(require_internal_token),
 ):
     del _internal
+
+    if max_uses <= 0 or duration_days <= 0 or (free_months is not None and free_months <= 0):
+        raise HTTPException(status_code=400, detail="invalid_promo_limits")
 
     expires = datetime.utcnow() + timedelta(days=duration_days)
 

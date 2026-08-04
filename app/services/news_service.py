@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import logging
+import os
 import re
 import threading
 import time
@@ -10,21 +12,172 @@ from collections import Counter
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from app.core.atomic_io import interprocess_file_lock, read_json_file_consistent, write_json_file_atomic
+from app.services.symbol_registry import canonical_symbol, canonical_symbol_aliases, provider_symbol
 from app.system.system_metrics import record_cache_access, record_cache_lookup, record_external_provider_call, record_worker_stage_duration
 
 logger = logging.getLogger("stocknewsbr.news")
 _YFINANCE = None
 
 _CACHE_LOCK = threading.Lock()
+_PERSIST_LOCK = threading.Lock()
 _REQUEST_LOCKS_LOCK = threading.Lock()
 _CACHE_TTL_SECONDS = 300
+# Public alias: callers outside this module need the same freshness threshold to decide
+# when a cached entry must be refreshed instead of served as-is.
+NEWS_CACHE_TTL_SECONDS = _CACHE_TTL_SECONDS
 _NEWS_MAX_INPUT_ITEMS = 80
 _NEWS_MAX_CLUSTER_CANDIDATES = 12
 _NEWS_CACHE: dict[str, dict[str, Any]] = {}
 _NEWS_PROVIDER_STATUS: dict[str, dict[str, Any]] = {}
 _REQUEST_LOCKS: dict[str, threading.Lock] = {}
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_TICKER_NEWS_ALIASES = {
+    "F": ("ford", "ford motor", "ford motor company"),
+    "AAPL": ("apple", "apple inc"),
+    "NVDA": ("nvidia", "nvidia corp", "nvidia corporation"),
+    "TSLA": ("tesla", "tesla inc"),
+    "MSFT": ("microsoft", "microsoft corp", "microsoft corporation"),
+    "AMD": ("advanced micro devices",),
+    "AMZN": ("amazon", "amazon.com", "amazon com", "amazon.com inc"),
+    "META": ("meta", "meta platforms", "facebook"),
+    "NFLX": ("netflix",),
+    "GOOGL": ("google", "alphabet", "alphabet inc"),
+    "INTC": ("intel", "intel corp", "intel corporation"),
+    "AVGO": ("broadcom", "broadcom inc"),
+    "BA": ("boeing", "boeing co", "boeing company"),
+    "BAC": ("bank of america", "bofa", "merrill lynch"),
+    "BNY": ("bank of new york mellon", "bny mellon"),
+    "JPM": ("jpmorgan", "jp morgan", "jpmorgan chase"),
+    "COST": ("costco", "costco wholesale"),
+    "CRM": ("salesforce", "salesforce inc"),
+    "CVX": ("chevron", "chevron corp", "chevron corporation"),
+    "DIS": ("disney", "walt disney"),
+    "AAL": ("american airlines",),
+    "BULL": ("webull", "webull corp", "webull corporation"),
+    "BYDDY": ("byd", "byd co", "byd company", "byd co ltd", "byd company limited"),
+    "PETR4": ("petrobras", "petróleo brasileiro"),
+    "PETR3": ("petrobras", "petróleo brasileiro"),
+    "VALE3": ("vale", "vale s.a", "vale sa"),
+    "ITUB4": ("itau", "itaú", "itau unibanco", "itaú unibanco"),
+    "BBDC4": ("bradesco", "banco bradesco"),
+    "BBAS3": ("banco do brasil",),
+    "SANB11": ("santander brasil", "banco santander"),
+    "BPAC11": ("btg pactual",),
+    "BTCUSD": ("bitcoin", "btc"),
+    "ETHUSD": ("ethereum", "ether", "eth"),
+    "BNBUSD": ("bnb", "binance coin", "bnb chain"),
+}
+_NEWS_LOCAL_TZ = ZoneInfo("America/Sao_Paulo")
+
+
+def _project_runtime_path(env_name: str, default_relative: str) -> Path:
+    configured = os.getenv(env_name)
+    if configured:
+        configured_path = Path(configured)
+        return configured_path if configured_path.is_absolute() else _PROJECT_ROOT / configured_path
+    return _PROJECT_ROOT / default_relative
+
+
+_NEWS_CACHE_FILE = _project_runtime_path("NEWS_CACHE_FILE", "runtime/cache/news_cache.json")
+_NEWS_CACHE_LOADED = False
+_NEWS_CACHE_FILE_MTIME: float | None = None
+
+DEFAULT_NEWS_LOCALE = "pt-BR"
+SUPPORTED_NEWS_LOCALES = ("pt-BR", "en-US")
+
+
+def normalize_news_locale(locale: str | None) -> str:
+    value = str(locale or "").strip().replace("_", "-").lower()
+    if value in {"en", "en-us", "us", "usa"} or value.startswith("en-"):
+        return "en-US"
+    if value in {"pt", "pt-br", "br", "bra", "brasil"} or value.startswith("pt-"):
+        return "pt-BR"
+    return DEFAULT_NEWS_LOCALE
+
+
+def _cache_entry_locale(entry: dict[str, Any]) -> str:
+    explicit = entry.get("locale")
+    if explicit:
+        return normalize_news_locale(str(explicit))
+    items = entry.get("items")
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict) and item.get("content_locale"):
+                return normalize_news_locale(str(item.get("content_locale")))
+    return DEFAULT_NEWS_LOCALE
+
+
+def _cache_record_locales(record: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(record, dict):
+        return {}
+    locales = record.get("locales")
+    if isinstance(locales, dict):
+        return {
+            normalize_news_locale(str(locale)): entry
+            for locale, entry in locales.items()
+            if isinstance(entry, dict) and isinstance(entry.get("items"), list)
+        }
+    if isinstance(record.get("items"), list):
+        return {_cache_entry_locale(record): record}
+    return {}
+
+
+def _merge_news_cache_records(existing: Any, incoming: Any) -> dict[str, Any]:
+    merged: dict[str, dict[str, Any]] = {
+        locale: copy.deepcopy(entry) for locale, entry in _cache_record_locales(existing).items()
+    }
+    for locale, entry in _cache_record_locales(incoming).items():
+        current = merged.get(locale)
+        incoming_version = (
+            float(entry.get("timestamp", 0.0) or 0.0),
+            float(entry.get("checked_at", 0.0) or 0.0),
+        )
+        current_version = (
+            float(current.get("timestamp", 0.0) or 0.0),
+            float(current.get("checked_at", 0.0) or 0.0),
+        ) if isinstance(current, dict) else (0.0, 0.0)
+        if current is None or incoming_version > current_version:
+            localized_entry = copy.deepcopy(entry)
+            localized_entry["locale"] = locale
+            merged[locale] = localized_entry
+    return {"locales": merged}
+
+
+def _get_news_cache_entry_locked(ticker: str, locale: str) -> dict[str, Any] | None:
+    return _cache_record_locales(_NEWS_CACHE.get(ticker)).get(locale)
+
+
+def _set_news_cache_entry_locked(ticker: str, locale: str, entry: dict[str, Any]) -> None:
+    normalized_locale = normalize_news_locale(locale)
+    locales = {
+        key: copy.deepcopy(value)
+        for key, value in _cache_record_locales(_NEWS_CACHE.get(ticker)).items()
+    }
+    localized_entry = copy.deepcopy(entry)
+    localized_entry["locale"] = normalized_locale
+    locales[normalized_locale] = localized_entry
+    _NEWS_CACHE[ticker] = {"locales": locales}
+
+
+def _available_news_cache_locales_locked(ticker: str) -> list[str]:
+    locales = _cache_record_locales(_NEWS_CACHE.get(ticker))
+    return [locale for locale in SUPPORTED_NEWS_LOCALES if locale in locales]
+
+
+def _latest_news_cache_entry_locked(ticker: str, *, exclude_locale: str | None = None) -> dict[str, Any] | None:
+    entries = [
+        entry
+        for locale, entry in _cache_record_locales(_NEWS_CACHE.get(ticker)).items()
+        if locale != exclude_locale and isinstance(entry.get("items"), list)
+    ]
+    if not entries:
+        return None
+    return max(entries, key=lambda entry: float(entry.get("timestamp", 0.0) or 0.0))
 
 
 def _get_yfinance():
@@ -36,6 +189,99 @@ def _get_yfinance():
             yf_module = False
         _YFINANCE = yf_module
     return _YFINANCE or None
+
+
+def _load_news_cache_once() -> None:
+    global _NEWS_CACHE_FILE_MTIME, _NEWS_CACHE_LOADED
+    try:
+        lock_path = _NEWS_CACHE_FILE.with_suffix(_NEWS_CACHE_FILE.suffix + ".lock")
+        with _PERSIST_LOCK, interprocess_file_lock(lock_path):
+            payload, cache_mtime, _ = read_json_file_consistent(_NEWS_CACHE_FILE, dict, max_attempts=3)
+    except Exception as exc:
+        logger.warning("News cache load failed: %s", exc)
+        return
+
+    with _CACHE_LOCK:
+        if _NEWS_CACHE_LOADED and _NEWS_CACHE_FILE_MTIME == (cache_mtime or None):
+            return
+        cached = payload.get("news_cache") if isinstance(payload, dict) else None
+        if isinstance(cached, dict):
+            for key, value in cached.items():
+                normalized_record = _merge_news_cache_records(None, value)
+                if normalized_record["locales"]:
+                    normalized_key = str(key).upper()
+                    _NEWS_CACHE[normalized_key] = _merge_news_cache_records(
+                        _NEWS_CACHE.get(normalized_key), normalized_record,
+                    )
+
+        provider_status = payload.get("provider_status") if isinstance(payload, dict) else None
+        if isinstance(provider_status, dict):
+            for key, value in provider_status.items():
+                if not isinstance(value, dict):
+                    continue
+                normalized_key = str(key).upper()
+                existing = _NEWS_PROVIDER_STATUS.get(normalized_key)
+                disk_checked_at = float(value.get("checked_at", 0.0) or 0.0)
+                existing_checked_at = float(existing.get("checked_at", 0.0) or 0.0) if isinstance(existing, dict) else -1.0
+                if existing is None or disk_checked_at > existing_checked_at:
+                    _NEWS_PROVIDER_STATUS[normalized_key] = copy.deepcopy(value)
+
+        _NEWS_CACHE_FILE_MTIME = cache_mtime or None
+        _NEWS_CACHE_LOADED = True
+
+
+def _persist_news_cache() -> None:
+    global _NEWS_CACHE_FILE_MTIME, _NEWS_CACHE_LOADED
+    with _CACHE_LOCK:
+        cache_snapshot = copy.deepcopy(_NEWS_CACHE)
+        provider_snapshot = copy.deepcopy(_NEWS_PROVIDER_STATUS)
+
+    try:
+        lock_path = _NEWS_CACHE_FILE.with_suffix(_NEWS_CACHE_FILE.suffix + ".lock")
+        with _PERSIST_LOCK, interprocess_file_lock(lock_path):
+            disk_payload, _, _ = read_json_file_consistent(_NEWS_CACHE_FILE, dict, max_attempts=3)
+            disk_cache = disk_payload.get("news_cache") if isinstance(disk_payload, dict) else None
+            if isinstance(disk_cache, dict):
+                for key, value in disk_cache.items():
+                    normalized_key = str(key).upper()
+                    if _cache_record_locales(value):
+                        cache_snapshot[normalized_key] = _merge_news_cache_records(
+                            cache_snapshot.get(normalized_key), value,
+                        )
+
+            disk_provider_status = disk_payload.get("provider_status") if isinstance(disk_payload, dict) else None
+            if isinstance(disk_provider_status, dict):
+                for key, value in disk_provider_status.items():
+                    if not isinstance(value, dict):
+                        continue
+                    normalized_key = str(key).upper()
+                    existing = provider_snapshot.get(normalized_key)
+                    disk_checked_at = float(value.get("checked_at", 0.0) or 0.0)
+                    existing_checked_at = float(existing.get("checked_at", 0.0) or 0.0) if isinstance(existing, dict) else -1.0
+                    if existing is None or disk_checked_at > existing_checked_at:
+                        provider_snapshot[normalized_key] = copy.deepcopy(value)
+
+            write_json_file_atomic(_NEWS_CACHE_FILE, {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "schema_version": 2,
+                "news_cache": cache_snapshot,
+                "provider_status": provider_snapshot,
+            })
+            persisted_mtime = _NEWS_CACHE_FILE.stat().st_mtime
+
+        with _CACHE_LOCK:
+            for key, value in cache_snapshot.items():
+                _NEWS_CACHE[key] = _merge_news_cache_records(value, _NEWS_CACHE.get(key))
+            for key, value in provider_snapshot.items():
+                current = _NEWS_PROVIDER_STATUS.get(key)
+                snapshot_checked_at = float(value.get("checked_at", 0.0) or 0.0)
+                current_checked_at = float(current.get("checked_at", 0.0) or 0.0) if isinstance(current, dict) else -1.0
+                if current is None or snapshot_checked_at > current_checked_at:
+                    _NEWS_PROVIDER_STATUS[key] = copy.deepcopy(value)
+            _NEWS_CACHE_FILE_MTIME = persisted_mtime
+            _NEWS_CACHE_LOADED = True
+    except Exception as exc:
+        logger.warning("News cache persist failed: %s", exc)
 
 
 def _remember_news_provider_status(
@@ -302,8 +548,8 @@ _TICKER_SECTOR_MAP = {
     "BPAC11": ("Financeiro / Bancos", "Bancos de investimento"),
     "SUZB3": ("Materiais / Papel e Celulose", "Papel e celulose"),
     "KLBN11": ("Materiais / Papel e Celulose", "Papel e celulose"),
-    "ELET3": ("Utilidades / Energia", "Energia elétrica"),
-    "ELET6": ("Utilidades / Energia", "Energia elétrica"),
+    "AXIA3": ("Utilidades / Energia", "Energia elétrica"),
+    "AXIA7": ("Utilidades / Energia", "Energia elétrica"),
     "CPFE3": ("Utilidades / Energia", "Energia elétrica"),
     "EQTL3": ("Utilidades / Energia", "Energia elétrica"),
     "ENBR3": ("Utilidades / Energia", "Energia elétrica"),
@@ -321,8 +567,8 @@ _TICKER_SECTOR_MAP = {
     "RAIL3": ("Industriais / Logística", "Logística"),
     "CCRO3": ("Industriais / Infraestrutura", "Infraestrutura"),
     "NTCO3": ("Consumo / Beleza", "Bens de consumo"),
-    "BRFS3": ("Consumo / Alimentos", "Alimentos"),
-    "JBSS3": ("Consumo / Alimentos", "Alimentos"),
+    "MBRF3": ("Consumo / Alimentos", "Alimentos"),
+    "JBSS32": ("Consumo / Alimentos", "Alimentos"),
     # BDR
     "AAPL34": ("Tecnologia / EUA", "Hardware"),
     "MSFT34": ("Tecnologia / EUA", "Software"),
@@ -383,7 +629,7 @@ def _clean_whitespace(value: str) -> str:
 
 @lru_cache(maxsize=4096)
 def _normalize_ticker(ticker: str) -> str:
-    return _clean_whitespace(str(ticker or "")).upper().replace(" ", "")
+    return canonical_symbol(ticker) or _clean_whitespace(str(ticker or "")).upper().replace(" ", "")
 
 
 @lru_cache(maxsize=4096)
@@ -421,17 +667,42 @@ def _contains_any(text: str, keywords: set[str]) -> bool:
     return False
 
 
+def _nested_value(raw_item: dict[str, Any], *path: str) -> Any:
+    current: Any = raw_item
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
 def _parse_published_at(raw_item: dict[str, Any]) -> datetime | None:
-    for key in ("providerPublishTime", "published_at", "pubDate", "publishedAt"):
-        value = raw_item.get(key)
+    values = [
+        raw_item.get("providerPublishTime"),
+        raw_item.get("published_at"),
+        raw_item.get("pubDate"),
+        raw_item.get("publishedAt"),
+        raw_item.get("displayTime"),
+        _nested_value(raw_item, "content", "providerPublishTime"),
+        _nested_value(raw_item, "content", "pubDate"),
+        _nested_value(raw_item, "content", "publishedAt"),
+        _nested_value(raw_item, "content", "displayTime"),
+    ]
+    for value in values:
         if not value:
             continue
         try:
             if isinstance(value, (int, float)):
-                return datetime.fromtimestamp(float(value), tz=timezone.utc)
+                timestamp = float(value)
+                if timestamp > 1_000_000_000_000:
+                    timestamp = timestamp / 1000.0
+                return datetime.fromtimestamp(timestamp, tz=timezone.utc)
             if isinstance(value, str):
                 if value.isdigit():
-                    return datetime.fromtimestamp(float(value), tz=timezone.utc)
+                    timestamp = float(value)
+                    if timestamp > 1_000_000_000_000:
+                        timestamp = timestamp / 1000.0
+                    return datetime.fromtimestamp(timestamp, tz=timezone.utc)
                 parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
                 return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
         except Exception:
@@ -445,6 +716,34 @@ def _to_iso(dt: datetime | None) -> str | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat()
+
+
+def _news_age_minutes(published_at: datetime | None, now_ts: float | None = None) -> int | None:
+    if published_at is None:
+        return None
+    current_ts = _now_ts() if now_ts is None else now_ts
+    try:
+        return max(0, int((current_ts - published_at.timestamp()) // 60))
+    except Exception:
+        return None
+
+
+def _is_news_today(published_at: datetime | None, now_dt: datetime | None = None) -> bool:
+    if published_at is None:
+        return False
+    current = now_dt or datetime.fromtimestamp(_now_ts(), tz=timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    if published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=timezone.utc)
+    return published_at.astimezone(_NEWS_LOCAL_TZ).date() == current.astimezone(_NEWS_LOCAL_TZ).date()
+
+
+def _detect_news_language(title: str, summary: str) -> str:
+    text = _safe_lower(f"{title} {summary}")
+    if re.search(r"\b(acao|acoes|noticia|mercado|lucro|receita|resultado|banco|petroleo|juros|empresa)\b", text):
+        return "pt-BR"
+    return "en-US"
 
 
 def _extract_title(raw_item: dict[str, Any]) -> str:
@@ -479,27 +778,82 @@ def _extract_source(raw_item: dict[str, Any]) -> str:
         value = raw_item.get(key)
         if isinstance(value, str) and value.strip():
             return _clean_whitespace(value)
+        if isinstance(value, dict):
+            nested = value.get("displayName") or value.get("name")
+            if isinstance(nested, str) and nested.strip():
+                return _clean_whitespace(nested)
+    for value in (
+        _nested_value(raw_item, "content", "provider", "displayName"),
+        _nested_value(raw_item, "content", "provider", "name"),
+        _nested_value(raw_item, "content", "publisher"),
+        _nested_value(raw_item, "content", "source"),
+    ):
+        if isinstance(value, str) and value.strip():
+            return _clean_whitespace(value)
     return "Yahoo Finance"
 
 
 def _extract_url(raw_item: dict[str, Any]) -> str | None:
-    for key in ("link", "url", "canonicalUrl"):
+    for key in ("link", "url", "canonicalUrl", "clickThroughUrl"):
         value = raw_item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            nested = value.get("url")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    for value in (
+        _nested_value(raw_item, "content", "canonicalUrl", "url"),
+        _nested_value(raw_item, "content", "clickThroughUrl", "url"),
+        _nested_value(raw_item, "content", "url"),
+        _nested_value(raw_item, "content", "link"),
+    ):
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
 
 
 def _extract_related_tickers(raw_item: dict[str, Any]) -> list[str]:
-    related = raw_item.get("relatedTickers")
-    if not isinstance(related, list):
-        return []
+    related_sources = [
+        raw_item.get("relatedTickers"),
+        _nested_value(raw_item, "content", "finance", "stockTickers"),
+        _nested_value(raw_item, "content", "finance", "companyTickers"),
+        _nested_value(raw_item, "content", "finance", "relatedTickers"),
+        _nested_value(raw_item, "content", "relatedTickers"),
+    ]
     result: list[str] = []
-    for item in related:
-        symbol = _normalize_ticker(item if isinstance(item, str) else str(item or ""))
-        if symbol:
-            result.append(symbol)
+    for related in related_sources:
+        if not isinstance(related, list):
+            continue
+        for item in related:
+            if isinstance(item, dict):
+                raw_symbol = item.get("symbol") or item.get("ticker") or item.get("name")
+            else:
+                raw_symbol = item
+            symbol = _normalize_ticker(str(raw_symbol or ""))
+            if symbol:
+                result.append(symbol)
     return list(dict.fromkeys(result))
+
+
+def _news_aliases(ticker: str) -> set[str]:
+    normalized = _normalize_ticker(ticker).replace(".SA", "")
+    aliases = {
+        normalized,
+        normalized.replace("34", ""),
+        normalized.replace(".SA", ""),
+    }
+    aliases.update(canonical_symbol_aliases(normalized))
+    aliases.update(_TICKER_NEWS_ALIASES.get(normalized, ()))
+    return {alias.lower().strip() for alias in aliases if alias}
+
+
+def _text_has_alias(text: str, alias: str) -> bool:
+    if not alias:
+        return False
+    if len(alias) <= 2:
+        return bool(re.search(rf"\b{re.escape(alias)}\b", text))
+    return alias in text
 
 
 def _sector_from_keywords(text: str) -> tuple[str, str]:
@@ -584,14 +938,10 @@ def _extract_entities(ticker: str, title: str, summary: str, related_tickers: li
 def _ticker_directness(ticker: str, title: str, summary: str, related_tickers: list[str]) -> tuple[bool, float]:
     normalized_ticker = _normalize_ticker(ticker).replace(".SA", "")
     text = _safe_lower(f"{title} {summary}")
-    aliases = {
-        normalized_ticker,
-        normalized_ticker.replace("34", ""),
-        normalized_ticker.replace(".SA", ""),
-    }
+    aliases = _news_aliases(ticker)
     related = {_normalize_ticker(item).replace(".SA", "") for item in related_tickers}
 
-    if any(alias and _safe_lower(alias) in text for alias in aliases):
+    if any(_text_has_alias(text, _safe_lower(alias)) for alias in aliases):
         return True, 100.0
     if normalized_ticker in related:
         return True, 88.0
@@ -669,14 +1019,35 @@ def _impact_hint_balance(text: str, labels: list[str]) -> tuple[int, int]:
     return bullish_score, bearish_score
 
 
-def _impact_from_keywords(text: str, labels: list[str]) -> tuple[str, str]:
+def _canonical_impact_reason(impact: str, locale: str, *, ambiguous_indirect: bool = False) -> str:
+    content_locale = normalize_news_locale(locale)
+    if ambiguous_indirect:
+        return (
+            "The headline is relevant but still ambiguous or indirect for the asset; confirmation is required."
+            if content_locale == "en-US"
+            else "Manchete relevante, mas ainda ambígua ou indireta para o papel; precisa de confirmação."
+        )
+    if content_locale == "en-US":
+        return {
+            "bullish": "Favorable short-term read for the asset.",
+            "bearish": "The headline pressures the asset in the short term.",
+            "neutral": "Impact remains ambiguous and needs context confirmation.",
+        }.get(impact, "Impact remains ambiguous and needs context confirmation.")
+    return {
+        "bullish": "Leitura favorável ao ativo no curto prazo.",
+        "bearish": "Leitura pressionando o ativo no curto prazo.",
+        "neutral": "Impacto ainda ambíguo e pede confirmação de contexto.",
+    }.get(impact, "Impacto ainda ambíguo e pede confirmação de contexto.")
+
+
+def _impact_from_keywords(text: str, labels: list[str], locale: str = DEFAULT_NEWS_LOCALE) -> tuple[str, str]:
     bullish_score, bearish_score = _impact_hint_balance(text, labels)
 
     if bullish_score > bearish_score:
-        return "bullish", "Leitura favorável ao ativo no curto prazo."
+        return "bullish", _canonical_impact_reason("bullish", locale)
     if bearish_score > bullish_score:
-        return "bearish", "Leitura pressionando o ativo no curto prazo."
-    return "neutral", "Impacto ainda ambíguo e pede confirmação de contexto."
+        return "bearish", _canonical_impact_reason("bearish", locale)
+    return "neutral", _canonical_impact_reason("neutral", locale)
 
 
 def _ambiguity_analysis(
@@ -712,31 +1083,77 @@ def _ambiguity_analysis(
     return max(0.0, min(score, 100.0)), flags
 
 
-def _impact_label(impact: str) -> str:
-    return {
+def _impact_label(impact: str, locale: str = DEFAULT_NEWS_LOCALE) -> str:
+    labels = {
         "bullish": "Positivo",
         "bearish": "Negativo",
         "neutral": "Neutro",
-    }.get(impact, "Neutro")
+    }
+    if normalize_news_locale(locale) == "en-US":
+        labels = {"bullish": "Positive", "bearish": "Negative", "neutral": "Neutral"}
+    return labels.get(impact, labels["neutral"])
 
 
-def _build_card_summary(title: str, summary: str, labels: list[str], impact: str) -> str:
+def _localized_news_label(label: str, locale: str) -> str:
+    if normalize_news_locale(locale) != "en-US":
+        return label
+    return {
+        "resultado": "earnings",
+        "guidance": "guidance",
+        "M&A": "M&A",
+        "regulação": "regulation",
+        "macro": "macro",
+        "fato relevante": "material event",
+    }.get(label, label)
+
+
+def _build_card_summary(
+    title: str,
+    summary: str,
+    labels: list[str],
+    impact: str,
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> str:
+    content_locale = normalize_news_locale(locale)
     base = _first_sentence(summary) or _first_sentence(title)
     if not base:
         base = title
     if labels:
-        label_tail = " • ".join(labels[:2])
+        label_tail = " • ".join(_localized_news_label(label, content_locale) for label in labels[:2])
         base = f"{base} ({label_tail})"
-    if impact == "bullish":
-        suffix = " Tendência positiva para o ativo."
-    elif impact == "bearish":
-        suffix = " Pode pressionar o papel."
+    if content_locale == "en-US":
+        if impact == "bullish":
+            suffix = " The read is constructive for the asset."
+        elif impact == "bearish":
+            suffix = " It may pressure the asset."
+        else:
+            suffix = " Context confirmation is still required."
     else:
-        suffix = " Exige confirmação do contexto."
+        if impact == "bullish":
+            suffix = " Tendência positiva para o ativo."
+        elif impact == "bearish":
+            suffix = " Pode pressionar o papel."
+        else:
+            suffix = " Exige confirmação do contexto."
     return _shorten(f"{base}{suffix}", 170)
 
 
-def _build_editorial(ticker: str, labels: list[str], impact: str, confidence: float, sector: str) -> str:
+def _build_editorial(
+    ticker: str,
+    labels: list[str],
+    impact: str,
+    confidence: float,
+    sector: str,
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> str:
+    if normalize_news_locale(locale) == "en-US":
+        confidence_word = "strong" if confidence >= 70 else "moderate" if confidence >= 45 else "weak"
+        tone = "supports upside" if impact == "bullish" else "supports downside" if impact == "bearish" else "remains neutral"
+        if labels:
+            lead = ", ".join(_localized_news_label(label, locale) for label in labels[:2])
+            return _shorten(f"{lead.capitalize()} for {ticker} {tone}; {confidence_word} read for the sector.", 180)
+        return _shorten(f"News for {ticker} {tone}; {confidence_word} sector read.", 180)
+
     confidence_word = "forte" if confidence >= 70 else "moderada" if confidence >= 45 else "fraca"
     if impact == "bullish":
         tone = "favorece alta"
@@ -759,8 +1176,18 @@ def _build_editorial_final(
     ambiguity_score: float,
     source_count: int,
     direct_match: bool,
+    locale: str = DEFAULT_NEWS_LOCALE,
 ) -> str:
-    base = _build_editorial(ticker, labels, impact, confidence, sector)
+    content_locale = normalize_news_locale(locale)
+    base = _build_editorial(ticker, labels, impact, confidence, sector, content_locale)
+    if content_locale == "en-US":
+        if ambiguity_score >= 45:
+            return _shorten(f"{base} Mixed signal: wait for price confirmation before treating the headline as a trigger.", 220)
+        if source_count >= 2:
+            return _shorten(f"{base} The same event was confirmed by {source_count} related sources.", 220)
+        if not direct_match:
+            return _shorten(f"{base} The impact appears more sector-wide than asset-specific.", 220)
+        return base
     if ambiguity_score >= 45:
         return _shorten(f"{base} Sinal misto: espere confirmação no preço antes de tratar a manchete como gatilho.", 220)
     if source_count >= 2:
@@ -770,7 +1197,28 @@ def _build_editorial_final(
     return base
 
 
-def _build_why_it_matters(ticker: str, labels: list[str], impact: str, sector: str) -> str:
+def _build_why_it_matters(
+    ticker: str,
+    labels: list[str],
+    impact: str,
+    sector: str,
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> str:
+    if normalize_news_locale(locale) == "en-US":
+        if "resultado" in labels:
+            return _shorten(f"It may move {ticker} by changing earnings expectations and sector pricing.", 180)
+        if "guidance" in labels:
+            return _shorten(f"It may move {ticker} by changing expectations for execution and margins.", 180)
+        if "M&A" in labels:
+            return _shorten(f"It may cause rapid repricing in {ticker} through event premium and strategic positioning.", 180)
+        if "regulação" in labels:
+            return _shorten(f"It may change perceived risk for {ticker} and its sector.", 180)
+        if "macro" in labels:
+            return _shorten("The macro backdrop may change sector flow and risk appetite.", 180)
+        if "fato relevante" in labels:
+            return _shorten(f"The market may adjust price and flow in {ticker} after the disclosure.", 180)
+        return _shorten(f"It adds flow and context that may affect {ticker} in the short term.", 180)
+
     if "resultado" in labels:
         return _shorten(f"Pode mover {ticker} porque altera expectativa de lucro e precificação do papel no setor {sector.lower()}.", 180)
     if "guidance" in labels:
@@ -786,27 +1234,186 @@ def _build_why_it_matters(ticker: str, labels: list[str], impact: str, sector: s
     return _shorten(f"Ajuda a entender o fluxo e o contexto que podem afetar {ticker} no curto prazo.", 180)
 
 
-def _build_trader_takeaway(
+def _build_trader_takeaway_en(
     ticker: str,
+    title: str,
+    summary: str,
     impact: str,
     labels: list[str],
     ambiguity_score: float,
     direct_match: bool,
 ) -> str:
+    text = _safe_lower(f"{title} {summary} {' '.join(labels)}")
+    seed = sum(ord(char) for char in f"{ticker}|{title}|{summary}") % 3
+
+    def pick(options: list[str]) -> str:
+        return _shorten(options[seed % len(options)], 190)
+
     if ambiguity_score >= 45:
-        return _shorten(f"Para trader: trate a notícia de {ticker} como contexto, não como gatilho isolado, até o preço confirmar direção.", 190)
-    if "resultado" in labels or "guidance" in labels:
-        return _shorten(f"Para trader: monitore reação de preço e volume em {ticker} porque a leitura pode virar tendência intraday.", 190)
+        return pick([
+            f"Trader note: treat the {ticker} headline as context until price confirms direction.",
+            f"Trader note: the read for {ticker} is ambiguous; wait for price and volume reaction.",
+            f"Trader note: use this as an alert for {ticker}, not a standalone trigger.",
+        ])
+    if "M&A" in labels or "merger" in text or "acquisition" in text or "fusão" in text or "aquis" in text:
+        return pick([
+            f"Trader note: event risk may reprice {ticker}; wait for price, spread and volume confirmation.",
+            f"Trader note: M&A may create a premium in {ticker}, but flow must confirm the timing.",
+            f"Trader note: turn this corporate event into a trade only if {ticker} shows real flow.",
+        ])
+    if "dividend" in text or "dividendo" in text or "yield" in text:
+        return pick([
+            f"Trader note: do not buy {ticker} on yield alone; confirm cash quality, trend and volume.",
+            f"Trader note: income appeal supports context, but {ticker} must hold price structure.",
+            f"Trader note: weak volume keeps the dividend read for {ticker} as an alert only.",
+        ])
+    if "resultado" in labels or "guidance" in labels or "earnings" in text:
+        return pick([
+            f"Trader note: monitor price and volume reaction in {ticker} before acting.",
+            f"Trader note: earnings or guidance in {ticker} requires margin, flow and candle confirmation.",
+            f"Trader note: separate the headline from execution; {ticker} price must validate the read.",
+        ])
+    if "regulação" in labels or "regulation" in text or "regulatory" in text:
+        return pick([
+            f"Trader note: regulatory news may raise volatility in {ticker}; wait for direction confirmation.",
+            f"Trader note: regulation changes perceived risk in {ticker}; let the market show the dominant side.",
+            f"Trader note: treat regulation in {ticker} as event risk and validate support or resistance.",
+        ])
     if "macro" in labels and not direct_match:
-        return _shorten(f"Para trader: leia primeiro o impacto no índice/setor e só depois a transmissão para {ticker}.", 190)
+        return pick([
+            f"Trader note: read the index and sector impact before its transmission to {ticker}.",
+            f"Trader note: macro affects {ticker} through risk appetite; act only if the asset confirms its own flow.",
+            f"Trader note: use price and volume as the final filter for this macro context in {ticker}.",
+        ])
     if impact == "bullish":
-        return _shorten(f"Para trader: priorize continuação compradora só se {ticker} sustentar fluxo e não devolver o rompimento.", 190)
+        return pick([
+            f"Trader note: favor upside continuation only if {ticker} sustains flow and holds the breakout.",
+            f"Trader note: the constructive read in {ticker} still needs price and volume confirmation.",
+            f"Trader note: consider the positive context only after {ticker} defends support or breaks out cleanly.",
+        ])
     if impact == "bearish":
-        return _shorten(f"Para trader: priorize proteção ou venda só se {ticker} confirmar fraqueza e perder suporte com volume.", 190)
-    return _shorten(f"Para trader: use a manchete como leitura complementar e espere confirmação do mercado em {ticker}.", 190)
+        return pick([
+            f"Trader note: favor protection only if {ticker} confirms weakness with volume.",
+            f"Trader note: the negative read in {ticker} still needs support loss or rejection confirmation.",
+            f"Trader note: wait for {ticker} to confirm direction before turning the headline into a trade.",
+        ])
+    return pick([
+        f"Trader note: use the headline as context and wait for market confirmation in {ticker}.",
+        f"Trader note: keep {ticker} on watch until the news appears in real flow.",
+        f"Trader note: confirm the new context on the chart before acting in {ticker}.",
+    ])
 
 
-def _market_context(ticker: str, labels: list[str], sector: str, industry: str) -> str:
+def _build_trader_takeaway(
+    ticker: str,
+    title: str,
+    summary: str,
+    impact: str,
+    labels: list[str],
+    ambiguity_score: float,
+    direct_match: bool,
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> str:
+    if normalize_news_locale(locale) == "en-US":
+        return _build_trader_takeaway_en(
+            ticker,
+            title,
+            summary,
+            impact,
+            labels,
+            ambiguity_score,
+            direct_match,
+        )
+    text = _safe_lower(f"{title} {summary} {' '.join(labels)}")
+    label_set = {str(label).lower() for label in labels}
+    seed = sum(ord(char) for char in f"{ticker}|{title}|{summary}") % 3
+    def pick(options: list[str]) -> str:
+        return _shorten(options[seed % len(options)], 190)
+
+    if ambiguity_score >= 45:
+        return pick([
+            f"Para trader: trate a notícia de {ticker} como contexto, não como gatilho isolado, até o preço confirmar direção.",
+            f"Para trader: leitura ambígua em {ticker}; espere reação de preço e volume antes de agir.",
+            f"Para trader: use a manchete como alerta em {ticker}, mas só opere com confirmação no gráfico.",
+        ])
+    if "M&A" in labels or "m&a" in label_set or "merger" in text or "acquisition" in text or "fusão" in text or "aquis" in text:
+        return pick([
+            f"Para trader: evento de fusões e aquisições em {ticker} pode gerar reprecificação; espere preço, spread e volume confirmarem.",
+            f"Para trader: M&A pode criar prêmio em {ticker}, mas o timing depende de VWAP, volume e reação do mercado.",
+            f"Para trader: notícia corporativa em {ticker} só vira operação se houver fluxo real confirmando o lado.",
+        ])
+    if "dividend" in text or "dividendo" in text or "yield" in text:
+        return pick([
+            f"Para trader: não compre {ticker} só pelo dividendo; valide caixa, tendência e reação de volume antes da entrada.",
+            f"Para trader: yield em {ticker} é contexto de renda; entrada exige preço sustentando suporte e fluxo.",
+            f"Para trader: dividendo pode atrair comprador em {ticker}, mas volume fraco mantém a leitura só como alerta.",
+        ])
+    if "battery" in text or "bateria" in text or " ev" in text or "electric vehicle" in text or "veículo elétrico" in text:
+        return pick([
+            f"Para trader: tema de EV/baterias muda expectativa em {ticker}; deixe a reação do preço confirmar o timing.",
+            f"Para trader: notícia estratégica em {ticker} precisa virar fluxo comprador antes de justificar entrada.",
+            f"Para trader: EV pode mexer em margem e crescimento de {ticker}; opere só após rompimento ou defesa clara.",
+        ])
+    if "mover" in text or "destaque" in text:
+        return pick([
+            f"Para trader: lista de destaques é filtro relativo; opere {ticker} só se força e volume confirmarem no gráfico.",
+            f"Para trader: destaque de mercado não é entrada; compare {ticker} com o setor e espere gatilho real.",
+            f"Para trader: use o mover como triagem em {ticker}; execução depende de tendência e liquidez.",
+        ])
+    if "resultado" in labels or "guidance" in labels or "earnings" in text:
+        return pick([
+            f"Para trader: monitore reação de preço e volume em {ticker} porque a leitura pode virar tendência intraday.",
+            f"Para trader: resultado/guidance em {ticker} exige confirmação em margem, fluxo e direção do candle.",
+            f"Para trader: separe manchete de execução em {ticker}; o preço precisa validar a leitura.",
+        ])
+    if "regulação" in labels or "regulation" in text or "regulatory" in text:
+        return pick([
+            f"Para trader: notícia regulatória pode aumentar volatilidade em {ticker}; reduza tamanho até confirmar direção.",
+            f"Para trader: regulação muda risco percebido em {ticker}; espere o mercado mostrar o lado dominante.",
+            f"Para trader: trate regulação em {ticker} como evento de risco; proteja tamanho e valide suporte/resistência.",
+        ])
+    if "macro" in labels and not direct_match:
+        return pick([
+            f"Para trader: leia primeiro o impacto no índice/setor e só depois a transmissão para {ticker}.",
+            f"Para trader: macro afeta {ticker} por apetite a risco; só aja se o papel confirmar fluxo próprio.",
+            f"Para trader: contexto macro em {ticker} pede cautela; use preço e volume como filtro final.",
+        ])
+    if impact == "bullish":
+        return pick([
+            f"Para trader: priorize continuação compradora só se {ticker} sustentar fluxo e não devolver o rompimento.",
+            f"Para trader: viés positivo em {ticker} exige compradores defendendo VWAP e volume acompanhando.",
+            f"Para trader: a leitura favorece alta em {ticker}, mas entrada só com suporte defendido ou rompimento limpo.",
+        ])
+    if impact == "bearish":
+        return pick([
+            f"Para trader: priorize proteção ou venda só se {ticker} confirmar fraqueza e perder suporte com volume.",
+            f"Para trader: viés negativo em {ticker} pede defesa; short só com rejeição ou perda de suporte.",
+            f"Para trader: evite compra impulsiva em {ticker}; aguarde preço recuperar estrutura antes de virar o lado.",
+        ])
+    return pick([
+        f"Para trader: use a manchete como leitura complementar e espere confirmação do mercado em {ticker}.",
+        f"Para trader: mantenha {ticker} em observação; a notícia precisa aparecer no fluxo antes de virar trade.",
+        f"Para trader: contexto novo em {ticker}; confirme no gráfico antes de comprar, vender ou encerrar.",
+    ])
+
+
+def _market_context(
+    ticker: str,
+    labels: list[str],
+    sector: str,
+    industry: str,
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> str:
+    if normalize_news_locale(locale) == "en-US":
+        if "macro" in labels:
+            return "Macro news tends to affect broad market sentiment before the specific sector."
+        if "regulação" in labels:
+            return "Regulatory news usually raises volatility and changes sector risk."
+        if "M&A" in labels:
+            return "M&A events may create an event premium and accelerate repricing."
+        if "guidance" in labels or "resultado" in labels:
+            return "Earnings and guidance usually affect valuation and sector flow."
+        return "The context is tied to the asset's industry and short-term flow."
     if "macro" in labels:
         return "Notícia macro tende a afetar primeiro o humor do mercado e depois o setor específico."
     if "regulação" in labels:
@@ -825,8 +1432,16 @@ def _safe_market_context(
     industry: str,
     direct_match: bool,
     ambiguity_score: float,
+    locale: str = DEFAULT_NEWS_LOCALE,
 ) -> str:
-    context = _market_context(ticker, labels, sector, industry)
+    content_locale = normalize_news_locale(locale)
+    context = _market_context(ticker, labels, sector, industry, content_locale)
+    if content_locale == "en-US":
+        if ambiguity_score >= 45:
+            return _shorten(f"{context} The headline still has mixed signals and needs price confirmation.", 190)
+        if not direct_match:
+            return _shorten(f"{context} The effect may reach the sector before {ticker} specifically.", 190)
+        return context
     if ambiguity_score >= 45:
         return _shorten(f"{context} Ainda assim, a manchete traz sinais mistos e precisa de confirmação no preço.", 190)
     if not direct_match:
@@ -899,7 +1514,8 @@ def _relevance_score(labels: list[str], confidence: float, title: str, summary: 
             "fato relevante": 16.0,
         }
         base += sum(label_weight.get(label, 8.0) for label in labels[:3])
-    if ticker.upper() in _safe_lower(f"{title} {summary}"):
+    text = _safe_lower(f"{title} {summary}")
+    if any(_text_has_alias(text, alias) for alias in _news_aliases(ticker)):
         base += 18.0
     if sector and sector != "Mercado":
         base += 8.0
@@ -929,7 +1545,12 @@ def _should_keep_item(
     return relevance_score >= 35.0
 
 
-def _normalize_raw_item(raw_item: dict[str, Any], ticker: str) -> dict[str, Any] | None:
+def _normalize_raw_item(
+    raw_item: dict[str, Any],
+    ticker: str,
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> dict[str, Any] | None:
+    content_locale = normalize_news_locale(locale)
     title = _extract_title(raw_item)
     summary = _extract_summary(raw_item)
 
@@ -940,13 +1561,15 @@ def _normalize_raw_item(raw_item: dict[str, Any], ticker: str) -> dict[str, Any]
     url = _extract_url(raw_item)
     related_tickers = _extract_related_tickers(raw_item)
     published_at = _parse_published_at(raw_item)
+    detected_ts = _now_ts()
+    detected_at = datetime.fromtimestamp(detected_ts, tz=timezone.utc)
     sector, industry = _asset_sector(ticker, f"{title} {summary}")
     labels = _classify_labels(f"{title} {summary}")
     entities = _extract_entities(ticker, title, summary, related_tickers, labels)
     story_key = _story_signature(ticker, title, labels, entities)
     direct_match, directness_score = _ticker_directness(ticker, title, summary, related_tickers)
     bullish_hints, bearish_hints = _impact_hint_balance(f"{title} {summary}", labels)
-    impact, impact_reason = _impact_from_keywords(f"{title} {summary}", labels)
+    impact, impact_reason = _impact_from_keywords(f"{title} {summary}", labels, content_locale)
     ambiguity_score, ambiguity_flags = _ambiguity_analysis(
         f"{title} {summary}",
         labels,
@@ -959,33 +1582,85 @@ def _normalize_raw_item(raw_item: dict[str, Any], ticker: str) -> dict[str, Any]
     confidence, relevance_score = _adjust_quality_scores(confidence, relevance_score, directness_score, ambiguity_score)
     if ambiguity_score >= 55.0 and not direct_match and impact != "neutral":
         impact = "neutral"
-        impact_reason = "Manchete relevante, mas ainda ambigua ou indireta para o papel; precisa de confirmacao."
+        impact_reason = _canonical_impact_reason(impact, content_locale, ambiguous_indirect=True)
     ranking_score = round((0.38 * _recency_score(published_at)) + (0.42 * relevance_score) + (0.20 * confidence), 2)
 
     useful = _should_keep_item(relevance_score, labels, title, summary, direct_match, ambiguity_score)
+
+    published_at_source = _to_iso(published_at)
+    fetched_at = _to_iso(detected_at)
+    source_url = url
+    age_minutes = _news_age_minutes(published_at, detected_ts)
+    is_today = _is_news_today(published_at, detected_at)
+    is_incomplete = published_at is None or not source or not source_url
 
     return {
         "id": raw_item.get("id") or story_key,
         "ticker": ticker,
         "title": title,
+        "original_title": title,
         "summary": summary or title,
-        "card_summary": _build_card_summary(title, summary, labels, impact),
+        "original_summary": summary or title,
+        "content_locale": content_locale,
+        "card_summary": _build_card_summary(title, summary, labels, impact, content_locale),
         "source": source,
+        "source_name": source,
         "source_domain": _extract_domain(url),
         "url": url,
-        "published_at": _to_iso(published_at),
+        "source_url": source_url,
+        "published_at": published_at_source,
+        "published_at_source": published_at_source,
+        "detected_at": fetched_at,
+        "fetched_at": fetched_at,
+        "age_minutes": age_minutes,
+        "is_today": is_today,
+        "is_stale": not is_today,
+        "source_published_at": bool(published_at),
+        "matched_symbol": ticker,
+        "language": _detect_news_language(title, summary),
+        "publication_status": "ok" if published_at else "missing_source_time",
+        "is_incomplete": is_incomplete,
         "sector": sector,
         "industry": industry,
         "labels": labels,
         "entities": entities,
+        "related_tickers": related_tickers,
         "impact": impact,
-        "impact_label": _impact_label(impact),
+        "impact_label": _impact_label(impact, content_locale),
         "impact_reason": impact_reason,
-        "why_it_matters": _build_why_it_matters(ticker, labels, impact, sector),
-        "editorial": _build_editorial_final(ticker, labels, impact, confidence, sector, ambiguity_score, 1, direct_match),
-        "market_context": _safe_market_context(ticker, labels, sector, industry, direct_match, ambiguity_score),
-        "trader_takeaway": _build_trader_takeaway(ticker, impact, labels, ambiguity_score, direct_match),
+        "why_it_matters": _build_why_it_matters(ticker, labels, impact, sector, content_locale),
+        "editorial": _build_editorial_final(
+            ticker,
+            labels,
+            impact,
+            confidence,
+            sector,
+            ambiguity_score,
+            1,
+            direct_match,
+            content_locale,
+        ),
+        "market_context": _safe_market_context(
+            ticker,
+            labels,
+            sector,
+            industry,
+            direct_match,
+            ambiguity_score,
+            content_locale,
+        ),
+        "trader_takeaway": _build_trader_takeaway(
+            ticker,
+            title,
+            summary,
+            impact,
+            labels,
+            ambiguity_score,
+            direct_match,
+            content_locale,
+        ),
         "relevance_score": round(relevance_score, 2),
+        "relevance": round(relevance_score, 2),
         "ranking_score": ranking_score,
         "confidence_score": round(confidence, 2),
         "direct_ticker_match": direct_match,
@@ -1022,6 +1697,9 @@ def _news_ticker_candidates(ticker: str) -> list[str]:
         return []
 
     candidates = [normalized]
+    provider_candidate = provider_symbol(normalized)
+    if provider_candidate and provider_candidate != normalized:
+        candidates.append(provider_candidate)
     if "." not in normalized and "-" not in normalized and normalized[-1:].isdigit():
         candidates.append(f"{normalized}.SA")
     if normalized.endswith(".SA"):
@@ -1029,7 +1707,7 @@ def _news_ticker_candidates(ticker: str) -> list[str]:
 
     unique_candidates: list[str] = []
     for candidate in candidates:
-        candidate = _normalize_ticker(candidate)
+        candidate = _clean_whitespace(str(candidate or "")).upper().replace(" ", "")
         if candidate and candidate not in unique_candidates:
             unique_candidates.append(candidate)
     return unique_candidates
@@ -1081,6 +1759,9 @@ def _prepare_raw_items(raw_items: list[dict[str, Any]], limit: int) -> list[dict
 
 
 def _fetch_yfinance_news(ticker: str) -> list[dict[str, Any]]:
+    if str(os.getenv("MARKET_PROVIDER_NETWORK_DISABLED") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        _remember_news_provider_status(ticker, "network_disabled")
+        return []
     yf = _get_yfinance()
     if yf is None:
         _remember_news_provider_status(ticker, "dependency_unavailable", error="dependency_unavailable")
@@ -1112,7 +1793,11 @@ def _fetch_yfinance_news(ticker: str) -> list[dict[str, Any]]:
         return []
 
 
-def _cluster_news(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _cluster_news(
+    items: list[dict[str, Any]],
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> list[dict[str, Any]]:
+    content_locale = normalize_news_locale(locale)
     clusters: list[dict[str, Any]] = []
     story_index: dict[str, dict[str, Any]] = {}
     token_index: dict[str, list[dict[str, Any]]] = {}
@@ -1224,46 +1909,116 @@ def _cluster_news(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             float(canonical.get("ambiguity_score", 0.0) or 0.0),
             canonical["source_count"],
             bool(canonical.get("direct_ticker_match")),
+            content_locale,
         )
+        canonical["trader_takeaway"] = _build_trader_takeaway(
+            str(canonical.get("ticker") or ""),
+            str(canonical.get("title") or ""),
+            str(canonical.get("summary") or ""),
+            str(canonical.get("impact") or "neutral"),
+            list(canonical.get("labels") or []),
+            float(canonical.get("ambiguity_score", 0.0) or 0.0),
+            bool(canonical.get("direct_ticker_match")),
+            content_locale,
+        )
+        canonical["content_locale"] = content_locale
         results.append(canonical)
 
     return results
 
 
-def build_symbol_news(ticker: str, raw_items: list[dict[str, Any]], limit: int = 6) -> list[dict[str, Any]]:
+def build_symbol_news(
+    ticker: str,
+    raw_items: list[dict[str, Any]],
+    limit: int = 6,
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> list[dict[str, Any]]:
+    items, _report = build_symbol_news_with_report(ticker, raw_items, limit=limit, locale=locale)
+    return items
+
+
+def build_symbol_news_with_report(
+    ticker: str,
+    raw_items: list[dict[str, Any]],
+    limit: int = 6,
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     normalized_ticker = _normalize_ticker(ticker)
+    content_locale = normalize_news_locale(locale)
     limit = _sanitize_limit(limit)
+    original_raw_count = len(raw_items) if isinstance(raw_items, list) else 0
+    reason_counts: Counter[str] = Counter()
+    if isinstance(raw_items, list):
+        for raw_item in raw_items[: min(len(raw_items), _NEWS_MAX_INPUT_ITEMS, max(limit * 8, 40))]:
+            if not isinstance(raw_item, dict):
+                reason_counts["provider_invalid"] += 1
+                continue
+            if not _extract_title(raw_item) and not _extract_summary(raw_item):
+                reason_counts["missing_title"] += 1
     raw_items = _prepare_raw_items(raw_items, limit)
+    prepared_count = len(raw_items)
+    if original_raw_count > prepared_count:
+        explained = sum(reason_counts.values())
+        duplicate_count = max(0, original_raw_count - prepared_count - explained)
+        if duplicate_count:
+            reason_counts["duplicate"] += duplicate_count
     normalized_items = []
 
     for raw_item in raw_items or []:
         if not isinstance(raw_item, dict):
+            reason_counts["provider_invalid"] += 1
             continue
-        candidate = _normalize_raw_item(raw_item, normalized_ticker)
+        candidate = _normalize_raw_item(raw_item, normalized_ticker, content_locale)
         if candidate is None:
+            reason_counts["missing_title"] += 1
             continue
         normalized_items.append(candidate)
 
     if not normalized_items:
-        return []
+        reason = reason_counts.most_common(1)[0][0] if reason_counts else ("provider_invalid" if original_raw_count else "no_raw_news")
+        return [], {
+            "ticker": normalized_ticker,
+            "locale": content_locale,
+            "status": "empty",
+            "reason": reason,
+            "raw_count": original_raw_count,
+            "prepared_count": prepared_count,
+            "normalized_count": 0,
+            "output_count": 0,
+            "discard_reasons": dict(reason_counts),
+        }
 
     normalized_items.sort(
         key=lambda item: (
-            float(item.get("ranking_score", 0.0) or 0.0),
             item.get("published_at") or "",
+            float(item.get("ranking_score", 0.0) or 0.0),
         ),
         reverse=True,
     )
 
-    clustered = _cluster_news(normalized_items)
+    clustered = _cluster_news(normalized_items, content_locale)
 
     ordered = list(clustered)
-    ordered.sort(
-        key=lambda item: (
+    def _priority_key(item: dict[str, Any]) -> tuple[Any, ...]:
+        labels = {str(label).lower() for label in item.get("labels", []) if label}
+        direct_match = 1 if item.get("direct_ticker_match") else 0
+        editorial_priority = 0
+        if labels.intersection({"resultado", "guidance", "fato relevante", "regulacao", "m&a"}):
+            editorial_priority += 2
+        if labels.intersection({"macro", "juros", "inflacao"}) and not direct_match:
+            editorial_priority -= 1
+        return (
             1 if item.get("useful", True) else 0,
+            direct_match,
+            editorial_priority,
+            float(item.get("relevance_score", 0.0) or 0.0),
+            float(item.get("confidence_score", 0.0) or 0.0),
             float(item.get("ranking_score", 0.0) or 0.0),
             item.get("published_at") or "",
-        ),
+        )
+
+    ordered.sort(
+        key=_priority_key,
         reverse=True,
     )
 
@@ -1280,27 +2035,166 @@ def build_symbol_news(ticker: str, raw_items: list[dict[str, Any]], limit: int =
         if len(output) >= limit:
             break
 
-    return output
+    # _priority_key decides WHICH stories make the cut (editorial value); the feed itself
+    # must be chronological, newest first, and must not inherit the provider's order.
+    # published_at is always _to_iso() UTC, so the string sort is the chronological sort;
+    # items without a source publication time sort last instead of masquerading as new.
+    output.sort(
+        key=lambda item: (
+            item.get("published_at") or "",
+            float(item.get("ranking_score", 0.0) or 0.0),
+        ),
+        reverse=True,
+    )
+
+    report_status = "ok" if output else "empty"
+    reason = None if output else (reason_counts.most_common(1)[0][0] if reason_counts else "filtered_by_quality")
+    return output, {
+        "ticker": normalized_ticker,
+        "locale": content_locale,
+        "status": report_status,
+        "reason": reason,
+        "raw_count": original_raw_count,
+        "prepared_count": prepared_count,
+        "normalized_count": len(normalized_items),
+        "output_count": len(output),
+        "discard_reasons": dict(reason_counts),
+    }
 
 
-def get_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
+def _localized_impact_reason(item: dict[str, Any], locale: str) -> str:
+    impact = str(item.get("impact") or "neutral")
+    ambiguity_score = float(item.get("ambiguity_score", 0.0) or 0.0)
+    direct_match = bool(item.get("direct_ticker_match"))
+    if ambiguity_score >= 55.0 and not direct_match:
+        return _canonical_impact_reason(impact, locale, ambiguous_indirect=True)
+    return _canonical_impact_reason(impact, locale)
+
+
+def _localize_cached_news_item(item: dict[str, Any], locale: str) -> dict[str, Any]:
+    content_locale = normalize_news_locale(locale)
+    localized = copy.deepcopy(item)
+    original_title = str(localized.get("original_title") or localized.get("title") or localized.get("headline") or "").strip()
+    original_summary = str(localized.get("original_summary") or localized.get("summary") or original_title).strip()
+    ticker = str(localized.get("ticker") or localized.get("matched_symbol") or "")
+    labels = list(localized.get("labels") or [])
+    impact = str(localized.get("impact") or "neutral")
+    sector = str(localized.get("sector") or "Mercado")
+    industry = str(localized.get("industry") or "Geral")
+    confidence = float(localized.get("confidence_score", 0.0) or 0.0)
+    ambiguity_score = float(localized.get("ambiguity_score", 0.0) or 0.0)
+    direct_match = bool(localized.get("direct_ticker_match"))
+    source_count = max(1, int(localized.get("source_count", 1) or 1))
+
+    localized["title"] = original_title
+    if "headline" in localized:
+        localized["headline"] = original_title
+    localized["original_title"] = original_title
+    localized["summary"] = original_summary or original_title
+    localized["original_summary"] = original_summary or original_title
+    localized["language"] = localized.get("language") or _detect_news_language(original_title, original_summary)
+    localized["content_locale"] = content_locale
+    localized["card_summary"] = _build_card_summary(original_title, original_summary, labels, impact, content_locale)
+    localized["impact_label"] = _impact_label(impact, content_locale)
+    localized["impact_reason"] = _localized_impact_reason(localized, content_locale)
+    localized["why_it_matters"] = _build_why_it_matters(ticker, labels, impact, sector, content_locale)
+    localized["editorial"] = _build_editorial_final(
+        ticker,
+        labels,
+        impact,
+        confidence,
+        sector,
+        ambiguity_score,
+        source_count,
+        direct_match,
+        content_locale,
+    )
+    localized["market_context"] = _safe_market_context(
+        ticker,
+        labels,
+        sector,
+        industry,
+        direct_match,
+        ambiguity_score,
+        content_locale,
+    )
+    localized["trader_takeaway"] = _build_trader_takeaway(
+        ticker,
+        original_title,
+        original_summary,
+        impact,
+        labels,
+        ambiguity_score,
+        direct_match,
+        content_locale,
+    )
+    return localized
+
+
+def _localize_cached_news_items(items: list[dict[str, Any]], locale: str) -> list[dict[str, Any]]:
+    return [
+        _localize_cached_news_item(item, locale)
+        for item in items
+        if isinstance(item, dict)
+    ]
+
+
+def _localized_cache_entry(source_entry: dict[str, Any], ticker: str, locale: str) -> dict[str, Any]:
+    content_locale = normalize_news_locale(locale)
+    localized_entry = copy.deepcopy(source_entry)
+    localized_items = _localize_cached_news_items(list(source_entry.get("items") or []), content_locale)
+    localized_entry["locale"] = content_locale
+    localized_entry["items"] = localized_items
+    localized_entry["report"] = build_news_intelligence_report(
+        ticker,
+        localized_items,
+        locale=content_locale,
+    )
+    return localized_entry
+
+
+def get_symbol_news(
+    ticker: str,
+    limit: int = 6,
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> list[dict[str, Any]]:
+    _load_news_cache_once()
     normalized_ticker = _normalize_ticker(ticker)
     if not normalized_ticker:
         return []
 
+    content_locale = normalize_news_locale(locale)
     limit = _sanitize_limit(limit)
     now = _now_ts()
+
+    def is_fresh(entry: dict[str, Any] | None) -> bool:
+        return bool(
+            entry
+            and entry.get("items")
+            and now - float(entry.get("timestamp", 0.0) or 0.0) < _CACHE_TTL_SECONDS
+        )
+
     with _CACHE_LOCK:
-        cached = _NEWS_CACHE.get(normalized_ticker)
-        if cached and now - float(cached.get("timestamp", 0.0) or 0.0) < _CACHE_TTL_SECONDS:
-            return list(cached.get("items", []))[:limit]
+        cached = _get_news_cache_entry_locked(normalized_ticker, content_locale)
+        if is_fresh(cached):
+            return copy.deepcopy(list(cached.get("items", []))[:limit])
+        alternate = _latest_news_cache_entry_locked(normalized_ticker, exclude_locale=content_locale)
+        if is_fresh(alternate):
+            localized_entry = _localized_cache_entry(alternate, normalized_ticker, content_locale)
+            _set_news_cache_entry_locked(normalized_ticker, content_locale, localized_entry)
+            return copy.deepcopy(localized_entry["items"][:limit])
 
     request_lock = _get_request_lock(normalized_ticker)
     with request_lock:
         with _CACHE_LOCK:
-            cached = _NEWS_CACHE.get(normalized_ticker)
-            if cached and now - float(cached.get("timestamp", 0.0) or 0.0) < _CACHE_TTL_SECONDS:
-                return list(cached.get("items", []))[:limit]
+            cached = _get_news_cache_entry_locked(normalized_ticker, content_locale)
+            if is_fresh(cached):
+                return copy.deepcopy(list(cached.get("items", []))[:limit])
+            alternate = _latest_news_cache_entry_locked(normalized_ticker, exclude_locale=content_locale)
+            if is_fresh(alternate):
+                localized_entry = _localized_cache_entry(alternate, normalized_ticker, content_locale)
+                _set_news_cache_entry_locked(normalized_ticker, content_locale, localized_entry)
+                return copy.deepcopy(localized_entry["items"][:limit])
 
         raw_items: list[dict[str, Any]] = []
         fetched_from = normalized_ticker
@@ -1312,7 +2206,12 @@ def get_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
                 if candidate != normalized_ticker:
                     logger.info("News service resolved %s via candidate %s", normalized_ticker, candidate)
                 break
-        items = build_symbol_news(normalized_ticker, raw_items, limit=limit)
+        items, filter_report = build_symbol_news_with_report(
+            normalized_ticker,
+            raw_items,
+            limit=limit,
+            locale=content_locale,
+        )
         provider_meta = _latest_news_provider_status(
             fetched_from if raw_items else (attempted_candidates[-1] if attempted_candidates else normalized_ticker)
         )
@@ -1320,29 +2219,40 @@ def get_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
         fallback_used = False
 
         if not items:
+            stale_items: list[dict[str, Any]] | None = None
             with _CACHE_LOCK:
-                cached = _NEWS_CACHE.get(normalized_ticker)
+                cached = _get_news_cache_entry_locked(normalized_ticker, content_locale)
+                if not cached or not cached.get("items"):
+                    alternate = _latest_news_cache_entry_locked(normalized_ticker, exclude_locale=content_locale)
+                    cached = _localized_cache_entry(alternate, normalized_ticker, content_locale) if alternate and alternate.get("items") else None
                 if cached and cached.get("items"):
                     logger.info("News service using stale cache for %s after empty provider response", normalized_ticker)
                     fallback_used = True
                     cache_status = "stale_fallback"
-                    cached["timestamp"] = now
-                    cached["status"] = cache_status
-                    cached["fallback_used"] = True
-                    cached["fetched_from"] = "stale_cache"
-                    cached["provider"] = "yfinance"
-                    cached["provider_status"] = provider_meta.get("status")
-                    cached["provider_error"] = provider_meta.get("error")
-                    cached["attempted_candidates"] = attempted_candidates
-                    return list(cached.get("items", []))[:limit]
+                    fallback_entry = copy.deepcopy(cached)
+                    fallback_entry["checked_at"] = now
+                    fallback_entry["status"] = cache_status
+                    fallback_entry["fallback_used"] = True
+                    fallback_entry["fetched_from"] = "stale_cache"
+                    fallback_entry["provider"] = "yfinance"
+                    fallback_entry["provider_status"] = provider_meta.get("status")
+                    fallback_entry["provider_error"] = provider_meta.get("error")
+                    fallback_entry["attempted_candidates"] = attempted_candidates
+                    _set_news_cache_entry_locked(normalized_ticker, content_locale, fallback_entry)
+                    stale_items = copy.deepcopy(list(fallback_entry.get("items", []))[:limit])
+            if stale_items is not None:
+                _persist_news_cache()
+                return stale_items
             cache_status = "empty"
 
-        intelligence_report = build_news_intelligence_report(normalized_ticker, items)
+        intelligence_report = build_news_intelligence_report(normalized_ticker, items, locale=content_locale)
 
         with _CACHE_LOCK:
-            _NEWS_CACHE[normalized_ticker] = {
+            cache_entry = {
                 "timestamp": now,
-                "items": list(items),
+                "checked_at": now,
+                "locale": content_locale,
+                "items": copy.deepcopy(items),
                 "raw_count": len(raw_items),
                 "status": cache_status,
                 "fallback_used": fallback_used,
@@ -1351,28 +2261,41 @@ def get_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
                 "provider_status": provider_meta.get("status"),
                 "provider_error": provider_meta.get("error"),
                 "attempted_candidates": attempted_candidates,
+                "filter_report": filter_report,
+                "discard_reasons": filter_report.get("discard_reasons", {}),
+                "discard_reason": filter_report.get("reason"),
                 "report": intelligence_report,
             }
+            _set_news_cache_entry_locked(normalized_ticker, content_locale, cache_entry)
 
-        return list(items)
+        _persist_news_cache()
+
+        return copy.deepcopy(items)
 
 
-def get_cached_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
+def get_cached_symbol_news(
+    ticker: str,
+    limit: int = 6,
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> list[dict[str, Any]]:
+    _load_news_cache_once()
     start = time.perf_counter()
     normalized_ticker = _normalize_ticker(ticker)
     if not normalized_ticker:
         record_cache_lookup("news", time.perf_counter() - start, len(_NEWS_CACHE))
         return []
 
+    content_locale = normalize_news_locale(locale)
     limit = _sanitize_limit(limit)
     with _CACHE_LOCK:
-        cached = _NEWS_CACHE.get(normalized_ticker)
-        if not isinstance(cached, dict):
-            record_cache_access("news", False, "memory")
-            record_cache_lookup("news", time.perf_counter() - start, len(_NEWS_CACHE))
-            return []
+        cached = _get_news_cache_entry_locked(normalized_ticker, content_locale)
+        if cached is None:
+            alternate = _latest_news_cache_entry_locked(normalized_ticker, exclude_locale=content_locale)
+            if alternate is not None:
+                cached = _localized_cache_entry(alternate, normalized_ticker, content_locale)
+                _set_news_cache_entry_locked(normalized_ticker, content_locale, cached)
 
-        items = cached.get("items")
+        items = cached.get("items") if isinstance(cached, dict) else None
         if not isinstance(items, list):
             record_cache_access("news", False, "memory")
             record_cache_lookup("news", time.perf_counter() - start, len(_NEWS_CACHE))
@@ -1380,17 +2303,33 @@ def get_cached_symbol_news(ticker: str, limit: int = 6) -> list[dict[str, Any]]:
 
         record_cache_access("news", bool(items), "memory")
         record_cache_lookup("news", time.perf_counter() - start, len(_NEWS_CACHE))
-        return list(items)[:limit]
+        return copy.deepcopy(list(items)[:limit])
 
 
-def get_news_cached_report(ticker: str, items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def get_news_cached_report(
+    ticker: str,
+    items: list[dict[str, Any]] | None = None,
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> dict[str, Any]:
     normalized_ticker = _normalize_ticker(ticker)
+    content_locale = normalize_news_locale(locale)
     with _CACHE_LOCK:
-        cached = _NEWS_CACHE.get(normalized_ticker)
+        cached = _get_news_cache_entry_locked(normalized_ticker, content_locale)
         report = cached.get("report") if isinstance(cached, dict) else None
         if isinstance(report, dict):
-            return dict(report)
-    return build_news_intelligence_report(normalized_ticker, items or [])
+            return copy.deepcopy(report)
+    _load_news_cache_once()
+    with _CACHE_LOCK:
+        cached = _get_news_cache_entry_locked(normalized_ticker, content_locale)
+        if cached is None:
+            alternate = _latest_news_cache_entry_locked(normalized_ticker, exclude_locale=content_locale)
+            if alternate is not None:
+                cached = _localized_cache_entry(alternate, normalized_ticker, content_locale)
+                _set_news_cache_entry_locked(normalized_ticker, content_locale, cached)
+        report = cached.get("report") if isinstance(cached, dict) else None
+        if isinstance(report, dict):
+            return copy.deepcopy(report)
+    return build_news_intelligence_report(normalized_ticker, items or [], locale=content_locale)
 
 
 def build_news_quality_report(ticker: str, items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1430,17 +2369,23 @@ def build_news_quality_report(ticker: str, items: list[dict[str, Any]]) -> dict[
     }
 
 
-def build_news_intelligence_report(ticker: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+def build_news_intelligence_report(
+    ticker: str,
+    items: list[dict[str, Any]],
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> dict[str, Any]:
+    content_locale = normalize_news_locale(locale)
     quality = build_news_quality_report(ticker, items)
     normalized_ticker = quality["ticker"]
 
     if not items:
         return {
             **quality,
+            "locale": content_locale,
             "status": "empty",
             "dominant_labels": [],
-            "dominant_sector": "Mercado",
-            "dominant_industry": "Geral",
+            "dominant_sector": "Market" if content_locale == "en-US" else "Mercado",
+            "dominant_industry": "General" if content_locale == "en-US" else "Geral",
             "dominant_impact": "neutral",
             "top_story_key": None,
             "top_story_title": "",
@@ -1495,6 +2440,7 @@ def build_news_intelligence_report(ticker: str, items: list[dict[str, Any]]) -> 
     return {
         **quality,
         "ticker": normalized_ticker,
+        "locale": content_locale,
         "status": "ok",
         "dominant_labels": dominant_labels,
         "dominant_sector": dominant_sector,
@@ -1529,32 +2475,52 @@ def _get_request_lock(ticker: str) -> threading.Lock:
         return lock
 
 
-def get_news_cache_info(ticker: str) -> dict[str, Any]:
+def get_news_cache_info(
+    ticker: str,
+    locale: str = DEFAULT_NEWS_LOCALE,
+) -> dict[str, Any]:
+    _load_news_cache_once()
     normalized_ticker = _normalize_ticker(ticker)
+    content_locale = normalize_news_locale(locale)
     now = _now_ts()
     provider_meta = _latest_news_provider_status(normalized_ticker)
     with _CACHE_LOCK:
-        cached = _NEWS_CACHE.get(normalized_ticker)
+        cached = _get_news_cache_entry_locked(normalized_ticker, content_locale)
+        if cached is None:
+            alternate = _latest_news_cache_entry_locked(normalized_ticker, exclude_locale=content_locale)
+            if alternate is not None:
+                cached = _localized_cache_entry(alternate, normalized_ticker, content_locale)
+                _set_news_cache_entry_locked(normalized_ticker, content_locale, cached)
+        available_locales = _available_news_cache_locales_locked(normalized_ticker)
         if not cached:
+            provider_raw_count = int(provider_meta.get("raw_count", 0) or 0)
             return {
                 "ticker": normalized_ticker,
+                "locale": content_locale,
+                "available_locales": available_locales,
                 "status": "cold",
                 "timestamp": None,
+                "checked_at": provider_meta.get("checked_at"),
                 "age_seconds": None,
                 "items": 0,
-                "raw_count": 0,
+                "raw_count": provider_raw_count,
                 "provider": "yfinance",
                 "provider_status": provider_meta.get("status"),
                 "provider_error": provider_meta.get("error"),
                 "attempted_candidates": [],
+                "discard_reason": "cache_missing_after_provider_raw" if provider_raw_count > 0 else None,
+                "discard_reasons": {"cache_missing_after_provider_raw": provider_raw_count} if provider_raw_count > 0 else {},
             }
 
         timestamp = float(cached.get("timestamp", 0.0) or 0.0)
         age_seconds = max(0, int(now - timestamp)) if timestamp else None
         return {
             "ticker": normalized_ticker,
+            "locale": content_locale,
+            "available_locales": available_locales,
             "status": str(cached.get("status") or ("stale" if age_seconds and age_seconds >= _CACHE_TTL_SECONDS else "warm")),
             "timestamp": timestamp or None,
+            "checked_at": cached.get("checked_at") or provider_meta.get("checked_at"),
             "age_seconds": age_seconds,
             "items": len(cached.get("items", [])),
             "raw_count": int(cached.get("raw_count", 0) or 0),
@@ -1564,6 +2530,9 @@ def get_news_cache_info(ticker: str) -> dict[str, Any]:
             "provider_status": cached.get("provider_status") or "not_checked",
             "provider_error": cached.get("provider_error"),
             "attempted_candidates": list(cached.get("attempted_candidates") or []),
+            "filter_report": cached.get("filter_report") if isinstance(cached.get("filter_report"), dict) else {},
+            "discard_reason": cached.get("discard_reason"),
+            "discard_reasons": cached.get("discard_reasons") if isinstance(cached.get("discard_reasons"), dict) else {},
         }
 
 

@@ -7,7 +7,7 @@ def detect_fake_breakout(df):
 
     try:
 
-        if df is None or len(df) < 20:
+        if df is None or len(df) < 21:
             return False
 
         if "High" not in df or "Close" not in df:

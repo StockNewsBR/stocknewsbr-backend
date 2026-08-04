@@ -10,7 +10,7 @@
 ## Product Model
 
 - Launch principal: app Google Play
-- Trial padrao: 90 dias
+- Trial padrao: 30 dias
 - Pos-trial: conta migra automaticamente para `free`
 - Premium mensal: `R$49`
 - Premium anual: `R$500`

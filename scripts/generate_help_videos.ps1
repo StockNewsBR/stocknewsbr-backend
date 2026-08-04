@@ -18,6 +18,10 @@ if (-not (Test-Path $ManifestPath)) {
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $items = Get-Content $ManifestPath -Raw | ConvertFrom-Json
 
+function Escape-DrawText([string]$Value) {
+  return $Value.Replace('\', '\\').Replace(':', '\:').Replace("'", "\'")
+}
+
 foreach ($item in $items) {
   $slug = $item.slug
   $title = [string]$item.title
@@ -27,12 +31,14 @@ foreach ($item in $items) {
   else {
     $subtitle = "Demonstracao StockNewsBR"
   }
+  $escapedTitle = Escape-DrawText $title
+  $escapedSubtitle = Escape-DrawText $subtitle
   $output = Join-Path $OutputDir "$slug.mp4"
 
   & $ffmpeg.Source `
     -y `
     -f lavfi -i "color=c=0x07111b:s=1280x720:d=12" `
-    -vf "drawtext=fontfile='$FontPath':text='$title':fontcolor=white:fontsize=52:x=(w-text_w)/2:y=(h-text_h)/2-40,drawtext=fontfile='$FontPath':text='$subtitle':fontcolor=0x95a9bd:fontsize=28:x=(w-text_w)/2:y=(h-text_h)/2+36" `
+    -vf "drawtext=fontfile='$FontPath':text='$escapedTitle':fontcolor=white:fontsize=52:x=(w-text_w)/2:y=(h-text_h)/2-40,drawtext=fontfile='$FontPath':text='$escapedSubtitle':fontcolor=0x95a9bd:fontsize=28:x=(w-text_w)/2:y=(h-text_h)/2+36" `
     -c:v libx264 `
     -pix_fmt yuv420p `
     $output

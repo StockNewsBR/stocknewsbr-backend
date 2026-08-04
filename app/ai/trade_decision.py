@@ -4,6 +4,45 @@ from typing import Any, Dict, Iterable, List
 
 from app.ai.ai_common import clamp, safe_float
 
+OPERATIONAL_ACTIONS = {"BUY", "SELL", "SHORT", "COVER"}
+ENTRY_OR_COVER_ACTIONS = {"BUY", "SHORT", "COVER"}
+ENTRY_ACTIONS = {"BUY", "SHORT"}
+NO_DECISION_ACTION = "NO_DECISION"
+BUY_READY_STATE = "BUY_READY"
+SELL_READY_STATE = "SELL_READY"
+SHORT_READY_STATE = "SHORT_READY"
+WATCH_STATE = "WATCH"
+WAIT_STATE = "WAIT"
+NO_TRADE_STATE = "NO_TRADE"
+DO_NOT_TRADE_STATE = "DO_NOT_TRADE"
+READY_DECISION_STATES = {BUY_READY_STATE, SELL_READY_STATE, SHORT_READY_STATE}
+NO_TRADE_MESSAGE = "⚠️ NÃO OPERAR AGORA"
+_READY_STATE_BY_ACTION = {
+    "BUY": BUY_READY_STATE,
+    "SELL": SELL_READY_STATE,
+    "COVER": SELL_READY_STATE,
+    "SHORT": SHORT_READY_STATE,
+}
+_BLOCKED_DATA_QUALITIES = {
+    "score_only",
+    "score only",
+    "missing",
+    "empty",
+    "stale",
+    "no_price",
+    "no-price",
+    "no price",
+    "provider_failed",
+    "provider-failed",
+    "provider failed",
+    "failed",
+    "error",
+    "timeout",
+    "unavailable",
+    "invalid",
+}
+_BLOCKED_STATUSES = _BLOCKED_DATA_QUALITIES
+
 
 _BULLISH_COMPONENTS = (
     ("institutional_flow_score", 0.28),
@@ -58,6 +97,438 @@ _STATE_BEARISH_BOOSTS = {
 
 def _state(value: Any) -> str:
     return str(value or "").strip().lower()
+
+
+def _provided_action_text(value: Any) -> str:
+    if value in (None, "", False, 0):
+        return ""
+    return str(value).upper().strip()
+
+
+def _is_truthy(value: Any) -> bool:
+    if value is True:
+        return True
+    if value is False or value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on", "blocked", "invalid"}
+
+
+def _reason_suffix(value: str) -> str:
+    return str(value or "").replace(" ", "_").replace("-", "_")
+
+
+def _nested_dict(row: Dict[str, Any], *keys: str) -> Dict[str, Any]:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def _auditor_guard(row: Dict[str, Any]) -> List[str]:
+    reasons: List[str] = []
+    auditor = _nested_dict(row, "auditor", "institutional_auditor", "auditor_institucional", "audit")
+
+    for source in (row, auditor):
+        for key in (
+            "blocked_by_auditor",
+            "auditor_blocked",
+            "institutional_auditor_blocked",
+            "auditor_institucional_bloqueou",
+        ):
+            if _is_truthy(source.get(key)):
+                reasons.append("auditor_blocked")
+
+        status = _state(source.get("auditor_status") or source.get("status") or source.get("decision_status"))
+        if status in {"blocked", "rejected", "invalid", "critical", "high_risk", "do_not_trade"}:
+            reasons.append("auditor_blocked")
+
+        audit_status = _state(source.get("audit_status"))
+        if audit_status == "blocked":
+            reasons.append("auditor_blocked")
+
+        if source.get("auditor_approved") is False:
+            reasons.append("auditor_blocked")
+
+        conflict_level = _state(source.get("conflict_level") or source.get("institutional_conflict_level"))
+        if conflict_level in {"high", "critical", "severe"}:
+            reasons.append("institutional_conflict")
+
+    if _is_truthy(row.get("institutional_conflict")):
+        reasons.append("institutional_conflict")
+
+    return list(dict.fromkeys(reasons))
+
+
+def _snapshot_guard(row: Dict[str, Any]) -> List[str]:
+    reasons: List[str] = []
+
+    if row.get("snapshot_valid") is False or _is_truthy(row.get("snapshot_invalid")):
+        reasons.append("snapshot_invalid")
+
+    snapshot_status = _state(row.get("snapshot_status") or row.get("snapshot_data_status"))
+    if snapshot_status in _BLOCKED_STATUSES or snapshot_status in {"invalid", "stale", "failed"}:
+        reasons.append("snapshot_invalid")
+
+    source = _state(row.get("source") or row.get("snapshot_source"))
+    if source in {
+        "stale_fallback",
+        "last_good_stale",
+        "exception_fallback",
+        "provider_failed",
+        "provider_error",
+        "cache_miss",
+    }:
+        reasons.append("snapshot_invalid")
+
+    return list(dict.fromkeys(reasons))
+
+
+def _radar_guard(row: Dict[str, Any]) -> List[str]:
+    reasons: List[str] = []
+    radar = _nested_dict(row, "radar", "institutional_radar")
+
+    for source in (row, radar):
+        for key in ("blocked_by_radar", "radar_blocked", "radar_invalid", "radar_invalido"):
+            if _is_truthy(source.get(key)):
+                reasons.append("radar_invalid")
+
+        status = _state(source.get("radar_state") or source.get("radar_status") or source.get("status"))
+        if status in {"invalid", "invalidated", "blocked", "stale", "error", "failed", "provider_failed"}:
+            reasons.append("radar_invalid")
+
+    return list(dict.fromkeys(reasons))
+
+
+def _liquidity_guard(row: Dict[str, Any]) -> List[str]:
+    liquidity_state = _state(
+        row.get("liquidity_map_state")
+        or row.get("liquidity_state")
+        or row.get("liquidity_status")
+    )
+    if liquidity_state in {"thin_liquidity", "low_liquidity", "illiquid", "invalid", "blocked"}:
+        return ["low_liquidity"]
+    if row.get("liquidity_valid") is False or _is_truthy(row.get("low_liquidity")):
+        return ["low_liquidity"]
+    return []
+
+
+def _canonical_no_trade_reason(reason: Any) -> str:
+    reason_text = _reason_suffix(str(reason or "")).lower()
+
+    if (
+        "low_liquidity" in reason_text
+        or "thin_liquidity" in reason_text
+        or "rel_volume_missing" in reason_text
+        or "breakout_without_volume" in reason_text
+        or "without_volume" in reason_text
+    ):
+        return "baixa liquidez"
+    if "price_missing" in reason_text or "no_price" in reason_text:
+        return "preço ausente"
+    if "volume_missing" in reason_text:
+        return "volume ausente"
+    if "auditor" in reason_text:
+        return "auditor bloqueou"
+    if "radar" in reason_text:
+        return "radar inválido"
+    if "snapshot" in reason_text or "stale" in reason_text:
+        return "snapshot inválido"
+    if (
+        "data_quality" in reason_text
+        or "score_only" in reason_text
+        or "provider" in reason_text
+        or "quote_status" in reason_text
+        or "market_data_status" in reason_text
+    ):
+        return "data_quality insuficiente"
+    if (
+        "conflict" in reason_text
+        or "against_flow" in reason_text
+        or "against_smart_money" in reason_text
+        or "buy_in_downtrend" in reason_text
+        or "short_in_bulltrend" in reason_text
+        or "score_buy_vs_final_short" in reason_text
+        or "score_short_vs_final_buy" in reason_text
+        or "strong_score_without_directional_evidence" in reason_text
+    ):
+        return "conflito institucional"
+    if "range" in reason_text or "chop" in reason_text or "lateral" in reason_text:
+        return "mercado lateral"
+    if "trend_confirmation" in reason_text or "vwap_confirmation" in reason_text or "regime_or_trend_missing" in reason_text:
+        return "contexto técnico insuficiente"
+    return "contexto técnico insuficiente"
+
+
+def _no_trade_reasons(blocked: List[str], warnings: List[str]) -> List[str]:
+    raw_reasons = list(blocked or []) + list(warnings or [])
+    if not raw_reasons:
+        return []
+    return list(dict.fromkeys(_canonical_no_trade_reason(reason) for reason in raw_reasons))
+
+
+def _is_do_not_trade_reason(reason: Any) -> bool:
+    canonical = _canonical_no_trade_reason(reason)
+    return canonical in {
+        "preço ausente",
+        "volume ausente",
+        "baixa liquidez",
+        "data_quality insuficiente",
+        "snapshot inválido",
+        "auditor bloqueou",
+        "radar inválido",
+        "conflito institucional",
+    }
+
+
+def _decision_state_for(action: str, decision_ready: bool, blocked: List[str], warnings: List[str]) -> str:
+    action = str(action or "").upper()
+    if decision_ready and action in _READY_STATE_BY_ACTION:
+        return _READY_STATE_BY_ACTION[action]
+    if blocked:
+        return DO_NOT_TRADE_STATE if any(_is_do_not_trade_reason(reason) for reason in blocked) else NO_TRADE_STATE
+    if warnings:
+        return WATCH_STATE
+    if action in {"WATCH", "WATCH_BUY", "WATCH_SHORT"}:
+        return WATCH_STATE
+    return WAIT_STATE
+
+
+def _decision_metadata(action: str, decision_ready: bool, blocked: List[str], warnings: List[str]) -> Dict[str, Any]:
+    state = _decision_state_for(action, decision_ready, blocked, warnings)
+    reasons = [] if decision_ready else _no_trade_reasons(blocked, warnings)
+    return {
+        "decision_state": state,
+        "operational_message": "" if decision_ready else NO_TRADE_MESSAGE,
+        "no_trade_reasons": reasons,
+        "can_trade": bool(decision_ready and state in READY_DECISION_STATES),
+    }
+
+
+def _has_positive_value(row: Dict[str, Any], *keys: str) -> bool:
+    for key in keys:
+        value = safe_float(row.get(key), 0.0)
+        if value > 0:
+            return True
+    return False
+
+
+def _market_data_guard(row: Dict[str, Any]) -> tuple[bool, List[str], List[str]]:
+    reasons: List[str] = []
+    warnings: List[str] = []
+    data_quality = _state(row.get("data_quality"))
+
+    if data_quality in {"score_only", "score only"}:
+        reasons.append("score_only_sem_preco_real")
+    elif data_quality in _BLOCKED_DATA_QUALITIES:
+        reasons.append(f"data_quality_{_reason_suffix(data_quality)}")
+
+    if row.get("stale") is True or row.get("is_stale") is True:
+        reasons.append("market_data_stale")
+
+    if row.get("provider_failed") is True or row.get("provider_error") is True:
+        reasons.append("provider_failed")
+
+    for status_key in ("quote_status", "status", "provider_status", "market_data_status"):
+        status = _state(row.get(status_key))
+        if status in _BLOCKED_STATUSES:
+            reasons.append(f"{status_key}_{_reason_suffix(status)}")
+
+    if not _has_positive_value(row, "price", "close", "last_price"):
+        reasons.append("price_missing_or_zero")
+
+    if not _has_positive_value(row, "volume", "last_volume"):
+        reasons.append("volume_missing_or_zero")
+
+    if row.get("volume_known") is False and "volume_missing_or_zero" not in reasons:
+        warnings.append("volume_provider_incompleto")
+
+    reasons = list(dict.fromkeys(reasons))
+    warnings = list(dict.fromkeys(warnings))
+    return not reasons, reasons, warnings
+
+
+def _first_positive(row: Dict[str, Any], *keys: str) -> float:
+    for key in keys:
+        value = safe_float(row.get(key), 0.0)
+        if value > 0:
+            return value
+    return 0.0
+
+
+def _above_vwap_value(row: Dict[str, Any]) -> bool | None:
+    if isinstance(row.get("above_vwap"), bool):
+        return bool(row.get("above_vwap"))
+
+    price = _first_positive(row, "price", "close", "last_price")
+    vwap = safe_float(row.get("vwap"), 0.0)
+    if price > 0 and vwap > 0:
+        return price >= vwap
+    return None
+
+
+def _has_valid_regime_or_trend(row: Dict[str, Any]) -> bool:
+    regime_state = _state(row.get("market_regime_state"))
+    chart_regime = _chart_regime(row)
+    trend_strength = safe_float(row.get("trend_strength"), 0.0)
+    trend_text = _state(row.get("trend") or row.get("trend_bias") or row.get("bias"))
+
+    valid_regimes = {"bull_trend", "bear_trend", "range", "high_volatility"}
+    valid_chart_regimes = {
+        "trend_up",
+        "breakout_up",
+        "reversal_up",
+        "trend_down",
+        "breakout_down",
+        "reversal_down",
+        "range",
+        "chop",
+        "squeeze",
+    }
+    valid_trend_words = {
+        "alta",
+        "alta forte",
+        "uptrend",
+        "bullish",
+        "baixa",
+        "baixa forte",
+        "downtrend",
+        "bearish",
+        "lateral",
+        "range",
+    }
+
+    return (
+        regime_state in valid_regimes
+        or chart_regime in valid_chart_regimes
+        or trend_strength > 0
+        or trend_text in valid_trend_words
+    )
+
+
+def _entry_context_guard(row: Dict[str, Any], action: str) -> List[str]:
+    action = str(action or "").upper()
+    if action not in OPERATIONAL_ACTIONS:
+        return []
+
+    reasons: List[str] = []
+    rel_volume = safe_float(row.get("rel_volume"), 0.0)
+    if rel_volume <= 0:
+        reasons.append("rel_volume_missing_or_zero")
+
+    if not _has_valid_regime_or_trend(row):
+        reasons.append("regime_or_trend_missing")
+
+    if action not in ENTRY_ACTIONS:
+        return list(dict.fromkeys(reasons))
+
+    regime_state = _state(row.get("market_regime_state"))
+    chart_regime = _chart_regime(row)
+    trend_strength = safe_float(row.get("trend_strength"), 0.0)
+    above_vwap = _above_vwap_value(row)
+
+    if action == "BUY":
+        trend_confirmed = (
+            regime_state == "bull_trend"
+            or chart_regime in {"trend_up", "breakout_up", "reversal_up"}
+            or (above_vwap is True and trend_strength >= 35)
+        )
+        if not trend_confirmed:
+            reasons.append("buy_without_trend_confirmation")
+        if above_vwap is not True and chart_regime not in {"trend_up", "breakout_up", "reversal_up"}:
+            reasons.append("buy_without_vwap_confirmation")
+
+    if action == "SHORT":
+        trend_confirmed = (
+            regime_state == "bear_trend"
+            or chart_regime in {"trend_down", "breakout_down", "reversal_down"}
+            or (above_vwap is False and trend_strength >= 35)
+        )
+        if not trend_confirmed:
+            reasons.append("short_without_trend_confirmation")
+        if above_vwap is not False and chart_regime not in {"trend_down", "breakout_down", "reversal_down"}:
+            reasons.append("short_without_vwap_confirmation")
+
+    return list(dict.fromkeys(reasons))
+
+
+def _directional_text(row: Dict[str, Any]) -> str:
+    fields = (
+        "signal",
+        "trade_action",
+        "trade_direction",
+        "trend",
+        "state",
+        "ai_comment",
+        "market_regime_state",
+        "chart_regime_state",
+        "institutional_flow_state",
+        "smart_money_state",
+    )
+    return " ".join(str(row.get(field) or "").lower() for field in fields)
+
+
+def _explicit_side_from_row(row: Dict[str, Any]) -> str:
+    text = _directional_text(row)
+    bullish_words = ("buy", "long", "compra", "comprador", "alta", "bull", "accumulation", "institutional_buying")
+    bearish_words = ("short", "sell short", "venda descoberta", "vendedor", "baixa", "bear", "distribution", "queda")
+    bullish = any(word in text for word in bullish_words)
+    bearish = any(word in text for word in bearish_words)
+    if bullish and not bearish:
+        return "bullish"
+    if bearish and not bullish:
+        return "bearish"
+    return "mixed"
+
+
+def _detect_decision_conflicts(
+    row: Dict[str, Any],
+    action: str,
+    bullish: float | None = None,
+    bearish: float | None = None,
+) -> List[str]:
+    conflicts: List[str] = []
+    action = str(action or "").upper()
+    bullish = safe_float(bullish, safe_float(row.get("bullish_pressure"), 0.0))
+    bearish = safe_float(bearish, safe_float(row.get("bearish_pressure"), 0.0))
+    score = safe_float(row.get("source_score", row.get("score", row.get("master_score_raw", row.get("master_score")))), 0.0)
+    side = _explicit_side_from_row(row)
+
+    buy_score = max(
+        safe_float(row.get("score_buy"), 0.0),
+        safe_float(row.get("buy_score"), 0.0),
+        safe_float(row.get("long_score"), 0.0),
+        bullish,
+    )
+    short_score = max(
+        safe_float(row.get("score_short"), 0.0),
+        safe_float(row.get("short_score"), 0.0),
+        safe_float(row.get("sell_score"), 0.0),
+        bearish,
+    )
+    raw_signal = _state(row.get("source_signal") or row.get("signal"))
+    raw_direction = _state(row.get("trade_direction"))
+
+    if action == "SHORT" and (
+        raw_signal in {"buy", "watch_buy", "long"}
+        or raw_direction == "long"
+        or side == "bullish"
+        or buy_score >= short_score + 18.0
+        or (score >= 70.0 and bullish >= bearish + 10.0)
+    ):
+        conflicts.append("score_buy_vs_final_short")
+    if action == "BUY" and (
+        raw_signal in {"short", "watch_short", "sell_short"}
+        or raw_direction == "short"
+        or side == "bearish"
+        or short_score >= buy_score + 18.0
+        or (score >= 70.0 and bearish >= bullish + 10.0)
+    ):
+        conflicts.append("score_short_vs_final_buy")
+    if action in ENTRY_OR_COVER_ACTIONS and score >= 70.0 and bullish <= 0.0 and bearish <= 0.0 and side == "mixed":
+        conflicts.append("strong_score_without_directional_evidence")
+
+    return conflicts
 
 
 def _score(row: Dict[str, Any], key: str, default: float = 0.0) -> float:
@@ -176,9 +647,19 @@ def _risk_level(blocked: List[str], warnings: List[str], row: Dict[str, Any]) ->
     return "baixo"
 
 
-def _action_after_block(action: str, bullish: float, bearish: float, row: Dict[str, Any], blocked: List[str]) -> str:
+def _action_after_block(
+    action: str,
+    bullish: float,
+    bearish: float,
+    row: Dict[str, Any],
+    blocked: List[str],
+    hard_block: bool = False,
+) -> str:
     if not blocked:
         return action
+
+    if hard_block:
+        return NO_DECISION_ACTION
 
     if action == "BUY":
         return "SELL"
@@ -242,6 +723,11 @@ def _build_trade_instructions(action: str, row: Dict[str, Any], blocked: List[st
             "ou risco de squeeze contra o short."
         )
         invalidation = "Manter short apenas se perder suporte novamente com volume vendedor e sem defesa institucional."
+    elif action == NO_DECISION_ACTION:
+        trigger = (
+            f"Sem decisão operacional em {ticker}: aguardar preço, volume real, qualidade de dado e coerência entre score e direção."
+        )
+        invalidation = "Liberar operação somente quando dados reais e direção institucional estiverem alinhados."
     else:
         trigger = "Aguardar alinhamento entre regime, liquidez, fluxo, tendencia e volatilidade."
         invalidation = "Sem entrada enquanto os filtros operacionais continuarem conflitantes."
@@ -277,9 +763,29 @@ def evaluate_trade_coherence(
     chart_regime = _chart_regime(row)
     liquidity_event = _liquidity_event(row)
     trend_strength = safe_float(row.get("trend_strength"), 0.0)
+    has_complete_market_data, data_blockers, data_warnings = _market_data_guard(row)
+    decision_conflicts = _detect_decision_conflicts(row, action, bullish=bullish, bearish=bearish)
+    entry_context_blockers = _entry_context_guard(row, action)
+    auditor_blockers = _auditor_guard(row)
+    snapshot_blockers = _snapshot_guard(row)
+    radar_blockers = _radar_guard(row)
+    liquidity_blockers = _liquidity_guard(row)
 
     if row.get("data_quality") == "score_only":
         warnings.append("score_only_sem_preco_real")
+    warnings.extend(data_warnings)
+
+    if action in OPERATIONAL_ACTIONS and not has_complete_market_data:
+        blocked.extend(data_blockers)
+    if action in OPERATIONAL_ACTIONS and decision_conflicts:
+        blocked.extend(decision_conflicts)
+    if action in OPERATIONAL_ACTIONS and entry_context_blockers:
+        blocked.extend(entry_context_blockers)
+    if action in OPERATIONAL_ACTIONS:
+        blocked.extend(auditor_blockers)
+        blocked.extend(snapshot_blockers)
+        blocked.extend(radar_blockers)
+        blocked.extend(liquidity_blockers)
 
     if action == "BUY":
         if chart_regime in {"chop", "range"} and not _reversal_exception(row, "long"):
@@ -298,7 +804,7 @@ def evaluate_trade_coherence(
     elif action == "SELL":
         if _is_bullish_squeeze(row):
             blocked.append("sell_into_bullish_squeeze")
-        if regime_state == "bull_trend" and _score(row, "smart_money_score") >= 60 and _score(row, "master_score", _score(row, "score")) >= 60:
+        if regime_state == "bull_trend" and _score(row, "smart_money_score") >= 60 and _score(row, "master_score_raw", _score(row, "master_score", _score(row, "score"))) >= 60:
             blocked.append("sell_against_bull_regime")
         if chart_regime in {"trend_up", "breakout_up"} and bullish > bearish + 8:
             warnings.append("exit_long_against_uptrend_continuation")
@@ -324,12 +830,31 @@ def evaluate_trade_coherence(
             warnings.append("exit_short_against_downtrend_continuation")
 
     if regime_state == "range" and action in {"BUY", "SHORT"} and trend_strength < 35:
-        warnings.append("trend_not_confirmed")
+        blocked.append("range_without_confirmation")
     if regime_state == "high_volatility" and action in {"BUY", "SHORT"}:
         warnings.append("high_volatility_entry")
 
-    final_action = _action_after_block(action, bullish, bearish, row, blocked)
+    blocked = list(dict.fromkeys(blocked))
+    warnings = list(dict.fromkeys(warnings))
+    hard_block_reasons = list(
+        dict.fromkeys(
+            data_blockers
+            + decision_conflicts
+            + entry_context_blockers
+            + auditor_blockers
+            + snapshot_blockers
+            + radar_blockers
+            + liquidity_blockers
+        )
+    )
+    hard_block = any(
+        reason in set(hard_block_reasons)
+        for reason in blocked
+    )
+    final_action = _action_after_block(action, bullish, bearish, row, blocked, hard_block=hard_block)
     instructions = _build_trade_instructions(final_action, row, blocked, warnings)
+    decision_ready = final_action in OPERATIONAL_ACTIONS and not hard_block and not blocked and not warnings
+    metadata = _decision_metadata(final_action, decision_ready, blocked, warnings)
 
     return {
         "proposed_action": action,
@@ -337,6 +862,10 @@ def evaluate_trade_coherence(
         "coherence_status": "blocked" if blocked else "watch" if warnings else "ok",
         "blocked_reasons": blocked,
         "warnings": warnings,
+        "decision_ready": decision_ready,
+        **metadata,
+        "conflict_detected": bool(decision_conflicts),
+        "data_quality_blocked": bool(data_blockers),
         "rules": {
             "regime": regime_state or "unknown",
             "chart_regime": chart_regime or "unknown",
@@ -351,7 +880,7 @@ def evaluate_trade_coherence(
     }
 
 
-def _weighted_component_score(row: Dict[str, Any]) -> float:
+def _weighted_component_score(row: Dict[str, Any]) -> tuple[float, float]:
     bullish = 0.0
     bearish = 0.0
 
@@ -454,6 +983,80 @@ def _decision_reason(action: str, bullish: float, bearish: float, row: Dict[str,
     )
 
 
+def _neutralize_operational_decision(
+    resolved: Dict[str, Any],
+    row: Dict[str, Any],
+    action: str,
+    bullish: float | None = None,
+    bearish: float | None = None,
+) -> Dict[str, Any]:
+    has_complete_market_data, data_blockers, data_warnings = _market_data_guard(row)
+    decision_conflicts = _detect_decision_conflicts(row, action, bullish=bullish, bearish=bearish)
+    entry_context_blockers = _entry_context_guard(row, action)
+    auditor_blockers = _auditor_guard(row)
+    snapshot_blockers = _snapshot_guard(row)
+    radar_blockers = _radar_guard(row)
+    liquidity_blockers = _liquidity_guard(row)
+    blocked_reasons = list(
+        dict.fromkeys(
+            list(resolved.get("blocked_reasons") or [])
+            + data_blockers
+            + decision_conflicts
+            + entry_context_blockers
+            + auditor_blockers
+            + snapshot_blockers
+            + radar_blockers
+            + liquidity_blockers
+        )
+    )
+    warnings = list(dict.fromkeys(list(resolved.get("warnings") or []) + data_warnings))
+    hard_block = bool(
+        data_blockers
+        or decision_conflicts
+        or entry_context_blockers
+        or auditor_blockers
+        or snapshot_blockers
+        or radar_blockers
+        or liquidity_blockers
+    )
+
+    if action in OPERATIONAL_ACTIONS and hard_block:
+        resolved["signal"] = NO_DECISION_ACTION
+        resolved["trade_action"] = NO_DECISION_ACTION
+        resolved["trade_direction"] = "flat"
+        resolved["trade_confidence"] = 0.0
+        resolved["coherence_status"] = "blocked"
+        resolved["trigger"] = (
+            "Sem decisão operacional: aguardando preço, volume real, qualidade de dado e coerência entre score e direção."
+        )
+        resolved["invalidation"] = "Operar somente quando o dado real e a direção institucional estiverem alinhados."
+        resolved["risk"] = "Risco alto: " + "; ".join(blocked_reasons[:6]) + "."
+        resolved["risk_level"] = "alto"
+        resolved["reason"] = resolved.get("reason") or "Decisão bloqueada por trava de segurança."
+
+    resolved["blocked_reasons"] = blocked_reasons
+    resolved["warnings"] = warnings
+    resolved["decision_ready"] = bool(
+        resolved.get("trade_action") in OPERATIONAL_ACTIONS
+        and has_complete_market_data
+        and not hard_block
+        and not blocked_reasons
+        and not warnings
+    )
+    resolved["conflict_detected"] = bool(decision_conflicts or resolved.get("conflict_detected"))
+    resolved["data_quality_blocked"] = bool(data_blockers)
+    resolved["data_quality"] = row.get("data_quality") or ("priced" if has_complete_market_data else "score_only")
+    resolved.update(
+        _decision_metadata(
+            str(resolved.get("trade_action") or action or "").upper(),
+            bool(resolved.get("decision_ready")),
+            blocked_reasons,
+            warnings,
+        )
+    )
+    return resolved
+
+
 def resolve_trade_action(row: Dict[str, Any]) -> Dict[str, Any]:
     bullish, bearish = _weighted_component_score(row)
     bullish, bearish, conflicts = _apply_state_boosts(row, bullish, bearish)
@@ -519,7 +1122,7 @@ def resolve_trade_action(row: Dict[str, Any]) -> Dict[str, Any]:
     coherence = evaluate_trade_coherence(row, action, bullish=bullish, bearish=bearish)
     action = coherence["final_action"]
 
-    side_confidence = long_confidence if action in {"BUY", "SELL"} else short_confidence
+    side_confidence = 0.0 if action == NO_DECISION_ACTION else long_confidence if action in {"BUY", "SELL"} else short_confidence
     confidence = clamp(side_confidence + (safe_float(row.get("score"), 0.0) - 50.0) * 0.08, 5.0, 100.0)
     confidence = clamp(
         confidence
@@ -534,11 +1137,12 @@ def resolve_trade_action(row: Dict[str, Any]) -> Dict[str, Any]:
         "SELL": "exit_long",
         "SHORT": "short",
         "COVER": "exit_short",
-    }[action]
+        NO_DECISION_ACTION: "flat",
+    }.get(action, "flat")
 
     reason = _decision_reason(action, bullish, bearish, row, conflicts)
 
-    return {
+    payload = {
         "signal": action,
         "trade_action": action,
         "trade_direction": trade_direction,
@@ -552,6 +1156,13 @@ def resolve_trade_action(row: Dict[str, Any]) -> Dict[str, Any]:
         "chart_regime_state": chart_regime or "unknown",
         "liquidity_event": liquidity_event or "none",
         "conflicts": conflicts[:6],
+        "conflict_detected": bool(coherence.get("conflict_detected")),
+        "decision_ready": bool(coherence.get("decision_ready")),
+        "decision_state": coherence.get("decision_state") or WAIT_STATE,
+        "operational_message": coherence.get("operational_message") or "",
+        "no_trade_reasons": coherence.get("no_trade_reasons") or [],
+        "can_trade": bool(coherence.get("can_trade")),
+        "data_quality": row.get("data_quality") or ("priced" if not coherence.get("data_quality_blocked") else "score_only"),
         "coherence_status": coherence["coherence_status"],
         "blocked_reasons": coherence["blocked_reasons"],
         "warnings": coherence["warnings"],
@@ -562,6 +1173,7 @@ def resolve_trade_action(row: Dict[str, Any]) -> Dict[str, Any]:
         "risk_level": coherence["risk_level"],
         "reason": reason,
     }
+    return _neutralize_operational_decision(payload, row, action, bullish=bullish, bearish=bearish)
 
 
 def summarize_trade_decision(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
@@ -578,8 +1190,14 @@ def summarize_trade_decision(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
             "bearish_pressure": 0.0,
             "market_regime_state": "unknown",
             "conflicts": [],
+            "conflict_detected": False,
             "reason": "Sem master score suficiente para consolidar uma decisao.",
             "decision_ready": False,
+            "decision_state": WAIT_STATE,
+            "operational_message": NO_TRADE_MESSAGE,
+            "no_trade_reasons": ["snapshot inválido"],
+            "can_trade": False,
+            "data_quality": "score_only",
         }
 
     top = max(
@@ -589,16 +1207,27 @@ def summarize_trade_decision(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
             safe_float(row.get("score"), 0.0),
         ),
     )
-    if top.get("trade_action") or top.get("signal") in {"BUY", "SELL", "SHORT", "COVER"}:
+    trade_action = _provided_action_text(top.get("trade_action"))
+    signal = _provided_action_text(top.get("signal"))
+    source_signal = _provided_action_text(top.get("source_signal")) or signal
+    recognized_actions = OPERATIONAL_ACTIONS | {NO_DECISION_ACTION}
+    has_precomputed_action = trade_action in recognized_actions or signal in recognized_actions
+    if has_precomputed_action:
         resolved = dict(top)
-        action = str(resolved.get("trade_action") or resolved.get("signal") or "SELL").upper()
+        if trade_action == NO_DECISION_ACTION:
+            action = trade_action
+        elif trade_action in OPERATIONAL_ACTIONS:
+            action = trade_action
+        else:
+            action = signal
         resolved["signal"] = action
         resolved["trade_action"] = action
-        resolved["trade_direction"] = resolved.get("trade_direction") or {
+        resolved["trade_direction"] = {
             "BUY": "long",
             "SELL": "exit_long",
             "SHORT": "short",
             "COVER": "exit_short",
+            NO_DECISION_ACTION: "flat",
         }.get(action, "exit_long")
         resolved["trade_confidence"] = round(safe_float(resolved.get("trade_confidence"), safe_float(resolved.get("confidence"), 0.0)), 1)
         resolved["trade_bias"] = round(safe_float(resolved.get("trade_bias"), 0.0), 1)
@@ -615,10 +1244,31 @@ def summarize_trade_decision(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         resolved.setdefault("invalidation", "Sair se o contexto de regime, fluxo ou liquidez virar contra.")
         resolved.setdefault("risk", "Risco nao detalhado no payload original.")
         resolved.setdefault("risk_level", "medio")
+        coherence_row = dict(top)
+        coherence_row["source_signal"] = source_signal
+        coherence_row["signal"] = action
+        coherence_row["trade_action"] = action
+        coherence_row["trade_direction"] = resolved["trade_direction"]
+        resolved = _neutralize_operational_decision(
+            resolved,
+            coherence_row,
+            action,
+            bullish=safe_float(resolved.get("bullish_pressure"), None),
+            bearish=safe_float(resolved.get("bearish_pressure"), None),
+        )
     else:
         resolved = resolve_trade_action(top)
 
     resolved["ticker"] = top.get("ticker") or top.get("symbol") or "UNKNOWN"
     resolved["score"] = round(safe_float(top.get("score"), 0.0), 1)
-    resolved["decision_ready"] = resolved.get("trade_action") in {"BUY", "SELL", "SHORT", "COVER"}
+    if resolved.get("trade_action") not in OPERATIONAL_ACTIONS:
+        resolved["decision_ready"] = False
+        resolved.update(
+            _decision_metadata(
+                str(resolved.get("trade_action") or NO_DECISION_ACTION).upper(),
+                False,
+                list(resolved.get("blocked_reasons") or []),
+                list(resolved.get("warnings") or []),
+            )
+        )
     return resolved

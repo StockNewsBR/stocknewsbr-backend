@@ -5,37 +5,37 @@ from app.services.video_library_service import get_help_video_entry, get_help_vi
 
 
 HELP_GUIDES = {
-    "heat-map": {
-        "slug": "heat-map",
-        "title": "IA Heat Map",
-        "tagline": "Descubra onde esta a forca do mercado em segundos.",
+    "flow": {
+        "slug": "flow",
+        "title": "Fluxo IA",
+        "tagline": "Entenda a direcao do fluxo institucional sem duplicar leitura.",
         "what_it_does": [
-            "Mostra quais ativos e setores estao puxando o mercado.",
-            "Ajuda a identificar dominancia compradora ou vendedora.",
-            "Destaca concentracao de fluxo e momentum do dia.",
+            "Mostra pressao institucional compradora ou vendedora.",
+            "Separa fluxo real de ruido visual.",
+            "Ajuda a responder se o mercado esta favorecendo um lado.",
         ],
         "how_to_use": [
-            "Veja onde a intensidade esta crescendo antes de abrir uma posicao.",
-            "Cruze o mapa com o radar e com o grafico para confirmar contexto.",
-            "Evite operar ativos sem suporte de fluxo quando o mapa estiver fraco.",
+            "Use como contexto de fluxo, nao como ordem isolada.",
+            "Cruze com Risco IA antes de agir.",
+            "Evite tratar interesse institucional como trade pronto.",
         ],
-        "example": "PETR4 e VALE3 em destaque no mapa junto com score forte reforcam uma leitura de lideranca do indice.",
+        "example": "PETR4 com Fluxo IA forte vira candidato, mas so opera se Risco IA liberar.",
     },
-    "radar": {
-        "slug": "radar",
-        "title": "IA Radar",
-        "tagline": "Scanner de aceleracao e oportunidade em tempo real.",
+    "liquidity": {
+        "slug": "liquidity",
+        "title": "Liquidez IA",
+        "tagline": "Zonas, sweeps e traps em uma leitura unica.",
         "what_it_does": [
-            "Rankeia ativos com aumento de score e momentum.",
-            "Combina sinais, fluxo e eventos para destacar oportunidades.",
-            "Serve como porta de entrada para o trader decidir o que estudar primeiro.",
+            "Consolida mapa e sweep de liquidez.",
+            "Mostra armadilhas e invalidacao.",
+            "Evita ver liquidez como tres confirmacoes diferentes.",
         ],
         "how_to_use": [
-            "Olhe os primeiros nomes do radar logo no pre-mercado.",
-            "Abra o grafico e a sala do ticker para validar contexto.",
-            "Use o score junto com breakout e smart money para filtrar entrada.",
+            "Use zonas como referencia, nao como entrada automatica.",
+            "Aguarde reacao e volume.",
+            "Se a liquidez for fina, deixe Risco IA bloquear.",
         ],
-        "example": "Quando VALE3 sobe no radar com breakout e score acima de 80, o ativo vira candidato prioritario da mesa.",
+        "example": "VALE3 varre liquidez e rejeita a zona; Liquidez IA mostra trap, Risco IA decide se vale operar.",
     },
     "grafico": {
         "slug": "grafico",

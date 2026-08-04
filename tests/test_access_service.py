@@ -82,14 +82,14 @@ class AccessServiceTests(unittest.TestCase):
         self.assertEqual(_default_plan_days("premium_anual"), 365)
         self.assertEqual(_default_plan_days("premium_mensal"), 31)
 
-    def test_trial_policy_starts_with_30_days_and_shortens_after_launch_window(self):
+    def test_trial_policy_uses_30_days_before_and_after_launch_window(self):
         launch_day = datetime(2026, 5, 14)
         after_launch_window = datetime(2026, 6, 14)
 
         self.assertEqual(trial_days_for_market("BR", launch_day), 30)
         self.assertEqual(trial_days_for_market("USA", launch_day), 30)
-        self.assertEqual(trial_days_for_market("BR", after_launch_window), 14)
-        self.assertEqual(trial_days_for_market("USA", after_launch_window), 14)
+        self.assertEqual(trial_days_for_market("BR", after_launch_window), 30)
+        self.assertEqual(trial_days_for_market("USA", after_launch_window), 30)
 
     def test_grant_trial_access_uses_current_trial_policy(self):
         user = DummyUser()

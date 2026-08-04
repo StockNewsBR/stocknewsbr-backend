@@ -25,6 +25,13 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
 
+    # Mission 31B.1: forge-proof official identity taxonomy. These are set
+    # ONLY by the backend (seeds / privileged flows), never by user payload.
+    official = Column(Boolean, default=False, nullable=False, index=True)
+    role = Column(String, default="user", nullable=False, index=True)
+    is_bot = Column(Boolean, default=False, nullable=False)
+    official_identity_locked = Column(Boolean, default=False, nullable=False)
+
     plan = Column(String, default="trial", index=True)
     plan_status = Column(String, default="trialing", index=True)
 
@@ -211,9 +218,13 @@ class UserSession(Base):
     device_id = Column(String, nullable=True, index=True)
     device_label = Column(String, nullable=True)
     issued_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=True, index=True)
     last_seen_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     revoked_at = Column(DateTime, nullable=True, index=True)
     revoked_reason = Column(String, nullable=True)
+    created_ip_hash = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+    correlation_id = Column(String, nullable=True)
 
     user = relationship(
         "User",
@@ -228,19 +239,46 @@ class LoginChallenge(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     email = Column(String, nullable=False, index=True)
     login_token = Column(String, unique=True, index=True, nullable=False)
+    # Mission 31B: stores the HMAC-SHA256 digest of the code (conceptual
+    # "code_digest"); never a reversible or plaintext value.
     code_hash = Column(String, nullable=False)
+    purpose = Column(String, nullable=False, default="LOGIN", index=True)
+    target_email = Column(String, nullable=True)
     channel = Column(String, nullable=False, default="web", index=True)
     device_id = Column(String, nullable=True, index=True)
     device_label = Column(String, nullable=True)
     attempt_count = Column(Integer, default=0, nullable=False)
+    max_attempts = Column(Integer, default=5, nullable=False)
+    delivery_status = Column(String, nullable=False, default="PENDING", index=True)
+    delivery_attempted_at = Column(DateTime, nullable=True)
     expires_at = Column(DateTime, nullable=False, index=True)
     consumed_at = Column(DateTime, nullable=True, index=True)
+    invalidated_at = Column(DateTime, nullable=True, index=True)
+    request_ip_hash = Column(String, nullable=True)
+    correlation_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     user = relationship(
         "User",
         back_populates="login_challenges",
     )
+
+
+class AuthAuditEvent(Base):
+    __tablename__ = "auth_audit_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event = Column(String, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    email_masked = Column(String, nullable=True)
+    email_hash = Column(String, nullable=True, index=True)
+    ip_hash = Column(String, nullable=True, index=True)
+    user_agent = Column(String, nullable=True)
+    sid_ref = Column(String, nullable=True)
+    reason = Column(String, nullable=True)
+    status = Column(String, nullable=True)
+    correlation_id = Column(String, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
 class TelegramLinkToken(Base):
@@ -266,6 +304,7 @@ class SubscriptionAuditLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     provider = Column(String, index=True, nullable=False)
+    provider_event_id = Column(String, nullable=True, index=True)
     event_type = Column(String, index=True, nullable=False)
     product_id = Column(String, nullable=True)
     origin = Column(String, nullable=True)
@@ -278,3 +317,82 @@ class SubscriptionAuditLog(Base):
         "User",
         back_populates="subscription_events",
     )
+
+
+class SocialPost(Base):
+    __tablename__ = "social_posts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    ticker = Column(String, nullable=True, index=True)
+    text = Column(Text, nullable=False)
+    image_url = Column(String, nullable=True)
+    sentiment = Column(String, nullable=True, index=True)
+    display_name = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    avatar_url = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class SocialComment(Base):
+    __tablename__ = "social_comments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("social_posts.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    text = Column(Text, nullable=False)
+    image_url = Column(String, nullable=True)
+    display_name = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    avatar_url = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class SocialLike(Base):
+    __tablename__ = "social_likes"
+    __table_args__ = (
+        UniqueConstraint("post_id", "user_id", name="uq_social_like_post_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("social_posts.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class SocialRepost(Base):
+    __tablename__ = "social_reposts"
+    __table_args__ = (
+        UniqueConstraint("post_id", "user_id", name="uq_social_repost_post_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("social_posts.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    quote_text = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class SocialFollow(Base):
+    __tablename__ = "social_follows"
+    __table_args__ = (
+        UniqueConstraint("user_id", "target_user_id", name="uq_social_follow_user_target"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    target_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class SocialSentimentVote(Base):
+    __tablename__ = "social_sentiment_votes"
+    __table_args__ = (
+        UniqueConstraint("ticker", "user_id", name="uq_social_sentiment_vote_ticker_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticker = Column(String, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    sentiment = Column(String, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)

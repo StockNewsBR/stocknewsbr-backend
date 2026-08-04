@@ -4,7 +4,7 @@ import type { ReactNode, RefObject } from "react";
 
 import type { FeedPost, PollPayload, UserAccess } from "@/lib/types";
 
-import type { WorkspaceNewsRow, WorkspaceHelpSection } from "@/components/workspace-sections";
+import type { WorkspaceHelpSection, WorkspaceNewsRow } from "@/components/workspace-sections";
 
 function cx(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
@@ -37,6 +37,17 @@ function socialText(value: string | null | undefined, locale: AppLocale) {
     .replace(/Fluxo/g, "Flow");
 }
 
+function newsSentimentLabel(sentiment?: string | null, locale: AppLocale = "pt-BR") {
+  const normalized = String(sentiment || "").trim().toLowerCase();
+  if (normalized.includes("bull") || normalized.includes("alta") || normalized.includes("positivo")) {
+    return `🟢 ${locale === "en-US" ? "Bullish" : "Alta"}`;
+  }
+  if (normalized.includes("bear") || normalized.includes("baixa") || normalized.includes("negativo")) {
+    return `🔴 ${locale === "en-US" ? "Bearish" : "Baixa"}`;
+  }
+  return `⚪ ${locale === "en-US" ? "Neutral" : "Neutra"}`;
+}
+
 type LeftRailProps = {
   locale: AppLocale;
   railRef?: RefObject<HTMLElement | null>;
@@ -51,6 +62,7 @@ type LeftRailProps = {
   watchCategory: WatchCategory;
   onSetWatchCategory: (value: WatchCategory) => void;
   activeWatchCount: number;
+  watchCategoryCounts?: Partial<Record<Exclude<WatchCategory, "Todos">, number>>;
   accessCard: ReactNode;
   authCard: ReactNode;
   notificationCard: ReactNode;
@@ -58,6 +70,7 @@ type LeftRailProps = {
   watchlistContent: ReactNode;
   institutionalSections: WorkspaceHelpSection[];
   onOpenInstitutionalSection: (id: string) => void;
+  activeInstitutionalSectionId?: string | null;
 };
 
 export function WorkspaceLeftRail({
@@ -74,6 +87,7 @@ export function WorkspaceLeftRail({
   watchCategory,
   onSetWatchCategory,
   activeWatchCount,
+  watchCategoryCounts,
   accessCard,
   authCard,
   notificationCard,
@@ -81,6 +95,7 @@ export function WorkspaceLeftRail({
   watchlistContent,
   institutionalSections,
   onOpenInstitutionalSection,
+  activeInstitutionalSectionId,
 }: LeftRailProps) {
   const isEnglish = locale === "en-US";
   const categoryLabels: Record<WatchCategory, string> = {
@@ -90,13 +105,33 @@ export function WorkspaceLeftRail({
     Crypto: "Crypto",
     USA: "USA",
   };
+  // Total badge is always the SUM of B3+BDR+Crypto+USA; each chip carries its own count.
+  const totalWatchCount = watchCategoryCounts
+    ? (["B3", "BDR", "Crypto", "USA"] as const).reduce((total, category) => total + (watchCategoryCounts[category] || 0), 0)
+    : activeWatchCount;
+  const activeCountLabel = `Total: ${totalWatchCount} ${isEnglish ? "assets" : "ativos"}`;
+  const categoryChipLabel = (category: WatchCategory) =>
+    category === "Todos"
+      ? `${categoryLabels[category]} (${totalWatchCount})`
+      : watchCategoryCounts
+        ? `${categoryLabels[category]} (${watchCategoryCounts[category] || 0})`
+        : categoryLabels[category];
+
+  const activeInstitutionalSection = institutionalSections.find((section) => section.id === activeInstitutionalSectionId);
 
   return (
     <aside className="snbr-left-rail" ref={railRef}>
       <div className="snbr-left-header">
-        <div>
-          <h1>StockNewsBR</h1>
-          <p>{isEnglish ? "AI Market Intelligence" : "Inteligencia de Mercado com IA"}</p>
+        <div className="snbr-header-brand">
+          <img
+            className="snbr-brand-image"
+            src="/brand/stocknewsbr-brand.png"
+            alt={isEnglish ? "StockNewsBR brand art" : "Arte da marca StockNewsBR"}
+          />
+          <div className="snbr-header-brand-copy">
+            <h1>StockNewsBR</h1>
+            <p>{isEnglish ? "AI Market Intelligence" : "Inteligência de Mercado com IA"}</p>
+          </div>
         </div>
         <button
           aria-expanded={mobileWatchlistOpen}
@@ -112,12 +147,12 @@ export function WorkspaceLeftRail({
         {accessCard}
         {authCard}
         {notificationCard}
+        {toolsCard}
 
         <div className="snbr-search-block">
           <div className="snbr-section-head compact">
             <div>
               <h3>{isEnglish ? "Asset Search" : "Busca de ativos"}</h3>
-              <p>{isEnglish ? "Open B3, BDR, crypto or USA assets on screen without adding them automatically." : "Use para abrir B3, BDR, cripto ou ação dos EUA na tela, sem adicionar automaticamente."}</p>
             </div>
           </div>
           <input
@@ -131,30 +166,28 @@ export function WorkspaceLeftRail({
             placeholder={isEnglish ? "Search asset, like F, AAPL, PETR4 or BTCUSD" : "Buscar ativo, como PETR4, F, AAPL ou BTCUSD"}
           />
           <p className="snbr-assistive-copy">
-            {isEnglish ? "Search opens the asset on screen. Add puts it in your active list. Nothing is added by itself." : "Buscar abre o ativo na tela. Adicionar coloca o ativo na sua lista ativa. Nada entra sozinho."}
+            {isEnglish ? "Search opens the asset on screen. Add puts it in your active list." : "Buscar abre o ativo na tela. Adicionar coloca o ativo na sua lista ativa."}
           </p>
           <div className="snbr-watch-actions">
             <button className="snbr-button primary" onClick={onApplyTicker} type="button" aria-label={isEnglish ? "Open asset on screen" : "Abrir ativo na tela"}>
               {isEnglish ? "Open" : "Abrir na tela"}
             </button>
-            <button className="snbr-button secondary" onClick={onAddTicker} type="button" aria-label={isEnglish ? "Add current asset to active list" : "Adicionar acao atual a lista ativa"}>
+            <button className="snbr-button secondary" onClick={onAddTicker} type="button" aria-label={isEnglish ? "Add current asset to active list" : "Adicionar ação atual à lista ativa"}>
               {isEnglish ? "Add to list" : "Adicionar a lista"}
             </button>
-            <button className="snbr-button secondary" onClick={onRemoveTicker} type="button" aria-label={isEnglish ? "Remove current asset from active list" : "Excluir acao atual da lista ativa"}>
+            <button className="snbr-button secondary" onClick={onRemoveTicker} type="button" aria-label={isEnglish ? "Remove current asset from active list" : "Excluir ação atual da lista ativa"}>
               {isEnglish ? "Remove" : "Excluir"}
             </button>
           </div>
         </div>
 
-        {toolsCard}
-
         <div className="snbr-side-card snbr-active-list-shell">
           <div className="snbr-watch-toolbar snbr-watch-toolbar-inline">
             <div>
               <strong>{isEnglish ? "My Active List" : "Minha Lista Ativa"}</strong>
-              <p>{isEnglish ? "Preloaded assets by category + any asset added from search." : "Ativos preloaded por categoria + qualquer ativo adicionado pela busca."}</p>
+              <p>{isEnglish ? "Preloaded assets by category + any asset added from search." : "Ativos pré-carregados por categoria + qualquer ativo adicionado pela busca."}</p>
             </div>
-            <span className="snbr-chip">{activeWatchCount} {isEnglish ? "assets" : "ativos"}</span>
+            <span className="snbr-chip">{activeCountLabel}</span>
           </div>
           <div className="snbr-active-filter-row" aria-label={isEnglish ? "Active list filters" : "Filtros da lista ativa"}>
             {(["Todos", "B3", "BDR", "Crypto", "USA"] as const).map((category) => (
@@ -165,7 +198,7 @@ export function WorkspaceLeftRail({
                 type="button"
                 aria-pressed={watchCategory === category}
               >
-                {categoryLabels[category]}
+                {categoryChipLabel(category)}
               </button>
             ))}
           </div>
@@ -174,39 +207,17 @@ export function WorkspaceLeftRail({
         </div>
 
         <div className="snbr-left-footer">
-          <span className="snbr-left-footer-title">{isEnglish ? "🏛 StockNewsBR institutional structure - AI Market Intelligence" : "🏛 Estrutura institucional StockNewsBR – Inteligência de Mercado com IA"}</span>
-          {institutionalSections.slice(0, 8).map((section) => (
+          <strong>{isEnglish ? "Trader Educational Help" : "Ajuda Educacional para o Trader"}</strong>
+          {institutionalSections.map((section) => (
             <button
               key={section.id}
+              className={section.id === activeInstitutionalSectionId ? "active" : undefined}
               onClick={() => section.id && onOpenInstitutionalSection(section.id)}
               type="button"
-              aria-label={`${isEnglish ? "Open institutional section" : "Abrir secao institucional"} ${section.label || section.title}`}
             >
               {section.label || section.title}
             </button>
           ))}
-          <div className="snbr-rail-disclosure">
-            <div className="snbr-store-badges" aria-label={isEnglish ? "App stores" : "Lojas do app"}>
-              <span>App Store</span>
-              <span>Google Play</span>
-            </div>
-            <p>{isEnglish ? "©2026 StockNewsBR. All rights reserved." : "©2026 StockNewsBR. Todos os direitos reservados."}</p>
-            <p>
-              {isEnglish
-                ? "Market data comes from public/connected providers and internal caches identified by each payload. Futures may show explicit reference pricing when an exact public contract is unavailable; crypto data uses public crypto providers when available."
-                : "Dados de mercado vêm de provedores públicos/conectados e caches internos identificados em cada payload. Futuros podem mostrar preço de referência explícito quando o contrato público exato não estiver disponível; cripto usa provedores públicos quando houver dado."}
-            </p>
-            <p>
-              {isEnglish
-                ? "StockNewsBR is not a securities broker-dealer, investment adviser or financial professional. Nothing on the platform is an offer, solicitation, research report or individualized advice to buy, sell, short or hold any asset."
-                : "StockNewsBR não é corretora, consultor de investimentos ou profissional financeiro. Nada na plataforma é oferta, solicitação, relatório de análise ou recomendação individual para comprar, vender, operar vendido ou manter qualquer ativo."}
-            </p>
-            <p>
-              {isEnglish
-                ? "By using the platform, you understand that every trade decision is yours and must be confirmed with price, volume, liquidity, risk and your own suitability."
-                : "Ao usar a plataforma, você entende que toda decisão de trade é sua e deve ser confirmada com preço, volume, liquidez, risco e adequação ao seu perfil."}
-            </p>
-          </div>
         </div>
       </div>
     </aside>
@@ -243,6 +254,8 @@ export function WorkspaceRightRail({
   onSelectTicker,
 }: RightRailProps) {
   const isEnglish = locale === "en-US";
+  const hasVerifiedPoll = Boolean(activePoll.question?.trim() && activePoll.options?.length);
+  const noVerifiedPollLabel = isEnglish ? "No verified poll available" : "Sem poll verificada disponível";
 
   return (
     <aside className="snbr-right-rail">
@@ -297,12 +310,13 @@ export function WorkspaceRightRail({
               >
                 <div className="snbr-news-copy">
                   <strong>{item.title}</strong>
-                  <p>{item.source} • {item.age}</p>
+                  <p>{isEnglish ? "Source" : "Fonte"}: {item.source} • {isEnglish ? "Published" : "Publicado"}: {item.publishedTime}</p>
                   <span>{item.cardSummary}</span>
                   <div className="snbr-news-meta-row compact">
                     {item.impact ? <span className="snbr-news-impact compact">{item.impact}</span> : null}
+                    <span className="snbr-news-impact compact">{newsSentimentLabel(item.sentiment, locale)}</span>
                     <span className="snbr-news-impact compact">{item.quality}</span>
-                    {item.sameStoryCount > 1 ? <span>{item.sameStoryCount} {isEnglish ? "versions" : "versoes"}</span> : null}
+                    {item.sameStoryCount > 1 ? <span>{item.sameStoryCount} {isEnglish ? "versions" : "versões"}</span> : null}
                     {item.relevanceScore != null ? <span>{Math.round(item.relevanceScore)} {isEnglish ? "rel." : "relev."}</span> : null}
                   </div>
                 </div>
@@ -316,7 +330,7 @@ export function WorkspaceRightRail({
           <div className="snbr-section-head compact">
             <div>
               <h3>{isEnglish ? "Featured Discussions" : "Discussoes em destaque"}</h3>
-              <p>{isEnglish ? "Conversations driving reactions and engagement right now." : "Conversas que estao puxando reacao e engajamento agora."}</p>
+              <p>{isEnglish ? "Conversations driving reactions and engagement right now." : "Conversas que estão puxando reação e engajamento agora."}</p>
             </div>
           </div>
           <div className="snbr-discussion-mini-list">
@@ -338,22 +352,30 @@ export function WorkspaceRightRail({
           <div className="snbr-section-head compact">
             <div>
               <h3>{isEnglish ? "Poll/Vote" : "Poll/Votar"}</h3>
-              <p>{isEnglish ? "Weekly vote open for the ticker community." : "Votação semanal aberta para a comunidade do ticker."}</p>
+              <p>{hasVerifiedPoll
+                ? (isEnglish ? "Verified weekly vote open for the ticker community." : "Votação semanal verificada aberta para a comunidade do ticker.")
+                : noVerifiedPollLabel}</p>
             </div>
           </div>
           <div className="snbr-poll-mini">
-            <strong>{activePoll.question || `${isEnglish ? "Poll/Vote for" : "Poll/Votar de"} ${selectedTicker}`}</strong>
-            <div className="snbr-poll-mini-meta">
-              <span>{activePoll.total_votes || 0} {isEnglish ? "votes" : "votos"}</span>
-              <span>{activePoll.status || (isEnglish ? "open" : "aberta")}</span>
-            </div>
-            {(activePoll.options || []).slice(0, 2).map((option) => (
-              <div key={option.key} className="snbr-account-line snbr-poll-mini-row">
-                <span>{option.label}</span>
-                <strong>{option.votes}</strong>
-              </div>
-            ))}
-            <p className="snbr-poll-mini-note">{isEnglish ? "AI and community complement each other: read the context, vote on the thesis and confirm with price." : "IA e comunidade se complementam: leia o contexto, vote na tese e confirme no preço."}</p>
+            {hasVerifiedPoll ? (
+              <>
+                <strong>{activePoll.question}</strong>
+                <div className="snbr-poll-mini-meta">
+                  <span>{activePoll.total_votes || 0} {isEnglish ? "votes" : "votos"}</span>
+                  <span>{activePoll.status || (isEnglish ? "open" : "aberta")}</span>
+                </div>
+                {(activePoll.options || []).slice(0, 2).map((option) => (
+                  <div key={option.key} className="snbr-account-line snbr-poll-mini-row">
+                    <span>{option.label}</span>
+                    <strong>{option.votes}</strong>
+                  </div>
+                ))}
+                <p className="snbr-poll-mini-note">{isEnglish ? "AI and community complement each other: read the context, vote on the thesis and confirm with price." : "IA e comunidade se complementam: leia o contexto, vote na tese e confirme no preço."}</p>
+              </>
+            ) : (
+              <strong>{noVerifiedPollLabel}</strong>
+            )}
           </div>
         </div>
 

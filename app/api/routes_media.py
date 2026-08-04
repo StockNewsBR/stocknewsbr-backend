@@ -1,12 +1,13 @@
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.dependencies import require_active_plan
-from app.database import get_db
+from app.database import apply_rls_context, get_db
 from app.models import User
 from app.services.media_service import get_media_status, get_signed_upload, save_upload
 from app.services.media_asset_service import create_media_asset, get_media_asset, serialize_media_asset
+from app.services.gif_service import search_tenor_gifs
 
 
 class SignedUploadRequest(BaseModel):
@@ -15,6 +16,23 @@ class SignedUploadRequest(BaseModel):
 
 
 router = APIRouter(prefix="/api/media", tags=["Media"])
+
+
+def _apply_media_rls_context(db: Session, current_user: User) -> None:
+    # Mission 36: bind the transaction-local RLS context to the authenticated
+    # user before any media_assets access. Source of identity is ONLY the
+    # authenticated user (never the request body/query/path). The auth/plan
+    # dependency already ran a query on this same Session, so a transaction is
+    # active; apply_rls_context is a no-op on SQLite and fail-closed on
+    # PostgreSQL without an active transaction. Failure propagates (no
+    # fallback without RLS).
+    apply_rls_context(
+        db,
+        current_user_id=int(current_user.id),
+        current_actor_id=int(current_user.id),
+        current_role="user",
+        request_id=None,
+    )
 
 
 @router.get("/status")
@@ -29,6 +47,7 @@ async def media_upload(
     current_user: User = Depends(require_active_plan),
     db: Session = Depends(get_db),
 ):
+    _apply_media_rls_context(db, current_user)
     payload = await save_upload(file, folder="posts")
     storage_key = f"{payload['folder']}/{payload['filename']}"
     asset = create_media_asset(
@@ -55,6 +74,7 @@ def media_presign(
     current_user: User = Depends(require_active_plan),
     db: Session = Depends(get_db),
 ):
+    _apply_media_rls_context(db, current_user)
     signed = get_signed_upload(
         content_type=payload.content_type,
         folder=payload.folder,
@@ -77,15 +97,27 @@ def media_presign(
     }
 
 
+@router.get("/gifs/search")
+def media_gif_search(
+    q: str,
+    locale: str = "pt-BR",
+    limit: int = 12,
+    current_user: User = Depends(require_active_plan),
+):
+    del current_user
+    return search_tenor_gifs(q, locale=locale, limit=limit)
+
+
 @router.get("/{asset_id}")
 def media_asset_detail(
     asset_id: int,
     current_user: User = Depends(require_active_plan),
     db: Session = Depends(get_db),
 ):
+    _apply_media_rls_context(db, current_user)
     asset = get_media_asset(db, asset_id)
 
     if not asset or asset.owner_user_id != current_user.id:
-        return {"detail": "media_not_found"}
+        raise HTTPException(status_code=404, detail="media_not_found")
 
     return serialize_media_asset(asset)
