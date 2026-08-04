@@ -44,3 +44,14 @@ output/playwright/
 
 **/*.tsbuildinfo
 **/.next-stale-*/
+
+# H8 repo hygiene guard — broad masks already covered by the rules above
+# (e.g. `node_modules/`, `__pycache__/`, `*.pyc`, `.env` etc.). The lines
+# below are explicit doublings using the `**/` prefix so the guard never
+# depends on which directory pattern Git picks first.
+
+**/.next/
+**/.next-stale-*/
+**/node_modules/
+**/__pycache__/
+**/*.pyc

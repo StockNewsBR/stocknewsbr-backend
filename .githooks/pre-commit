@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run the repository hygiene guard before accepting a commit.
+# See scripts/check_repo_hygiene.py for the full list of forbidden categories.
+
+set -euo pipefail
+
+resolve_python() {
+  if [ -n "${PYTHON:-}" ] && command -v "$PYTHON" >/dev/null 2>&1; then
+    echo "$PYTHON"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    echo "python3"
+    return 0
+  fi
+  if command -v python >/dev/null 2>&1; then
+    echo "python"
+    return 0
+  fi
+  return 1
+}
+
+python_bin=$(resolve_python) || {
+  echo "[hygiene] ERROR: no Python interpreter found." >&2
+  echo "[hygiene] ERROR: set \$PYTHON or install python3 on PATH." >&2
+  exit 1
+}
+
+exec "$python_bin" scripts/check_repo_hygiene.py
