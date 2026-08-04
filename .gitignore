@@ -41,3 +41,6 @@ output/playwright/
 
 # Claude Code local config
 .claude/
+
+**/*.tsbuildinfo
+**/.next-stale-*/
