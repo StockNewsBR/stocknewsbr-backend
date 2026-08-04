@@ -80,19 +80,3 @@ def top_signals():
     return {
         "signals": signals[:10]
     }
-
-
-# -----------------------------------------------------
-# SYSTEM HEALTH
-# -----------------------------------------------------
-
-@router.get("/system-health")
-
-def system_health():
-
-    snapshot = get_snapshot()
-
-    return {
-        "status": "running",
-        "signals": len(snapshot.get("signals", []))
-    }
