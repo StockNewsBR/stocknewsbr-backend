@@ -15,6 +15,13 @@ expectations stay auditable:
   same mechanism; without a supplied header it returns 403.
 - Neither protected surface exposes credentials, secrets, tokens or
   environment values in the response body.
+
+H10.1 compliance note:
+- `/system-health` (legacy lightweight health under
+  `require_channel_access("app")`) was restored and given the explicit
+  operation_id `system_health_legacy_market` so the OpenAPI operationId
+  namespace stays unique WITHOUT changing its path, method, payload,
+  status codes or auth dependency. This preserves the public HTTP contract.
 """
 
 import unittest
@@ -217,10 +224,94 @@ class HealthContractTests(unittest.TestCase):
         from app.main import app
         spec = app.openapi()
         paths = set(spec["paths"].keys())
+        # Canonical + legacy health routes must coexist (H10.1 compliance fix).
         self.assertIn("/ping", paths)
         self.assertIn("/system/health", paths)
         self.assertIn("/system/readiness", paths)
-        self.assertNotIn("/system-health", paths, "legacy stub path must remain removed")
+        self.assertIn(
+            "/system-health",
+            paths,
+            "Legacy /system-health must remain in OpenAPI (path preserved "
+            "by H10.1 compliance fix; duplicate op-id resolved with an "
+            "explicit operation_id rather than route removal).",
+        )
+
+    def test_system_health_legacy_auth_contract_preserved(self):
+        """The legacy /system-health must stay guarded by the app-channel
+        dependency (`require_channel_access("app")`), not by the internal
+        token. We inspect the route's runtime `dependant.dependencies` chain
+        rather than the OpenAPI security field, because FastAPI does not
+        propagate `Depends(...)` declared at the APIRouter level into the
+        OpenAPI `security` block for every operation."""
+        from app.main import app
+
+        def dependency_names(path, method="GET"):
+            for r in app.routes:
+                if (
+                    hasattr(r, "path")
+                    and r.path == path
+                    and method in (getattr(r, "methods", set()) or set())
+                ):
+                    dep = getattr(r, "dependant", None)
+                    if not dep:
+                        return []
+                    return [
+                        getattr(getattr(d, "call", None), "__name__", "<lambda>")
+                        for d in dep.dependencies
+                    ]
+            return None
+
+        canonical_deps = dependency_names("/system/health")
+        legacy_deps = dependency_names("/system-health")
+        ping_deps = dependency_names("/ping")
+
+        self.assertIsNotNone(canonical_deps, "/system/health route not found")
+        self.assertIsNotNone(legacy_deps, "/system-health route not found")
+        self.assertIsNotNone(ping_deps, "/ping route not found")
+
+        # Canonical protected by internal token
+        self.assertIn(
+            "require_internal_token",
+            canonical_deps,
+            f"/system/health must depend on require_internal_token; got {canonical_deps}",
+        )
+        # Legacy MUST NOT be guarded by the internal token (preserves legacy auth)
+        self.assertNotIn(
+            "require_internal_token",
+            legacy_deps,
+            "Legacy /system-health must NOT be guarded by the internal token; "
+            "the H10.1 fix preserves its require_channel_access('app') dependency.",
+        )
+        # Legacy MUST have at least one auth dependency (the require_channel_access closure)
+        self.assertGreater(
+            len(legacy_deps),
+            0,
+            "Legacy /system-health must keep its app-channel dependency "
+            "(require_channel_access('app') closure).",
+        )
+        # /ping must remain public (no deps)
+        self.assertEqual(
+            ping_deps,
+            [],
+            "/ping must stay public with no dependencies (P3-B contract).",
+        )
+
+    def test_system_health_legacy_operation_id_is_unique(self):
+        from app.main import app
+        spec = app.openapi()
+        legacy_oid = spec["paths"]["/system-health"]["get"].get("operationId")
+        canonical_oid = spec["paths"]["/system/health"]["get"].get("operationId")
+        self.assertEqual(
+            legacy_oid,
+            "system_health_legacy_market",
+            "Legacy /system-health must declare the explicit operation_id "
+            "introduced by the H10.1 compliance fix.",
+        )
+        self.assertNotEqual(
+            canonical_oid,
+            legacy_oid,
+            f"Canonical and legacy health routes share operationId: {canonical_oid}",
+        )
 
 
 if __name__ == "__main__":
