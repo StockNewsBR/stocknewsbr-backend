@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException
+from starlette.concurrency import run_in_threadpool
 
 from app.dependencies import require_any_channel_access
 from app.models import User
@@ -87,7 +88,8 @@ async def create_ticker_post(
     payload: PostCreateRequest,
     current_user: User = Depends(require_any_channel_access("app", "web")),
 ):
-    post = create_post(
+    post = await run_in_threadpool(
+        create_post,
         user_id=current_user.id,
         text=payload.text,
         ticker=canonical_symbol(symbol),
@@ -120,12 +122,13 @@ async def create_post_comment(
     payload: CommentCreateRequest,
     current_user: User = Depends(require_any_channel_access("app", "web")),
 ):
-    post = get_post(post_id)
+    post = await run_in_threadpool(get_post, post_id)
 
     if not post:
         raise HTTPException(status_code=404, detail="post_not_found")
 
-    comment = add_comment(
+    comment = await run_in_threadpool(
+        add_comment,
         post_id=post_id,
         user_id=current_user.id,
         text=payload.text,
@@ -158,12 +161,13 @@ async def repost_post(
     payload: RepostCreateRequest | None = None,
     current_user: User = Depends(require_any_channel_access("app", "web")),
 ):
-    post = get_post(post_id)
+    post = await run_in_threadpool(get_post, post_id)
 
     if not post:
         raise HTTPException(status_code=404, detail="post_not_found")
 
-    repost = create_repost(
+    repost = await run_in_threadpool(
+        create_repost,
         post_id=post_id,
         user_id=current_user.id,
         quote_text=(payload.quote_text if payload else None),
@@ -195,12 +199,12 @@ async def unrepost_post(
     post_id: int,
     current_user: User = Depends(require_any_channel_access("app", "web")),
 ):
-    post = get_post(post_id)
+    post = await run_in_threadpool(get_post, post_id)
 
     if not post:
         raise HTTPException(status_code=404, detail="post_not_found")
 
-    if not delete_repost(post_id, current_user.id):
+    if not await run_in_threadpool(delete_repost, post_id, current_user.id):
         raise HTTPException(status_code=404, detail="repost_not_found")
 
     await broadcast_ticker_event(
@@ -219,13 +223,13 @@ async def delete_ticker_post(
     post_id: int,
     current_user: User = Depends(require_any_channel_access("app", "web")),
 ):
-    post = get_post(post_id)
+    post = await run_in_threadpool(get_post, post_id)
 
     if not post:
         raise HTTPException(status_code=404, detail="post_not_found")
 
     can_moderate = str(getattr(current_user, "role", "") or "").lower() in {ROLE_ADMIN, ROLE_MODERATOR}
-    if not delete_post(post_id, current_user.id, can_moderate=can_moderate):
+    if not await run_in_threadpool(delete_post, post_id, current_user.id, can_moderate=can_moderate):
         raise HTTPException(status_code=403, detail="post_delete_forbidden")
 
     await broadcast_ticker_event(

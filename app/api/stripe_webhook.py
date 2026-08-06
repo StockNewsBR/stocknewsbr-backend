@@ -409,6 +409,79 @@ def _resolve_user(db: Session, data: dict, event_type: str):
     return None
 
 
+def _stripe_check_duplicate_locked(db: Session, event_id: str, event_type: str) -> bool:
+    # S1: acquired in a threadpool worker (the async handler offloads this),
+    # not on the event loop. threading.RLock serializes across worker threads.
+    with _STRIPE_WEBHOOK_LOCK:
+        return _stripe_event_already_processed(db, event_id, event_type)
+
+
+def _stripe_apply_state_change_locked(
+    db: Session,
+    event_id: str,
+    event_type: str,
+    data: dict,
+    activation_context,
+    payload_excerpt,
+):
+    # S1: the whole lock-windowed state change + commit runs off the event
+    # loop. The await on _validate_activation_event stays on the loop because
+    # it may await the Stripe SDK (already offloaded via run_in_threadpool).
+    with _STRIPE_WEBHOOK_LOCK:
+        if _stripe_event_already_processed(db, event_id, event_type):
+            return {"status": "ok", "duplicate": True}
+
+        user = _resolve_user(db, data, event_type)
+        activated_subscription = False
+        product_id = _metadata(data).get("product_id")
+        customer_id = None
+        subscription_id = _subscription_id_for_event(data, event_type) or ""
+
+        if activation_context is not None:
+            customer_id, subscription_id, product_id = activation_context
+
+        if event_type in _STRIPE_STATE_CHANGING_EVENTS and not user:
+            raise HTTPException(status_code=422, detail="stripe_user_not_resolved")
+
+        if event_type in _STRIPE_ACTIVATION_EVENTS and user:
+            _ensure_customer_ownership(db, user, customer_id, subscription_id)
+            activate_subscription(
+                user,
+                provider="stripe",
+                product_id=product_id,
+                origin="website",
+                external_subscription_id=subscription_id,
+            )
+            user.stripe_customer_id = customer_id
+            user.stripe_subscription_id = subscription_id
+            activated_subscription = True
+
+        if event_type in {"customer.subscription.deleted", "invoice.payment_failed"} and user:
+            _ensure_downgrade_event_ownership(user, data, event_type)
+            downgrade_to_free(user, reason="premium_inactive")
+
+        log_subscription_event(
+            db,
+            user,
+            provider="stripe",
+            provider_event_id=event_id,
+            event_type=event_type,
+            product_id=product_id,
+            origin="website",
+            external_subscription_id=subscription_id,
+            status=user.plan_status if user else "unresolved",
+            payload_excerpt=payload_excerpt,
+        )
+
+        if user:
+            db.add(user)
+            if activated_subscription:
+                apply_referral_validation(db)
+
+        db.commit()
+        return {"status": "ok"}
+
+
 @router.post("/stripe/webhook")
 async def stripe_webhook(request: Request):
     content_length = request.headers.get("content-length")
@@ -432,9 +505,8 @@ async def stripe_webhook(request: Request):
     db: Session = SessionLocal()
 
     try:
-        with _STRIPE_WEBHOOK_LOCK:
-            if _stripe_event_already_processed(db, event_id, event_type):
-                return {"status": "ok", "duplicate": True}
+        if await run_in_threadpool(_stripe_check_duplicate_locked, db, event_id, event_type):
+            return {"status": "ok", "duplicate": True}
 
         activation_context = None
         if event_type in (_STRIPE_STATE_CHANGING_EVENTS - _STRIPE_ACTIVATION_EVENTS):
@@ -442,63 +514,19 @@ async def stripe_webhook(request: Request):
         if event_type in _STRIPE_ACTIVATION_EVENTS:
             activation_context = await _validate_activation_event(event, event_type, data)
 
-        with _STRIPE_WEBHOOK_LOCK:
-            if _stripe_event_already_processed(db, event_id, event_type):
-                return {"status": "ok", "duplicate": True}
-
-            user = _resolve_user(db, data, event_type)
-            activated_subscription = False
-            product_id = _metadata(data).get("product_id")
-            customer_id = None
-            subscription_id = _subscription_id_for_event(data, event_type) or ""
-
-            if activation_context is not None:
-                customer_id, subscription_id, product_id = activation_context
-
-            if event_type in _STRIPE_STATE_CHANGING_EVENTS and not user:
-                raise HTTPException(status_code=422, detail="stripe_user_not_resolved")
-
-            if event_type in _STRIPE_ACTIVATION_EVENTS and user:
-                _ensure_customer_ownership(db, user, customer_id, subscription_id)
-                activate_subscription(
-                    user,
-                    provider="stripe",
-                    product_id=product_id,
-                    origin="website",
-                    external_subscription_id=subscription_id,
-                )
-                user.stripe_customer_id = customer_id
-                user.stripe_subscription_id = subscription_id
-                activated_subscription = True
-
-            if event_type in {"customer.subscription.deleted", "invoice.payment_failed"} and user:
-                _ensure_downgrade_event_ownership(user, data, event_type)
-                downgrade_to_free(user, reason="premium_inactive")
-
-            log_subscription_event(
-                db,
-                user,
-                provider="stripe",
-                provider_event_id=event_id,
-                event_type=event_type,
-                product_id=product_id,
-                origin="website",
-                external_subscription_id=subscription_id,
-                status=user.plan_status if user else "unresolved",
-                payload_excerpt=payload_excerpt,
-            )
-
-            if user:
-                db.add(user)
-                if activated_subscription:
-                    apply_referral_validation(db)
-
-            db.commit()
-            return {"status": "ok"}
+        return await run_in_threadpool(
+            _stripe_apply_state_change_locked,
+            db,
+            event_id,
+            event_type,
+            data,
+            activation_context,
+            payload_excerpt,
+        )
 
     except IntegrityError:
         db.rollback()
-        if _stripe_event_already_processed(db, event_id, event_type):
+        if await run_in_threadpool(_stripe_event_already_processed, db, event_id, event_type):
             return {"status": "ok", "duplicate": True}
         raise
     except HTTPException:

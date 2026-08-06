@@ -1,3 +1,4 @@
+import logging
 import math
 import re
 from datetime import datetime, timedelta, timezone
@@ -54,6 +55,8 @@ from app.services.symbol_sanitizer import mark_symbol_cooldown, sanitize_market_
 from app.system.system_metrics import record_cache_access
 from app.system.symbol_hydration import get_symbol_analysis, hydration_status, request_symbol_hydration, resolve_symbol_context
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/public", tags=["Public Market Live"])
 # BRFS3/JBSS3 left this blocklist: they now alias to live successors
@@ -1582,6 +1585,7 @@ def public_market_bundle(
     record_cache_access("quote", _has_usable_quote_payload(quote), "public_bundle")
 
     insight = public_market_insight(ticker, interval=chart_interval, is_premium=True)
+    daily_rows = _load_chart_data_fast(ticker, _DAILY_CANDLE_INTERVAL)
     # The top card is labelled "RSI diário (D1)", so it must be computed on DAILY
     # candles. Range "1D" is one day of 5m candles -- using it here is what made the
     # card publish an intraday RSI under a daily label. Score/trend stay per-timeframe.
@@ -1591,17 +1595,29 @@ def public_market_bundle(
             **build_public_rsi_contract(
                 response_symbol,
                 _DAILY_CANDLE_INTERVAL,
-                _load_chart_data_fast(ticker, _DAILY_CANDLE_INTERVAL),
+                daily_rows,
             ),
         }
     on_demand = get_symbol_analysis(ticker, chart_interval)
     # The override was removed because public_market_insight now fully structures the on_demand payload.
     statuses = hydration_status(ticker, timeframe=chart_interval, locale=locale)
-    news = build_public_news_payload(
-        response_symbol, limit=safe_limit, source="public_bundle", allow_fetch=False,
-        schedule_warmup=True, locale=locale,
-    )
-    ai_tools = build_public_ai_tools_payload([ticker, response_symbol], timeframe=chart_interval)
+    # news/ai_tools are optional enrichment layers with their own data_status/status
+    # fields (same contract as the LLM conclusion layer below): a provider or cache
+    # failure in either must degrade that one section, not 500 the whole bundle when
+    # quote/insight/chart are already healthy.
+    try:
+        news = build_public_news_payload(
+            response_symbol, limit=safe_limit, source="public_bundle", allow_fetch=False,
+            schedule_warmup=True, locale=locale,
+        )
+    except Exception:
+        logger.exception("public_market_bundle: news payload failed for %s", ticker)
+        news = {}
+    try:
+        ai_tools = build_public_ai_tools_payload([ticker, response_symbol], timeframe=chart_interval)
+    except Exception:
+        logger.exception("public_market_bundle: ai_tools payload failed for %s", ticker)
+        ai_tools = {}
     ai_status = str(ai_tools.get("status") or "PENDING")
     ai_status_map = {
         "READY": "READY", "PENDING": "PENDING", "REFRESHING": "REFRESHING",
@@ -1612,7 +1628,6 @@ def public_market_bundle(
     statuses["news"] = str(news.get("data_status") or statuses.get("news") or "PENDING")
     statuses["ai"] = ai_status_map.get(ai_status, ai_status)
     chart = public_market_chart(ticker, interval=chart_interval, range_value=None)
-    daily_rows = _load_chart_data_fast(ticker, _DAILY_CANDLE_INTERVAL)
     # Comparable intraday RVOL needs a multi-day 5m series (@5M ~1mo) to find >=7 same-UTC-bucket
     # samples. Feeding stocks [] here is why "RVOL intraday comparável" was always indisponível for
     # equities -> auditor blocked -> every stock collapsed to the same NEUTRAL/AGUARDAR verdict.

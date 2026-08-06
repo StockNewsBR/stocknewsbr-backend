@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from starlette.concurrency import run_in_threadpool
 
 from app.dependencies import require_any_channel_access
 from app.models import User
@@ -14,8 +15,8 @@ async def like(
     post_id: int,
     current_user: User = Depends(require_any_channel_access("app", "web")),
 ):
-    post = get_post(post_id)
-    like_count = like_post(post_id, current_user.id)
+    post = await run_in_threadpool(get_post, post_id)
+    like_count = await run_in_threadpool(like_post, post_id, current_user.id)
 
     await broadcast_ticker_event(
         post.get("ticker") if post else None,
@@ -34,8 +35,8 @@ async def unlike(
     post_id: int,
     current_user: User = Depends(require_any_channel_access("app", "web")),
 ):
-    post = get_post(post_id)
-    like_count = unlike_post(post_id, current_user.id)
+    post = await run_in_threadpool(get_post, post_id)
+    like_count = await run_in_threadpool(unlike_post, post_id, current_user.id)
 
     await broadcast_ticker_event(
         post.get("ticker") if post else None,

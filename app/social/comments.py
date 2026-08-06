@@ -3,11 +3,18 @@ from __future__ import annotations
 from app.database import SessionLocal
 from app.models import SocialComment
 from app.social.db import ensure_social_tables, utc_social_datetime
-from app.social.moderation import can_publish, get_user_guardian_score, record_content_approved, validate_attachment_url
+from app.social.moderation import (
+    can_publish,
+    get_user_guardian_score,
+    get_user_guardian_scores,
+    record_content_approved,
+    validate_attachment_url,
+)
 
 
-def _serialize_comment(comment: SocialComment) -> dict:
-    guardian_score = get_user_guardian_score(comment.user_id)
+def _serialize_comment(comment: SocialComment, guardian_score: dict | None = None) -> dict:
+    if guardian_score is None:
+        guardian_score = get_user_guardian_score(comment.user_id)
     created_at = utc_social_datetime(comment.created_at)
     return {
         "id": comment.id,
@@ -88,7 +95,8 @@ def get_comments(post_id, blocked_users=None):
             query = query.filter(~SocialComment.user_id.in_(blocked_users))
 
         rows = query.order_by(SocialComment.created_at.asc(), SocialComment.id.asc()).all()
-        return [_serialize_comment(row) for row in rows]
+        guardian_scores = get_user_guardian_scores(row.user_id for row in rows)
+        return [_serialize_comment(row, guardian_score=dict(guardian_scores[row.user_id])) for row in rows]
     finally:
         db.close()
 
@@ -115,9 +123,11 @@ def get_comments_for_posts(post_ids, blocked_users=None):
             SocialComment.id.asc(),
         ).all()
 
+        guardian_scores = get_user_guardian_scores(row.user_id for row in rows)
         grouped = {post_id: [] for post_id in lookup}
         for row in rows:
-            grouped.setdefault(row.post_id, []).append(_serialize_comment(row))
+            serialized = _serialize_comment(row, guardian_score=dict(guardian_scores[row.user_id]))
+            grouped.setdefault(row.post_id, []).append(serialized)
 
         return grouped
     finally:

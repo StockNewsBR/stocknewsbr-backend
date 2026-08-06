@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.dependencies import require_active_plan
 from app.database import apply_rls_context, get_db
@@ -47,10 +48,11 @@ async def media_upload(
     current_user: User = Depends(require_active_plan),
     db: Session = Depends(get_db),
 ):
-    _apply_media_rls_context(db, current_user)
+    await run_in_threadpool(_apply_media_rls_context, db, current_user)
     payload = await save_upload(file, folder="posts")
     storage_key = f"{payload['folder']}/{payload['filename']}"
-    asset = create_media_asset(
+    asset = await run_in_threadpool(
+        create_media_asset,
         db,
         owner_user_id=current_user.id,
         provider=payload["provider"],

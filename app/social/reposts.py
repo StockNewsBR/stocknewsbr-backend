@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from app.database import SessionLocal
 from app.models import SocialRepost
@@ -48,14 +49,28 @@ def create_repost(post_id, user_id, quote_text=None):
                 quote_text=_normalize_quote_text(quote_text),
             )
             db.add(row)
-            db.commit()
-            db.refresh(row)
-            record_content_approved(
-                resolved_user_id,
-                content_type="repost",
-                content_id=row.id,
-                post_id=int(post_id),
-            )
+            try:
+                db.commit()
+            except IntegrityError:
+                # Concurrent repost from another thread won the insert race;
+                # uq_social_repost_post_user means the repost already exists.
+                db.rollback()
+                row = (
+                    db.query(SocialRepost)
+                    .filter(
+                        SocialRepost.post_id == int(post_id),
+                        SocialRepost.user_id == resolved_user_id,
+                    )
+                    .first()
+                )
+            else:
+                db.refresh(row)
+                record_content_approved(
+                    resolved_user_id,
+                    content_type="repost",
+                    content_id=row.id,
+                    post_id=int(post_id),
+                )
 
         return serialize_repost(row)
     finally:

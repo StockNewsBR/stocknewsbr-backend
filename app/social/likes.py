@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from app.database import SessionLocal
 from app.models import SocialLike
@@ -23,7 +24,12 @@ def like_post(post_id: int, user_id: int) -> int:
 
         if row is None:
             db.add(SocialLike(post_id=int(post_id), user_id=int(user_id)))
-            db.commit()
+            try:
+                db.commit()
+            except IntegrityError:
+                # Concurrent like from another thread won the insert race;
+                # uq_social_like_post_user means the like already exists.
+                db.rollback()
 
         return count_likes(post_id)
     finally:

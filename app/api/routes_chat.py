@@ -1,5 +1,7 @@
+import logging
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from starlette.concurrency import run_in_threadpool
 
 from app.core.csrf import allowed_web_origins, origin_from_header
 from app.core.settings import session_cookie_name
@@ -7,11 +9,13 @@ from app.database import SessionLocal
 from app.dependencies import require_active_plan
 from app.models import User
 from app.security import resolve_token_user
-from app.services.access_service import has_channel_access, refresh_user_access
+from app.services.access_service import has_channel_access
 from app.services.browser_ticket_service import consume_browser_ticket
 from app.services.symbol_registry import canonical_symbol
 from app.services.ticker_room_service import append_room_message, list_room_messages
 from app.system.room_websocket_manager import room_ws_manager
+
+logger = logging.getLogger(__name__)
 
 
 class ChatMessageRequest(BaseModel):
@@ -31,8 +35,6 @@ def _resolve_user_from_token(token: str | None):
     try:
         user = resolve_token_user(token, db)
 
-        refresh_user_access(user)
-
         if not user.is_active or not has_channel_access(user):
             return None
 
@@ -40,7 +42,16 @@ def _resolve_user_from_token(token: str | None):
             "id": user.id,
             "display_name": user.display_name or user.email,
         }
+    except HTTPException:
+        # Expected auth denials (bad/expired token, missing/unknown/revoked
+        # session, unknown user): fail closed. No stack trace, no token logged.
+        return None
     except Exception:
+        # Unexpected failure (DB unavailable, access/refresh crash). Fail
+        # closed, but log so it is not silently swallowed. The message and
+        # recorded traceback never include the token, Authorization header, or
+        # any secret/credential.
+        logger.exception("websocket auth resolution failed")
         return None
     finally:
         db.close()
@@ -67,7 +78,8 @@ async def chat_message(
     current_user: User = Depends(require_active_plan),
 ):
     symbol = canonical_symbol(symbol)
-    item = append_room_message(
+    item = await run_in_threadpool(
+        append_room_message,
         symbol=symbol,
         user_id=current_user.id,
         user_name=current_user.display_name or current_user.email,
@@ -125,18 +137,19 @@ async def websocket_chat(websocket: WebSocket, symbol: str):
         token = cookie_token
 
     if user is None:
-        user = _resolve_user_from_token(token)
+        user = await run_in_threadpool(_resolve_user_from_token, token)
 
     if user is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     await room_ws_manager.connect(symbol, websocket)
+    history = await run_in_threadpool(list_room_messages, symbol, limit=60)
     await websocket.send_json(
         {
             "type": "history",
             "symbol": symbol,
-            "items": list_room_messages(symbol, limit=60),
+            "items": history,
         }
     )
 
@@ -152,7 +165,8 @@ async def websocket_chat(websocket: WebSocket, symbol: str):
             text = str(payload.get("text") or "").strip()
             image_url = payload.get("image_url")
 
-            item = append_room_message(
+            item = await run_in_threadpool(
+                append_room_message,
                 symbol=symbol,
                 user_id=user["id"],
                 user_name=user["display_name"],

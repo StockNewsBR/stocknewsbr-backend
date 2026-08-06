@@ -516,5 +516,81 @@ class PublicMarketRouteTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["provider_status"], "empty_chart")
 
 
+class PublicBundlePartialFailureTests(unittest.TestCase):
+    """S5: news/ai_tools are optional enrichment layers with their own status
+    field. A provider/cache exception in either must degrade only that section
+    -- never turn a healthy quote/insight/chart into a 500 for the whole bundle."""
+
+    def _healthy_core_patches(self):
+        return [
+            patch.object(routes_public_market_live, "request_symbol_hydration"),
+            patch.object(
+                routes_public_market_live,
+                "cached_price_payloads",
+                return_value={"F": {"symbol": "F", "price": 14.9, "volume": 1_000_000, "source": "snapshot"}},
+            ),
+            patch.object(
+                routes_public_market_live, "public_market_insight", return_value={"symbol": "F", "score": 6.2}
+            ),
+            patch.object(
+                routes_public_market_live,
+                "public_market_chart",
+                return_value={"ticker": "F", "ohlc": [{"close": 14.9}], "series": [], "markers": [], "zones": [], "summary": {}},
+            ),
+            patch.object(routes_public_market_live, "get_symbol_analysis", return_value={}),
+            patch.object(routes_public_market_live, "hydration_status", return_value={}),
+        ]
+
+    def test_bundle_degrades_news_section_when_news_payload_raises(self):
+        patches = self._healthy_core_patches() + [
+            patch.object(
+                routes_public_market_live,
+                "build_public_news_payload",
+                side_effect=RuntimeError("news provider blew up"),
+            ),
+            patch.object(
+                routes_public_market_live,
+                "build_public_ai_tools_payload",
+                return_value={"tools": {"risk": []}, "status": "PENDING"},
+            ),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+        with self.assertLogs("app.api.routes_public_market_live", level="ERROR") as logs:
+            payload = routes_public_market_live.public_market_bundle("F", interval="1D")
+
+        self.assertEqual(payload["quote"]["price"], 14.9)
+        self.assertEqual(payload["insight"]["score"], 6.2)
+        self.assertEqual(payload["news"], {})
+        self.assertTrue(any("news payload failed" in message for message in logs.output))
+
+    def test_bundle_degrades_ai_tools_section_when_ai_tools_payload_raises(self):
+        patches = self._healthy_core_patches() + [
+            patch.object(
+                routes_public_market_live,
+                "build_public_news_payload",
+                return_value={"symbol": "F", "items": [], "count": 0},
+            ),
+            patch.object(
+                routes_public_market_live,
+                "build_public_ai_tools_payload",
+                side_effect=RuntimeError("ai tools provider blew up"),
+            ),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+        with self.assertLogs("app.api.routes_public_market_live", level="ERROR") as logs:
+            payload = routes_public_market_live.public_market_bundle("F", interval="1D")
+
+        self.assertEqual(payload["quote"]["price"], 14.9)
+        self.assertEqual(payload["insight"]["score"], 6.2)
+        self.assertEqual(payload["ai_tools"], {})
+        self.assertTrue(any("ai_tools payload failed" in message for message in logs.output))
+
+
 if __name__ == "__main__":
     unittest.main()
