@@ -119,6 +119,11 @@ STOP_EVENT = threading.Event()
 WORKERS_STARTED = False
 WORKERS_LOCK = threading.Lock()
 
+# How long shutdown waits for each background worker to finish its current
+# iteration. Workers sleep on STOP_EVENT, so a healthy one exits immediately;
+# this budget only covers a worker caught mid-iteration.
+WORKER_JOIN_TIMEOUT_SECONDS = 10.0
+
 
 def _env_flag(name: str, default: bool) -> bool:
     raw_value = os.getenv(name)
@@ -253,6 +258,43 @@ def _start_thread(name: str, target, *args):
         return True
 
 
+def _stop_background_threads(timeout: float = WORKER_JOIN_TIMEOUT_SECONDS) -> list[str]:
+    """Signal every background worker and wait for it to actually exit.
+
+    Setting STOP_EVENT alone left shutdown racing the workers. Two concrete
+    defects followed: the lifespan returned while a worker could still be
+    holding a DB session mid-iteration, and the next startup's
+    ``STOP_EVENT.clear()`` could revive a thread from the previous cycle that
+    had not yet observed the ``set()`` — leaked, unowned, and invisible to
+    ``_start_thread``, which only skips creation while the stale thread is
+    alive.
+
+    Joining makes shutdown a completed handover. The returned names are the
+    workers that refused to exit within the timeout, so a wedged thread is
+    reported rather than silently leaked.
+    """
+    STOP_EVENT.set()
+
+    with THREAD_LOCK:
+        threads = list(BACKGROUND_THREADS.items())
+        BACKGROUND_THREADS.clear()
+
+    stragglers = []
+    for name, thread in threads:
+        thread.join(timeout=timeout)
+        if thread.is_alive():
+            stragglers.append(name)
+
+    if stragglers:
+        logger.warning(
+            "Background workers did not exit within %ss | threads=%s",
+            timeout,
+            ",".join(stragglers),
+        )
+
+    return stragglers
+
+
 def referral_worker(stop_event: threading.Event):
     while not stop_event.is_set():
         db = None
@@ -339,6 +381,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        # Signal first so every worker starts winding down while the
+        # self-managed subsystems below are stopped, then join at the end.
         STOP_EVENT.set()
         if snapshot_worker_started:
             try:
@@ -354,6 +398,20 @@ async def lifespan(app: FastAPI):
                 stop_quote_warmup()
             except Exception:
                 logger.exception("Quote warmup shutdown failed")
+
+        # The conclusion pool is built lazily on the first bundle request and
+        # its queue can hold a backlog of provider calls that each run to a
+        # 20s timeout. cancel_futures drops that backlog instead of letting it
+        # run against a process that is going away; the next request rebuilds
+        # the pool, so this stays safe across an in-process restart.
+        try:
+            from app.ai.conclusion_generator import shutdown_executor
+
+            shutdown_executor(wait=False, cancel_futures=True)
+        except Exception:
+            logger.exception("Conclusion executor shutdown failed")
+
+        _stop_background_threads()
 
         with WORKERS_LOCK:
             WORKERS_STARTED = False

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sqlalchemy.exc import IntegrityError
+
 from app.database import SessionLocal
 from app.models import SocialFollow
 from app.social.db import ensure_social_tables
@@ -30,7 +32,13 @@ def follow(user, target):
             target_user_id=int(target),
         )
         db.add(row)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # Concurrent follow from another threadpool worker won the insert
+            # race; uq_social_follow_user_target means the follow already
+            # exists. Following is idempotent, so the outcome is unchanged.
+            db.rollback()
         return {"status": "following"}
     finally:
         db.close()

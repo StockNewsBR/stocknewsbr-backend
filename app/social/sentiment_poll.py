@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sqlalchemy.exc import IntegrityError
+
 from app.database import SessionLocal
 from app.models import SocialSentimentVote
 from app.social.db import ensure_social_tables
@@ -50,7 +52,26 @@ def vote(ticker: str, sentiment: str, user_id: int | None = None):
             )
             db.add(row)
 
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # Concurrent vote from another threadpool worker won the insert
+            # race; uq_social_sentiment_vote_ticker_user means the row already
+            # exists. vote() is an upsert, so resolve to the row that actually
+            # won and apply this caller's sentiment to it rather than dropping
+            # the vote on the floor.
+            db.rollback()
+            row = (
+                db.query(SocialSentimentVote)
+                .filter(
+                    SocialSentimentVote.ticker == ticker,
+                    SocialSentimentVote.user_id == resolved_user_id,
+                )
+                .first()
+            )
+            if row is not None:
+                row.sentiment = sentiment
+                db.commit()
     finally:
         db.close()
 

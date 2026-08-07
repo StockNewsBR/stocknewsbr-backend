@@ -1,7 +1,9 @@
 import logging
 import math
 import re
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 import os as _os_premium_gate
@@ -57,6 +59,19 @@ from app.system.symbol_hydration import get_symbol_analysis, hydration_status, r
 
 
 logger = logging.getLogger(__name__)
+
+# Bounded so the alias memo can never grow without limit: the tradable universe
+# is a few thousand symbols, and anything beyond that is junk input we do not
+# want to retain.
+_ALIAS_CACHE_MAXSIZE = 4096
+
+# Per-request candle memo, populated only for the duration of one
+# public_market_bundle call. A ContextVar (not a module dict) so concurrent
+# requests on different threadpool workers never observe each other's rows, and
+# so nothing survives the request that created it.
+_CHART_ROWS_MEMO: ContextVar[dict | None] = ContextVar(
+    "public_market_chart_rows_memo", default=None
+)
 
 router = APIRouter(prefix="/public", tags=["Public Market Live"])
 # BRFS3/JBSS3 left this blocklist: they now alias to live successors
@@ -254,11 +269,21 @@ def _response_symbol(symbol: str) -> str:
     return value
 
 
-def _symbol_aliases(symbol: str) -> list[str]:
-    raw = _normalize_public_symbol(symbol)
-    if not raw:
-        return []
+@lru_cache(maxsize=_ALIAS_CACHE_MAXSIZE)
+def _symbol_aliases_cached(raw: str) -> tuple[str, ...]:
+    """Expand one already-normalized symbol into every provider spelling.
 
+    Memoized: this walks the whole alias map and runs several regexes per
+    candidate, and it depends only on registry tables that are built once at
+    import and never mutated. A single /public/market/bundle request asked for
+    the same ticker's aliases 14 times (quote resolution, chart load, the RVOL
+    series and the metrics contract each expanded independently), so this was
+    pure repeated work on the hottest public endpoint.
+
+    Keyed on the normalized symbol, not the raw input, so "petr4", "PETR4" and
+    " PETR4 " share one entry. Returns a tuple; the public wrapper hands each
+    caller its own list so nobody can mutate the shared entry.
+    """
     display = get_display_symbol(raw)
     aliases = [*canonical_symbol_aliases(raw), raw, display]
     for candidate in list(aliases):
@@ -277,7 +302,18 @@ def _symbol_aliases(symbol: str) -> list[str]:
         if re.match(r"^[A-Z]{4}(3|4|5|6|11)$", base) or re.match(r"^[A-Z]{4,5}34$", base):
             aliases.append(f"{base}.SA")
 
-    return _dedupe_alias_symbols(aliases)
+    return tuple(_dedupe_alias_symbols(aliases))
+
+
+def _symbol_aliases(symbol: str) -> list[str]:
+    # Normalization stays outside the cache: _normalize_public_symbol marks
+    # symbol cooldowns for ambiguous/invalid input, and that side effect must
+    # still fire on every lookup.
+    raw = _normalize_public_symbol(symbol)
+    if not raw:
+        return []
+
+    return list(_symbol_aliases_cached(raw))
 
 
 def _identity_forms(value) -> set[str]:
@@ -1569,6 +1605,34 @@ def public_market_bundle(
     candles: str | None = None,
     is_premium: bool = Depends(resolve_premium_entitlement),
 ):
+    # The insight and chart sections each resolve their own candles, which made
+    # the bundle load the same series twice. Hold the memo for exactly this
+    # request and always release it, so nothing carries over to the next one.
+    token = _CHART_ROWS_MEMO.set({})
+    try:
+        return _public_market_bundle_impl(
+            symbol,
+            interval=interval,
+            limit=limit,
+            range_value=range_value,
+            locale=locale,
+            candles=candles,
+            is_premium=is_premium,
+        )
+    finally:
+        _CHART_ROWS_MEMO.reset(token)
+
+
+def _public_market_bundle_impl(
+    symbol: str,
+    *,
+    interval: str,
+    limit: int,
+    range_value: str | None,
+    locale: str,
+    candles: str | None,
+    is_premium: bool,
+):
     chart_interval = _normalize_candle_interval(candles) or _normalize_chart_interval(interval, range_value)
     safe_limit = max(1, min(int(limit or 6), 20))
     if is_ambiguous_crypto_symbol(symbol):
@@ -1737,6 +1801,27 @@ _CANDLE_INTERVAL_WARM_RANGE = {
 
 
 def _load_chart_data_fast(ticker: str, interval: str):
+    """Resolve one candle series, deduplicated within a single bundle request.
+
+    ``public_market_insight`` and ``public_market_chart`` each resolve their own
+    candles, so a bundle asked the loader for the very same (ticker, interval)
+    twice — two alias walks and two cache reads for a series already in memory.
+
+    The memo is only active while ``public_market_bundle`` holds it, so
+    duplicates inside one request collapse and nothing is retained between
+    requests. Outside a bundle every call still reads through.
+    """
+    memo = _CHART_ROWS_MEMO.get()
+    if memo is None:
+        return _load_chart_data_uncached(ticker, interval)
+
+    key = (str(ticker), str(interval))
+    if key not in memo:
+        memo[key] = _load_chart_data_uncached(ticker, interval)
+    return memo[key]
+
+
+def _load_chart_data_uncached(ticker: str, interval: str):
     rows = load_public_chart_rows(_symbol_aliases(ticker), interval)
     if not rows:
         warm_range = _CANDLE_INTERVAL_WARM_RANGE.get(str(interval or "").upper().strip())
