@@ -300,6 +300,9 @@ class TelegramLinkToken(Base):
 
 class SubscriptionAuditLog(Base):
     __tablename__ = "subscription_audit_logs"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_event_id", name="uq_subscription_audit_provider_event"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)

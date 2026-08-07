@@ -344,7 +344,7 @@ class Mission31DRootApiFinancialIntegrityTests(unittest.TestCase):
         self.assertIsNone(bundle["news"]["items"][0]["score"])
         self.assertIsNone(bundle["ai_tools"]["tools"][0]["confidence"])
 
-    def test_runtime_schema_no_longer_owns_stripe_provider_event_id_ddl(self):
+    def test_runtime_schema_guarantees_stripe_provider_event_id_unique_index(self):
         engine = create_engine("sqlite:///:memory:", future=True)
         with engine.begin() as conn:
             conn.execute(
@@ -354,6 +354,7 @@ class Mission31DRootApiFinancialIntegrityTests(unittest.TestCase):
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         user_id INTEGER,
                         provider VARCHAR NOT NULL,
+                        provider_event_id VARCHAR,
                         event_type VARCHAR NOT NULL,
                         payload_excerpt TEXT
                     )
@@ -365,15 +366,15 @@ class Mission31DRootApiFinancialIntegrityTests(unittest.TestCase):
         columns = {column["name"] for column in inspect(engine).get_columns("subscription_audit_logs")}
         indexes = {index["name"] for index in inspect(engine).get_indexes("subscription_audit_logs")}
 
-        self.assertNotIn("provider_event_id", columns)
-        self.assertNotIn("uq_subscription_audit_provider_event", indexes)
+        self.assertIn("provider_event_id", columns)
+        self.assertIn("uq_subscription_audit_provider_event", indexes)
 
-    def test_subscription_audit_model_keeps_nullable_event_id_without_unique_constraint(self):
+    def test_subscription_audit_model_enforces_unique_constraint(self):
         table = SubscriptionAuditLog.__table__
 
         self.assertIn("provider_event_id", table.c)
         self.assertTrue(table.c.provider_event_id.nullable)
-        self.assertFalse(
+        self.assertTrue(
             any(
                 isinstance(constraint, UniqueConstraint)
                 and set(constraint.columns.keys()) == {"provider", "provider_event_id"}

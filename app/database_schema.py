@@ -388,6 +388,12 @@ INDEX_PATCHES = {
             "default": "CREATE INDEX ix_auth_audit_event_ip_created ON auth_audit_events (event, ip_hash, created_at)",
         },
     },
+    "subscription_audit_logs": {
+        "uq_subscription_audit_provider_event": {
+            "sqlite": "CREATE UNIQUE INDEX IF NOT EXISTS uq_subscription_audit_provider_event ON subscription_audit_logs (provider, provider_event_id) WHERE provider_event_id IS NOT NULL",
+            "default": "CREATE UNIQUE INDEX IF NOT EXISTS uq_subscription_audit_provider_event ON subscription_audit_logs (provider, provider_event_id) WHERE provider_event_id IS NOT NULL",
+        },
+    },
 }
 
 
@@ -553,6 +559,7 @@ REQUIRED_PRODUCTION_INDEXES = {
     },
     "subscription_audit_logs": {
         "ix_subscription_audit_logs_user_id": ("user_id",),
+        "uq_subscription_audit_provider_event": ("provider", "provider_event_id"),
     },
 }
 
@@ -563,6 +570,7 @@ REQUIRED_PRODUCTION_UNIQUE_INDEXES = {
     "user_sessions": {"ix_user_sessions_session_id"},
     "login_challenges": {"ix_login_challenges_login_token"},
     "telegram_link_tokens": {"ix_telegram_link_tokens_link_code"},
+    "subscription_audit_logs": {"uq_subscription_audit_provider_event"},
 }
 
 REQUIRED_PRODUCTION_RLS_POLICIES = {
