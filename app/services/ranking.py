@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import threading
 import time
 
 from fastapi import APIRouter, Depends
@@ -47,6 +48,47 @@ _RANK_CACHE = {
     "timestamp": 0.0,
     "snapshot_signature": "",
 }
+
+# /ranking and /ranking/top are plain `def` handlers, so FastAPI serves them
+# from its threadpool and several requests touch _RANK_CACHE concurrently.
+#
+# _RANK_CACHE_LOCK makes each read and each publish atomic. Without it the
+# three-statement publish below was observable half-done: a reader landing
+# after "data" was replaced but before "snapshot_signature" caught up saw the
+# new rows validated against the previous signature — exactly what the
+# signature exists to prevent. This lock is deliberately never held across the
+# ranking computation.
+#
+# _RANK_REFRESH_LOCK coalesces concurrent misses so one thread recomputes while
+# the rest wait and then read the fresh entry, instead of every arrival
+# rebuilding the ranking independently.
+_RANK_CACHE_LOCK = threading.RLock()
+_RANK_REFRESH_LOCK = threading.RLock()
+
+
+def _read_rank_cache(snapshot_signature: str, now: float):
+    """Return the cached rows when the entry is fresh and matches, else None.
+
+    All three fields are read under one lock so the freshness decision is made
+    against a single consistent view of the entry.
+    """
+    with _RANK_CACHE_LOCK:
+        data = _RANK_CACHE["data"]
+        signature = _RANK_CACHE.get("snapshot_signature")
+        timestamp = _RANK_CACHE["timestamp"]
+
+        if data and signature == snapshot_signature and now - timestamp < CACHE_TTL:
+            return list(data)
+
+    return None
+
+
+def _write_rank_cache(data, timestamp: float, snapshot_signature: str) -> None:
+    """Publish an entry atomically; readers never observe it half-updated."""
+    with _RANK_CACHE_LOCK:
+        _RANK_CACHE["data"] = list(data)
+        _RANK_CACHE["timestamp"] = timestamp
+        _RANK_CACHE["snapshot_signature"] = snapshot_signature
 
 _ACTIONABLE_SIGNALS = {"BUY", "SELL", "SHORT", "COVER"}
 _BLOCKED_DATA_QUALITIES = {
@@ -671,66 +713,65 @@ def _get_symbol_frame(data, symbol):
 
 
 def generate_ranking(force_refresh: bool = False, allow_external_fetch: bool = False):
-    now = time.time()
     snapshot_info = get_snapshot_info()
     snapshot_signature = _snapshot_signature(snapshot_info)
 
-    if (
-        not force_refresh
-        and _RANK_CACHE["data"]
-        and _RANK_CACHE.get("snapshot_signature") == snapshot_signature
-        and now - _RANK_CACHE["timestamp"] < CACHE_TTL
-    ):
-        return list(_RANK_CACHE["data"])
+    if not force_refresh:
+        cached = _read_rank_cache(snapshot_signature, time.time())
+        if cached is not None:
+            return cached
 
-    snapshot_results = _normalize_snapshot_ranking(snapshot_info)
+    # Serialize the rebuild so concurrent misses do not each recompute the
+    # whole ranking. Losers block here, then find the entry the winner just
+    # published on the re-check below. _RANK_CACHE_LOCK is not held across any
+    # of this work — only the individual read/publish steps take it.
+    with _RANK_REFRESH_LOCK:
+        if not force_refresh:
+            cached = _read_rank_cache(snapshot_signature, time.time())
+            if cached is not None:
+                return cached
 
-    if snapshot_results:
-        _RANK_CACHE["data"] = list(snapshot_results)
-        _RANK_CACHE["timestamp"] = now
-        _RANK_CACHE["snapshot_signature"] = snapshot_signature
-        return list(snapshot_results)
+        now = time.time()
+        snapshot_results = _normalize_snapshot_ranking(snapshot_info)
 
-    if (
-        not allow_external_fetch
-        or not ALLOW_NETWORK_FALLBACK
-        or current_provider_call_source() == "http"
-    ):
-        _RANK_CACHE["data"] = []
-        _RANK_CACHE["timestamp"] = now
-        _RANK_CACHE["snapshot_signature"] = snapshot_signature
-        return []
+        if snapshot_results:
+            _write_rank_cache(snapshot_results, now, snapshot_signature)
+            return list(snapshot_results)
 
-    data = fetch_market_data()
+        if (
+            not allow_external_fetch
+            or not ALLOW_NETWORK_FALLBACK
+            or current_provider_call_source() == "http"
+        ):
+            _write_rank_cache([], now, snapshot_signature)
+            return []
 
-    if data is None:
-        _RANK_CACHE["data"] = []
-        _RANK_CACHE["timestamp"] = now
-        _RANK_CACHE["snapshot_signature"] = snapshot_signature
-        return []
+        data = fetch_market_data()
 
-    results = []
+        if data is None:
+            _write_rank_cache([], now, snapshot_signature)
+            return []
 
-    for symbol in SYMBOLS:
-        try:
-            frame = _get_symbol_frame(data, symbol)
-            score = calculate_score(symbol, frame)
+        results = []
 
-            if score:
-                normalized_score = _normalize_calculated_ranking_item(score)
-                if normalized_score:
-                    results.append(normalized_score)
-        except Exception as exc:
-            logger.warning("Ranking fallback error %s: %s", symbol, exc)
-            continue
+        for symbol in SYMBOLS:
+            try:
+                frame = _get_symbol_frame(data, symbol)
+                score = calculate_score(symbol, frame)
 
-    results.sort(key=_ranking_order_key)
+                if score:
+                    normalized_score = _normalize_calculated_ranking_item(score)
+                    if normalized_score:
+                        results.append(normalized_score)
+            except Exception as exc:
+                logger.warning("Ranking fallback error %s: %s", symbol, exc)
+                continue
 
-    _RANK_CACHE["data"] = list(results)
-    _RANK_CACHE["timestamp"] = now
-    _RANK_CACHE["snapshot_signature"] = snapshot_signature
+        results.sort(key=_ranking_order_key)
 
-    return results
+        _write_rank_cache(results, now, snapshot_signature)
+
+        return results
 
 
 def get_ranking(force_refresh: bool = False, allow_external_fetch: bool = False):
