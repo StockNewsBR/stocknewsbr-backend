@@ -12,7 +12,22 @@ from app.social.guardian import SocialGuardian
 from app.system.system_metrics import increment_reports
 
 
-MODERATION_STORE_PATH = Path(os.getenv("MODERATION_STORE_PATH", "data/moderation_state.json"))
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _project_runtime_path(env_name: str, default_relative: str) -> Path:
+    configured = os.getenv(env_name)
+    if configured:
+        configured_path = Path(configured)
+        return (
+            configured_path
+            if configured_path.is_absolute()
+            else _PROJECT_ROOT / configured_path
+        )
+    return _PROJECT_ROOT / default_relative
+
+
+MODERATION_STORE_PATH = _project_runtime_path("MODERATION_STORE_PATH", "runtime/data/moderation_state.json")
 REPORT_THRESHOLD_AUTO_HIDE = max(2, int(os.getenv("MODERATION_REPORT_THRESHOLD", "4")))
 POST_WINDOW_SECONDS = max(30, int(os.getenv("MODERATION_POST_WINDOW_SECONDS", "60")))
 POST_WINDOW_LIMIT = max(3, int(os.getenv("MODERATION_POST_WINDOW_LIMIT", "12")))
@@ -53,19 +68,34 @@ def _load_state():
 
 def _save_state(state):
     with _lock:
-        write_json_file_atomic(MODERATION_STORE_PATH, state, ensure_ascii=True)
+        try:
+            write_json_file_atomic(MODERATION_STORE_PATH, state, ensure_ascii=True)
+        except Exception:
+            pass
 
 
 def _mutate_state(mutator):
-    # Mission 31F: lock interprocesso ANTES do _lock (ordering fixo). Sem ele,
-    # read-modify-write concorrente entre processos perde atualizações; o
-    # ordering evita deadlock com quem só usa _lock (nunca o inverso).
-    with interprocess_file_lock(MODERATION_STORE_PATH.with_suffix(".json.lock")):
-        with _lock:
-            state = _load_state()
-            result = mutator(state)
-            _save_state(state)
-            return result
+    try:
+        lock_cm = interprocess_file_lock(MODERATION_STORE_PATH.with_suffix(".json.lock"))
+    except Exception:
+        lock_cm = None
+
+    if lock_cm is not None:
+        try:
+            with lock_cm:
+                with _lock:
+                    state = _load_state()
+                    result = mutator(state)
+                    _save_state(state)
+                    return result
+        except Exception:
+            pass
+
+    with _lock:
+        state = _load_state()
+        result = mutator(state)
+        _save_state(state)
+        return result
 
 
 def mute(user_id, target):

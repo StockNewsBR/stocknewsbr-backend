@@ -15,9 +15,25 @@ from app.ai.ai_specialists import OFFICIAL_AI_TOOL_KEYS
 from app.cache.snapshot_cache import get_snapshot
 
 AI_TAB_AUDIT_DIR = Path("runtime/ai_tabs")
-AI_TAB_AUDIT_EXPORT_DIR = AI_TAB_AUDIT_DIR / "exports"
-AI_TAB_AUDIT_DATASET_DIR = AI_TAB_AUDIT_DIR / "datasets"
-AI_TAB_AUDIT_HISTORY_DIR = AI_TAB_AUDIT_DIR / "history"
+AI_TAB_AUDIT_EXPORT_DIR = Path("runtime/ai_tabs/exports")
+AI_TAB_AUDIT_DATASET_DIR = Path("runtime/ai_tabs/datasets")
+AI_TAB_AUDIT_HISTORY_DIR = Path("runtime/ai_tabs/history")
+
+def _get_audit_export_dir() -> Path:
+    if AI_TAB_AUDIT_EXPORT_DIR != Path("runtime/ai_tabs/exports"):
+        return Path(AI_TAB_AUDIT_EXPORT_DIR)
+    return AI_TAB_AUDIT_DIR / "exports"
+
+def _get_audit_dataset_dir() -> Path:
+    if AI_TAB_AUDIT_DATASET_DIR != Path("runtime/ai_tabs/datasets"):
+        return Path(AI_TAB_AUDIT_DATASET_DIR)
+    return AI_TAB_AUDIT_DIR / "datasets"
+
+def _get_audit_history_dir() -> Path:
+    if AI_TAB_AUDIT_HISTORY_DIR != Path("runtime/ai_tabs/history"):
+        return Path(AI_TAB_AUDIT_HISTORY_DIR)
+    return AI_TAB_AUDIT_DIR / "history"
+
 AI_TAB_AUDIT_HISTORY_LIMIT = 48
 EXPECTED_TOOLS = list(OFFICIAL_AI_TOOL_KEYS)
 REQUIRED_FIELDS = [
@@ -91,9 +107,9 @@ _history: List[Dict[str, Any]] = []
 
 def _ensure_report_dir() -> None:
     AI_TAB_AUDIT_DIR.mkdir(parents=True, exist_ok=True)
-    AI_TAB_AUDIT_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    AI_TAB_AUDIT_DATASET_DIR.mkdir(parents=True, exist_ok=True)
-    AI_TAB_AUDIT_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    _get_audit_export_dir().mkdir(parents=True, exist_ok=True)
+    _get_audit_dataset_dir().mkdir(parents=True, exist_ok=True)
+    _get_audit_history_dir().mkdir(parents=True, exist_ok=True)
 
 
 def _safe_rows(rows: Any) -> List[Dict[str, Any]]:
@@ -998,12 +1014,12 @@ def _export_audit_artifacts(
         )
 
     manifest = {
-        "summary_csv": str(AI_TAB_AUDIT_EXPORT_DIR / "latest_audit_summary.csv"),
-        "dataset_csv": str(AI_TAB_AUDIT_DATASET_DIR / "latest_audit_dataset.csv"),
-        "comparisons_csv": str(AI_TAB_AUDIT_HISTORY_DIR / "latest_audit_comparisons.csv"),
-        "summary_snapshot_csv": str(AI_TAB_AUDIT_EXPORT_DIR / f"audit_summary-{timestamp}.csv"),
-        "dataset_snapshot_csv": str(AI_TAB_AUDIT_DATASET_DIR / f"audit_dataset-{timestamp}.csv"),
-        "comparisons_snapshot_csv": str(AI_TAB_AUDIT_HISTORY_DIR / f"audit_comparisons-{timestamp}.csv"),
+        "summary_csv": str(_get_audit_export_dir() / "latest_audit_summary.csv"),
+        "dataset_csv": str(_get_audit_dataset_dir() / "latest_audit_dataset.csv"),
+        "comparisons_csv": str(_get_audit_history_dir() / "latest_audit_comparisons.csv"),
+        "summary_snapshot_csv": str(_get_audit_export_dir() / f"audit_summary-{timestamp}.csv"),
+        "dataset_snapshot_csv": str(_get_audit_dataset_dir() / f"audit_dataset-{timestamp}.csv"),
+        "comparisons_snapshot_csv": str(_get_audit_history_dir() / f"audit_comparisons-{timestamp}.csv"),
     }
 
     summary_fields = list(summary_rows[0].keys()) if summary_rows else []

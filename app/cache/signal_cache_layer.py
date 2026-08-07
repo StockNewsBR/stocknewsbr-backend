@@ -105,9 +105,13 @@ class SignalCacheLayer:
 
             new_signals = [deepcopy(item) for item in signals if isinstance(item, dict)]
 
+            disk_ts = float(timestamp or 0.0)
             with self._lock:
+                if disk_ts < self._timestamp:
+                    self._disk_mtime = stable_mtime or file_mtime
+                    return
                 self._signals = new_signals
-                self._timestamp = float(timestamp or 0.0)
+                self._timestamp = disk_ts
                 self._disk_mtime = stable_mtime or file_mtime
         except Exception as exc:
             logger.exception("Signal cache load error: %s", exc)

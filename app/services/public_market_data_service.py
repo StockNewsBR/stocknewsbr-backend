@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 import json
 import math
 import os
@@ -550,14 +551,8 @@ def _fresh_enough(entry: dict, allow_stale: bool, max_age_seconds: int, retentio
     return allow_stale
 
 
-def _symbol_aliases(symbol: str) -> list[str]:
-    if is_ambiguous_crypto_symbol(symbol):
-        return []
-    raw = canonical_symbol(symbol) or sanitize_market_symbol(symbol, allow_provider_symbols=True) or ""
-    if not raw:
-        if symbol:
-            mark_symbol_cooldown(symbol, "invalid_symbol")
-        return []
+@lru_cache(maxsize=1024)
+def _symbol_aliases_cached(raw: str) -> tuple[str, ...]:
     compact = raw.replace(".SA", "").replace("-", "").replace("/", "")
     aliases = [*canonical_symbol_aliases(raw), raw, compact]
     if compact and compact != raw:
@@ -576,7 +571,19 @@ def _symbol_aliases(symbol: str) -> list[str]:
         if normalized and normalized not in seen:
             seen.add(normalized)
             result.append(normalized)
-    return result
+    return tuple(result)
+
+
+def _symbol_aliases(symbol: str) -> list[str]:
+    if is_ambiguous_crypto_symbol(symbol):
+        return []
+    raw = canonical_symbol(symbol) or sanitize_market_symbol(symbol, allow_provider_symbols=True) or ""
+    if not raw:
+        if symbol:
+            mark_symbol_cooldown(symbol, "invalid_symbol")
+        return []
+    return list(_symbol_aliases_cached(raw))
+
 
 
 def _payload_matches_symbol(payload: dict, symbol: str) -> bool:

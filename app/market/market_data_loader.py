@@ -1239,12 +1239,19 @@ def _extract_single_ticker_frame(data: Optional[pd.DataFrame], symbol: str, is_m
         return None
 
     if hasattr(columns, "levels"):
-        available = set(columns.get_level_values(0))
+        level0 = set(columns.get_level_values(0))
+        level1 = set(columns.get_level_values(1)) if len(getattr(columns, "levels", [])) > 1 else set()
 
-        if normalized_symbol not in available:
+        if normalized_symbol in level0:
+            frame = data[normalized_symbol].copy()
+        elif normalized_symbol in level1:
+            frame = data.xs(normalized_symbol, axis=1, level=1).copy()
+        elif symbol in level0:
+            frame = data[symbol].copy()
+        elif symbol in level1:
+            frame = data.xs(symbol, axis=1, level=1).copy()
+        else:
             return None
-
-        frame = data[normalized_symbol].copy()
     else:
         if is_multi:
             return None
