@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import RLock, Thread
@@ -32,6 +34,12 @@ _RUNNING: set[str] = set()
 _CACHE: dict[str, dict[str, Any]] = {}
 _LOADED = False
 _CACHE_MTIME_NS = -1
+
+# Per-request hydration view, held only while request_scoped_analysis() is
+# active. See that helper for why one request must read each entry once.
+_ANALYSIS_MEMO: ContextVar[dict | None] = ContextVar(
+    "symbol_analysis_request_memo", default=None
+)
 
 
 def _cache_path() -> Path:
@@ -149,10 +157,49 @@ def _persist() -> None:
         logger.exception("Failed to persist on-demand symbol analysis")
 
 
-def get_symbol_analysis(symbol: str, timeframe: str = "1D") -> dict[str, Any]:
+@contextmanager
+def request_scoped_analysis():
+    """Serve one consistent hydration view for the duration of one request.
+
+    A single /public/market/bundle call reads the same entry four times, from
+    resolve_symbol_context, hydration_status, the bundle handler itself and
+    build_public_ai_tools_payload. Each read costs a _load() (a stat, plus a
+    full JSON parse whenever the file changed) and a trip through _LOCK.
+
+    Beyond the repeated work there is a consistency edge: the hydration worker
+    writes this cache from another thread, so a worker settling mid-request
+    makes the response carry a PENDING hydration block next to an already-READY
+    ai_tools section. Reading once and reusing that view keeps one response
+    internally consistent.
+
+    ContextVar rather than a module dict, so concurrent threadpool workers never
+    share a view and nothing survives the request that created it.
+    """
+    token = _ANALYSIS_MEMO.set({})
+    try:
+        yield
+    finally:
+        _ANALYSIS_MEMO.reset(token)
+
+
+def _read_symbol_analysis(symbol: str, timeframe: str = "1D") -> dict[str, Any]:
     _load()
     with _LOCK:
         return dict(_CACHE.get(_key(symbol, timeframe)) or {})
+
+
+def get_symbol_analysis(symbol: str, timeframe: str = "1D") -> dict[str, Any]:
+    memo = _ANALYSIS_MEMO.get()
+    if memo is None:
+        return _read_symbol_analysis(symbol, timeframe)
+
+    key = _key(symbol, timeframe)
+    if key not in memo:
+        memo[key] = _read_symbol_analysis(symbol, timeframe)
+
+    # Same contract as the unmemoized read: every caller gets its own top-level
+    # dict, so nobody can mutate the view the rest of the request will see.
+    return dict(memo[key])
 
 
 def resolve_symbol_context(symbol: str, timeframe: str = "1D") -> dict[str, Any]:

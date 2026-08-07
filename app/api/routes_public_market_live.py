@@ -55,7 +55,7 @@ from app.services.symbol_registry import (
 )
 from app.services.symbol_sanitizer import mark_symbol_cooldown, sanitize_market_symbol
 from app.system.system_metrics import record_cache_access
-from app.system.symbol_hydration import get_symbol_analysis, hydration_status, request_symbol_hydration, resolve_symbol_context
+from app.system.symbol_hydration import get_symbol_analysis, hydration_status, request_scoped_analysis, request_symbol_hydration, resolve_symbol_context
 
 
 logger = logging.getLogger(__name__)
@@ -1605,20 +1605,24 @@ def public_market_bundle(
     candles: str | None = None,
     is_premium: bool = Depends(resolve_premium_entitlement),
 ):
-    # The insight and chart sections each resolve their own candles, which made
-    # the bundle load the same series twice. Hold the memo for exactly this
-    # request and always release it, so nothing carries over to the next one.
+    # Two request-scoped memos, both released on the way out:
+    #  - candles: insight and chart each resolved their own rows, so the bundle
+    #    loaded the same series twice.
+    #  - hydration: four call sites read the same entry, and reading once also
+    #    keeps the response's status fields consistent with each other when the
+    #    hydration worker settles mid-request.
     token = _CHART_ROWS_MEMO.set({})
     try:
-        return _public_market_bundle_impl(
-            symbol,
-            interval=interval,
-            limit=limit,
-            range_value=range_value,
-            locale=locale,
-            candles=candles,
-            is_premium=is_premium,
-        )
+        with request_scoped_analysis():
+            return _public_market_bundle_impl(
+                symbol,
+                interval=interval,
+                limit=limit,
+                range_value=range_value,
+                locale=locale,
+                candles=candles,
+                is_premium=is_premium,
+            )
     finally:
         _CHART_ROWS_MEMO.reset(token)
 
