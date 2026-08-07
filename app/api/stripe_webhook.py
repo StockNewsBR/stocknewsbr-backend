@@ -373,12 +373,14 @@ def _subscription_id_for_event(data: dict, event_type: str) -> str | None:
     return _optional_stripe_id(data, "subscription")
 
 
-def _resolve_user(db: Session, data: dict, event_type: str):
+def _resolve_user(db: Session, data: dict, event_type: str, for_update: bool = False):
     user_id = _metadata_user_id(data)
     customer_id = _optional_stripe_id(data, "customer")
     subscription_id = _subscription_id_for_event(data, event_type)
 
     query = db.query(User)
+    if for_update:
+        query = query.with_for_update(of=User)
 
     if event_type in {"customer.subscription.deleted", "invoice.payment_failed"}:
         if subscription_id:
@@ -424,14 +426,16 @@ def _stripe_apply_state_change_locked(
     activation_context,
     payload_excerpt,
 ):
-    # S1: the whole lock-windowed state change + commit runs off the event
-    # loop. The await on _validate_activation_event stays on the loop because
-    # it may await the Stripe SDK (already offloaded via run_in_threadpool).
+    # S1: thread lock for intra-process concurrency; DB row lock (with_for_update)
+    # and provider_event_id DB unique constraint provide cross-process safety.
     with _STRIPE_WEBHOOK_LOCK:
         if _stripe_event_already_processed(db, event_id, event_type):
             return {"status": "ok", "duplicate": True}
 
-        user = _resolve_user(db, data, event_type)
+        user = _resolve_user(db, data, event_type, for_update=True)
+        if _stripe_event_already_processed(db, event_id, event_type):
+            return {"status": "ok", "duplicate": True}
+
         activated_subscription = False
         product_id = _metadata(data).get("product_id")
         customer_id = None

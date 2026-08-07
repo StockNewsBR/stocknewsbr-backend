@@ -502,6 +502,32 @@ class StripeWebhookAtomicityTests(unittest.TestCase):
         ).count()
         self.assertEqual(count, 1)
 
+    def test_stripe_concurrent_cross_process_executions_idempotent(self):
+        """Duas chamadas simulando sessões/processos distintos mantêm a idempotência sem duplicar o log."""
+        import concurrent.futures
+
+        def _execute_webhook():
+            return self._make_request()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            fut1 = executor.submit(_execute_webhook)
+            fut2 = executor.submit(_execute_webhook)
+            r1 = fut1.result()
+            r2 = fut2.result()
+
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r2.status_code, 200)
+
+        results = [r1.json(), r2.json()]
+        duplicates = [res.get("duplicate") for res in results if res.get("duplicate")]
+        # Exatamente 1 das respostas deve indicar duplicate
+        self.assertEqual(len(duplicates), 1)
+
+        count = self.db.query(SubscriptionAuditLog).filter(
+            SubscriptionAuditLog.provider_event_id == self.event_id
+        ).count()
+        self.assertEqual(count, 1)
+
     def test_stripe_different_integrity_error_not_duplicate(self):
         """IntegrityError real de origem diferente não retorna duplicate=true."""
         self.event["id"] = "evt_non_duplicate_integrity_31d"
