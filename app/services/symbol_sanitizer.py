@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -7,6 +8,11 @@ import time
 from pathlib import Path
 from threading import RLock
 from typing import Any
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 from app.services.symbol_registry import CRYPTO_BASES
 from app.services.symbol_registry import US_EXCHANGE_BY_SYMBOL
@@ -46,6 +52,41 @@ _shared_file_sig: tuple[int, int] | None = None
 _last_shared_sync: float = 0.0
 
 
+@contextlib.contextmanager
+def _cross_process_file_lock():
+    lock_file = _COOLDOWN_FILE.with_suffix(".lock")
+    try:
+        lock_file.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    fd = None
+    if fcntl is not None:
+        try:
+            fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o666)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except Exception:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except Exception:
+                    pass
+                fd = None
+
+    try:
+        yield
+    finally:
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                os.close(fd)
+            except Exception:
+                pass
+
+
 def _raw(value: Any) -> str:
     return str(value or "").strip().upper()
 
@@ -82,19 +123,32 @@ def _sync_shared_cooldowns(now: float) -> None:
 def _persist_shared_cooldowns() -> None:
     global _shared_file_sig
     now = time.time()
-    active = {
-        k: v for k, v in _cooldowns.items()
-        if isinstance(v, dict) and float(v.get("until") or 0.0) > now
-    }
-    try:
-        _COOLDOWN_FILE.parent.mkdir(parents=True, exist_ok=True)
-        tmp_file = _COOLDOWN_FILE.with_suffix(".tmp")
-        tmp_file.write_text(json.dumps(active, indent=2, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp_file, _COOLDOWN_FILE)
-        stat = _COOLDOWN_FILE.stat()
-        _shared_file_sig = (stat.st_mtime_ns, stat.st_size)
-    except Exception:
-        pass
+    with _cross_process_file_lock():
+        if _COOLDOWN_FILE.exists():
+            try:
+                raw_text = _COOLDOWN_FILE.read_text(encoding="utf-8")
+                loaded = json.loads(raw_text)
+                if isinstance(loaded, dict):
+                    for k, v in loaded.items():
+                        if isinstance(v, dict) and float(v.get("until") or 0.0) > now:
+                            if k not in _cooldowns and len(_cooldowns) < 4096:
+                                _cooldowns[k] = v
+            except Exception:
+                pass
+
+        active = {
+            k: v for k, v in _cooldowns.items()
+            if isinstance(v, dict) and float(v.get("until") or 0.0) > now
+        }
+        try:
+            _COOLDOWN_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp_file = _COOLDOWN_FILE.with_suffix(".tmp")
+            tmp_file.write_text(json.dumps(active, indent=2, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp_file, _COOLDOWN_FILE)
+            stat = _COOLDOWN_FILE.stat()
+            _shared_file_sig = (stat.st_mtime_ns, stat.st_size)
+        except Exception:
+            pass
 
 
 def mark_symbol_cooldown(value: Any, reason: str = "provider_failure", seconds: int = DEFAULT_SYMBOL_COOLDOWN_SECONDS) -> None:

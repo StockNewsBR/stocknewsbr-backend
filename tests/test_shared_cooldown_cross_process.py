@@ -1,4 +1,5 @@
 import concurrent.futures
+import multiprocessing
 import tempfile
 import time
 import unittest
@@ -6,6 +7,12 @@ from pathlib import Path
 
 from app.services import symbol_sanitizer
 from app.services.public_market_data_service import _symbol_aliases, _symbol_aliases_cached
+
+
+def _process_writer_func(cooldown_path_str: str, symbol: str):
+    from app.services import symbol_sanitizer
+    symbol_sanitizer._COOLDOWN_FILE = Path(cooldown_path_str)
+    symbol_sanitizer.mark_symbol_cooldown(symbol, seconds=120)
 
 
 class SharedCooldownCrossProcessTests(unittest.TestCase):
@@ -90,3 +97,29 @@ class SharedCooldownCrossProcessTests(unittest.TestCase):
         invalid_aliases = _symbol_aliases("INVALID_SYMBOL_12345_XYZ")
         self.assertEqual(invalid_aliases, [])
         self.assertTrue(symbol_sanitizer.is_symbol_on_cooldown("INVALID_SYMBOL_12345_XYZ"))
+
+    def test_6_real_os_processes_concurrent_writes_no_lost_update(self):
+        """6. Dois PROCESSOS OS independentes gravam símbolos diferentes simultaneamente no shared store sem lost update."""
+        symbol_sanitizer.mark_symbol_cooldown("PETR4", seconds=120)
+
+        ctx = multiprocessing.get_context("spawn")
+        p1 = ctx.Process(target=_process_writer_func, args=(str(self.cooldown_file), "VALE3"))
+        p2 = ctx.Process(target=_process_writer_func, args=(str(self.cooldown_file), "ITUB4"))
+
+        p1.start()
+        p2.start()
+        p1.join(timeout=10)
+        p2.join(timeout=10)
+
+        self.assertEqual(p1.exitcode, 0)
+        self.assertEqual(p2.exitcode, 0)
+
+        with symbol_sanitizer._lock:
+            symbol_sanitizer._cooldowns.clear()
+            symbol_sanitizer._shared_file_sig = None
+            symbol_sanitizer._last_shared_sync = 0.0
+
+        snapshot = symbol_sanitizer.symbol_cooldown_snapshot()
+        self.assertIn("PETR4", snapshot)
+        self.assertIn("VALE3", snapshot)
+        self.assertIn("ITUB4", snapshot)
